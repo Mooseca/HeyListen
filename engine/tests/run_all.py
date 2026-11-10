@@ -210,6 +210,7 @@ ARGS = {
     "tests/test_prompts_face_runs.py": ["--cc", "gcc"],
     "tests/test_hl_gates.py": ["--cc", "gcc"],
     "tests/test_stick_dead_zone.py": ["--cc", "gcc", "--cxx", "g++"],
+    "tests/test_stick_rest.py": ["--cc", "gcc"],
     "tests/test_menu_restart.py": ["--cxx", "g++", "--cc", "gcc"],
     "tests/test_output_resolution.py": ["--cxx", "{cxx}"],
     "tests/test_handheld_live.py": ["--cxx", "{cxx}"],
