@@ -122,6 +122,7 @@ ARGS = {
     "tests/test_flash_sampling.py": ["--cxx", "{cxx}"],
     "tests/test_capture_dimensions.py": ["--cxx", "{cxx}", "--headers", "{vulkan_headers}"],
     "tests/test_ui_texture_upload.py": ["--cxx", "{cxx}", "--headers", "{vulkan_headers}"],
+    "tests/test_texture_staging_publication.py": ["--cxx", "{cxx}", "--headers", "{vulkan_headers}"],
     "tests/test_multiwait_wake.py": ["--cxx", "{cxx}"],
     "tests/test_event_handoff.py": ["--cxx", "{cxx}"],
     "tests/test_recording_log_handoff.py": ["--cc", "clang"],
