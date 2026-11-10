@@ -207,6 +207,7 @@ MODULES = {
 SKIP = {
     "tests/test_udmabuf_limit_unreadable.py": ({"windows"}, "the Linux guest window's start-up check (POSIX file descriptors)"),
     "tests/test_no_dmabuf_window.py": ({"windows"}, "the Linux guest window's start-up check"),
+    "tests/test_fs_path_utf8.py": ({"linux"}, "native Windows filesystem conversion APIs"),
     "tests/test_precompile_compute_guard.py": ({"linux"}, "Windows structured exceptions"),
     "tests/test_shader_module_guard.py": ({"linux"}, "Windows structured exceptions"),
     "tests/test_log_batch.py": ({"linux"}, "the Windows log writer: SRW locks and threads"),
