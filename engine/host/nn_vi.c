@@ -175,6 +175,7 @@ static int64_t fps_period_ns(void) {
     const int64_t period = 1000000000LL * m / v;
     return period < 1000000000LL / 360 ? 1000000000LL / 360 : period > 1000000000LL / 20 ? 1000000000LL / 20 : period;
 }
+int hos_vi_game_fps(void) { return fps_limit(); }   /* (HeyListen: host/nn_audio_in.c paces the microphone above 60) */
 static int64_t next_frame_at, window_start, frames_in_window;
 static volatile LONG64 presents;
 /* (HL_STEP_SCAN, hl_trace.c: the frames presented so far) */

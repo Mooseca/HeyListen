@@ -62,6 +62,9 @@ typedef struct {
     int ring_start, ring_len;
     int64_t frames_read, log_next_ns;
     int peak;                    /* (the loudest sample since the last log line, 16-bit) */
+    int owed;                    /* (HeyListen) frames the game was told this frame are filled and has not read (pace_frame) */
+    int64_t start_ns;            /* (HeyListen: when it was started; HOS_MIC_LOG=2's times count from here) */
+    int calls_logged;            /* (HeyListen: HOS_MIC_LOG=2's calls logged since it was started) */
 } InStream;
 
 static InStream streams[MAX_STREAMS];
@@ -342,6 +345,35 @@ static void note_read(InStream *s, const uint8_t *p, int frames) {
     }
 }
 
+/* ---- (HeyListen) the microphone above 60 fps ----
+   The game asks once a frame what is filled (GetInputStreamFilledFrameCount), reads all of that in pieces of 256 frames
+   at most (some milliseconds apart; it asks again until it has it all), and works the ocarina's notes out of it. At 60 fps
+   a frame reads a 60th of a second (800 frames at 48 kHz). With the Frame rate limit above 60 (host/nn_vi.c) frames are
+   shorter and so is what each reads (450 frames at 106 fps): the microphone was heard (its level in HOS_MIC_LOG) and no
+   note was. So above 60 fps the game is told only whole 60ths of a second: a frame with less than one gets nothing, the
+   next one the whole 60th (or more), each one unbroken sound. Giving each frame the newest 60th instead (the end of what
+   the frame before was given again, then the new) was tried and recognised notes worse. Tested humming songs with a 144
+   limit (88 to 144 fps), frame generation 2x on. At 60 nothing changes. HOS_MIC_PACE=0: as before above 60 too.
+   HOS_MIC_LOG=2: also each of the game's calls for the first 400 after a start (when, what it asked, what it got). */
+int hos_vi_game_fps(void);   /* (host/nn_vi.c: the frame rate the game runs at, 60 or the Frame rate limit above it) */
+static int pace_mode = -1;
+static int paced(void) {
+    if (pace_mode < 0) pace_mode = !getenv("HOS_MIC_PACE") || atoi(getenv("HOS_MIC_PACE")) != 0;
+    return pace_mode && hos_vi_game_fps() > 60;
+}
+/* a frame starts (the game's what-is-filled): what it may read this frame */
+static void pace_frame(InStream *s) {
+    const int have = s->ring_len / s->frame_bytes, sixtieth = s->rate / 60;
+    s->owed = paced() ? have - have % sixtieth : have;
+}
+static void log_call(InStream *s, const char *what, int asked, int got) {
+    if (log_on < 0) log_on = getenv("HOS_MIC_LOG") != NULL;
+    if (!log_on || s->calls_logged >= 400 || atoi(getenv("HOS_MIC_LOG")) < 2) return;
+    s->calls_logged++;
+    hos_log("audio in: stream %d at %.2f ms: %s %d -> %d (recorded, not read: %d)", (int)(s - streams),
+            (double)(hos_now_ns() - s->start_ns) / 1e6, what, asked, got, s->ring_len / s->frame_bytes);
+}
+
 /* ListVirtualInputDevices(AudioDeviceName *names, int count): one (256 bytes, a name) */
 HLE(_ZN2nn5audio23ListVirtualInputDevicesEPNS0_15AudioDeviceNameEi) {
     if ((int)ARG(1) <= 0 || !ARG(0)) { RET(0); return; }
@@ -414,6 +446,7 @@ HLE(_ZN2nn5audio16StartInputStreamEPNS0_15InputStreamTypeE) {
     InStream *s = stream_of(ARG(0));
     if (s && !s->started) {
         s->started = 1, s->ring_start = s->ring_len = 0;
+        s->owed = s->calls_logged = 0, s->start_ns = hos_now_ns();   /* (HeyListen) */
         attach(s);
     }
     ReleaseSRWLockExclusive(&lock);
@@ -436,6 +469,7 @@ HLE(_ZN2nn5audio16PurgeInputStreamEPNS0_15InputStreamTypeE) {   /* (what was rec
     if (s) {
         if (s->started) pump_all();   /* (what the source had for it so far goes too) */
         s->ring_start = s->ring_len = 0;
+        s->owed = 0;   /* (HeyListen) */
     }
     ReleaseSRWLockExclusive(&lock);
     RET(0);
@@ -451,10 +485,21 @@ static int filled(InStream *s) {
     pump_all();
     return s->ring_len / s->frame_bytes;
 }
+static int readable(InStream *s) {   /* (HeyListen) what the game may read now: at most what it was told this frame */
+    const int have = filled(s);
+    return paced() && s->owed < have ? s->owed : have;
+}
 HLE(_ZN2nn5audio30GetInputStreamFilledFrameCountEPKNS0_15InputStreamTypeE) {
     AcquireSRWLockExclusive(&lock);
     InStream *s = stream_of(ARG(0));
-    RET(s ? filled(s) : 0);
+    int n = 0;
+    if (s && s->started) {   /* (HeyListen: a frame starts) */
+        pump_all();
+        pace_frame(s);
+        n = readable(s);
+        log_call(s, "filled", 0, n);
+    }
+    RET(n);
     ReleaseSRWLockExclusive(&lock);
 }
 HLE(_ZN2nn5audio28GetInputStreamFreeFrameCountEPKNS0_15InputStreamTypeE) {
@@ -475,7 +520,7 @@ HLE(_ZN2nn5audio15ReadInputStreamEPNS0_15InputStreamTypeEPvi) {
     InStream *s = stream_of(ARG(0));
     int frames = 0;
     if (s && ARG(1) && (int)ARG(2) > 0) {
-        const int have = filled(s);
+        const int have = readable(s);   /* (HeyListen: filled(s) at the pace above 60 fps) */
         frames = (int)ARG(2) < have ? (int)ARG(2) : have;
         const int cap = s->capacity * s->frame_bytes, n = frames * s->frame_bytes;
         uint8_t *dst = (uint8_t *)hos_guest_range(ARG(1), (uint64_t)n);   /* (hookshot: only into guest memory) */
@@ -485,10 +530,12 @@ HLE(_ZN2nn5audio15ReadInputStreamEPNS0_15InputStreamTypeEPvi) {
             memcpy(dst, s->ring + s->ring_start, (size_t)first);
             memcpy(dst + first, s->ring, (size_t)(n - first));
             s->ring_start = (s->ring_start + n) % cap, s->ring_len -= n;
+            s->owed = s->owed > frames ? s->owed - frames : 0;   /* (HeyListen) */
             HOS_WRITTEN(dst, (size_t)n);
             note_read(s, dst, frames);
         }
     }
+    if (s && s->started) log_call(s, "read", (int)ARG(2), frames);   /* (HeyListen) */
     ReleaseSRWLockExclusive(&lock);
     RET(frames);
 }
