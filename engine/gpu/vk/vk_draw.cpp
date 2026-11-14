@@ -42,6 +42,7 @@
 #include "vk_jobs.h"
 #include "vk_shader.h"
 #include "vk_texture.h"
+#include "vk_ledger.h"   // (RX_VK_LEDGER)
 #include "movie_upscale_policy.h"
 #include "skip_code.h"
 
@@ -677,6 +678,11 @@ VkPipelineCache pcache = VK_NULL_HANDLE;
 bool pcache_loaded = false;   // (TICK-038: it began with this device's and driver's data from the file)
 std::string pcache_path;
 std::atomic<int64_t> pcache_built_since_save{0};
+// (HeyListen) RX_VK_PCACHE_MISSES=0: every pipeline made counts toward a save of the cache, as before
+bool pcache_misses_only() {
+    static const bool v = !getenv("RX_VK_PCACHE_MISSES") || atoi(getenv("RX_VK_PCACHE_MISSES")) != 0;
+    return v;
+}
 void pcache_init() {
     if (pcache) return;
     char exe[MAX_PATH];
@@ -1787,6 +1793,12 @@ VkPipeline build_graphics(const Program& p, const NvnState& s, const Targets& at
         }
     }
     if (cold) ci.flags |= VK_PIPELINE_CREATE_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT;
+    // (HeyListen, RX_VK_PCACHE_MISSES: whether the pipeline cache had it. A hit adds nothing to the cache: counted as built, the
+    // 1.2 GB cache was fetched and written again at every scene load, whose pipelines all come from it)
+    VkPipelineCreationFeedback feedback{};
+    VkPipelineCreationFeedbackCreateInfo feedback_ci{VK_STRUCTURE_TYPE_PIPELINE_CREATION_FEEDBACK_CREATE_INFO};
+    feedback_ci.pPipelineCreationFeedback = &feedback;
+    if (pcache_misses_only() && part < 0 && !driver_cache_only) feedback_ci.pNext = ci.pNext, ci.pNext = &feedback_ci;
     const VkResult r = guarded_graphics(part >= 0 || driver_cache_only ? VK_NULL_HANDLE : pcache, &ci, &pl);
     if (cold && r == VK_PIPELINE_COMPILE_REQUIRED) return *cold = true, VK_NULL_HANDLE;
     if (part >= 0) {
@@ -1803,7 +1815,10 @@ VkPipeline build_graphics(const Program& p, const NvnState& s, const Targets& at
         pl = VK_NULL_HANDLE;
     }
     st_pipelines++;
-    pcache_built_since_save += !driver_cache_only;
+    if (!driver_cache_only &&
+        !(pcache_misses_only() && (feedback.flags & VK_PIPELINE_CREATION_FEEDBACK_VALID_BIT) &&
+          (feedback.flags & VK_PIPELINE_CREATION_FEEDBACK_APPLICATION_PIPELINE_CACHE_HIT_BIT)))
+        pcache_built_since_save++;
     st_pipeline_us += std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - t0).count();
     return pl;
 }
@@ -2245,6 +2260,8 @@ VkDescriptorBufferInfo uniform_range(const NvnState& s, const Stage& st, uint32_
         const uint64_t want = used ? std::max<uint64_t>(used, 16) : std::max<uint64_t>(u.size, 16);
         const uint64_t n = std::min<uint64_t>(std::min<uint64_t>(want, u.size ? std::max<uint64_t>(u.size, 16) : want),
                                               dev.props.limits.maxUniformBufferRange);
+        const LedgerUse ledger_scope_(kUseUniform);   // (RX_VK_LEDGER: the block's memory, whichever way it reaches the GPU below)
+        ledger_mark(u.addr, n, kUseUniform);
         // (HeyListen, HL_UBO_INLINE: a slot bound with its bytes: those, with the stream's updates over them as ub_overlay
         // does, copied into the stream; past the bytes the bind carried, zeros. No guest read, no mirror)
         if (const uint8_t* bytes = s.ubo_bytes[std::clamp(st.nvn_stage, 0, kNvnStages - 1)][index - 3]) {
@@ -2625,6 +2642,7 @@ void build_descriptors(const NvnState& s, const Program& p) {
                         if (const uint64_t end = gpu_pool_end(base); end > base + n) wide_n = std::min(end - base, wide) & ~3ull;
                 }
                 const auto t0 = slow_desc_timing() ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
+                const LedgerUse ledger_scope_(kUseStorage);   // (RX_VK_LEDGER)
                 // (hookshot) a storage buffer table's entries (count > 1, Info::global_tables): the ones past the table's
                 // end are whatever the constant buffer holds there, bound only when they look like a buffer
                 const bool plausible = d.count == 1 || (size && size <= (256ull << 20) && host->gpu_guest(base));
@@ -6457,6 +6475,8 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
             }
         }
         if (d.indirect) {
+            ledger_mark(d.indirect, (uint64_t)std::max(d.max, 1) * (uint64_t)std::max(d.stride, 12), kUseIndirect);   // (RX_VK_LEDGER)
+            if (d.count_addr) ledger_mark(d.count_addr, 4, kUseIndirect);
             BufferRef cnt = d.count_addr ? gpu_buffer_bind(d.count_addr, 4, false) : BufferRef{};
             if (mesh_conv_buf) {   // (EvilOOT: the records as {count, 1, 1}, mesh_indirect_convert)
                 // (hookshot: as many records as mesh_indirect_convert wrote, not the game's maximum)
@@ -6524,6 +6544,7 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
             if (b == 15 || !s.vbuf[b].address) continue;
             const uint64_t vb_addr = s.vbuf[b].address, vb_size = std::max<uint64_t>(s.vbuf[b].size, 1);
             const uint64_t vb_stamp = gpu_bind_stamp();
+            ledger_mark(vb_addr, vb_size, kUseVertex);   // (RX_VK_LEDGER)
             BufferRef r;
             if (vertex_bind_reuse(vb_addr, vb_size, vb_stamp, kept_vb[b].addr, kept_vb[b].size, kept_vb[b].stamp, kept_vb[b].ok))
                 r = kept_vb[b].ref;
@@ -6596,10 +6617,13 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
         // negative count or stride from the game is no draw
         if (d.max < 0 || d.stride < 0) SKIP_HERE();
         const int ind_stride = std::max(d.stride, d.indexed ? 20 : 16);
+        ledger_mark(d.indirect, (uint64_t)std::max(d.max, 1) * (uint64_t)ind_stride, kUseIndirect);   // (RX_VK_LEDGER)
+        if (d.count_addr) ledger_mark(d.count_addr, 4, kUseIndirect);
         BufferRef args = gpu_buffer_bind(d.indirect, (uint64_t)std::max(d.max, 1) * (uint64_t)ind_stride, false);
         BufferRef cnt = d.count_addr ? gpu_buffer_bind(d.count_addr, 4, false) : BufferRef{};
         if (!args) SKIP_HERE();
         if (d.indexed) {
+            ledger_mark(d.ibuf, 4, kUseIndex);
             BufferRef ib = gpu_buffer_bind(d.ibuf, 4, false);
             if (!ib) SKIP_HERE();
             bind_index(cmd, ib.buffer, ib.offset, itype);
@@ -6614,6 +6638,7 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
         BufferRef ib;
         {
             FINE_SCOPE(FT_VERTEX);
+            ledger_mark(d.ibuf, (uint64_t)std::max(d.count, 1) * unit, kUseIndex);   // (RX_VK_LEDGER)
             ib = gpu_buffer_bind(d.ibuf, (uint64_t)std::max(d.count, 1) * unit, false);
             if (!ib) SKIP_HERE();
             FINE_N(FC_IBIND, 1);
@@ -7134,13 +7159,14 @@ struct PreparedFor {
     uint64_t stamp = 0, seed_hash = 0, seed_size = 0;
     int64_t seed_time = 0, recorded_at = 0;   // (Windows: 100 ns FILETIME ticks; elsewhere: filesystem-clock nanoseconds)
     bool timed = false;   // (recorded_at read: records of four words had none)
+    uint64_t kept = 0;   // (the program keys the cache held when the prepare ended; 0: a record from before it was written)
 };
 #ifdef _WIN32
 constexpr int64_t kSeedTimeSlack = 20'000'000;   // (two seconds in FILETIME ticks)
 #else
 constexpr int64_t kSeedTimeSlack = 2'000'000'000;
 #endif
-enum class PrepareWhy { None, First, Translator, Seed };
+enum class PrepareWhy { None, First, Translator, Seed, Cache };
 /// The seed's size and write time (false: there is none). Windows keeps native 100 ns FILETIME ticks: converting that
 /// epoch to nanoseconds overflows int64_t. Other platforms keep filesystem-clock nanoseconds
 bool seed_file_id(const std::string& path, uint64_t* size, int64_t* time) {
@@ -7205,16 +7231,16 @@ bool seed_file_hash(const std::string& path, uint64_t* out) {
 int prepared_read(const std::string& path, PreparedFor* had) {
     FILE* f = fopen(path.c_str(), "rb");
     if (!f) return 0;
-    uint64_t r[5]{};
-    const size_t n = fread(r, 8, 5, f);
+    uint64_t r[6]{};
+    const size_t n = fread(r, 8, 6, f);
     fclose(f);
     had->stamp = r[0], had->seed_hash = r[1], had->seed_size = r[2], had->seed_time = (int64_t)r[3];
-    had->recorded_at = (int64_t)r[4], had->timed = n == 5;
+    had->recorded_at = (int64_t)r[4], had->timed = n >= 5, had->kept = n >= 6 ? r[5] : 0;
     return n >= 4 ? 2 : n >= 1 ? 1 : 0;
 }
 void prepared_write(const std::string& path, const PreparedFor& now) {
-    const uint64_t r[5] = {now.stamp, now.seed_hash, now.seed_size, (uint64_t)now.seed_time, (uint64_t)file_clock_now()};
-    if (FILE* f = fopen(path.c_str(), "wb")) fwrite(r, 8, 5, f), fclose(f);
+    const uint64_t r[6] = {now.stamp, now.seed_hash, now.seed_size, (uint64_t)now.seed_time, (uint64_t)file_clock_now(), now.kept};
+    if (FILE* f = fopen(path.c_str(), "wb")) fwrite(r, 8, 6, f), fclose(f);
 }
 /// Whether to prepare (and why), and what for: *now, written once the prepare is done. No seed: the translator alone, as before.
 /// *hash_ms: how long the seed's hash took (0: not taken)
@@ -7223,6 +7249,7 @@ PrepareWhy prepare_check(const std::string& path, const std::string& seed, uint6
     PreparedFor had;
     const int read = prepared_read(path, &had);
     now->stamp = stamp;
+    now->kept = had.kept;
     const bool have_seed = seed_file_id(seed, &now->seed_size, &now->seed_time);
     bool same_seed = !have_seed;
     if (have_seed && read == 2 && had.seed_size == now->seed_size && had.seed_time == now->seed_time &&
@@ -7240,7 +7267,14 @@ PrepareWhy prepare_check(const std::string& path, const std::string& seed, uint6
     }
     if (!read) return PrepareWhy::First;
     if (had.stamp != stamp) return PrepareWhy::Translator;
-    return same_seed ? PrepareWhy::None : PrepareWhy::Seed;
+    if (!same_seed) return PrepareWhy::Seed;
+    // (the record says prepared, but the program cache may not have kept it: a start with other shader settings (RX_VK_OOT_*, ...,
+    // vk_shader.cpp's disk_stamp) makes the cache again under its stamp, and closed before it prepared, the next start under the
+    // usual settings found an empty cache and a record that said prepared: every program then translated in play, 200-400 ms
+    // each. Less than half of what the last prepare left, or none for a record from before the count: prepared again)
+    const size_t kept = program_cache_kept();
+    if (kept != SIZE_MAX && (had.kept ? kept < had.kept / 2 : kept == 0)) return PrepareWhy::Cache;
+    return PrepareWhy::None;
 }
 } // namespace
 /// (hookshot) An update: every shader was prepared once here, for another translator. Each release changes the translator, and every
@@ -7279,8 +7313,16 @@ bool prepare_run(void (*progress)(size_t done, size_t total), bool background) {
     if (why == PrepareWhy::Seed)
         logf("vk: the game's shader list (hookshot_shaders.bin) is not the one the shaders were prepared from: preparing again "
              "(only the programs not kept yet)");
+    if (why == PrepareWhy::Cache)
+        logf("vk: the program cache holds %zu program keys of the %llu the last preparation left: preparing again",
+             program_cache_kept(), (unsigned long long)prepared_for.kept);
     const size_t programs = seed_open();
     if (!programs) return false;
+    // (the record goes while the shaders are prepared and is written again when they are: a preparation closed or killed part
+    // way left the old record standing, and the next start trusted it whenever the cache held more than half of what it had held,
+    // or anything at all under a record from before the count: thousands of programs were then translated in play. With no
+    // record the next start prepares again, and only what the cache does not hold yet)
+    remove(path.c_str());
     const size_t total = programs * 3;   // (each program for float, one and two integer bone inputs)
     // The driver's part: each program's stage libraries, built once and let go, for the driver's own disk cache. What stays with us is
     // nothing: a kept library costs memory, and our pipeline cache would be read in whole at every start. A driver whose compiler
@@ -7410,6 +7452,7 @@ bool prepare_run(void (*progress)(size_t done, size_t total), bool background) {
          "texture variants, %zu at the limit) in %.1f s", programs, background ? " in play" : "", made.load(), (long long)failed, libs.load(), variants.load(),
          asking.load(), capped.load(), std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count());
     if (!background) remove(warming.c_str());
+    if (const size_t kept = program_cache_kept(); kept != SIZE_MAX) prepared_for.kept = kept;
     prepared_write(path, prepared_for);
     return true;
 }
@@ -8001,6 +8044,7 @@ void dispatch(VkCommandBuffer cmd, NvnState& s, uint32_t x, uint32_t y, uint32_t
             if (gpu_dump_on && stats_query.cmd && stats_prog_wanted(p.key)) stats_query.state = &s, stats_query.prog = p.key;
         }
         if (indirect) {
+            ledger_mark(indirect, 12, kUseIndirect);   // (RX_VK_LEDGER)
             BufferRef args = gpu_buffer_bind(indirect, 12, false);
             if (!args) SKIP_HERE();
             if (grid_patch_at != UINT64_MAX) {   // (PR 252) the grid as the GPU has it, into the program's c0 (the full barrier
@@ -8194,6 +8238,65 @@ int64_t draw_slotgen_saves() {   // (RX_VK_DESC_SLOTGEN: of those, what the glob
     return st_desc_slotgen_saves;
 }
 
+// (HeyListen) the process's private commit now, in MB (0 where it cannot be read): the cache save logs it around its fetch, to show
+// what the fetch cost in memory (the vector: its whole size; the mapped file: none)
+uint64_t pcache_private_mb() {
+#ifdef _WIN32
+    struct Counters {
+        DWORD cb, PageFaultCount;
+        SIZE_T PeakWorkingSetSize, WorkingSetSize, QuotaPeakPagedPoolUsage, QuotaPagedPoolUsage, QuotaPeakNonPagedPoolUsage,
+            QuotaNonPagedPoolUsage, PagefileUsage, PeakPagefileUsage, PrivateUsage;
+    };
+    using MemInfo = BOOL(WINAPI*)(HANDLE, Counters*, DWORD);
+    static const MemInfo info = (MemInfo)(void*)GetProcAddress(GetModuleHandleA("kernel32.dll"), "K32GetProcessMemoryInfo");
+    Counters c{};
+    c.cb = sizeof c;
+    return info && info(GetCurrentProcess(), &c, sizeof c) ? (uint64_t)(c.PrivateUsage >> 20) : 0;
+#else
+    return 0;
+#endif
+}
+void pcache_log_save(const char* how, size_t n, uint64_t private_before_mb, uint64_t private_during_mb, int64_t ms) {
+    logf("vk: pipeline cache saved (%s): %llu MB in %lld ms; process private commit %llu MB before the fetch, %llu MB with its data in hand",
+         how, (unsigned long long)(n >> 20), (long long)ms, (unsigned long long)private_before_mb, (unsigned long long)private_during_mb);
+}
+
+// (HeyListen, RX_VK_PCACHE_MAP, default on) The cache's data fetched straight into the file's own pages: the driver writes into a
+// mapped view of the temporary file, so the 1.2 GB never exists as private memory (the vector it replaces was 1.2 GB of commit and
+// of working set until the write ended; mapped file pages are the system's to write out and to drop). The driver's data is still
+// made whole in one call: Vulkan has no way to fetch it in pieces. False: nothing written (the caller then uses a vector).
+bool pcache_save_mapped(const std::string& tmp, size_t n) {
+#ifdef _WIN32
+    static const bool on = !getenv("RX_VK_PCACHE_MAP") || atoi(getenv("RX_VK_PCACHE_MAP")) != 0;
+    if (!on || !n) return false;
+    HANDLE f = CreateFileA(tmp.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (f == INVALID_HANDLE_VALUE) return false;
+    bool ok = false;
+    const auto t0 = std::chrono::steady_clock::now();
+    const uint64_t before = pcache_private_mb();
+    HANDLE m = CreateFileMappingA(f, nullptr, PAGE_READWRITE, (DWORD)((uint64_t)n >> 32), (DWORD)n, nullptr);
+    void* view = m ? MapViewOfFile(m, FILE_MAP_WRITE, 0, 0, n) : nullptr;
+    size_t got = n;
+    if (view && vkGetPipelineCacheData(dev.device, pcache, &got, view) == VK_SUCCESS && got <= n) ok = true;
+    if (ok)
+        pcache_log_save("mapped file", got, before, pcache_private_mb(),
+                        std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count());
+    if (view) UnmapViewOfFile(view);
+    if (m) CloseHandle(m);
+    if (ok && got < n) {   // (the cache shrank between the two calls: the file ends where the data does)
+        LARGE_INTEGER end;
+        end.QuadPart = (LONGLONG)got;
+        ok = SetFilePointerEx(f, end, nullptr, FILE_BEGIN) && SetEndOfFile(f);
+    }
+    CloseHandle(f);
+    if (!ok) DeleteFileA(tmp.c_str());
+    return ok;
+#else
+    (void)tmp, (void)n;
+    return false;
+#endif
+}
+
 void pipeline_cache_save(bool force) {
     if (!pcache || (!force && pcache_built_since_save < 32)) return;
     pcache_built_since_save = 0;
@@ -8210,8 +8313,16 @@ void pipeline_cache_save(bool force) {
         try {
             size_t n = 0;
             if (vkGetPipelineCacheData(dev.device, pcache, &n, nullptr) == VK_SUCCESS && n) {
+                if (pcache_save_mapped(pcache_path + ".tmp", n)) {
+                    MoveFileExA((pcache_path + ".tmp").c_str(), pcache_path.c_str(), MOVEFILE_REPLACE_EXISTING);
+                    return;
+                }
+                const auto fetch_t0 = std::chrono::steady_clock::now();
+                const uint64_t private_before = pcache_private_mb();
                 std::vector<uint8_t> data(n);
                 if (vkGetPipelineCacheData(dev.device, pcache, &n, data.data()) == VK_SUCCESS) {
+                    pcache_log_save("vector", n, private_before, pcache_private_mb(),
+                                    std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - fetch_t0).count());
                     const std::string tmp = pcache_path + ".tmp";
                     if (FILE* f = fopen(tmp.c_str(), "wb")) {
                         const bool ok = fwrite(data.data(), 1, n, f) == n;

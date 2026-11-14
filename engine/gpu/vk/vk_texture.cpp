@@ -33,6 +33,7 @@
 #include <vector>
 
 #include "vk_texture.h"
+#include "vk_ledger.h"   // (RX_VK_LEDGER)
 #include "vk_menu.h"
 #include "vk_draw.h"
 #include "vk_gprof.h"
@@ -425,6 +426,11 @@ struct InitRedirect {
     InitRedirect(const InitRedirect&) = delete;
     InitRedirect& operator=(const InitRedirect&) = delete;
 };
+}  // namespace
+// (RX_VK_POOL_MIRROR, vk_memory.cpp) a never-imported pool's mirror made by a segment's worker goes the same way
+void* upload_to_earliest_begin() { return new InitRedirect(true); }
+void upload_to_earliest_end(void* h) { delete static_cast<InitRedirect*>(h); }
+namespace {
 
 // ---- staging: host-visible arenas, reused once the submission that filled them completed ----
 struct Arena {
@@ -2543,6 +2549,7 @@ Texture* create(const Key& key, const nvn_tex* t, VkFormat vf, bool astc, int bw
     }
     textures.emplace(key, std::move(tex));
     by_gpu.emplace(p->gpu, p);
+    ledger_mark(p->gpu, p->guest_size, kUseSampled);   // (RX_VK_LEDGER: this storage held a texture)
     watch_tex(p, "made");
     if (remade_log_on()) {   // (one evicted not long ago, made again)
         std::lock_guard lk(evicted_mu);
@@ -3713,6 +3720,7 @@ int texture_flush_to_guest(uint64_t lo, uint64_t size) {
 
 void texture_written(Texture* tex) {
     if (!tex) return;
+    ledger_mark(tex->gpu, tex->guest_size, kUseRendered);   // (RX_VK_LEDGER)
     if (tex->upload_value == rec_value && tex->upload_seg > tl_seg) {   // (a parallel replay's order broken: see dry_mark_written)
         static int64_t n;
         if (n++ < 40 || n % 500 == 0)
@@ -4050,7 +4058,33 @@ Texture* texture_for_present(const nvn_tex* t) {
     return best ? best : tex;
 }
 
+/// (RX_VK_LEDGER) the textures' part of a ledger snapshot (the replay's thread: the table is this thread's)
+void texture_ledger_snapshot(LedgerSnap& s) {
+    s.textures.reserve(textures.size());
+    for (auto& kv : textures) {
+        const Texture* t = kv.second.get();
+        LedgerTex l;
+        l.gpu = t->gpu, l.guest_size = t->guest_size, l.vk_bytes = t->bytes + t->pad, l.vk_format = (uint32_t)t->format;
+        l.width = t->width, l.height = t->height, l.depth = t->depth, l.layers = t->layers, l.levels = t->levels;
+        l.block_w = t->block_w, l.block_h = t->block_h;
+        l.astc = t->astc, l.gpu_written = t->gpu_written, l.released = t->released;
+        l.depth_aspect = (t->aspect & (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT)) != 0;
+        s.textures.push_back(l);
+    }
+    s.spare_bytes = spare_bytes;
+    {
+        std::lock_guard lk(pool_mu);
+        s.rt_pool_bytes = pool_bytes;
+    }
+    {
+        std::lock_guard lk(bcc_mu);
+        s.bcc_bytes = bcc_bytes, s.bcc_entries = bcc.size();
+    }
+    texture_stats(&s.uploads, &s.astc_gpu, &s.bytes_uploaded);
+}
+
 void texture_frame(uint64_t completed) {
+    ledger_frame();   // (RX_VK_LEDGER)
     upload_frame_report();
     if (bcc_cap()) {   // (TICK-051: the BC cache's entries let go, and every 600 frames what it did)
         bcc_free_done(completed);
@@ -4625,8 +4659,39 @@ void texture_frame(uint64_t completed) {
     // batches (flush_textures), not one submission and one wait each: a sweep of 500 at a scene load stalled for seconds
     struct Evict { Texture* tex; bool flush, shifted; };
     std::vector<Evict> evict;
+    // (HeyListen, 2026-11-14, RX_VK_FREE_FINALIZED=1, default 0) a render target the game finalized goes 3 presents after its last
+    // use, once the GPU is past it, whatever the budget: under the budget nothing above took it (a finalized target is no longer kept
+    // as "rendered", but the usual pass runs only past 7/8 of the budget and the transient sweep only for targets drawn over), and
+    // the ledger saw 65 of them, 212 MB, in the market (2560x1440 R11G11B10 and D32 among them). Not one keep_finalized keeps (drawn
+    // in one frame, 4 MB or less, not drawn over: made again over its storage and sampled undrawn, the terrain's normal maps).
+    // Nothing samples it after: the game cannot sample a texture it finalized (a texture made again over the storage is a new one,
+    // uploaded from guest memory, which is the risk this switch takes for targets over 4 MB); the BC cache holds ASTC transcodes only;
+    // the write-back before eviction is for targets not finalized; the upscaler and the present read images of their own and the
+    // frame's live target
+    static const bool free_finalized = [] {
+        const char* e = getenv("RX_VK_FREE_FINALIZED");
+        const bool on = e && atoi(e) != 0;
+        if (on) logf("vk: render targets the game finalized freed 3 presents after their last use (RX_VK_FREE_FINALIZED=1)");
+        return on;
+    }();
+    static uint64_t st_fin_freed = 0, st_fin_freed_bytes = 0, fin_logged_at = 0;
+    std::unordered_set<const Texture*> freed_fin;
+    if (free_finalized) {
+        for (auto& [last, tex] : order)
+            if (tex->gpu_written && tex->released && frame_no - last >= 3 && tex->last_value <= completed && !keep_finalized(tex)) {
+                evict.push_back({tex, false, false});
+                freed_fin.insert(tex);
+                st_fin_freed++, st_fin_freed_bytes += tex->bytes;
+            }
+        if (st_fin_freed && frame_no >= fin_logged_at + 600) {
+            fin_logged_at = frame_no;
+            logf("vk: finalized render targets freed (RX_VK_FREE_FINALIZED): %llu so far (%llu MB)", (unsigned long long)st_fin_freed,
+                 (unsigned long long)(st_fin_freed_bytes >> 20));
+        }
+    }
     for (auto& [last, tex] : order) {
         if ((!usual_on && !overwritten_unused) || frame_no - last < need_first) break;
+        if (!freed_fin.empty() && freed_fin.count(tex)) continue;
         // (TICK-027: a target drawn over, unused for overwritten_unused frames, goes in any pass)
         const bool ours_over = overwritten_unused && frame_no - last >= overwritten_unused && !keep_finalized(tex) &&
                                (drawn_over(tex) || overlapped_later(tex));
