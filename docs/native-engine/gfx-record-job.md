@@ -1047,6 +1047,25 @@ shots (the textures in place everywhere: grass, rock, water, foliage, the HUD); 
 native; the record check (render-state and preparation state records) 188,119-280,577 calls compared a run, 0
 mismatched.
 
+### The crossings a frame (`HL_GFX_TIME=1`, PC 3050, castle-move, 2026-11-14)
+
+`HL_GFX_TIME=1` counts and times, per presented frame, each graphics gate's calls from the translated code (answered
+natively or declined), its calls back into the translation (`a64_icall`) and the time from the gate's entry to its
+return (`host/hl_gfx.c`; off by default, one branch a call when off). Run `q1-time-castle` (build at `8286dbba`), three
+10-second lines:
+
+| Gate | Calls in a frame | Answered | ns an answered call | Declined | ns a declined call | Calls back a frame |
+|---|---:|---:|---:|---:|---:|---:|
+| render state `0x80077d60` | 29-43 | all | 850-980 | 0 | - | 0 |
+| sub-mesh draw `0x80078fc0` | 52-100 | all but 0-2 | 1,830-2,600 (its preparation's call back included) | 0-2 | 56 | 44-75 |
+| preparation `0x8008fc00` | 1,680-2,080 | 98% | 1,470-1,510 | 31-33 | 1,600 | 0 |
+
+So about 1,800-2,300 translated-to-native crossings a frame, 98% of them the preparation's, called one draw at a time
+from translated loops; 2.5-3.0 ms of CPU a frame inside the preparation's gate over the threads that record. The bare
+price of a crossing (out of lifted code, the gate's look at the call, back: the sub-mesh draw's declined calls) is about
+56 ns, so about 0.1 ms of CPU a frame for the crossings themselves; the rest is the native work and its NVN calls. A
+declined preparation costs as much as an answered one (1.6 us): its route is decided most of the way before it declines.
+
 ## Not established
 
 - Who builds the runner's item lists (R+1244..R+1280), the pass and target objects, the slot table of `0x80364080`

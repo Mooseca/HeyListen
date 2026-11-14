@@ -275,7 +275,9 @@ bool import_dma_buf_pieces(uint64_t lo, uint64_t hi, uint64_t piece, Pool& p) {
             late_fix_wait_unlocked();   // (TICK-060m: a pending late fix waited for outside the queue's lock, as the other senders)
             std::lock_guard qk(dev.present_mu);
             queue_flush_locked();
+            vk_tl_note("bind-sparse-pool+");
             res = vkQueueBindSparse(dev.queue, 1, &si, fence);
+            vk_tl_note("bind-sparse-pool-");
         }
         if (res == VK_SUCCESS) {
             res = vkWaitForFences(dev.device, 1, &fence, VK_TRUE, UINT64_MAX);
@@ -302,7 +304,11 @@ bool import_dma_buf(uint64_t lo, uint64_t hi, Pool& p) {
         typedef int (*MemfdFn)(void);
         const MemfdFn fn = getenv("RX_VK_NO_DMABUF") ? nullptr : (MemfdFn)dlsym(RTLD_DEFAULT, "hos_posix_guest_memfd");
         const int fd = fn ? fn() : -1;
-        if (fd >= 0 && dev.dma_buf_import && vkGetMemoryFdPropertiesKHR) dmabuf_dev = open("/dev/udmabuf", O_RDWR | O_CLOEXEC);
+        int open_errno = 0;
+        if (fd >= 0 && dev.dma_buf_import && vkGetMemoryFdPropertiesKHR) {
+            dmabuf_dev = open("/dev/udmabuf", O_RDWR | O_CLOEXEC);
+            if (dmabuf_dev < 0) open_errno = errno;
+        }
         if (fd >= 0 && dmabuf_dev >= 0) {
             dmabuf_memfd = fd;
             dmabuf_limit = 64ull << 20;
@@ -317,7 +323,18 @@ bool import_dma_buf(uint64_t lo, uint64_t hi, Pool& p) {
         }
         logf("vk: guest memory as dma-bufs: %s", dmabuf_memfd >= 0 ? "yes" : !fn ? "no (no memfd window, or RX_VK_NO_DMABUF)"
                  : fd < 0 ? "no (the window is anonymous memory)" : !dev.dma_buf_import ? "no (VK_EXT_external_memory_dma_buf)"
+                 : open_errno == ENOENT ? "no (/dev/udmabuf is missing: the udmabuf kernel module is not loaded)"
+                 : open_errno == EACCES || open_errno == EPERM ? "no (/dev/udmabuf is not open to this user)"
                  : "no (/dev/udmabuf cannot be opened)");
+        // (without it every pool is a host-pointer import, which amdgpu looks up again at every submission: 3-8 fps in Kokiri.
+        // Distributions differ: systemd's uaccess rule gives the logged-in user the device on some, others leave it to the kvm
+        // group, root's alone. Said plainly, since this is the difference between playable and not)
+        if (dmabuf_memfd < 0 && (open_errno == EACCES || open_errno == EPERM))
+            logf("vk: WARNING: the game will run very slowly. Give your user /dev/udmabuf: sudo usermod -aG kvm $USER, then log "
+                 "out and back in (docs/USER_GUIDE.md, Linux)");
+        else if (dmabuf_memfd < 0 && open_errno == ENOENT)
+            logf("vk: WARNING: the game will run very slowly. Load the udmabuf kernel module: sudo modprobe udmabuf "
+                 "(docs/USER_GUIDE.md, Linux)");
         if (dmabuf_memfd >= 0)
             logf("vk: dma-bufs of at most %llu MB (udmabuf's limit %llu MB); larger pools %s", (unsigned long long)(piece >> 20),
                  (unsigned long long)(dmabuf_limit >> 20),
@@ -7444,7 +7461,9 @@ int memory_mirror_read(uint64_t guest, uint64_t size, void* out) {
             late_fix_wait_unlocked();
             std::lock_guard qk(dev.present_mu);   // (one queue: submits and presents take turns)
             queue_flush_locked();
+            vk_tl_note("mem-submit+");
             done = vkQueueSubmit2(dev.queue, 1, &si, fence) == VK_SUCCESS;
+            vk_tl_note("mem-submit-");
         }
         done = done && vkWaitForFences(dev.device, 1, &fence, VK_TRUE, 5000000000ull) == VK_SUCCESS;
     }

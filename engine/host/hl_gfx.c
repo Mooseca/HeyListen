@@ -41,7 +41,9 @@
      HL_GFX_PREP=1  (the default) native on its cached, program-bound and (HL_GFX_PREP_STATE=1, the default) state paths
                     (hl::gfx::Prepare); every other call is left whole to the translation
    With HL_GFX_CHECK=1 (or 2) every call is checked instead: its route counted, the native version compared call by call
-   on the cached path, and the translated body's NVN calls filed by kind in the paths' histogram. */
+   on the cached path, and the translated body's NVN calls filed by kind in the paths' histogram.
+
+   HL_GFX_TIME=1: the three gates' crossings counted and timed (below, "the counters"). */
 #include "hl_host.h"
 #include "hl/c/hl_gfx.h"
 #include <stdio.h>
@@ -131,6 +133,63 @@ void hl_gfx_nvn_proc(const char *name, HostFn *fn, void **user) {
 /* ---- the counters ---- */
 static int log_on;
 static volatile LONG64 other_ctx;   /* passes left to the translation because the thread's context was not the one given */
+
+/* HL_GFX_TIME=1 (a measurement, off by default: one predictable branch a gate call when off): the crossings between the
+   translated code and the graphics bricks, by gate: calls (translated -> native), how many the native side answered,
+   the calls back into the translation (native -> translated, a64_icall), and the time spent from the gate's entry to its
+   return, apart for the calls it declined (the bare price of asking: out of lifted code, the native look at the call,
+   back). One line every 10 s, per presented frame. */
+enum { GT_STATE, GT_DRAW, GT_PREP, GT_N };
+static int time_on = -1;
+typedef struct { volatile LONG64 calls, answered, declined_ticks, answered_ticks, back, back_ticks; } GateTime;
+static GateTime gate_time[GT_N];
+static int gfx_time_on(void) {
+    if (time_on < 0) {
+        const char *e = getenv("HL_GFX_TIME");
+        time_on = e && atoi(e) != 0;
+        if (time_on) hos_log("hl gfx time: the gates' crossings counted and timed (HL_GFX_TIME=1)");
+    }
+    return time_on;
+}
+static int64_t tsc_now(void) {   /* (the time stamp counter: QueryPerformanceCounter's 100 ns steps are a call's length) */
+    return (int64_t)__builtin_ia32_rdtsc();
+}
+static void gate_time_add(int g, int answered, int64_t ticks) {
+    GateTime *t = &gate_time[g];
+    InterlockedIncrement64(&t->calls);
+    if (answered) InterlockedIncrement64(&t->answered), InterlockedAdd64(&t->answered_ticks, ticks);
+    else InterlockedAdd64(&t->declined_ticks, ticks);
+}
+extern volatile LONG64 hos_present_count;   /* display.c */
+static void gate_time_report(void) {
+    static volatile LONG64 last;
+    static int64_t presents0, tsc0;
+    static GateTime was[GT_N];
+    const int64_t now = hos_now_ns(), l = last;
+    if (now - l < 10000000000LL || InterlockedCompareExchange64(&last, now, l) != l) return;
+    const int64_t tsc = tsc_now();
+    if (!l) { presents0 = hos_present_count, tsc0 = tsc; return; }
+    const double frames = (double)(hos_present_count - presents0 > 0 ? hos_present_count - presents0 : 1),
+                 ns = (double)(now - l) / (double)(tsc - tsc0 > 0 ? tsc - tsc0 : 1);   /* (ns a tick, over the interval) */
+    presents0 = hos_present_count, tsc0 = tsc;
+    static const char *const names[GT_N] = {"render state", "sub-mesh draw", "preparation"};
+    char line[1024];
+    int n = snprintf(line, sizeof line, "hl gfx time: a frame (%.0f frames):", frames);
+    for (int g = 0; g < GT_N && n < (int)sizeof line; g++) {
+        GateTime d, *t = &gate_time[g];
+        d.calls = t->calls - was[g].calls, d.answered = t->answered - was[g].answered;
+        d.declined_ticks = t->declined_ticks - was[g].declined_ticks, d.answered_ticks = t->answered_ticks - was[g].answered_ticks;
+        d.back = t->back - was[g].back, d.back_ticks = t->back_ticks - was[g].back_ticks;
+        was[g].calls = t->calls, was[g].answered = t->answered, was[g].declined_ticks = t->declined_ticks;
+        was[g].answered_ticks = t->answered_ticks, was[g].back = t->back, was[g].back_ticks = t->back_ticks;
+        const LONG64 dec = d.calls - d.answered;
+        n += snprintf(line + n, sizeof line - (size_t)n, " %s: %.0f calls in, %.0f answered (%.3f ms, %.0f ns each), %.0f declined (%.0f ns each), %.0f calls back (%.3f ms);",
+                      names[g], d.calls / frames, d.answered / frames, d.answered_ticks * ns / 1e6 / frames,
+                      d.answered ? d.answered_ticks * ns / (double)d.answered : 0.0, dec / frames, dec ? d.declined_ticks * ns / (double)dec : 0.0,
+                      d.back / frames, d.back_ticks * ns / 1e6 / frames);
+    }
+    hos_log("%s", line);
+}
 
 static void hl_report(void) {
     static volatile LONG64 last;
@@ -269,6 +328,7 @@ static int state_init(void) {
         if (s == 0 && InterlockedCompareExchange(&state_ready, 3, 0) == 0) break;
         Sleep(0);
     }
+    gfx_time_on();
     const char *e = getenv("HL_GFX_STATE");
     const int mode = e && e[0] ? atoi(e) : HL_GFX_STATE_DEFAULT;
     state_check = check_wanted() != 0;
@@ -297,6 +357,7 @@ HL_GATE(80077d60, "31664901fd8bc782") {
         hl_gate_on_80077d60 = 0;
         return 0;
     }
+    const int64_t t0 = time_on > 0 ? tsc_now() : 0;
     Ctx *before = t_ctx;
     t_ctx = c;
     int answered;
@@ -315,6 +376,7 @@ HL_GATE(80077d60, "31664901fd8bc782") {
     }
     t_ctx = before;
     if (log_on) hl_report();
+    if (t0) gate_time_add(GT_STATE, answered, tsc_now() - t0), gate_time_report();
     return answered;
 }
 __attribute__((constructor)) static void hl_gfx_state_gate(void) { hl_gate_on_80077d60 = 1; }
@@ -339,6 +401,7 @@ static int draw_init(void) {
         if (s == 0 && InterlockedCompareExchange(&draw_ready, 3, 0) == 0) break;
         Sleep(0);
     }
+    gfx_time_on();
     const char *e = getenv("HL_GFX_DRAW");
     const int mode = e && e[0] ? atoi(e) : HL_GFX_DRAW_DEFAULT;
     draw_check = check_wanted() != 0;
@@ -372,6 +435,7 @@ HL_GATE(80078fc0, "329b54a385248a34") {
         hl_gate_on_80078fc0 = 0;
         return 0;
     }
+    const int64_t t0 = time_on > 0 ? tsc_now() : 0;
     Ctx *before = t_ctx;
     t_ctx = c;
     const uint64_t drawable = c->x[0], block = c->x[1];
@@ -398,7 +462,9 @@ HL_GATE(80078fc0, "329b54a385248a34") {
             c->x[1] = drawable;
             c->x[2] = 0;
             c->x[30] = hl_gfx_draw_prepare_return();
+            const int64_t b0 = t0 ? tsc_now() : 0;
             a64_icall(c, HL_DRAW_PREPARE);
+            if (t0) InterlockedIncrement64(&gate_time[GT_DRAW].back), InterlockedAdd64(&gate_time[GT_DRAW].back_ticks, tsc_now() - b0);
             const uint64_t prepared = c->x[0];
             c->x[31] = sp;
             hl_gfx_draw_end(prepared);
@@ -408,6 +474,7 @@ HL_GATE(80078fc0, "329b54a385248a34") {
     }
     t_ctx = before;
     if (log_on) hl_report();
+    if (t0) gate_time_add(GT_DRAW, answered != 0, tsc_now() - t0), gate_time_report();
     return answered != 0;
 }
 __attribute__((constructor)) static void hl_gfx_draw_gate(void) { hl_gate_on_80078fc0 = 1; }
@@ -428,6 +495,7 @@ static int prep_init(void) {
         if (s == 0 && InterlockedCompareExchange(&prep_ready, 3, 0) == 0) break;
         Sleep(0);
     }
+    gfx_time_on();
     const char *e = getenv("HL_GFX_PREP");
     const int mode = e && e[0] ? atoi(e) : HL_GFX_PREP_DEFAULT;
     prep_check = check_wanted() != 0;
@@ -478,6 +546,7 @@ HL_GATE(8008fc00, "4df7e218373859d0") {
             if (!check_wanted()) hl_gate_on_8008fc00 = 0;   /* (the checkpoint needs the gate while checking) */
             return 0;
         }
+        const int64_t t0 = time_on > 0 ? tsc_now() : 0;
         Ctx *before = t_ctx;
         t_ctx = c;
         int answered = 1;
@@ -490,6 +559,7 @@ HL_GATE(8008fc00, "4df7e218373859d0") {
         }
         t_ctx = before;
         if (log_on) hl_report();
+        if (t0) gate_time_add(GT_PREP, answered, tsc_now() - t0), gate_time_report();
         return answered;
     }
     t_draw_armed = 0;

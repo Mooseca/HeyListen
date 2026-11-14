@@ -33,6 +33,7 @@
 #include <vector>
 
 #include "vk_texture.h"
+#include "evict_reason.h"
 #include "vk_ledger.h"   // (RX_VK_LEDGER)
 #include "vk_menu.h"
 #include "vk_draw.h"
@@ -3144,8 +3145,13 @@ Texture* texture_touch(Texture* tex, bool for_sampling) {
     if (sparse_written) texture_dirty(*tex, 0, dirty);
     if (tex->gpu_written) {   // (an image the GPU drew, finalized and sampled again: from guest memory, 400 lines)
         static int logged;
+        static std::atomic<int64_t> total{0}, total_finalized{0};   // (the log stops at 400 lines: these count them all)
         uint64_t kb = 0;
         for (const auto& r : dirty) kb += (r.second - r.first) >> 10;
+        const int64_t n_all = ++total, n_fin = tex->released ? ++total_finalized : total_finalized.load();
+        if (logged >= 400 && n_all % 500 == 0)
+            logf("vk: uploads over a drawn image: %lld so far, %lld of them finalized, at present %llu", (long long)n_all,
+                 (long long)n_fin, (unsigned long long)(frame_no - 1));
         if (logged++ < 400)
             logf("vk: upload over a drawn image: #%u %#llx %ux%ux%u x%u NVN %#x at present %llu (texture frame %llu), %s, "
                  "%llu KB dirty in %zu ranges%s", tex->id, (unsigned long long)tex->gpu, tex->width, tex->height, tex->depth,
@@ -3475,7 +3481,9 @@ bool readback_submit_wait() {
         late_fix_wait_unlocked();   // (TICK-060: a pending late fix waited for outside the queue's lock)
         std::lock_guard qk(dev.present_mu);   // (one queue: submits and presents take turns)
         queue_flush_locked();
+        vk_tl_note("tex-rb-submit+");
         if (vkQueueSubmit2(dev.queue, 1, &si, rb_fence) != VK_SUCCESS) return false;
+        vk_tl_note("tex-rb-submit-");
     }
     return vkWaitForFences(dev.device, 1, &rb_fence, VK_TRUE, 5000000000ull) == VK_SUCCESS;
 }
@@ -3721,7 +3729,7 @@ int texture_flush_to_guest(uint64_t lo, uint64_t size) {
     return done;
 }
 
-void texture_written(Texture* tex) {
+void texture_written(Texture* tex, const char* why) {
     if (!tex) return;
     ledger_mark(tex->gpu, tex->guest_size, kUseRendered);   // (RX_VK_LEDGER)
     if (tex->upload_value == rec_value && tex->upload_seg > tl_seg) {   // (a parallel replay's order broken: see dry_mark_written)
@@ -3739,6 +3747,18 @@ void texture_written(Texture* tex) {
     }
     watch_tex(tex, "written");
     if (!tex->gpu_written || tex->released) tex->first_written = frame_no;
+    // (ported from Longshot 9fccd0fd, Hookshot #3004) A texture in a virtual pool that the GPU writes first is marked uploaded
+    // below without the first upload, which notes its pages' mapping (texture_touch): its first check after the game finalized
+    // it took all of its storage for remapped, and the whole image was uploaded from guest memory over the GPU's texels (OoT's
+    // HUD button labels blank after a zone change; issue 3's black surfaces in Zora's Domain). Noted here instead, by the
+    // writers that give a reason: each holds the ParLock a change to the map needs, or is the dry pass
+    // (tests/test_drawn_page_map.py lists them). The upscaler's stand-ins give none and run without that lock. A texture clear
+    // gives none: resolve() samples its texture first, which notes the map. RX_VK_NO_DRAWN_PAGE_MAP=1: as before
+    static const bool note_map = !env_on("RX_VK_NO_DRAWN_PAGE_MAP");
+    if (why && strcmp(why, "?") != 0 && note_map && tex->gpu >= (1ull << 40) && tex->page_map.empty() && tex->guest_size) {
+        static thread_local Ranges mapped;
+        texture_dirty(*tex, 0, mapped);
+    }
     tex->last_written = frame_no;
     tex->gpu_written = true;
     tex->gpu_gen = memory_generation();
@@ -3896,7 +3916,9 @@ bool sparse_flush(Texture* tex) {
         std::lock_guard qk(dev.present_mu);
         queue_flush_locked();
         if (!no_idle) vkQueueWaitIdle(dev.queue);
+        vk_tl_note("bind-sparse+", no_idle ? 0 : 1);
         res = vkQueueBindSparse(dev.queue, 1, &bi, fence);
+        vk_tl_note("bind-sparse-");
         if (++binds % 200 == 0) logf("vk: %lld sparse binds", (long long)binds);
     }
     if (res == VK_SUCCESS) {
@@ -4089,6 +4111,22 @@ void texture_ledger_snapshot(LedgerSnap& s) {
         s.bcc_bytes = bcc_bytes, s.bcc_entries = bcc.size();
     }
     texture_stats(&s.uploads, &s.astc_gpu, &s.bytes_uploaded);
+}
+
+/// For each texture (nullptr: skipped), the newest drawing into another image whose storage overlaps its own; 0 for none
+/// (ported from Longshot 25ee6a83, #323)
+static std::vector<uint64_t> drawn_others(const std::vector<const Texture*>& ts) {
+    std::vector<uint64_t> other(ts.size(), 0);
+    for (const auto& kv : textures) {   // (from any start: a scratch heap's targets overlap at other offsets)
+        const Texture* o = kv.second.get();
+        if (!o->gpu_written || !o->guest_size) continue;
+        for (size_t i = 0; i < ts.size(); i++) {
+            const Texture* t = ts[i];
+            if (t && o != t && o->gpu < t->gpu + t->guest_size && o->gpu + o->guest_size > t->gpu)
+                other[i] = std::max(other[i], o->last_written);
+        }
+    }
+    return other;
 }
 
 void texture_frame(uint64_t completed) {
@@ -4765,6 +4803,21 @@ void texture_frame(uint64_t completed) {
         // (issue 386). RX_VK_EVICT_NO_FLUSH=1: not written back, as before)
         static const bool no_flush = getenv("RX_VK_EVICT_NO_FLUSH") != nullptr;
         evict.push_back({tex, !no_flush && !overwritten && tex->gpu_written && !tex->released && flushable(*tex), shifted});
+    }
+    {   // (ported from Longshot 25ee6a83, #323) nor one whose storage another image was drawn into after its own last drawing
+        // (evict_reason.h's write_back_stale): its write-back puts old texels over memory that is the other image's now, and marks
+        // those pages written. OoT draws its HUD's labels inside the storage of a 1920 x 1080 target it has stopped using; that
+        // target's eviction, ~600 frames later at a 6 GB budget, made the finalized labels upload from memory that never held their
+        // texels: the d-pad and item prompts as noise until the pause menu redrew them
+        std::vector<const Texture*> ts;
+        for (const Evict& e : evict)
+            if (e.flush) ts.push_back(e.tex);
+        if (!ts.empty()) {
+            const std::vector<uint64_t> other = drawn_others(ts);
+            size_t i = 0;
+            for (Evict& e : evict)
+                if (e.flush) e.flush = !evict_reason::write_back_stale(e.tex->last_written, other[i++]);
+        }
     }
     {   // (the write-backs: batches of up to 64 textures or ~512 MB of staging memory, each one submission and one wait)
         std::vector<Flush> batch;

@@ -385,9 +385,36 @@ NV(nvnMemoryPoolGetBufferAddress) {
     RET(((const nvn_pool *)P(0))->gpu);
 }
 NV(nvnMemoryPoolFlushMappedRange) {}   /* CPU writes are seen through write watch */
+/* (stream R2, HOS_RB_LR_LOG=1) the CPU's reads of GPU results by caller (the guest return address), size and thread, a line every
+   3000 calls: which guest functions ask, and for what. Logging only */
+static void rb_lr_note(uint64_t lr, uint64_t size) {
+    static int on = -1;
+    if (on < 0) on = getenv("HOS_RB_LR_LOG") != NULL;
+    if (!on) return;
+    static struct { uint64_t lr, size; const char *th; int64_t n; } t[64];
+    static int64_t calls;
+    static CRITICAL_SECTION cs;
+    static LONG init;
+    if (!init && InterlockedCompareExchange(&init, 1, 0) == 0) InitializeCriticalSection(&cs), InterlockedIncrement(&init);
+    while (init < 2) Sleep(0);
+    EnterCriticalSection(&cs);
+    const char *th = hos_thread_name(hos_self());
+    int i = 0;
+    for (; i < 64 && t[i].size; i++)
+        if (t[i].lr == lr && t[i].size == size && t[i].th == th) break;
+    if (i < 64) t[i].lr = lr, t[i].size = size, t[i].th = th, t[i].n++;
+    if (++calls % 3000 == 0) {
+        for (int k = 0; k < 64 && t[k].size; k++)
+            hos_log("rb lr: %lld calls from lr %#llx size %#llx on %s", (long long)t[k].n, (unsigned long long)t[k].lr,
+                    (unsigned long long)t[k].size, t[k].th ? t[k].th : "?");
+        memset(t, 0, sizeof t);
+    }
+    LeaveCriticalSection(&cs);
+}
 NV(nvnMemoryPoolInvalidateMappedRange) {   /* the CPU is about to read what the GPU wrote */
     if (no_pool(c, "invalidate mapped range")) return;
     const nvn_pool *o = (const nvn_pool *)P(0);
+    rb_lr_note(c->x[30], U64(2));
     if ((int64_t)U64(1) >= 0) rx_nvn_invalidate(o->gpu + U64(1), U64(2));
 }
 NV(nvnMemoryPoolSetDebugLabel) {}
@@ -518,6 +545,7 @@ NV(nvnBufferGetSize) { RET(((const nvn_buffer *)P(0))->size); }
 NV(nvnBufferFlushMappedRange) {}
 NV(nvnBufferInvalidateMappedRange) {
     const nvn_buffer *o = (const nvn_buffer *)P(0);
+    rb_lr_note(c->x[30], U64(2));
     if (o->pool) rx_nvn_invalidate(POOL(o->pool)->gpu + (uint64_t)o->off + U64(1), U64(2));
 }
 NV(nvnBufferSetDebugLabel) {}

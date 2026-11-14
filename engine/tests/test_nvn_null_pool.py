@@ -74,6 +74,7 @@ static uint64_t h2g(void *p) { return (uint64_t)(uintptr_t)p; }
 #define RETP(p) RET(h2g(p))
 #define U64(i) (c->x[i])
 static void rx_nvn_invalidate(uint64_t a, uint64_t b) { (void)a; (void)b; }
+static void rb_lr_note(uint64_t lr, uint64_t size) { (void)lr; (void)size; }   /* (HOS_RB_LR_LOG, logging only) */
 ''' + guard + "\n" + flags + "\n" + size + "\n" + map_ + "\n" + address + "\n" + invalidate + r'''
 int main(void) {
     Ctx c;
