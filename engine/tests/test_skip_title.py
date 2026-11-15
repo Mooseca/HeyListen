@@ -191,7 +191,7 @@ def main():
         windows = os.name == "nt"
         flags = subprocess.CREATE_NO_WINDOW | subprocess.BELOW_NORMAL_PRIORITY_CLASS if windows else 0
         extra = {"creationflags": flags} if windows else {}
-        build = subprocess.run([a.cc, "-std=c11", "-Wall", "-Wextra", "-Werror", "-D_CRT_SECURE_NO_WARNINGS",
+        build = subprocess.run([a.cc, "-std=c11", "-Wall", "-Wextra", "-Werror", "-D_CRT_SECURE_NO_WARNINGS", "-D_DEFAULT_SOURCE",
                                 "-I", str(ROOT / "host"), "-I", str(ROOT / "gpu" / "vk"),
                                 str(src), str(AUTOLOAD), "-o", str(exe)], **extra)
         if build.returncode:
