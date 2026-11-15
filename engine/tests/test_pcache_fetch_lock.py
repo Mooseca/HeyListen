@@ -119,7 +119,8 @@ def main():
     assert save.count("vkGetPipelineCacheData") == 1, "a fetch in the save outside its locked fetch"
     assert save.count("return put_off_now();") == 3, "a save whose fetch was put off is lost without a log line"
     assert "guarded_compute(pcache," not in draw, "a build with pcache that does not hold it from a fetch"
-    assert "guarded_graphics(pcache," not in draw and "vkCreateGraphicsPipelines(dev.device, pcache," in draw
+    # (the masked clear's pipeline too, through guarded_graphics_held since the Intel gate: a raw create with pcache is none)
+    assert "guarded_graphics(pcache," not in draw and "vkCreateGraphicsPipelines(dev.device, pcache," not in draw
     assert draw.count("vkGetPipelineCacheData(") == 2, "a fetch outside the locked ones (the save's, the mapped write's under it)"
     with tempfile.TemporaryDirectory(prefix="pcache-fetch-") as tmp:
         source, exe = Path(tmp) / "check.cpp", Path(tmp) / "check.exe"

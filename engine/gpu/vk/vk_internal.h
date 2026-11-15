@@ -59,6 +59,7 @@ struct Device {
          coop_matrix = false,   // (VK_KHR_cooperative_matrix with its feature)
          native_mma = false,    // (HMMA on it: the cooperative matrix test passed, vk_coopmat.cpp)
          pci_bus_info = false;  // (VK_EXT_pci_bus_info supported, not enabled: its properties name the card's sysfs node, vk_memory.cpp pcie_link_gbps)
+    bool float_atomic_add = false;   // (longshot #2306) VK_EXT_shader_atomic_float's shaderBufferFloat32AtomicAdd: the translator's float adds
     bool eds3_polygon = false, eds3_clamp = false, eds3_blend = false, eds3_a2c = false;
     bool swapchain_colorspace = false;   // (hookshot) VK_EXT_swapchain_colorspace: HDR10 surfaces are listed
     bool hdr = false;                    // (hookshot) the swapchain is HDR10 (ST 2084, Rec. 2020): framegen_hdr writes it
@@ -97,6 +98,43 @@ struct Device {
     uint32_t sparse_family = UINT32_MAX;
 };
 extern Device dev;
+
+/// (longshot #252) Windows Intel's compiler (igvk64, UHD and Arc) faults when two threads hand it shaders at once: an Arc A750
+/// froze the PC on four compute pipelines, and an Intel UHD read address 0x170 inside igvk64 during the first scene's compiles.
+/// One thread at a time enters vkCreateShaderModule and vkCreate*Pipelines (a pipeline or module the renderer makes for itself, a
+/// translated program's module, a graphics or compute pipeline of the game's). Other vendors, and Intel on Linux, are not held:
+/// the gate is a no-op there, so nothing changes. The Debug tab's Intel shader compiles row (shown on Intel under Windows), or
+/// RX_VK_NO_INTEL_SERIAL=1 over it, lets them build side by side again.
+/// ask: a create that compiles nothing (VK_PIPELINE_CREATE_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT), made for a draw on the replay
+/// thread, which must never wait for a compile: it only tries the gate, and while a worker holds it, `busy` is set and the caller
+/// answers VK_PIPELINE_COMPILE_REQUIRED (cold) without asking the driver.
+bool intel_compiles_side_by_side();   // (vk_draw.cpp: the row or the environment, read once)
+inline bool intel_gate_on() {
+#ifdef _WIN32
+    static const bool on = dev.props.vendorID == 0x8086 && !intel_compiles_side_by_side();
+    return on;
+#else
+    return false;
+#endif
+}
+struct IntelDriverGate {
+    std::unique_lock<std::mutex> hold;
+    bool busy = false;
+    explicit IntelDriverGate(bool ask = false) {
+        if (!intel_gate_on()) return;
+        static std::mutex mu;
+        static std::once_flag once;
+        std::call_once(once, [] {
+            logf("vk: Intel's compiler is entered by one thread (Intel shader compiles row, RX_VK_NO_INTEL_SERIAL=1: side by side)");
+        });
+        if (ask) {
+            hold = std::unique_lock<std::mutex>(mu, std::try_to_lock);
+            busy = !hold.owns_lock();
+        } else {
+            hold = std::unique_lock<std::mutex>(mu);
+        }
+    }
+};
 
 /// A range of guest memory as the GPU sees it: a buffer (an imported pool), the offset in it, and its device address
 struct BufferRef {
@@ -399,12 +437,13 @@ bool precompile_blocking();                   // vk_draw.cpp: RX_VK_PRECOMPILE_W
 void precompile_run(void (*progress)(size_t done, size_t total), bool wait = true);
 bool prepare_run(void (*progress)(size_t done, size_t total), bool background);
 bool prepare_is_update();
+bool prepare_is_lazy_update();                 // (the update prepare_is_update found is lazy: nothing is made before the game)
 void prepare_background();
 void state_list_run();                        // (an update: the state list's pipelines noted before precompile_run)
 /// (HL_SHIPPED_STATES, on unless 0) the shipped pipeline state list changed since state_list_prepare last went through it: the
 /// start calls state_list_run when the shaders needed no preparing, so that precompile_run builds its pipelines
 bool state_list_pending();
-void predict_run(void (*progress)(size_t done, size_t total));   // (after a prepare_run that prepared: the notes' predictions)
+void predict_run(void (*progress)(size_t done, size_t total), bool background = false, bool noted = false);   // (after a prepare_run that prepared: the notes' predictions)
 /// (hookshot) The window was closed while the shaders were prepared: prepare_run and precompile_run take nothing more and return,
 /// what is done kept (the program cache, the driver's) and not counted as a start that ended inside them
 void prepare_stop();

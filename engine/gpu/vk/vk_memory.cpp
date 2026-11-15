@@ -31,6 +31,7 @@
 
 #include "vk_internal.h"
 #include "vk_texture.h"   // (upload_command_buffer)
+#include "vk_draw.h"      // (extern_guarded_shader_module, extern_guarded_compute)
 #include "vk_ledger.h"    // (RX_VK_LEDGER)
 #include "vk_lag.h"       // (RX_VK_LAG_LOG)
 #include "vk_gprof.h"      // (RX_VK_PASS_TIMING)
@@ -4587,7 +4588,8 @@ bool scatter_ready() {   // (scatter_mu held)
     VkShaderModuleCreateInfo mi{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
     mi.codeSize = sizeof(MSYNC_SCATTER_COMP_SPV), mi.pCode = MSYNC_SCATTER_COMP_SPV;
     VkShaderModule module = VK_NULL_HANDLE;
-    if (vkCreateShaderModule(dev.device, &mi, nullptr, &module) != VK_SUCCESS) return false;
+    IntelDriverGate gate;
+    if (extern_guarded_shader_module(&mi, &module) != VK_SUCCESS) return false;
     VkPushConstantRange pr{VK_SHADER_STAGE_COMPUTE_BIT, 0, 16};
     VkPipelineLayoutCreateInfo li{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
     li.pushConstantRangeCount = 1, li.pPushConstantRanges = &pr;
@@ -4597,7 +4599,7 @@ bool scatter_ready() {   // (scatter_mu held)
         ci.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
         ci.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT, ci.stage.module = module, ci.stage.pName = "main";
         ci.layout = scatter.layout;
-        ok = vkCreateComputePipelines(dev.device, VK_NULL_HANDLE, 1, &ci, nullptr, &scatter.pipeline) == VK_SUCCESS;
+        ok = extern_guarded_compute(VK_NULL_HANDLE, &ci, &scatter.pipeline) == VK_SUCCESS;
     }
     vkDestroyShaderModule(dev.device, module, nullptr);
     void* m = nullptr;
@@ -6696,14 +6698,15 @@ bool wbd_pipe_ready() {
         VkShaderModuleCreateInfo mi{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
         mi.codeSize = sizeof WB_DIFF_COMP_SPV;
         mi.pCode = WB_DIFF_COMP_SPV;
-        if (vkCreateShaderModule(dev.device, &mi, nullptr, &m) == VK_SUCCESS) {
+        IntelDriverGate gate;
+        if (extern_guarded_shader_module(&mi, &m) == VK_SUCCESS) {
             VkComputePipelineCreateInfo ci{VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};
             ci.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
             ci.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
             ci.stage.module = m;
             ci.stage.pName = "main";
             ci.layout = wbd_pipe.layout;
-            if (vkCreateComputePipelines(dev.device, VK_NULL_HANDLE, 1, &ci, nullptr, &wbd_pipe.pipe) != VK_SUCCESS)
+            if (extern_guarded_compute(VK_NULL_HANDLE, &ci, &wbd_pipe.pipe) != VK_SUCCESS)
                 wbd_pipe.pipe = VK_NULL_HANDLE;
             vkDestroyShaderModule(dev.device, m, nullptr);
         }

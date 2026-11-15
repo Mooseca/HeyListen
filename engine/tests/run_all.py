@@ -26,6 +26,8 @@ OS = "windows" if WINDOWS else "linux"
 # Arguments some tests need. {name} is a tool or folder found below (find_tools); a check whose tools are missing is
 # skipped, or fails with --strict. Tests not listed run with no arguments and their own defaults.
 ARGS = {
+    "tests/test_native_float_atomic_add.py": ["--cxx", "{cxx}", "--headers", "{spirv_headers}", "--spirv-val", "{spirv_val}"],
+    "tests/test_shader_module_guard.py": ["--cxx", "{cxx}"],
     "tests/test_png_publication.py": ["--cxx", "{cxx}"],
     "tests/test_framelog_sink.py": ["--cxx", "{cxx}", "--headers", "{vulkan_headers}"],
     "tests/test_capture_slot_ownership.py": ["--cxx", "{cxx}"],
@@ -154,6 +156,7 @@ MODULES = {
 # Checks that cannot run in CI, with why, by OS. Each still runs with --no-skip (or by name).
 SKIP = {
     "tests/test_precompile_compute_guard.py": ({"linux"}, "Windows structured exceptions"),
+    "tests/test_shader_module_guard.py": ({"linux"}, "Windows structured exceptions"),
     # (the game: these run the lifted code of a real dump against Unicorn)
     "nx2/test_insn.py": ({"linux", "windows"}, "needs the game's modules (work/dump) and Unicorn"),
     "nx2/test_leaf.py": ({"linux", "windows"}, "needs the game's modules (work/dump) and Unicorn"),

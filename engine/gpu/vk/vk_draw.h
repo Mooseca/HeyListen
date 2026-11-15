@@ -80,6 +80,7 @@ uint64_t ub_generation();
 void ub_thread_off();
 /// The pipeline cache to disk (force: whatever was built since the last save; else only after a few new ones)
 void pipeline_cache_save(bool force);
+void shader_key_commit();   // (RX_VK_SHADER_KEY: what the driver built so far goes to hookshot_compiled.bin)
 /// (longshot #404) the serial builds' thread between two builds: a save put off for builds under way, run there (vk_jobs.cpp)
 void pipeline_cache_between_builds();
 
@@ -91,5 +92,12 @@ uint64_t ub_overlay(uint64_t addr, uint64_t n, uint8_t* base, const std::functio
 void ub_overlay_onto(uint64_t addr, uint64_t n, uint8_t* p);
 /// Guest memory as the stream's place sees it: as submitted, the stream's uniform updates before it over it
 bool ub_read(uint64_t addr, void* dst, uint64_t n);
+
+/// (longshot #252) vkCreate* that a driver's compiler can fault inside. A fault leaves that one out (result -77) instead of ending
+/// the process. On Windows, Intel's compiler is entered by one thread (IntelDriverGate, vk_internal.h): the caller holds it. The
+/// calls themselves live in vk_draw.cpp's unnamed namespace; these are the ones the other files link to
+VkResult extern_guarded_graphics(VkPipelineCache cache, const VkGraphicsPipelineCreateInfo* ci, VkPipeline* pl);
+VkResult extern_guarded_compute(VkPipelineCache cache, const VkComputePipelineCreateInfo* ci, VkPipeline* pl);
+VkResult extern_guarded_shader_module(const VkShaderModuleCreateInfo* ci, VkShaderModule* m);
 
 } // namespace mkwvk

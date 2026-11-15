@@ -86,7 +86,7 @@ def main():
     assert armed != arm
     # (the arm builds through the cache-held guard: a fetch of the cache's data is not under way; none here)
     held='\nVkResult guarded_compute_held(VkPipelineCache c,const VkComputePipelineCreateInfo*ci,VkPipeline*pl){return guarded_compute(c,ci,pl);}\n'
-    cpp=HEAD+wrapper+held+'\nvoid actual_arm(Program&program,Pre*pre){pre->computes={&program};size_t i=0;'+armed+'\ncompleted=true;}\n'+r'''
+    cpp=HEAD+wrapper+held+'\nVkResult gated_compute(VkPipelineCache c,const VkComputePipelineCreateInfo*ci,VkPipeline*p){return guarded_compute_held(c,ci,p);}   // (Intel gate: not under test)\nvoid actual_arm(Program&program,Pre*pre){pre->computes={&program};size_t i=0;'+armed+'\ncompleted=true;}\n'+r'''
 int main(int argc,char**argv){
  SetErrorMode(SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX|SEM_NOOPENFILEERRORBOX);
  CHECK(argc==2);int which=std::atoi(argv[1]);Program program;Pre pre;

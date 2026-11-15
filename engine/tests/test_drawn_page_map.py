@@ -67,6 +67,7 @@ FIXTURE = r'''#include <algorithm>
 #include <cstring>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <unordered_map>
 #include <utility>

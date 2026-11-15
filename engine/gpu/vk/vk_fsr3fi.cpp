@@ -19,6 +19,7 @@
 #include <utility>
 
 #include "vk_fsr3fi.h"
+#include "vk_draw.h"   // (extern_guarded_shader_module, extern_guarded_compute)
 #include "vk_menu.h"    // (the Frame generation row)
 #include "vk_gprof.h"   // (RX_VK_PASS_TIMING: a span per pass, so the report names them)
 #include "vk_texture.h"
@@ -440,13 +441,14 @@ bool make_pipeline(Pipeline& p, const PassInfo& info) {
     mi.codeSize = info.spv_bytes;
     mi.pCode = info.spv;
     VkShaderModule m = VK_NULL_HANDLE;
-    if (vkCreateShaderModule(dev.device, &mi, nullptr, &m) != VK_SUCCESS) return false;
+    IntelDriverGate gate;
+    if (extern_guarded_shader_module(&mi, &m) != VK_SUCCESS) return false;
     VkComputePipelineCreateInfo ci{VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};
     ci.stage = {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0,
                 VK_SHADER_STAGE_COMPUTE_BIT, m, "main", nullptr};
     ci.layout = p.layout;
     const VkResult made =
-        vkCreateComputePipelines(dev.device, VK_NULL_HANDLE, 1, &ci, nullptr, &p.pipeline);
+        extern_guarded_compute(VK_NULL_HANDLE, &ci, &p.pipeline);
     vkDestroyShaderModule(dev.device, m, nullptr);
     if (made != VK_SUCCESS) {
         logf("vk: fsr3fi: the %s pass pipeline was not made (%d)", info.name, (int)made);

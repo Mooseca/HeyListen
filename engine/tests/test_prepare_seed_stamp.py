@@ -239,6 +239,24 @@ int main(int argc, char** argv) {
     std::filesystem::remove(seed);
     want("no seed, same translator", start(3), PrepareWhy::None);
     want("no seed, changed translator", start(4), PrepareWhy::Translator);
+    // a preparation that began and did not end leaves a record with no translator: prepared again, but never a first start (which
+    // drops what the driver's ledger lists); no record at all, or an empty one, is a first start
+    {
+        PreparedFor now;
+        double unused;
+        prepare_check(rec, seed, 4, &now, &unused);
+        prepared_mark_running(rec, now);
+        uint64_t first = 99;
+        FILE* f = fopen(rec.c_str(), "rb");
+        if (!f || fread(&first, 8, 1, f) != 1 || first != 0) std::puts("the running mark: wanted a record of stamp 0"), fails++;
+        if (f) fclose(f);
+        want("a preparation cut short", start(4), PrepareWhy::Translator);
+        want("then it was prepared", start(4), PrepareWhy::None);
+        std::filesystem::remove(rec);
+        want("no record", start(4), PrepareWhy::First);
+        put(rec, "");
+        want("an empty record", start(4), PrepareWhy::First);
+    }
     if (fails) return 1;
     std::puts("ok");
 }
@@ -258,7 +276,7 @@ int main(int argc, char** argv) {
                       ("why == PrepareWhy::Seed", "says when the seed made it prepare again"),
                       ("why == PrepareWhy::Cache", "says when the cache made it prepare again"),
                       ("prepared_for.kept = kept", "records the cache's count"),
-                      ("remove(path.c_str());", "forgets the record while it prepares, so a preparation cut short runs again")):
+                      ("prepared_mark_running(path, prepared_for)", "marks the record as no translator's while it prepares, so a preparation cut short runs again")):
         if need not in run:
             raise SystemExit("prepare_run no longer " + why)
     if "fwrite(&stamp, 8, 1" in run:

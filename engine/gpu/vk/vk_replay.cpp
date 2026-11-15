@@ -5368,7 +5368,7 @@ void do_present(const nvn_tex* t, const int crop[4]) {
                 if (old) wait_value(old);
             }
         }
-        if (presents % 300 == 0) pipeline_cache_save(false);
+        if (presents % 300 == 0) pipeline_cache_save(false), shader_key_commit();
         {   // (RX_VK_DUMP_KEY: F9 dumps the next frame, 8 times at most)
             static const bool dump_key = getenv("RX_VK_DUMP_KEY") != nullptr;
             static bool was_down;

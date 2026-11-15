@@ -95,6 +95,11 @@ const char* tx_framegen(int v) {
     return t[v];
 }
 const char* tx_onoff(int v) { return v ? "On" : "Off"; }
+const char* tx_intel_compiles(int v) { return v ? "Side by side" : "One at a time"; }
+MENU_HINTS(hn_intel_compiles, 0,
+           "The safe choice, and the best on a CPU with 4 cores or fewer: a shader Intel's compiler faults on is left out instead of "
+           "closing the game.",
+           "Shaders are built faster on a CPU with many cores, but Intel's driver can crash the game while it builds them.")
 const char* tx_fps_limit(int v) {
     static const char* t[] = {"60", "90", "120", "144", "165", "240"};
     return t[v < 0 || v > 5 ? 0 : v];
@@ -712,6 +717,9 @@ Row rows[] = {
     {TAB_DEBUG, "Sampler cache", &opts.sampler_cache, 0, 1, 1, tx_onoff,
      "What a sampler holds is kept beside it on the replay thread, so resolving a sampler that was not registered anew takes no "
      "lock. Helps while the game streams textures. Applies after restart.", nullptr, true},
+    // (longshot #252, Intel graphics on Windows only: row_shown) IntelDriverGate, vk_internal.h
+    {TAB_DEBUG, "Intel shader compiles", &opts.intel_compiles, 0, 1, 1, tx_intel_compiles,
+     "Intel graphics: how many shaders Intel's compiler is given at once. Applies after a restart.", hn_intel_compiles, true},
     // (Restart and Quit stay the table's last two: kRestartRow and kQuitRow count back from its end)
     {TAB_GAMEPLAY, "Restart", nullptr, 0, 0, 0, nullptr,
      "Starts the game again. Save your progress first. Press Enter or A twice to restart. Esc or B "
@@ -877,6 +885,14 @@ int ask_sel = 0;   // (the restart question's choice: 0 Later, 1 Restart now)
 
 /// A row on its tab: the debug tools only with them on, the Upscaler only in a build with DLSS or where AMD FSR 3.1 runs
 bool row_shown(int i) {
+    // (the Intel shader compiles row: Intel graphics on Windows, the only place IntelDriverGate holds the compiler)
+    if (rows[i].value == &opts.intel_compiles) {
+#ifdef _WIN32
+        if (dev.props.vendorID != 0x8086) return false;
+#else
+        return false;
+#endif
+    }
     return (rows[i].cheat < 0 || cheats_on()) && (rows[i].value != &opts.dlss || ur::upscaler_shown(dlss_built(), fsr3::supported())) &&
            (rows[i].value != &opts.dlss_model || ur::model_shown(dlss_built()));
 }
