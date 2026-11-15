@@ -34,6 +34,9 @@ int main() {
     const Rules b = parse("2000,-2000");
     CHECK(!wanted(b, 0x2000, false) && !wanted(b, 0x2000, true));
     CHECK(!parse("-1040").any());
+    const Rules meter = parse("1040,c0");   // RX_VK_READBACK_STRICT's default with RADV
+    CHECK(!meter.newest && wanted(meter, 0x1040, false) && wanted(meter, 0xc0, false) && !wanted(meter, 0x1b580, false)
+          && !wanted(meter, 0x2000, true));
     if (!fails) std::printf("PASS the rules\n");
     return fails;
 }
@@ -76,6 +79,11 @@ def main():
         "0 and 1 are not kept apart from a list of sizes"
     assert "readback_late::parse(e)" in strict and "r.sizes.newest = false" in strict, "the sizes are not parsed as sizes only"
     assert "VK_DRIVER_ID_MESA_RADV" in strict, "the default is no longer RADV's"
+    # unset on RADV: the light meter's sizes, not all (the 0x1b580 ranges' wait cost ~15% for no picture); unset elsewhere: off
+    i_default = strict.index("if (!e && radv) {")
+    assert strict.index('r.sizes = readback_late::parse("1040,c0");', i_default) < strict.index("} else if (e && strcmp", i_default), \
+        "RADV's default is not the light meter's sizes"
+    assert "r.all = e && atoi(e) != 0;" in strict, "only RX_VK_READBACK_STRICT=1 makes every range wait"
     i_strict = inv.index("readback_strict_wanted(size) && v > completed()")
     assert i_wait < i_strict, "the strict wait is asked outside the pending range's wait"
     print("PASS the wiring")

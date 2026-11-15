@@ -1054,7 +1054,8 @@ def main():
                                               "-Wl,--export-dynamic-symbol=hos_posix_*", "-Wl,--export-dynamic-symbol=hos_jt_mark_ext",
                                               "@" + rsp] + HOT_ORDER() +
                            (["-fprofile-instr-generate"] if PGO == "gen" else []) +
-                           (FFMPEG_LX[1] if FFMPEG_LX else []) + HOST_LIBS + ["-lstdc++"],   # (engine/native's C++)
+                           (FFMPEG_LX[1] if FFMPEG_LX else []) + HOST_LIBS + (["-l:libstdc++.a"] if SYSROOT else ["-lstdc++"]),   # (engine/native's C++: static with the
+                           # AppImage's sysroot, so the player's system needs no particular libstdc++)
                            capture_output=True, text=True)
         undefined = sorted({l.strip() for l in (r.stdout + r.stderr).splitlines() if "undefined symbol" in l})
         if r.returncode:
