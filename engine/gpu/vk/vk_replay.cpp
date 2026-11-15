@@ -34,7 +34,7 @@
 #include <unordered_map>
 #include <unordered_set>
 
-#include "vk_dlss.h"
+#include "vk_temporal.h"
 #include "vk_fsr3_inputs.h"   // (the camera jitter while AMD FSR 3.1 upscales)
 #include "status_line.h"
 #include "vk_reflex.h"
@@ -59,6 +59,7 @@
 #include "vk_tl_clock.h"   // (RX_VK_TL: the timeline's host time domain)
 #include "vk_lag.h"   // (RX_VK_LAG_LOG)
 #include "readback_late.h"   // (RX_VK_READBACK_LATE)
+#include "exe_base.h"   // (RX_VK_RB_PROF's call sites: offsets in the exe)
 #include "vk_work.h"   // (after the others: counts the commands that do GPU work, for full_barrier)
 
 namespace mkwvk {
@@ -932,6 +933,14 @@ void gpu_time_end(Recording& r, bool uploads) {
     vkCmdWriteTimestamp2(r.cmd, VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT, ts_pool, 4 * r.slot + 3);
     ts_pending[r.slot] = true;
     ts_up_pending[r.slot] = uploads;
+}
+/// A segment's submission (its own vkQueueSubmit2, dev.present_mu held), counted with submit_recording's when it carries timestamps:
+/// gpu_time_collect numbers every timed slot it collects, segments too, and a blit's place among them (blit_ts_mark,
+/// ts_last_end_seen) is this count. Without it the count fell behind by every segment, and the blit's gaps read 0 after a few frames
+void gpu_time_segment_submitted(const Recording& r) {
+    if (!ts_pool || !ts_pending[r.slot]) return;
+    std::lock_guard lk(ts_mu);
+    ts_seq_submitted++;
 }
 
 /// The next recording slot, begun, for the submission that will signal value
@@ -2709,6 +2718,10 @@ const uint8_t* replay_handle_early(VkCommandBuffer& cmd, const uint8_t* h, bool 
         bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
         vkResetCommandPool(dev.device, j->r->upload_pool, 0);
         vkBeginCommandBuffer(j->r->upload, &bi);
+        // (the segments' GPU time too, as replay_handle's (TICK-057). Without it these segments were in no GPU-time count: the log's
+        // "GPU time" ~3.8 ms a frame instead of ~6.3 on an RX 9070 XT in Kokiri, and its gaps and RX_VK_TL's GPU side showed the GPU
+        // idle 3-5 ms before each present while it ran them. A slot never used (a boundary not reached) is never ended: not collected)
+        gpu_time_begin(*j->r);
         j->order = base + (uint64_t)k;
         j->index = k;
         jobs.push_back(std::move(j));
@@ -2746,6 +2759,7 @@ const uint8_t* replay_handle_early(VkCommandBuffer& cmd, const uint8_t* h, bool 
         j->uploads = texture_uploads_recorded();
         j->inits = texture_segment_end(j->index);
         texture_segment_worker(-1);
+        gpu_time_end(*j->r, j->uploads);   // (as replay_handle's)
         vkEndCommandBuffer(j->r->upload);
         vkEndCommandBuffer(j->r->cmd);
         work_seg_end();   // (TICK-061, D6)
@@ -2825,6 +2839,7 @@ const uint8_t* replay_handle_early(VkCommandBuffer& cmd, const uint8_t* h, bool 
     Job* last = jobs[open].get();
     last->g.end = stop;
     submit_recording(r, false);   // (what came before, its uploads with the pre-sync: ahead of every segment in the queue)
+    for (size_t k = 0; k < used; k++) ts_recseq[jobs[k]->r->slot] = rec_seq;   // (RX_VK_TL: shown with r, the recording they follow)
     jt_mark(20, 0);
     early_wall.mark(6);
     const auto t_seg0 = std::chrono::steady_clock::now();
@@ -2870,6 +2885,7 @@ const uint8_t* replay_handle_early(VkCommandBuffer& cmd, const uint8_t* h, bool 
         late_fix_wait_unlocked();   // (TICK-060)
         std::lock_guard lk(dev.present_mu);
         queue_flush_locked();
+        gpu_time_segment_submitted(*j->r);   // (the blits' places among the timed recordings)
         const VkResult res = vkQueueSubmit2(dev.queue, 1, &si, j->r->fence);
         j->r->submitted = res == VK_SUCCESS;
         if (res != VK_SUCCESS) logf("vk: segment submit %llu failed (%d)", (unsigned long long)j->r->value, (int)res);
@@ -3192,6 +3208,7 @@ const uint8_t* replay_handle(VkCommandBuffer& cmd, const uint8_t* h, bool may_st
             vkBeginCommandBuffer(j->r->upload, &bi);
             gpu_time_begin(*j->r);   // (TICK-057: the segments' GPU time too, in the trace's gpu_ms and gaps and the late waits' tail)
         }
+        ts_recseq[j->r->slot] = rec_seq;   // (RX_VK_TL: shown with r, the recording they follow, submitted above)
         j->g = seg[k];
         j->order = base + k;
         j->index = (int)k;
@@ -3326,6 +3343,7 @@ const uint8_t* replay_handle(VkCommandBuffer& cmd, const uint8_t* h, bool may_st
         late_fix_wait_unlocked();   // (TICK-060)
         std::lock_guard lk(dev.present_mu);
         queue_flush_locked();
+        gpu_time_segment_submitted(*j->r);   // (the blits' places among the timed recordings)
         const VkResult res = vkQueueSubmit2(dev.queue, 1, &si, j->r->fence);
         j->r->submitted = res == VK_SUCCESS;
         if (res != VK_SUCCESS) logf("vk: segment submit %llu failed (%d)", (unsigned long long)j->r->value, (int)res);
@@ -4295,7 +4313,7 @@ struct RbScope {
         if (!on) return;
         void* bt[14];
         const USHORT n = CaptureStackBackTrace(1, 14, bt, nullptr);
-        const uintptr_t base = (uintptr_t)GetModuleHandleA(nullptr);
+        static const uintptr_t base = exe_base();
         int w = 0, seen = 0;
         for (USHORT i = 0; i < n && seen < 5; i++) {
             const uintptr_t a = (uintptr_t)bt[i];
@@ -4904,6 +4922,10 @@ bool write_png(const char* path, const uint8_t* rgba, uint32_t w, uint32_t h) {
     }
 }
 
+// (do_present: the game's picture is already HDR10, Native HDR taken. Read by present_image, and by vk_fsr4.cpp, whose context is
+// made for HDR colour while it is)
+std::atomic<bool> present_native_pq{false};
+
 namespace {
 
 int64_t fps_n = 0;
@@ -4980,6 +5002,9 @@ void log_frame_stats() {
              shader_translate_ms(), jobs_pending(), libs);
         l_fresh = fresh;
         const double overlay_wait_ms = (pwait_ms - l_pwait_ms) / 120.0;   // (the overlay's lines: vk_overlay.cpp)
+        static double l_swait_ms;
+        const double swait_ms = draw_shader_wait_ms(), overlay_shader_wait_ms = (swait_ms - l_swait_ms) / 120.0;
+        l_swait_ms = swait_ms;
         double overlay_replay_ms = -1;
         l_pskip = pskip, l_pwaits = pwaits, l_pwait_ms = pwait_ms, l_links = links, l_link_ms = link_ms;
         {
@@ -5087,7 +5112,9 @@ void log_frame_stats() {
             PerfWaits w;
             w.replay_ms = (float)overlay_replay_ms;
             w.gpu_ms = (float)((st_gpu_ns - l_gpu) / 120.0 / 1e6);
-            w.pipe_wait_ms = (float)overlay_wait_ms;   // (the waits for shaders and pipelines are counted together)
+            // (the waits for a program's translation, and the rest of them, for its pipeline's build)
+            w.pipe_wait_ms = (float)std::max(0.0, overlay_wait_ms - overlay_shader_wait_ms);
+            w.shader_wait_ms = (float)overlay_shader_wait_ms;
             w.tex_uploads = (float)((up - l_up) / 120.0);
             perf_set_waits(w);
         }
@@ -5187,7 +5214,7 @@ void status_tick() {
     }
     char dlss[320] = "";
     const bool line = frames % sl::kEvery == 0;
-    const int mode = line ? dlss_status(dlss, sizeof dlss) : dlss_mode();   // (dlss_status: since the last line, so only for one)
+    const int mode = line ? temporal_status(dlss, sizeof dlss) : temporal_mode();   // (temporal_status: since the last line, so only for one)
     static bool over = false;
     if (known && sl::crossed(over, used, allowed)) {
         char w[200];
@@ -5201,7 +5228,6 @@ void status_tick() {
     slowest_ns = 0;
 }
 
-std::atomic<bool> present_native_pq{false};   // (do_present: the game's picture is already HDR10)
 uint64_t present_value = 0;   // (the present job's value, handed out as it came; 0: the next one)
 struct PendingShot {
     bool on = false;
@@ -5218,7 +5244,7 @@ void do_present(const nvn_tex* t, const int crop[4]) {
     static PendingShot pending;
     // (hookshot) NVIDIA Reflex (vk_reflex.cpp): this frame's simulation ended, its submission starts; on the way out (after the
     // present) the driver's sleep until the next frame should begin
-    dlss_idle();   // (NVIDIA DLSS: its video memory let go once it has not been used for a while)
+    temporal_idle();   // (DLSS, FSR: their video memory let go once not used for a while)
     status_tick();   // (the status line, and the video-memory warning)
     reflex_present_begins();
     struct ReflexSleep { ~ReflexSleep() { reflex_sleep(); } } reflex_sleep_after;
@@ -6599,11 +6625,11 @@ bool replay_start() {
 }
 
 /// (hookshot) The host's camera jitter (nx2/oot_jitter.py, host/rx_backend.c): the scene's size while a temporal upscaler
-/// draws, NVIDIA DLSS (vk_dlss.cpp) or AMD FSR 3.1 (vk_fsr3_inputs.cpp), whichever it is (one at a time: the Upscaler row);
-/// 0, no jitter, otherwise
+/// draws, NVIDIA DLSS or AMD FSR 4 (vk_temporal.cpp) or AMD FSR 3.1 (vk_fsr3_inputs.cpp), whichever it is (one at a time: the
+/// Upscaler row); 0, no jitter, otherwise
 int jitter_option(int id) {
     const int axis = id - HOS_OPT_DLSS_JITTER_W;
-    const uint32_t d = dlss_jitter_size(axis);
+    const uint32_t d = temporal_jitter_size(axis);
     return (int)(d ? d : fsr3_inputs::jitter_size(axis));
 }
 
@@ -6632,7 +6658,7 @@ void fill_replay_table(MkwVkRenderer& t) {
         if (id == HOS_OPT_HDR_WHITE) return std::clamp(opts.hdr_white, 80, 500);
         if (id == HOS_OPT_DISCORD) return opts.discord != 0;
         if (id == HL_OPT_SKIP_TITLE) return opts.skip_title != 0;
-        return id == 0 ? opts.realtime : id == 1 ? menu_is_open() : id == 2 ? resolution_auto() && !dlss_full_scale() : id == 3 ? (dlss_full_scale() ? 10000 : resolution_scale()) : id == 4 ? opts.pad_background : id == 5 ? opts.text_speed : id == 6 ? opts.mouse_native :
+        return id == 0 ? opts.realtime : id == 1 ? menu_is_open() : id == 2 ? resolution_auto() && !temporal_full_scale() : id == 3 ? (temporal_full_scale() ? 10000 : resolution_scale()) : id == 4 ? opts.pad_background : id == 5 ? opts.text_speed : id == 6 ? opts.mouse_native :
                id == 7 ? opts.mouse_sens : id == 8 ? opts.mouse_invert : id == 9 ? opts.rumble : id == 16 ? opts.invert_cam_x : id == 17 ? opts.invert_cam_y : id == HOS_OPT_GYRO ? opts.gyro : id == HOS_OPT_GYRO_SENS_X ? opts.gyro_sens_x : id == HOS_OPT_GYRO_SENS_Y ? opts.gyro_sens_y : id == HOS_OPT_GYRO_INV_X ? opts.gyro_inv_x : id == HOS_OPT_GYRO_INV_Y ? opts.gyro_inv_y : id == HOS_OPT_GYRO_DEADZONE ? opts.gyro_deadzone :
                id == HOS_OPT_DLSS_JITTER_W || id == HOS_OPT_DLSS_JITTER_H || id == HOS_OPT_DLSS_JITTER_PHASES ? jitter_option(id) :
                id == HL_OPT_FPS_LIMIT ? (opts.fps_limit == 1 ? 90 : opts.fps_limit == 2 ? 120 : opts.fps_limit == 3 ? 144 : opts.fps_limit == 4 ? 165 : opts.fps_limit == 5 ? 240 : 60) : 0;   // (HeyListen: the frame rate limit, host/nn_vi.c; vk_opt_ids.h)

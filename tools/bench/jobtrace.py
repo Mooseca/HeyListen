@@ -35,6 +35,11 @@ class Wait:
         self.waker = self.wake_t = None
 
 
+def host_ptr(s):
+    """A T line's host thread pointer: 16 hex digits, or (traces written by glibc's %p before) 0x... and "(nil)"."""
+    return 0 if s == "(nil)" else int(s, 16)
+
+
 def load(path):
     names, host = {}, {}
     window = None
@@ -49,7 +54,7 @@ def load(path):
             if line[0] == "T":
                 _, i, ptr, name = line.rstrip("\n").split(" ", 3)
                 names[int(i)] = name
-                host[int(ptr, 16)] = int(i)
+                host[host_ptr(ptr)] = int(i)
                 continue
             t, ty, th, a, b = line.split()
             recs.append((int(t), int(ty), int(th), int(a, 16), int(b, 16)))

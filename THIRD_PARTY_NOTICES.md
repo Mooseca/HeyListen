@@ -11,5 +11,6 @@ HeyListen is licensed GPL-3.0-or-later (see `LICENSE`). It incorporates the foll
 | SDL2 | `engine/third_party/sdl2/` | zlib | `LICENSE.txt` |
 | stb_truetype | `engine/third_party/stb/` | public domain or MIT | `PROVENANCE.md` |
 | Eden shader recompiler and related code, sirit, Dear ImGui, suyu decoders | `engine/gpu/vk/eden`, `engine/gpu/vk/sirit`, `engine/gpu/vk/imgui`, `engine/gpu/third_party/suyu` | GPL-3.0 (Eden), GPL-2.0-or-later (suyu), BSD-3-Clause (sirit), MIT (ImGui) | license files in the respective folders |
+| AMD FidelityFX SDK v2.4.0, the FSR API headers only (AMD's signed runtime is never bundled: the player's own, beside the game) | `engine/third_party/fidelityfx/` | MIT | `LICENSE.md`, `README.md` |
 
 No game files are included. Anything derived from the user's game dump (modules, lifted C, shader and pipeline caches) is generated locally and ignored by git.

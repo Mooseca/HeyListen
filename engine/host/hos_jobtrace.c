@@ -9,7 +9,7 @@
    HOS_JOBTRACE_AT=<s> (default 90): seconds after start the window opens; HOS_JOBTRACE_SECS=<s> (default 3) its length.
    Records go to one preallocated array (4 M x 32 bytes, allocated only when the trace is asked for) by an atomic index;
    outside the window a record costs one load and a branch. After the window the file is written: "T <idx> <host
-   thread pointer> <name>" lines, then "<ns> <type> <thread idx> <a hex> <b hex>" (types in hos.h, JT_*). */
+   thread pointer, 16 hex digits> <name>" lines, then "<ns> <type> <thread idx> <a hex> <b hex>" (types in hos.h, JT_*). */
 #include "hos.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -96,7 +96,10 @@ static DWORD WINAPI jt_thread(void *p) {
     if (!f) { hos_log("jobtrace: cannot write %s", path); return 0; }
     fprintf(f, "# jobtrace window %lld %lld\n", (long long)t0, (long long)t1);
     const LONG m = nths < 512 ? nths : 512;
-    for (LONG i = 0; i < m; i++) fprintf(f, "T %ld %p %s\n", (long)i, ths[i].host, ths[i].name[0] ? ths[i].name : "?");
+    /* (the host pointer as 16 hex digits, not %p: glibc prints a null %p as "(nil)", MSVC as zeros) */
+    for (LONG i = 0; i < m; i++)
+        fprintf(f, "T %ld %016llx %s\n", (long)i, (unsigned long long)(uintptr_t)ths[i].host,
+                ths[i].name[0] ? ths[i].name : "?");
     for (LONG64 i = 0; i < n; i++)
         fprintf(f, "%lld %u %u %llx %llx\n", (long long)recs[i].t, recs[i].type, recs[i].th, (unsigned long long)recs[i].a,
                 (unsigned long long)recs[i].b);

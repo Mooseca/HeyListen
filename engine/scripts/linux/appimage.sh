@@ -20,9 +20,14 @@ export EMSDK=$DEPS/emsdk RX_CPM=$DEPS/cpm
 PY=$DEPS/python/bin/python3
 
 # ---- the Vulkan back end, built here once (it needs no game) ----
+# (with AMD FSR 4: the player's build uses this back end as built (HOOKSHOT_VK_PREBUILT) and has none to compile, so FSR 4 is
+# in it or nowhere. AMD's MIT FSR API headers come from third_party/fidelityfx, their licence goes below; AMD's runtime does
+# not: on Linux it is the player's own amd_fidelityfx_upscaler_vk.so, and without it the Upscaler row does not offer FSR 4)
 VKW=$B/vk-work
 rm -rf "$VKW/sa/build/hookshot_vk.so"
-OOT_WORK=$VKW RX_MARCH=x86-64-v3 RX_VK_ONLY=1 RX_RELEASE=1 "$PY" -I nx2/build.py --standalone --jobs "${JOBS:-$(nproc)}"
+OOT_WORK=$VKW RX_MARCH=x86-64-v3 RX_VK_ONLY=1 RX_RELEASE=1 HOOKSHOT_FSR=1 "$PY" -I nx2/build.py --standalone --jobs "${JOBS:-$(nproc)}" |
+    tee "$B/vk-build.txt"
+grep -q "with AMD FSR 4" "$B/vk-build.txt" || { echo "the Vulkan back end was built without AMD FSR 4 (third_party/fidelityfx)"; exit 1; }
 VK=$VKW/sa/build/hookshot_vk.so
 [ -f "$VK" ] || { echo "hookshot_vk.so was not built"; exit 1; }
 
@@ -77,10 +82,11 @@ cp "$VK" "$L/hookshot_vk.so"
 cp "$DEPS/sdl2/libSDL2-2.0.so.0" "$L/libSDL2-2.0.so.0"
 cp -a "$DEPS/licenses" "$T/licenses"   # (LLVM, FFmpeg, dav1d, SDL2: what this AppImage carries besides HeyListen and Hookshot)
 # ---- the licences of the third-party parts compiled into hookshot_vk.so (tests/test_appimage_licenses.py) ----
-mkdir -p "$T/licenses/imgui" "$T/licenses/zstd" "$T/licenses/libertinus"
+mkdir -p "$T/licenses/imgui" "$T/licenses/zstd" "$T/licenses/libertinus" "$T/licenses/fidelityfx"
 cp third_party/imgui/LICENSE.txt third_party/imgui/PROVENANCE.md "$T/licenses/imgui/"
 cp third_party/zstd/LICENSE third_party/zstd/PROVENANCE.md "$T/licenses/zstd/"
 cp third_party/fonts/libertinus/OFL.txt third_party/fonts/PROVENANCE.md "$T/licenses/libertinus/"
+cp third_party/fidelityfx/LICENSE.md third_party/fidelityfx/README.md "$T/licenses/fidelityfx/"   # (AMD's FSR API headers, MIT)
 # ---- end of the licences ----
 
 # the sysroot: this system's C library (headers, start files, the libraries to link against) and GCC's runtime pieces

@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
 import zipfile
 from pathlib import Path
 
@@ -497,7 +498,8 @@ class UpdateTests(unittest.TestCase):
             for name in make_game.BESIDE:   # (a folder from a builder before the launcher: the game and its libraries in it)
                 (out / name).write_bytes(b"old " + name.encode())
             with mock.patch.dict(os.environ, {"HOOKSHOT_TOOLS": str(ROOT)}):
-                exec(finish, make_game.__dict__, {"built": str(built), "out": str(out), "work": str(work)})
+                exec(finish, make_game.__dict__, {"built": str(built), "out": str(out), "work": str(work),
+                                                   "a": SimpleNamespace(fsr=False, no_fsr=False, update=None, fetch_fsr_runtime=False)})
             self.assertEqual((out / "HeyListen").read_bytes(), (ROOT / "builder" / "linux" / "hookshot-folder").read_bytes())
             self.assertTrue((out / "HeyListen").stat().st_mode & stat.S_IXUSR)
             self.assertEqual(sorted(p.name for p in out.iterdir()), ["HeyListen", "bin", "image.bin"])

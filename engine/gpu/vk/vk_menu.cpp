@@ -39,6 +39,8 @@
 #include "vk_dlss.h"
 #include "vk_fsr3.h"      // (the Upscaler row: whether AMD FSR 3.1 runs on this GPU)
 #include "vk_fsr3fi.h"    // (the Frame generation row: whether FSR 3.1 makes the frame)
+#include "vk_fsr4.h"
+#include "vk_temporal.h"
 #include "vk_reflex.h"
 #include "upscaler_rows.h"
 #include "menu_restart.h"
@@ -157,21 +159,25 @@ const char* hn_reflex(int v, int variant) {
     return variant == 0 ? t[std::clamp(v, 0, 2)] : variant == 1 ? none : nullptr;
 }
 // The Upscaler (opts.dlss): what scales the 3D up to the output. DLSS and DLAA only where dlss_why() lets them run, FSR 3.1
-// only where vk_fsr3.cpp says it does; the menu shows (and steps from) what runs, and keeps the saved choice for a PC where it
-// can
+// only where vk_fsr3.cpp says it does, FSR 4 and its native AA only where fsr4_why() does; the menu shows (and steps from)
+// what runs, and keeps the saved choice for a PC where it can
 namespace ur = upscaler_rows;
 /// One bit per upscaler that runs here (upscaler_rows.h bit). Each backend caches its own answer, so this costs nothing
 unsigned upscalers_available() {
-    return ur::bit(ur::GAME) | ur::dlss_bits(dlss_why() == DLSS_OK) | (fsr3::supported() ? ur::bit(ur::FSR3) : 0u);
+    return ur::bit(ur::GAME) | ur::dlss_bits(dlss_why() == DLSS_OK) | (fsr3::supported() ? ur::bit(ur::FSR3) : 0u) |
+           ur::fsr4_bits(fsr4_why() == FSR_OK);
 }
-int upscaler() { return fsr3_wanted() ? (int)ur::FSR3 : dlss_mode(); }
+/// (FSR 3.1 has inputs of its own; DLSS and FSR 4 run on the frame chain they share, temporal_mode)
+int upscaler() { return fsr3_wanted() ? (int)ur::FSR3 : temporal_mode(); }
 const char* tx_upscaler(int) {
-    static const char* t[] = {"Game's own", "NVIDIA DLSS", "NVIDIA DLAA", "AMD FSR 3.1"};
+    static const char* t[ur::kUpscalers] = {"Game's own", "NVIDIA DLSS", "NVIDIA DLAA", "AMD FSR 3.1", "AMD FSR 4",
+                                            "AMD FSR 4 Native AA"};
     return t[std::clamp(upscaler(), 0, ur::kUpscalers - 1)];
 }
-/// The Upscaler: the one shown (what runs, upscaler()), and with the game's own, why DLSS and DLAA are not offered
+/// The Upscaler: the one shown (what runs, upscaler()), and with the game's own, why DLSS and FSR are not offered. Variants
+/// (every one): each value, then the game's own with each of DLSS's reasons, then with each of FSR's
 const char* hn_upscaler(int v, int variant) {
-    static const char* const t[] = {
+    static const char* const t[ur::kUpscalers] = {
         "The game's own network.",
         "NVIDIA's, from a smaller 3D. Softer than the game's own: set Sharpness to around 80%. Things that move by "
         "themselves can trail for now.",
@@ -179,8 +185,11 @@ const char* hn_upscaler(int v, int variant) {
         "around 80%. Things that move by themselves can trail for now.",
         "AMD's, from a smaller 3D, on any GPU: built from AMD's own shaders. Things that move by themselves can trail for "
         "now.",
+        "AMD's machine-learned upscaler, from a smaller 3D, with AMD's files beside the game. Things that move by themselves "
+        "can trail for now.",
+        "AMD's machine-learned upscaler, the 3D at full size with its edges smoothed; the slowest.",
     };
-    static const char* const why[DLSS_WHY_COUNT] = {
+    static const char* const dlss_no[DLSS_WHY_COUNT] = {
         nullptr,
         "DLSS and DLAA: not in this build (built without NVIDIA's DLSS SDK, see the readme).",
         "DLSS and DLAA: off for this run (RX_VK_DLSS=0).",
@@ -189,17 +198,32 @@ const char* hn_upscaler(int v, int variant) {
         "DLSS and DLAA: DLSS's runtime was not found (the game folder's ngx folder, see the readme).",
         "DLSS and DLAA: NVIDIA's NGX on Linux loads DLSS's runtime only from a folder named in ASCII (see the readme).",
     };
-    // (now: the value shown and what runs here; every one: each value, and the game's own with each reason)
-    int w = 0;
-    if (variant < 0) v = std::clamp(upscaler(), 0, ur::kUpscalers - 1), w = (int)dlss_why();
-    else if (v == ur::GAME) w = variant;
-    else if (variant > 0) return nullptr;
+    static const char* const fsr_no[FSR_WHY_COUNT] = {
+        nullptr,
+        "AMD FSR 4: not in this build (see the readme).",
+        "AMD FSR 4: off for this run (RX_VK_FSR4=0).",
+        "AMD FSR 4: AMD's files were not found beside the game (see the readme).",
+        "AMD FSR 4: AMD's files have no FSR 4 for this GPU.",
+    };
+    // (now: the value shown and what runs here, with both engines' reasons; every one: as said above)
+    int d = 0, f = 0;
+    if (variant < 0) {
+        v = std::clamp(upscaler(), 0, ur::kUpscalers - 1), d = (int)dlss_why(), f = (int)fsr4_why();
+    } else if (v == ur::GAME) {
+        if (variant < DLSS_WHY_COUNT) d = variant;
+        else if (variant < DLSS_WHY_COUNT + FSR_WHY_COUNT - 1) f = variant - DLSS_WHY_COUNT + 1;
+        else return nullptr;
+    } else if (variant > 0) {
+        return nullptr;
+    }
     v = std::clamp(v, 0, ur::kUpscalers - 1);
-    if (w >= DLSS_WHY_COUNT) return nullptr;
-    if (v != ur::GAME || !why[w]) return t[v];
-    static char b[DLSS_WHY_COUNT][256];
-    snprintf(b[w], sizeof b[w], "%s %s", t[0], why[w]);
-    return b[w];
+    // (the reasons are said only where the engine is in the build: one without FSR does not tell an NVIDIA user why)
+    const char* dn = dlss_built() || variant >= 0 ? dlss_no[d] : nullptr;
+    const char* fn = fsr4_built() || variant >= 0 ? fsr_no[f] : nullptr;
+    if (v != ur::GAME || (!dn && !fn)) return t[v];
+    static char b[DLSS_WHY_COUNT][FSR_WHY_COUNT][320];
+    snprintf(b[d][f], sizeof b[d][f], "%s%s%s%s%s", t[0], dn ? " " : "", dn ? dn : "", fn ? " " : "", fn ? fn : "");
+    return b[d][f];
 }
 /// The DLSS model row (opts.dlss_model): NVIDIA's network by its preset, or RX_VK_DLSS_PRESET's for this run
 const char* dlss_preset_env() {
@@ -280,7 +304,9 @@ void game_size(float scale, uint32_t& w, uint32_t& h) {
 const char* tx_resolution(int v) {
     static char b[48];
     const int up = upscaler();
+    v = ur::snap(up, v);   // (the saved choice, as the Upscaler shown draws it: ur::snap)
     if (up == ur::DLAA) return "Native (DLAA)";
+    if (up == ur::FSR4_AA) return "Native (FSR 4)";
     if (!ur::percent(v)) return "Auto (dynamic)";
     if (const char* mode = ur::scales_by_mode(up) ? ur::dlss_mode_name(v) : nullptr) {
         snprintf(b, sizeof b, "%s (%d%%)", mode, ur::percent(v));
@@ -298,6 +324,10 @@ const char* hn_resolution(int v, int variant) {
     if (up == ur::DLAA)
         return "DLAA draws the 3D at full size: nothing to set here. Choose DLSS or the game's own upscaler to draw it "
                "smaller.";
+    if (up == ur::FSR4_AA)
+        return "FSR 4's native AA draws the 3D at full size: nothing to set here. Choose FSR 4 or the game's own upscaler "
+               "to draw it smaller.";
+    if (variant < 0) v = ur::snap(up, v);
     const int p = ur::percent(v);
     if (up == ur::DLSS) {
         switch (p) {
@@ -309,7 +339,7 @@ const char* hn_resolution(int v, int variant) {
         default: return nullptr;   // (not one of DLSS's steps: the row moves to one)
         }
     }
-    if (up == ur::FSR3) {
+    if (up == ur::FSR3 || up == ur::FSR4) {   // (the same modes, AMD's ratios)
         switch (p) {
         case 0: return "The game lowers it when the GPU is busy, and FSR follows.";
         case 67: return "FSR's Quality mode, 1.5x: its sharpest.";
@@ -883,7 +913,8 @@ std::string restart_list(const char* last) {
 }
 int ask_sel = 0;   // (the restart question's choice: 0 Later, 1 Restart now)
 
-/// A row on its tab: the debug tools only with them on, the Upscaler only in a build with DLSS or where AMD FSR 3.1 runs
+/// A row on its tab: the debug tools only with them on, the Upscaler only in a build with DLSS or FSR 4, or where AMD
+/// FSR 3.1 runs
 bool row_shown(int i) {
     // (the Intel shader compiles row: Intel graphics on Windows, the only place IntelDriverGate holds the compiler)
     if (rows[i].value == &opts.intel_compiles) {
@@ -893,7 +924,8 @@ bool row_shown(int i) {
         return false;
 #endif
     }
-    return (rows[i].cheat < 0 || cheats_on()) && (rows[i].value != &opts.dlss || ur::upscaler_shown(dlss_built(), fsr3::supported())) &&
+    return (rows[i].cheat < 0 || cheats_on()) &&
+           (rows[i].value != &opts.dlss || ur::upscaler_shown(dlss_built() || fsr4_built(), fsr3::supported())) &&
            (rows[i].value != &opts.dlss_model || ur::model_shown(dlss_built()));
 }
 int tab_row_count(int t) {
@@ -1078,7 +1110,7 @@ void set_row(Row& r, int v, int dir, bool keep = true) {
     if (row_fixed(r.value)) return;
     // (the scaling rows: only what can run here; the Render resolution row through the Upscaler's own steps)
     if (r.value == &opts.dlss) v = ur::step_upscaler(upscaler(), dir, upscalers_available());
-    if (r.value == &opts.resolution) v = ur::step(upscaler(), *r.value, dir);
+    if (r.value == &opts.resolution) v = ur::step(upscaler(), ur::snap(upscaler(), *r.value), dir);   // (from the step the row shows)
     if (r.value == &opts.output_res) {   // (smallest to largest: kOutputOrder)
         v = step_output_choice(*r.value, dir);
         if (v == *r.value) return;
@@ -1094,8 +1126,8 @@ void set_row(Row& r, int v, int dir, bool keep = true) {
         apply_preset(*r.value);
     } else {
         *r.value = v > r.hi ? r.lo : v < r.lo ? r.hi : v;
-        // (another Upscaler: the Render resolution moves to the nearest of its steps, DLSS's modes or the game's)
-        if (r.value == &opts.dlss) opts.resolution = ur::snap(upscaler(), opts.resolution);
+        // (another Upscaler: the saved Render resolution stays, and the nearest of the new Upscaler's steps is what draws and shows,
+        // so Balanced 58% comes back on return from an Upscaler that has no such step: resolution_scale, tx_resolution)
         if (!r.preset_exempt) {   // (the controls, the window and the counter are not the preset's)
             opts.preset = 0; // Custom
             sync_preset_budgets(0);
@@ -2011,9 +2043,18 @@ void menu_init() {
     restart_init();   // (what this run started with: the rows that take a restart differ from it once changed)
 }
 
-bool resolution_auto() { return opts.resolution == 0; }
+bool resolution_auto() { return upscaler_rows::snap(upscaler(), opts.resolution) == 0; }
 int resolution_scale() {
-    const float s = upscaler_rows::percent(opts.resolution) / 100.0f;
+    const int drawn = upscaler_rows::snap(upscaler(), opts.resolution);
+    {   // (said when it changes: the choice kept and what the Upscaler shown draws at, e.g. 58% kept, 50% drawn by the game's own)
+        static int said = -1;
+        if (said != drawn * 16 + opts.resolution) {
+            said = drawn * 16 + opts.resolution;
+            logf("vk: Render resolution: %d%% chosen, drawn at %d%% with Upscaler %d", upscaler_rows::percent(opts.resolution),
+                 upscaler_rows::percent(drawn), upscaler());
+        }
+    }
+    const float s = upscaler_rows::percent(drawn) / 100.0f;
     return s > 0 ? (int)(twelfths(s) * 10000.0f / 12.0f + 0.5f) : 0;   // (the twelfth game_size labels)
 }
 
@@ -2302,7 +2343,7 @@ void menu_tick() {
         // layout is not applied over them at start)
         if (open_now.load()) auto_pad = pad_last;   // (Menu size Auto: by what opened the menu)
         if (open_now.load()) opts.pad_layout = detect_pad_layout();
-        if (open_now.load()) dlss_probe();   // (whether the Upscaler row can offer DLSS here: NGX asked once)
+        if (open_now.load()) dlss_probe(), fsr4_probe();   // (whether the Upscaler row can offer DLSS and FSR here: asked once)
         if (open_now.load()) refresh_mics();   // (the microphones as they are now)
     }
     if (open_now.load() && page == 5) {   // (hookshot) the restart question: Later (the default) or Restart now

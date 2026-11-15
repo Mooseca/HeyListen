@@ -11,7 +11,8 @@ speed rows, the frame rate a run of 110 s cut at 66 s as always. The PC 3050 was
 - `RX_VK_RB_PROF=1` (`vk_replay.cpp`, `RbScope`): every `invalidate` timed by phase (the ticket's wait for the replay section in
   progress, the catch-up, the wait for the write-back's recording split into the flush's late-fix wait / the queue's lock / the
   sending / the recordings' semaphore, the GPU timeline, the strict wait, the texture catch-up), by thread, by range and by call site
-  (the exe's frames above the renderer, resolved against the link map), a line every 300 presents.
+  (the exe's frames above the renderer, as offsets from the exe's start: on Windows its RVAs, on Linux, a PIE exe, the
+  addresses in hookshot.map), a line every 300 presents.
 - `HOS_RB_LR_LOG=1` (`host/nvn_native.c`): the CPU's reads of GPU results by guest return address, size and thread.
 - `RX_VK_TL=<present>` or `RX_VK_TL_S=<seconds after the first present>`: a timeline of 3 frames of the renderer's threads (submits,
   replays and their stops at event waits, the CPU's event signals, presents and their drains, fence waits, readbacks with the writer's

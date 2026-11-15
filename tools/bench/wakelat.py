@@ -24,6 +24,11 @@ LR_NAMES = {0x80080188: "job-group wait", 0x83acfcf4: "end-of-frame wait", 0x812
             0x8009a478: "module poll"}
 
 
+def host_ptr(s):
+    """A T line's host thread pointer: 16 hex digits, or (traces written by glibc's %p before) 0x... and "(nil)"."""
+    return 0 if s == "(nil)" else int(s, 16)
+
+
 def load(path):
     names, hosts, recs = {}, {}, []
     with open(path, encoding="utf-8", errors="replace") as f:
@@ -33,7 +38,7 @@ def load(path):
             if line[0] == "T":
                 _, i, host, name = line.rstrip("\n").split(" ", 3)
                 names[int(i)] = name
-                hosts[int(host, 16)] = int(i)
+                hosts[host_ptr(host)] = int(i)
                 continue
             t, ty, th, a, b = line.split()
             recs.append((int(t), int(ty), int(th), int(a, 16), int(b, 16)))

@@ -347,8 +347,8 @@ HMODULE GetModuleHandleA(LPCSTR name);
 BOOL GetModuleHandleExA(DWORD flags, LPCSTR name, HMODULE *out);
 DWORD GetModuleFileNameA(HMODULE m, LPSTR out, DWORD cap);
 /* (glibc's backtrace: this thread's return addresses, the first `skip` and this call's own frame left out, as on Windows:
-   not inlined, so that backtrace's first frame is this function's. RX_VK_RB_PROF's call sites; here GetModuleHandleA(NULL)
-   is not the exe's base, so the sites it names are not offsets in the link map) */
+   not inlined, so that backtrace's first frame is this function's. RX_VK_RB_PROF's call sites; GetModuleHandleA(NULL) is
+   not the exe's base here, so they are offsets from gpu/vk/exe_base.h's) */
 __attribute__((noinline)) static inline USHORT CaptureStackBackTrace(DWORD skip, DWORD count, void **out, DWORD *hash) {
     void *bt[64];
     const int n = backtrace(bt, 64);

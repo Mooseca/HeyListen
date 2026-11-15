@@ -5,6 +5,7 @@
 
 #ifdef __linux__
 #include "amdgpu_stats.h"
+#include "cpu_temp.h"
 #endif
 
 #include <atomic>
@@ -105,6 +106,10 @@ void amd_open(const PerfGpuId& id) {
     if (!amd.files.any()) amd.files = {};
 }
 
+// ---- the CPU's temperature (Linux): k10temp's or coretemp's hwmon file, found once on the sampler thread (cpu_temp.h)
+cpu_temp::Files cpu_temp_files;
+bool cpu_temp_tried = false;
+
 void amd_sample(PerfStats& s) {
     if (!amd.files.any()) return;
     const auto a = amdgpu_stats::sample(amd.files);
@@ -176,6 +181,7 @@ void sampler() {
     if (!nv.tried) nvml_open(gpu_hint);
 #ifdef __linux__
     if (!nv.ok && !amd.tried) amd_open(gpu_id_hint);
+    if (!cpu_temp_tried) cpu_temp_files = cpu_temp::open("/sys"), cpu_temp_tried = true;
 #endif
     cpu_prev = {};
     std::unique_lock lk(mu);
@@ -190,6 +196,7 @@ void sampler() {
         nvml_sample(s);
 #ifdef __linux__
         amd_sample(s);
+        s.cpu_temp_c = cpu_temp::sample(cpu_temp_files);
 #endif
         lk.lock();
         std::memcpy(machine.cpu_name, s.cpu_name, sizeof s.cpu_name);

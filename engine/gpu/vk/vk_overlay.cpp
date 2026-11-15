@@ -16,6 +16,9 @@
 #include "vk_internal.h"   // (first: it sets the Win32 platform before any Vulkan header)
 #include "vk_menu.h"
 #include "vk_perf.h"
+#include "vk_fsr3.h"      // (fsr3_wanted: the Scaling line names the upscaler)
+#include "vk_temporal.h"  // (temporal_mode)
+#include "upscaler_rows.h"
 #include "imgui.h"
 #include "imgui_internal.h"
 
@@ -179,8 +182,13 @@ void perf_picture(uint32_t w, uint32_t h, const ImVec4& c) {
         snprintf(v[2], sizeof v[2], "%ux%u (%d%%)", (unsigned)((iw * (uint64_t)s + 9999) / 10000), (unsigned)(ih * (uint64_t)s / 10000),
                  (s + 50) / 100);
     }
+    // (the present's filter, game image to window; an upscaler that makes the game image from the 3D scene named before it:
+    // the row said "bilinear" alone while DLSS drew)
     static const char* const scaling[] = {"bilinear", "Catmull-Rom", "Lanczos"};
-    snprintf(v[3], sizeof v[3], "%s", scaling[opts.upscale < 0 || opts.upscale > 2 ? 0 : opts.upscale]);
+    static const char* const engines[] = {"", "DLSS", "DLAA", "FSR 3.1", "FSR 4", "FSR 4 AA"};
+    const int mode = temporal_mode();
+    const char* engine = fsr3_wanted() ? "FSR 3.1" : (mode > 0 && mode < upscaler_rows::kUpscalers ? engines[mode] : "");
+    snprintf(v[3], sizeof v[3], "%s%s%s", engine, *engine ? " + " : "", scaling[opts.upscale < 0 || opts.upscale > 2 ? 0 : opts.upscale]);
     {   // (HeyListen) the game's frame rate limit (option 9 / HOS_FPS_LIMIT, what host/nn_vi.c paces at), and frame generation on top
         static const int lim[] = {60, 90, 120, 144, 165, 240};
         int fps = !opts.realtime ? 60 : lim[opts.fps_limit < 0 || opts.fps_limit > 5 ? 0 : opts.fps_limit];

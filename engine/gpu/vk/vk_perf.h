@@ -14,7 +14,7 @@ struct PerfStats {
     float fps, frame_ms_avg, frame_ms_max;
     float frame_ms[kPerfHistory];   // oldest first; frames not seen yet read 0
     char cpu_name[64];
-    float cpu_total_pct, cpu_game_pct, cpu_temp_c;   // (the temperature: Windows gives none without a driver: -1)
+    float cpu_total_pct, cpu_game_pct, cpu_temp_c;   // (the temperature: Linux's hwmon, cpu_temp.h; Windows gives none without a driver: -1)
     float ram_used_mb, ram_total_mb, ram_game_mb;
     char gpu_name[96];
     float gpu_pct, gpu_temp_c, gpu_power_w, gpu_clock_mhz, vram_used_mb, vram_total_mb;

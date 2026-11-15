@@ -282,6 +282,8 @@ void par_stats_segment_parts(int64_t, int64_t, int64_t, int64_t) {}
 void jt_mark(int, uint64_t) {}   // (TICK-054: the frame-timeline marks)
 template <class R> void gpu_time_begin(R&) {}   // (TICK-057: the segments' GPU timestamps)
 template <class R> void gpu_time_end(R&, bool) {}
+template <class R> void gpu_time_segment_submitted(const R&) {}   // (a segment's submit counted with the recordings')
+uint64_t ts_recseq[8], rec_seq;   // (RX_VK_TL: each slot's recording number)
 std::atomic<bool> par_active{false};
 std::vector<int> run_order;   // (the order the workers run in, one after another; empty: all at once)
 std::vector<std::thread> workers;

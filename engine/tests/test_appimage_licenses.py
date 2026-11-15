@@ -1,5 +1,5 @@
-"""The AppImage carries the licences of the third-party parts compiled into hookshot_vk.so: Dear ImGui (MIT), zstd (BSD) and
-the Libertinus fonts (OFL), each with its PROVENANCE.md. Runs the real copy block of scripts/linux/appimage.sh into a temporary
+"""The AppImage carries the licences of the third-party parts compiled into hookshot_vk.so: Dear ImGui (MIT), zstd (BSD), the
+Libertinus fonts (OFL) and AMD's FSR API headers (MIT, the back end is built with AMD FSR 4), each with its PROVENANCE.md or README.md. Runs the real copy block of scripts/linux/appimage.sh into a temporary
 folder; nothing is built.
 
     python -I -B tests/test_appimage_licenses.py
@@ -19,6 +19,8 @@ WANT = {
     "licenses/zstd/PROVENANCE.md": "third_party/zstd/PROVENANCE.md",
     "licenses/libertinus/OFL.txt": "third_party/fonts/libertinus/OFL.txt",
     "licenses/libertinus/PROVENANCE.md": "third_party/fonts/PROVENANCE.md",
+    "licenses/fidelityfx/LICENSE.md": "third_party/fidelityfx/LICENSE.md",
+    "licenses/fidelityfx/README.md": "third_party/fidelityfx/README.md",
 }
 
 
@@ -46,9 +48,17 @@ class AppImageLicences(unittest.TestCase):
     def test_vk_third_party_covered(self):
         # (every third_party folder the Vulkan back end compiles in, from nx2/build.py, has its licence shipped)
         build = (ROOT / "nx2/build.py").read_text(encoding="utf-8") + (ROOT / "nx2/ui_fonts.py").read_text(encoding="utf-8")
-        for part, licence in (("imgui", "licenses/imgui/"), ("zstd", "licenses/zstd/"), ("fonts", "licenses/libertinus/")):
+        for part, licence in (("imgui", "licenses/imgui/"), ("zstd", "licenses/zstd/"), ("fonts", "licenses/libertinus/"),
+                              ("fidelityfx", "licenses/fidelityfx/")):
             if '"third_party", "%s"' % part in build:
                 self.assertTrue(any(k.startswith(licence) for k in WANT), part)
+
+    def test_back_end_built_with_fsr(self):
+        # (the player's build has no back end to compile: the AppImage's carries AMD FSR 4, from the headers carried above)
+        script = (ROOT / "scripts/linux/appimage.sh").read_text(encoding="utf-8")
+        self.assertIn("HOOKSHOT_FSR=1", script[:script.index("VK=$VKW")])
+        self.assertIn("with AMD FSR 4", script)
+        self.assertTrue((ROOT / "third_party/fidelityfx/api/include/ffx_api.h").is_file())
 
 
 if __name__ == "__main__":

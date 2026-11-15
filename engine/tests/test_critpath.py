@@ -26,16 +26,20 @@ def load(name):
 
 wakelat = load("wakelat")
 critpath = load("critpath")
+jobtrace = load("jobtrace")
 US = 1000
 EV_WAIT_B, EV_WAIT_E, EV_SIGNAL = 1, 2, 3
 SLEEP_B, SLEEP_E, VC_WAIT_B, VC_WAIT_E = 11, 12, 13, 14
 LR_EOF, LR_POLL = 0x83acfcf4, 0x8009a478
 
 
-def trace(path):
-    # threads: 0 main (host 0x10), 1 EX0 (0x20), 2 MW1 (0x30)
-    lines = ["# jobtrace window 0 100000000", "T 0 0000000000000010 sead::MainThread",
-             "T 1 0000000000000020 BaseProcExecutor0", "T 2 0000000000000030 ModuleSystemWorker1"]
+def trace(path, glibc=False):
+    # threads: 0 main (host 0x10), 1 EX0 (0x20), 2 MW1 (0x30), 3 a host thread (no guest thread: a null pointer)
+    # glibc: the T lines as glibc's %p printed them before the writer printed 16 hex digits (0x10, "(nil)")
+    ptr = (lambda v: "0x%x" % v if v else "(nil)") if glibc else (lambda v: "%016x" % v)
+    lines = ["# jobtrace window 0 100000000", "T 0 %s sead::MainThread" % ptr(0x10),
+             "T 1 %s BaseProcExecutor0" % ptr(0x20), "T 2 %s ModuleSystemWorker1" % ptr(0x30),
+             "T 3 %s host:vk_present" % ptr(0)]
     recs = []
     for f in range(3):
         b = f * 1000 * US
@@ -73,10 +77,30 @@ class T(unittest.TestCase):
             self.assertEqual(lat[("event", LR_EOF, 0)][0], (7 * US, 0))
             self.assertEqual(len(sleeps[(LR_POLL, 0)]), 15)
 
-    def test_critpath(self):
+    def test_glibc_pointers(self):
+        # a Linux trace written before the writer's fix: "(nil)" and 0x... host pointers load in every reader
         with tempfile.TemporaryDirectory() as d:
             p = Path(d) / "jt.txt"
-            trace(p)
+            trace(p, glibc=True)
+            names, hosts, recs = wakelat.load(str(p))
+            self.assertEqual(hosts, {0x10: 0, 0x20: 1, 0x30: 2, 0: 3})
+            self.assertEqual(names[3], "host:vk_present")
+            jnames, jhost, window, jrecs = jobtrace.load(str(p))
+            self.assertEqual(jhost, hosts)
+            self.assertEqual(jrecs, recs)
+        self.test_critpath(glibc=True)
+
+    def test_writer_pointer_form(self):
+        # the writer prints the host pointer as 16 hex digits on every platform, not %p ("(nil)" under glibc)
+        src = (ROOT / "engine" / "host" / "hos_jobtrace.c").read_text(encoding="utf-8")
+        line = re.search(r'fprintf\(f, "T [^"]*"', src).group(0)
+        self.assertNotIn("%p", line)
+        self.assertIn("%016llx", line)
+
+    def test_critpath(self, glibc=False):
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "jt.txt"
+            trace(p, glibc)
             out = io.StringIO()
             sys_argv = sys.argv
             sys.argv = ["critpath.py", str(p), "--anchor", "main"]

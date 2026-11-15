@@ -46,6 +46,8 @@ ARGS = {
     "tests/test_capture_claim.py": ["--cxx", "{cxx}"],
     "tests/test_pcie_link.py": ["--cxx", "{cxx}"],
     "tests/test_amdgpu_stats.py": ["--cxx", "{cxx}"],
+    "tests/test_cpu_temp.py": ["--cxx", "{cxx}"],
+    "tests/test_exe_base.py": ["--cxx", "{cxx}"],
     "tests/test_sparse_queue.py": ["--cxx", "{cxx}"],
     "tests/test_shadow_fast.py": ["--cxx", "{cxx}"],
     "tests/test_collect_fast.py": ["--cc", "{cxx}"],
