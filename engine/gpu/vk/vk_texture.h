@@ -71,6 +71,7 @@ struct Texture {
     uint32_t checked_epoch = 0;
     uint64_t upload_value = 0;   // (the submission its last upload was recorded in, and the parallel replay's segment
     uint64_t upload_seg = 0;     // that recorded it: one before it in the stream uploads it again)
+    uint64_t dry_value = 0;      // (D4: the submission the parallel replay's dry pass last marked it written in)
     uint64_t last_frame = 0;  // the present it was last used in (the cache's age)
     uint64_t first_render_frame = 0;   // the present it was first rendered into in (0: never)
     uint64_t last_value = 0;  // the timeline value of the last submission that used it

@@ -18,6 +18,7 @@
 #include <deque>
 #include <exception>
 #include <mutex>
+#include <shared_mutex>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -104,14 +105,14 @@ T& tls_make(T*& slot) {
 // frame, the counts a draw. FT_*: the sections of the descriptor build (banks, c1, user uniform buffers, storage buffers, textures) and
 // of the commands (hazards and the pass, pipeline bind, descriptor push, push constants, dynamic state, vertex and index binds, the draw)
 enum FineT { FT_BANK, FT_C1, FT_UBO, FT_STORAGE, FT_TEX, FT_HAZARD, FT_BINDPL, FT_BINDDESC, FT_PUSHCALL, FT_PUSHC, FT_DYN, FT_VERTEX,
-             FT_DRAWCALL, FT_COUNT };
+             FT_DRAWCALL, FT_PROGRAM, FT_PIPELINE, FT_TEXMISS, FT_COUNT };
 const char* const kFineT[] = {"banks", "c1", "user uniform buffers", "storage buffers", "textures", "hazards+pass", "bind pipeline",
                                       "bind descriptors", "of it the push call", "push constants", "dynamic state", "vertex+index binds",
-                                      "draw call"};
+                                      "draw call", "program lookup", "pipeline lookup", "of textures: slot misses (view and sampler lookups)"};
 enum FineC { FC_DRAWS, FC_BUILDS, FC_DESCS, FC_WRITES, FC_BANK_CALLS, FC_BANK_GEN, FC_BANK_FILLS, FC_BANK_FILL_BYTES, FC_BANK_SAME,
              FC_BANK_NEW, FC_BANK_NEW_BYTES, FC_C1_CALLS, FC_UBO_CALLS, FC_UBO_OVERLAY, FC_UBO_STREAM, FC_PUSH_FULL, FC_PUSH_DELTA,
              FC_PUSH_NONE, FC_PUSH_WRITES, FC_PUSH_DESCS, FC_BIND_PIPE, FC_DYN_FAST, FC_DYN_FULL, FC_DYN_CALLS, FC_VBIND, FC_IBIND,
-             FC_PUSHC, FC_PIPE_FAST, FC_PIPE_MAP, FC_POOL_SETS, FC_POOL_DESCS, FC_SSBO_DESCS, FC_COUNT };
+             FC_PUSHC, FC_PIPE_FAST, FC_PIPE_MAP, FC_POOL_SETS, FC_POOL_DESCS, FC_SSBO_DESCS, FC_TEX_HIT, FC_TEX_MISS, FC_COUNT };
 const char* const kFineC[] = {"draws", "descriptor builds", "descriptors", "descriptor writes", "bank calls",
                                       "bank kept by its stage's generation", "bank fills", "bank bytes filled", "bank refills equal",
                                       "bank copies into the stream", "bank bytes copied", "c1 calls", "user uniform buffer calls",
@@ -120,7 +121,8 @@ const char* const kFineC[] = {"draws", "descriptor builds", "descriptors", "desc
                                       "writes pushed", "descriptors pushed", "pipeline binds", "dynamic state from the draw before",
                                       "dynamic state worked out", "dynamic state commands", "vertex stream binds", "index buffer binds",
                                       "push constants", "pipeline keys from the fast pair", "pipeline keys from the thread's map",
-                                      "sets allocated (over the push limit)", "descriptors in them", "storage buffer descriptors built"};
+                                      "sets allocated (over the push limit)", "descriptors in them", "storage buffer descriptors built",
+                                      "texture slots kept (a handle's view, tex and sampler)", "texture slots resolved again"};
 static_assert(std::size(kFineT) == FT_COUNT && std::size(kFineC) == FC_COUNT, "every section and count is named");
 const bool g_fine = getenv("RX_VK_PROF_FINE") != nullptr;
 int64_t fine_ns[FT_COUNT], fine_n[FC_COUNT];
@@ -139,7 +141,7 @@ struct FineScope {
 void fine_report(double frames) {
     if (!g_fine) return;
     static int64_t last_ns[FT_COUNT], last_n[FC_COUNT];
-    char line[900];
+    char line[1400];
     int k = snprintf(line, sizeof line, "vk: a frame (fine): ms:");
     for (int i = 0; i < FT_COUNT; i++) {
         k += snprintf(line + k, sizeof line - k, " %s %.2f%s", kFineT[i], (fine_ns[i] - last_ns[i]) / frames / 1e6, i + 1 < FT_COUNT ? "," : "");
@@ -150,7 +152,7 @@ void fine_report(double frames) {
     k = snprintf(line, sizeof line, "vk: a frame (fine): %.0f draws; a draw:", draws / frames);
     for (int i = 1; i < FC_COUNT; i++) {
         k += snprintf(line + k, sizeof line - k, " %s %.2f%s", kFineC[i], (fine_n[i] - last_n[i]) / draws, i + 1 < FC_COUNT ? "," : "");
-        if (k > (int)sizeof line - 80) {
+        if (k > 700) {
             logf("%s", line);
             k = snprintf(line, sizeof line, "vk: a frame (fine): a draw:");
         }
@@ -861,6 +863,108 @@ VkResult guarded_compute(VkPipelineCache cache, const VkComputePipelineCreateInf
     return r;
 }
 #endif
+
+// (longshot #190) Intel's Windows driver faults in vkGetPipelineCacheData (igvk64.dll, an access violation) when it fetches a
+// cache's data while other threads build pipelines with that cache: the game closes with no message. Vulkan allows both at once;
+// on Intel the fetches and the builds take turns: a build holds this shared, a fetch alone, around the vkGetPipelineCacheData
+// calls only (never across a file's write). The background save does not queue behind the builds: it polls for a moment with no
+// build under way and is put off to the next request when there is none; after kFetchPutOffs put-offs in a row it queues, for a
+// bounded time, so back-to-back builds cannot put it off for good. A forced save (the prepare, Restart now, the exit) waits.
+// RX_VK_PCACHE_FETCH_LOCK=0: off, =1: on any GPU; unset: on for Intel (vendor 0x8086) under Windows only
+std::shared_timed_mutex pcache_fetch_mu;
+bool pcache_fetch_lock_on() {
+    static const bool on = [] {
+        const char* e = getenv("RX_VK_PCACHE_FETCH_LOCK");
+#ifdef _WIN32
+        return e ? atoi(e) != 0 : dev.props.vendorID == 0x8086;
+#else
+        return e && atoi(e) != 0;
+#endif
+    }();
+    return on;
+}
+/// (issue 496) compute pipelines built one at a time, on a thread of their own (jobs_push_serial): Intel's by default.
+/// RX_VK_COMPUTE_SERIAL=1 or 0 says so on any GPU
+bool serial_builds_on() {
+    static const bool on = getenv("RX_VK_COMPUTE_SERIAL") ? getenv("RX_VK_COMPUTE_SERIAL")[0] == '1' : dev.props.vendorID == 0x8086;
+    return on;
+}
+/// (longshot #404) On Intel's one-at-a-time builds a dispatch's first pipeline is made without the optimizer, the optimized one
+/// after it (compute_optimize). RX_VK_COMPUTE_QUICK_FIRST=0 builds the optimized one only, as before; =1 does it wherever builds
+/// are one at a time (RX_VK_COMPUTE_SERIAL)
+bool intel_quick_compute() {
+    static const bool on = !getenv("RX_VK_COMPUTE_QUICK_FIRST") || atoi(getenv("RX_VK_COMPUTE_QUICK_FIRST")) != 0;
+    return on;
+}
+thread_local int pcache_fetch_depth = 0;   // (a fetch inside a fetch on the same thread)
+constexpr int kFetchPollMs = 2000;    // (the background save's patience, polled)
+constexpr int kFetchPutOffs = 3;      // (saves put off in a row before the next one queues)
+constexpr int kFetchQueueMs = 10000;  // (how long a queued fetch waits)
+/// A fetch of a pipeline cache's data, the builds held off while it lasts (held() says whether it was had).
+/// wait_ms < 0: waits until the builds under way are done. queue: waits in the lock, as a writer (new builds wait behind it), at
+/// most wait_ms; not queue: polled for wait_ms, had only at a moment no build is under way (a writer waiting in the lock would
+/// stall the builds behind it, the replay thread's draw-time asks among them)
+struct PcacheFetch {
+    bool owns = false, outer = true;
+    explicit PcacheFetch(int wait_ms, bool queue = true) {
+        if (!pcache_fetch_lock_on()) return;
+        if (pcache_fetch_depth > 0) {
+            outer = false, pcache_fetch_depth++;
+            return;
+        }
+        if (wait_ms < 0) pcache_fetch_mu.lock(), owns = true;
+        else if (queue) owns = pcache_fetch_mu.try_lock_for(std::chrono::milliseconds(wait_ms));
+        else
+            for (const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(wait_ms);
+                 !(owns = pcache_fetch_mu.try_lock()) && std::chrono::steady_clock::now() < until;)
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        if (owns) pcache_fetch_depth = 1;
+    }
+    ~PcacheFetch() {
+        if (!outer) pcache_fetch_depth--;
+        else if (owns) pcache_fetch_depth = 0, pcache_fetch_mu.unlock();
+    }
+    PcacheFetch(const PcacheFetch&) = delete;
+    PcacheFetch& operator=(const PcacheFetch&) = delete;
+    bool held() const { return !pcache_fetch_lock_on() || !outer || owns; }
+};
+/// A pipeline built with a cache, while no fetch of one is under way (PcacheFetch)
+struct PcacheUse {
+    bool on = false;
+    explicit PcacheUse(VkPipelineCache cache) : on(cache && pcache_fetch_lock_on() && pcache_fetch_depth == 0) {
+        if (on) pcache_fetch_mu.lock_shared();
+    }
+    ~PcacheUse() {
+        if (on) pcache_fetch_mu.unlock_shared();
+    }
+    PcacheUse(const PcacheUse&) = delete;
+    PcacheUse& operator=(const PcacheUse&) = delete;
+};
+/// (the guards with the cache held from a fetch)
+/// (longshot #404) A pipeline the driver refused for want of memory (VK_ERROR_OUT_OF_DEVICE_MEMORY or _HOST_MEMORY), counted:
+/// texture_frame gives textures up when the count grows (st_driver_out_of_memory)
+VkResult note_out_of_memory(VkResult r) {
+    if (r == VK_ERROR_OUT_OF_DEVICE_MEMORY || r == VK_ERROR_OUT_OF_HOST_MEMORY)
+        st_driver_out_of_memory.fetch_add(1, std::memory_order_relaxed);
+    return r;
+}
+VkResult guarded_graphics_held(VkPipelineCache cache, const VkGraphicsPipelineCreateInfo* ci, VkPipeline* pl) {
+    PcacheUse use(cache);
+    return note_out_of_memory(guarded_graphics(cache, ci, pl));
+}
+VkResult guarded_compute_held(VkPipelineCache cache, const VkComputePipelineCreateInfo* ci, VkPipeline* pl) {
+    PcacheUse use(cache);
+    return note_out_of_memory(guarded_compute(cache, ci, pl));
+}
+/// (longshot #404) Before play on Intel's one-at-a-time builds (the prepare's warm pass, precompile_run): ci asked without the
+/// optimizer, the pipeline a dispatch's first build asks for, so that a dispatch finds it in the cache. With the optimizer one of
+/// the game's compute pipelines took Intel's compiler up to 389.5 s on a UHD Graphics (i3-1115G4). true: asked so (the optimized
+/// build is then owed to the program's first dispatch)
+bool precompile_compute_quick(VkComputePipelineCreateInfo& ci) {
+    if (!serial_builds_on() || !intel_quick_compute() || (ci.flags & VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT)) return false;
+    ci.flags |= VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT;
+    return true;
+}
 VkPipeline build_graphics(const Program& p, const NvnState& s, const Targets& at, VkPrimitiveTopology topo, int part = -1,
                           bool* cold = nullptr);
 thread_local bool driver_cache_only = false;   // (predict_run's: pipelines for the driver's own cache, not into ours)
@@ -1833,7 +1937,7 @@ VkPipeline build_graphics(const Program& p, const NvnState& s, const Targets& at
     VkPipelineCreationFeedbackCreateInfo feedback_ci{VK_STRUCTURE_TYPE_PIPELINE_CREATION_FEEDBACK_CREATE_INFO};
     feedback_ci.pPipelineCreationFeedback = &feedback;
     if (pcache_misses_only() && part < 0 && !driver_cache_only) feedback_ci.pNext = ci.pNext, ci.pNext = &feedback_ci;
-    const VkResult r = guarded_graphics(part >= 0 || driver_cache_only ? VK_NULL_HANDLE : pcache, &ci, &pl);
+    const VkResult r = guarded_graphics_held(part >= 0 || driver_cache_only ? VK_NULL_HANDLE : pcache, &ci, &pl);
     if (cold && r == VK_PIPELINE_COMPILE_REQUIRED) return *cold = true, VK_NULL_HANDLE;
     if (part >= 0) {
         if (r != VK_SUCCESS) {
@@ -2900,6 +3004,7 @@ void build_descriptors(const NvnState& s, const Program& p) {
                 if (sl && sl->valid && sl->handle == handle && sl->version == version && sl->samp_version == samp_version &&
                     sl->destroy_gen == dgen_now) {
                     view = sl->view, tex = sl->tex, sampler = sl->sampler;
+                    FINE_N(FC_TEX_HIT, 1);
                     if (tex && sl->tex_epoch != texture_epoch()) {   // (as texture_view_of's hit: once a submission)
                         if (!texture_touch_quick(tex, true)) {
                             if (par_stats_on) par_why(PW_TOUCH_SLOT);
@@ -2909,6 +3014,8 @@ void build_descriptors(const NvnState& s, const Program& p) {
                         sl->tex_epoch = texture_epoch();
                     }
                 } else {
+                    FINE_N(FC_TEX_MISS, 1);
+                    FINE_SCOPE(FT_TEXMISS);
                     view = handle ? texture_view_of(handle, vt, ViewUse::Sample, VK_FORMAT_UNDEFINED, &tex) : VK_NULL_HANDLE;
                     sampler = sampler_for((int)(handle >> 20), d.is_depth);
                     if (sl)
@@ -3000,6 +3107,7 @@ struct Pushed {
 };
 TLS_OBJECT(pushed, std::array<Pushed, 2>)   // [graphics, compute]
 } // namespace
+std::atomic<int64_t> st_driver_out_of_memory{0};
 void draw_skip_report(double frames) { skip_report_impl(frames), fine_report(frames); }
 void descriptors_disturbed() {
     pushed()[0].cmd = pushed()[1].cmd = VK_NULL_HANDLE;
@@ -4016,7 +4124,10 @@ VkPipeline clear_pipeline(const Targets& at, int index, uint32_t mask, int kind)
     ci.pMultisampleState = &ms, ci.pDepthStencilState = &ds, ci.pColorBlendState = &bs, ci.pDynamicState = &dy;
     ci.layout = clear_layout;
     VkPipeline pl = VK_NULL_HANDLE;
-    vkCreateGraphicsPipelines(dev.device, pcache, 1, &ci, nullptr, &pl);
+    {
+        PcacheUse use(pcache);
+        vkCreateGraphicsPipelines(dev.device, pcache, 1, &ci, nullptr, &pl);
+    }
     vkDestroyShaderModule(dev.device, vm, nullptr);
     vkDestroyShaderModule(dev.device, fm, nullptr);
     clear_pipes[key] = pl;
@@ -5783,7 +5894,7 @@ bool fallback_compute_pipelines(Program& p) {
         VkComputePipelineCreateInfo ci{VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};
         ci.stage = si;
         ci.layout = p.layout;
-        if (const VkResult r = guarded_compute(pcache, &ci, &made[i]); r != VK_SUCCESS) {
+        if (const VkResult r = guarded_compute_held(pcache, &ci, &made[i]); r != VK_SUCCESS) {
             failed.insert({p.key, p.variant});   // (#1317: not compiled again at every draw)
             // (what failed and against which limits: a GTX 1080 Ti's black screen after the intro on v2.0.11 had only "could not be
             // made", the result not said. -77: the driver faulted. The workgroup and shared memory are the mesh stage's, against the GPU's)
@@ -6079,6 +6190,7 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
     const Program* cp;
     {
         PROF_HOT(PROF_PROGRAM);
+        FINE_SCOPE(FT_PROGRAM);
         ParLock lk(d.mesh);   // (graphics programs: each thread's picks, program_pick's own lock)
         cp = program_for(s, d.mesh ? ProgramKind::Mesh : ProgramKind::Graphics, types);
     }
@@ -6194,6 +6306,7 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
             ParLock lk;
             ensure_layout(p);
         }
+        FINE_SCOPE(FT_PIPELINE);
         pe = graphics_pipeline(p, s, at, topo, types);
     }
     if (!pe->ready.load(std::memory_order_acquire)) {
@@ -7482,10 +7595,11 @@ bool prepare_run(void (*progress)(size_t done, size_t total), bool background) {
         pin_subgroup(ci.stage, p.workgroup[0]);
         ci.layout = p.layout;
         if (getenv("RX_VK_NOOPT")) ci.flags |= VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT;
+        precompile_compute_quick(ci);   // (Intel's one-at-a-time builds: without the optimizer, as a dispatch's first)
         VkPipeline pl = VK_NULL_HANDLE;
         // (into the app's pipeline cache, saved to mkw_vk_pipelines.bin: without it the next start compiled them again in play
         // where the driver's own cache missed them, AMD's 15 s culling compiles each time)
-        if (guarded_compute(pcache, &ci, &pl) == VK_SUCCESS && pl) {
+        if (guarded_compute_held(pcache, &ci, &pl) == VK_SUCCESS && pl) {
             vkDestroyPipeline(dev.device, pl, nullptr);
             libs++;
             pcache_built_since_save++;
@@ -7732,10 +7846,12 @@ void precompile_run(void (*progress)(size_t done, size_t total), bool wait) {
                 pin_subgroup(ci.stage, p.workgroup[0]);
                 ci.layout = p.layout;
                 VkPipeline made = VK_NULL_HANDLE;
-                if (guarded_compute(pcache, &ci, &made) != VK_SUCCESS) made = VK_NULL_HANDLE;
+                const bool quick = precompile_compute_quick(ci);
+                if (guarded_compute_held(pcache, &ci, &made) != VK_SUCCESS) made = VK_NULL_HANDLE;
                 if (made) {
                     p.compute_pipeline = made;
-                    cs_module_release(p);   // (TICK-038)
+                    if (quick) p.optimize_owed.store(true, std::memory_order_release);   // (its module stays for compute_optimize)
+                    else cs_module_release(p);   // (TICK-038)
                     p.compute_state.store(2, std::memory_order_release);
                 } else {
                     p.compute_state.store(0, std::memory_order_release);   // (a dispatch makes its own, and says why it fails)
@@ -7834,6 +7950,39 @@ void predict_run(void (*progress)(size_t done, size_t total)) {
     logf("vk: predicted %zu pipelines from %zu notes for %zu program variants no note names: %zu made in %.1f s%s", predicted.size(),
          notes.size(), programs, made.load(), std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count(),
          out_of_time.load() ? " (the time budget, RX_VK_PREDICT_S, ran out: the rest are built in play)" : "");
+}
+
+/// (longshot #404) Intel's one-at-a-time compute builds (serial_builds_on): a dispatch's pipeline is made first without the
+/// optimizer (intel_quick_compute, RX_VK_COMPUTE_QUICK_FIRST), then with it here, behind the builds queued first. With the
+/// optimizer Intel's compiler took 0.3 s to 6.5 min for each of 37 of the game's dispatches on a UHD Graphics (i3-1115G4), 22
+/// minutes on its one thread, each pass over the scene (its light, its exposure) left out until its turn. The dispatch binds this
+/// one once made; the first stays for the session (a recording may hold it). The program's module, kept for this, goes after it
+void compute_optimize(Program& q) {
+    struct Release { Program& q; ~Release() { cs_module_release(q); } } release{q};
+    if (q.failed || q.stages.empty() || !q.stages[0].module || !q.layout) return;
+    VkComputePipelineCreateInfo ci{VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};
+    ci.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    ci.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+    ci.stage.module = q.stages[0].module;
+    ci.stage.pName = "main";
+    pin_subgroup(ci.stage, q.workgroup[0]);
+    ci.layout = q.layout;
+    const auto t0 = std::chrono::steady_clock::now();
+    VkPipeline made = VK_NULL_HANDLE;
+    if (const VkResult r = guarded_compute_held(pcache, &ci, &made); r != VK_SUCCESS || !made) {
+        static std::atomic<int> told{0};
+        if (told++ < 20)
+            logf("vk: compute pipeline of %016llx: the optimized build was not made (%d); the one without the optimizer stays",
+                 (unsigned long long)q.key, (int)r);
+        return;
+    }
+    q.compute_optimized.store(made, std::memory_order_release);
+    pcache_built_since_save++;
+    st_pipelines++;
+    const int64_t ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
+    static std::atomic<int> told{0};
+    if (ms >= 200 || told++ < 20)
+        logf("vk: compute pipeline of %016llx: optimized in %lld ms, bound from now on", (unsigned long long)q.key, (long long)ms);
 }
 
 void dispatch(VkCommandBuffer cmd, NvnState& s, uint32_t x, uint32_t y, uint32_t z, uint64_t indirect) {
@@ -7954,9 +8103,8 @@ void dispatch(VkCommandBuffer cmd, NvnState& s, uint32_t x, uint32_t y, uint32_t
         if (fresh) {
             { ParLock lk; pcache_init(); }
             const Program* job = &p;
-            // (issue 496: one at a time on Intel. RX_VK_COMPUTE_SERIAL=1 or 0 says so on any GPU)
-            static const bool serial = getenv("RX_VK_COMPUTE_SERIAL") ? getenv("RX_VK_COMPUTE_SERIAL")[0] == '1'
-                                                                     : dev.props.vendorID == 0x8086;
+            // (issue 496: one at a time on Intel: serial_builds_on)
+            static const bool serial = serial_builds_on();
             auto build = [job] {
                 Program& q = const_cast<Program&>(*job);
                 VkComputePipelineCreateInfo ci{VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};
@@ -7968,6 +8116,9 @@ void dispatch(VkCommandBuffer cmd, NvnState& s, uint32_t x, uint32_t y, uint32_t
                 ci.layout = q.layout;
                 static const bool noopt = getenv("RX_VK_NOOPT") != nullptr;
                 if (noopt) ci.flags |= VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT;
+                // (longshot #404) on Intel's one-at-a-time builds, without the optimizer first: compute_optimize
+                const bool quick = serial && intel_quick_compute() && !(ci.flags & VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT);
+                if (quick) ci.flags |= VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT;
                 const auto t0 = std::chrono::steady_clock::now();
                 VkPipeline made = VK_NULL_HANDLE;
                 // (TICK-038) whether the pipeline cache had it: a hit is not a reason to write the 1 GB cache file again
@@ -7976,16 +8127,19 @@ void dispatch(VkCommandBuffer cmd, NvnState& s, uint32_t x, uint32_t y, uint32_t
                 fci.pipelineStageCreationFeedbackCount = 0;
                 fci.pPipelineCreationFeedback = &fb;
                 ci.pNext = &fci;
-                if (const VkResult r = guarded_compute(pcache, &ci, &made); r != VK_SUCCESS || !made) {
+                if (const VkResult r = guarded_compute_held(pcache, &ci, &made); r != VK_SUCCESS || !made) {
                     static std::atomic<int> told{0};
                     if (told++ < 20) logf("vk: compute pipeline of %016llx not made (%d)", (unsigned long long)q.key, (int)r);
                     q.failed = true;
                 } else {
                     q.compute_pipeline = made;
-                    cs_module_release(q);   // (TICK-038)
+                    if (quick) jobs_push_serial([job] { compute_optimize(const_cast<Program&>(*job)); });   // (keeps its module)
+                    else cs_module_release(q);   // (TICK-038)
                 }
                 const int64_t ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
-                if (ms >= 200) logf("vk: compute pipeline of %016llx: SLOW compile, %lld ms (on a worker)", (unsigned long long)q.key, (long long)ms);
+                if (ms >= 200)
+                    logf("vk: compute pipeline of %016llx: SLOW compile, %lld ms (on a worker%s)", (unsigned long long)q.key, (long long)ms,
+                         quick ? ", without the optimizer" : "");
                 st_pipeline_us += ms * 1000;
                 st_pipelines++;
                 // (NVIDIA leaves the hit bit clear even for what it had: a build under 30 ms is taken as one, the lazy compute
@@ -7997,7 +8151,9 @@ void dispatch(VkCommandBuffer cmd, NvnState& s, uint32_t x, uint32_t y, uint32_t
                 if (!hit) pcache_built_since_save++;
                 q.compute_state.store(2, std::memory_order_release);
             };
-            if (serial) jobs_push_serial(std::move(build));
+            // (first: a dispatch is a pass over the scene (its light, its exposure), left out while it builds; the mesh fallback's
+            // are a model each, and the optimized builds of earlier dispatches go behind both)
+            if (serial) jobs_push_serial(std::move(build), true);
             else jobs_push(std::move(build), true);
         }
         // (only the dispatch that started the build waits: later ones while it still compiles are left out at once, not 50 ms
@@ -8033,7 +8189,7 @@ void dispatch(VkCommandBuffer cmd, NvnState& s, uint32_t x, uint32_t y, uint32_t
             static std::atomic<int> told{0};
             if (told++ < 400) logf("vk: compute pipeline of %016llx: compiling", (unsigned long long)p.key);
         }
-        if (const VkResult made = guarded_compute(pcache, &ci, &p.compute_pipeline); made != VK_SUCCESS) {
+        if (const VkResult made = guarded_compute_held(pcache, &ci, &p.compute_pipeline); made != VK_SUCCESS) {
             static std::atomic<int> told{0};
             if (told++ < 20) logf("vk: compute pipeline of %016llx not made (%d)", (unsigned long long)p.key, (int)made);
             p.compute_pipeline = VK_NULL_HANDLE;
@@ -8107,9 +8263,15 @@ void dispatch(VkCommandBuffer cmd, NvnState& s, uint32_t x, uint32_t y, uint32_t
     if (taau_stand_in(cmd, s, p)) return void(st_dispatches++);
     if (!p.compute_pipeline) SKIP_HERE();
     dump_ssbos(cmd, p, "before");
-    if (res_log_on()) res_note_pipeline_use(p.compute_pipeline);   // (TICK-038)
+    if (p.optimize_owed.load(std::memory_order_relaxed) && p.optimize_owed.exchange(false, std::memory_order_acq_rel)) {
+        Program* q = &p;   // (made without the optimizer before play: precompile_run)
+        jobs_push_serial([q] { compute_optimize(*q); });
+    }
+    const VkPipeline optimized = p.compute_optimized.load(std::memory_order_acquire);   // (compute_optimize)
+    const VkPipeline bound = optimized ? optimized : p.compute_pipeline;
+    if (res_log_on()) res_note_pipeline_use(bound);   // (TICK-038)
     if (!p.dispatched.exchange(true, std::memory_order_relaxed)) compute_note(p.key);
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, p.compute_pipeline);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, bound);
     if (!bind_descriptors(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, p)) SKIP_HERE();
     push_constants(cmd, p, nullptr);
     gprof_begin(cmd);
@@ -8411,30 +8573,82 @@ bool pcache_save_mapped(const std::string& tmp, size_t n) {
 #endif
 }
 
+// (longshot #404) a save put off for builds under way, owed to the serial builds' thread (pipeline_cache_between_builds), and
+// that thread's save there
+std::atomic<bool> pcache_save_owed{false};
+thread_local bool pcache_save_between = false;
+/// (longshot #404) Intel's compute builds are one at a time (jobs_push_serial), and its compiler took 30 s to 6.5 minutes on some
+/// of the game's compute programs on a UHD Graphics: one build or another was under way the whole of a 15-minute run, the queued
+/// fetch's 10 s never found a moment without one, and every save in play was put off. Between two of the serial thread's builds
+/// the save runs there: no compute build is under way, and the graphics builds it queues behind take milliseconds
+void pipeline_cache_between_builds() {
+    if (!pcache_save_owed.exchange(false)) return;
+    pcache_save_between = true;
+    struct Done { ~Done() { pcache_save_between = false; } } done;
+    pipeline_cache_save(false);
+}
 void pipeline_cache_save(bool force) {
-    if (!pcache || (!force && pcache_built_since_save < 32)) return;
-    pcache_built_since_save = 0;
+    const bool between = pcache_save_between;
+    if (!pcache || (!force && !between && pcache_built_since_save < 32)) return;
+    const int64_t built = pcache_built_since_save.exchange(0);
     // (on a thread of its own unless forced, at exit: ~100 MB fetched and written took the replay thread 100+ ms at
     // each scene change; the cache is internally synchronized, pipelines go on being built meanwhile)
     static std::atomic<bool> busy{false};
     if (busy.exchange(true)) {
-        if (!force) return;
+        if (between) {   // (a background save under way: owed again, for after the next build)
+            pcache_built_since_save += built;
+            pcache_save_owed = true;
+            return;
+        }
+        if (!force) {
+            pcache_built_since_save += built;   // (still to save)
+            return;
+        }
         while (busy.load()) Sleep(1);   // (the one under way, then this one)
         busy = true;
     }
-    auto save = [] {
+    auto save = [force, between, built] {
         struct Done { ~Done() { busy = false; } } done;
+        // (Intel: no build under way while the cache's data is fetched, PcacheFetch. A forced save waits for the builds; the
+        // background one polls, and is put off when builds ran throughout; after kFetchPutOffs of those in a row it queues for
+        // kFetchQueueMs, so a stretch of back-to-back builds cannot put it off for good. The mapped write holds the lock across
+        // its one fetch into the file's pages; the vector path fetches under it and writes outside it)
+        static std::atomic<int> put_off{0};
+        const bool queue = force || between || put_off.load() >= kFetchPutOffs;
+        const int wait_ms = force ? -1 : queue ? kFetchQueueMs : kFetchPollMs;
+        bool had = true;
+        auto fetch = [&](size_t* n, void* data) {
+            PcacheFetch lock(wait_ms, queue);
+            had = lock.held();
+            return had && vkGetPipelineCacheData(dev.device, pcache, n, data) == VK_SUCCESS;
+        };
+        const auto put_off_now = [&] {
+            const int times = ++put_off;
+            if (times <= 4 || times % 16 == 0)
+                logf("vk: pipeline cache save put off (%d in a row): pipelines were being built throughout%s", times,
+                     serial_builds_on() ? "; owed to the serial builds' thread, between two of its builds" : "");
+            pcache_built_since_save += built;   // (still to save: the next request writes them, not only after 32 more)
+            if (serial_builds_on()) pcache_save_owed = true;
+        };
         try {
             size_t n = 0;
-            if (vkGetPipelineCacheData(dev.device, pcache, &n, nullptr) == VK_SUCCESS && n) {
-                if (pcache_save_mapped(pcache_path + ".tmp", n)) {
+            if (fetch(&n, nullptr) && n) {
+                bool mapped = false;
+                {
+                    PcacheFetch lock(wait_ms, queue);
+                    had = lock.held();
+                    mapped = had && pcache_save_mapped(pcache_path + ".tmp", n);
+                }
+                if (!had) return put_off_now();
+                if (mapped) {
                     MoveFileExA((pcache_path + ".tmp").c_str(), pcache_path.c_str(), MOVEFILE_REPLACE_EXISTING);
+                    put_off = 0;
                     return;
                 }
                 const auto fetch_t0 = std::chrono::steady_clock::now();
                 const uint64_t private_before = pcache_private_mb();
                 std::vector<uint8_t> data(n);
-                if (vkGetPipelineCacheData(dev.device, pcache, &n, data.data()) == VK_SUCCESS) {
+                if (fetch(&n, data.data())) {
                     pcache_log_save("vector", n, private_before, pcache_private_mb(),
                                     std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - fetch_t0).count());
                     const std::string tmp = pcache_path + ".tmp";
@@ -8443,13 +8657,18 @@ void pipeline_cache_save(bool force) {
                         fclose(f);
                         if (ok) MoveFileExA(tmp.c_str(), pcache_path.c_str(), MOVEFILE_REPLACE_EXISTING);
                     }
+                } else if (!had) {
+                    return put_off_now();   // (the size had, the data not: put off as well, not lost)
                 }
+            } else if (!had) {
+                return put_off_now();
             }
+            put_off = 0;
         } catch (const std::exception& e) {
             logf("vk: pipeline cache save failed: %s", e.what());
         }
     };
-    if (force) save();
+    if (force || between) save();
     else {
         try {
             std::thread(save).detach();

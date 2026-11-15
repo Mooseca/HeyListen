@@ -560,10 +560,16 @@ bool create_swapchain(uint32_t width, uint32_t height) {
         return false;
     }
     if (caps.currentExtent.width != UINT32_MAX) width = caps.currentExtent.width, height = caps.currentExtent.height;
-    logf("vk: surface caps images %u..%u extent %ux%u..%ux%u usage %#x alpha %#x transform %#x",
-         caps.minImageCount, caps.maxImageCount, caps.minImageExtent.width, caps.minImageExtent.height,
-         caps.maxImageExtent.width, caps.maxImageExtent.height, caps.supportedUsageFlags,
-         caps.supportedCompositeAlpha, caps.supportedTransforms);
+    // (a minimised window has a 0x0 surface and the game presents every frame: said once, not a thousand times)
+    static bool told_empty;
+    if (width && height) told_empty = false;
+    if ((width && height) || !told_empty) {
+        told_empty = !width || !height;
+        logf("vk: surface caps images %u..%u extent %ux%u..%ux%u usage %#x alpha %#x transform %#x",
+             caps.minImageCount, caps.maxImageCount, caps.minImageExtent.width, caps.minImageExtent.height,
+             caps.maxImageExtent.width, caps.maxImageExtent.height, caps.supportedUsageFlags,
+             caps.supportedCompositeAlpha, caps.supportedTransforms);
+    }
     if (!(caps.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_DST_BIT)) {
         logf("vk: surface does not support transfer-destination swapchain images");
         return false;

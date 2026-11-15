@@ -16,7 +16,7 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 START = "return (VkResult)-77;   // (a fault in the driver, told apart from what it returns)\n    }\n}\n#else\n"
-END = "\n#endif\nVkPipeline build_graphics"
+END = "\n#endif\n"   # (the first #endif after START: the guard's POSIX half; the Intel helpers may follow it now)
 
 HEAD = r"""
 #include <cstdint>
@@ -109,7 +109,8 @@ def main():
     if not compiler:
         raise SystemExit("C++ compiler not found: " + args.cxx)
     source = args.source.read_text(encoding="utf-8")
-    start, end = source.index(START) + len(START), source.index(END)
+    start = source.index(START) + len(START)
+    end = source.index(END, start)
     guard = source[start:end]
     failures = []
     with tempfile.TemporaryDirectory(prefix="hookshot-fault-guard-") as tmp:

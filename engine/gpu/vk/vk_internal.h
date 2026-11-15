@@ -116,6 +116,7 @@ void memory_sync();                                   // (at each submit: pools 
 /// (RX_VK_POOL_MIRROR: what the buffer is for: a texel view read or written, or the GPU unswizzle, which has a CPU path)
 enum { kGpuBufferRead, kGpuBufferWritten, kGpuBufferUnswizzle };
 bool memory_pool_mirror_on();   // (RX_VK_POOL_MIRROR)
+bool pools_mirrored();   // (vk_memory.cpp mirror_on: the buffer pools have VRAM mirrors, the discrete GPUs by default)
 BufferRef gpu_buffer(uint64_t gpu, uint64_t size, int use = kGpuBufferRead);   // (empty when no pool holds the range)
 /// A range as a binding of the replay sees it: the pool's VRAM mirror when it has one (vk_memory.cpp), else the
 /// imported pool. written: the GPU may write it (copied back to guest memory at the submission's end).
@@ -385,6 +386,9 @@ void vma_log_heaps();
 void log_alloc_where(const char* what, VmaAllocation allocation);
 /// (TICK-019) GPU reads straight from imported guest memory outside the buffer bindings' count: texel buffer views, GPU unswizzles
 extern std::atomic<int64_t> st_import_texel_views, st_import_texel_bytes, st_import_unswizzle_bytes;
+/// (longshot #404, vk_draw.cpp) the pipelines the driver refused for want of memory so far (VK_ERROR_OUT_OF_DEVICE_MEMORY or
+/// _HOST_MEMORY): texture_frame gives textures up when it grows
+extern std::atomic<int64_t> st_driver_out_of_memory;
 void vma_log_image_blocks();   // (the image pools' blocks: what they hold, and their free ranges)
 PFN_vkGetInstanceProcAddr instance_proc();   // vk_main.cpp
 

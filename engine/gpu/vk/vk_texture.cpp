@@ -3158,6 +3158,15 @@ Texture* texture_touch(Texture* tex, bool for_sampling) {
                  tex->layers, tex->nvn_format, (unsigned long long)(frame_no - 1), (unsigned long long)frame_no,
                  tex->released ? "finalized" : "live", (unsigned long long)kb, dirty.size(), gpu_dirty ? ", a GPU buffer wrote it" : "");
     }
+    if (tl_seg && tex->dry_value == rec_value) {   // (D4: uploaded in a segment although the dry pass marked it written)
+        static std::atomic<int64_t> n{0};
+        const int64_t k = ++n;
+        if (k <= 60 || k % 500 == 0)
+            logf("vk: parallel: #%u %#llx %ux%u x%u NVN %#x uploaded in segment %llu after the dry pass marked it written (gpu_written %d, "
+                 "released %d, uploaded %d, partial %d; %lld so)", tex->id, (unsigned long long)tex->gpu, tex->width, tex->height,
+                 tex->layers, tex->nvn_format, (unsigned long long)tl_seg, (int)tex->gpu_written, (int)tex->released, (int)tex->uploaded,
+                 (int)partial, (long long)k);
+    }
     const auto up0 = std::chrono::steady_clock::now();
     const bool up_ok = upload(*tex, partial || sparse_written ? &dirty : nullptr);
     {   // (an upload over 15 ms: what it was, 60 of them)
@@ -3732,12 +3741,29 @@ int texture_flush_to_guest(uint64_t lo, uint64_t size) {
 void texture_written(Texture* tex, const char* why) {
     if (!tex) return;
     ledger_mark(tex->gpu, tex->guest_size, kUseRendered);   // (RX_VK_LEDGER)
+    static std::mutex dry_seen_mu;
+    static std::unordered_map<uint64_t, std::pair<uint32_t, uint64_t>> dry_seen;   // (D4: gpu address -> the texture the dry pass marked there, and when)
     if (tex->upload_value == rec_value && tex->upload_seg > tl_seg) {   // (a parallel replay's order broken: see dry_mark_written)
         static int64_t n;
-        if (n++ < 40 || n % 500 == 0)
-            logf("vk: parallel: #%u %#llx %ux%u x%u NVN %#x written in segment %llu, uploaded by the later segment %llu (%lld so)",
-                 tex->id, (unsigned long long)tex->gpu, tex->width, tex->height, tex->layers, tex->nvn_format,
-                 (unsigned long long)tl_seg, (unsigned long long)tex->upload_seg, (long long)n);
+        if (n++ < 40 || n % 500 == 0) {
+            std::pair<uint32_t, uint64_t> seen{0, 0};
+            {
+                std::lock_guard lk(dry_seen_mu);
+                const auto it = dry_seen.find(tex->gpu);
+                if (it != dry_seen.end()) seen = it->second;
+            }
+            logf("vk: parallel: #%u %#llx %ux%u x%u NVN %#x written (%s) in segment %llu, uploaded by the later segment %llu (dry-marked %d; "
+                 "the dry pass last marked #%u there at value %llu, this one's value %llu; %lld so)",
+                 tex->id, (unsigned long long)tex->gpu, tex->width, tex->height, tex->layers, tex->nvn_format, why ? why : "no reason",
+                 (unsigned long long)tl_seg, (unsigned long long)tex->upload_seg, (int)(tex->dry_value == rec_value), seen.first,
+                 (unsigned long long)seen.second, (unsigned long long)rec_value, (long long)n);
+        }
+    }
+    if (why && !strncmp(why, "the dry pass", 12)) {
+        tex->dry_value = rec_value;
+        std::lock_guard lk(dry_seen_mu);
+        if (dry_seen.size() > 4096) dry_seen.clear();
+        dry_seen[tex->gpu] = {tex->id, rec_value};
     }
     vw_note(*tex);
     tex->only_cleared = false;
@@ -4318,10 +4344,31 @@ void texture_frame(uint64_t completed) {
         const uint64_t over = pressure - allowed / 10 * 9;
         budget = std::min(budget, total_bytes > over ? total_bytes - over : 0);
     }
-    if (known && !by_blocks && used > allowed / 100 * 97) {
-        const uint64_t over = used - allowed / 100 * 97;
+    // (longshot #404) an integrated GPU's line is lower: its heap is the PC's RAM, with nowhere to page to, so past the allowance
+    // the driver's own allocations fail. A UHD Graphics (7.0 GB allowed) at 6.7 GB entered Hyrule Castle, its imports grew by
+    // 560 MB, graphics pipelines were not made (-2) and the next indirect dispatch faulted inside Intel's driver; 3% of the
+    // allowance is 215 MB of room, 10% is 717. Dedicated cards keep 97%, where the driver pages instead
+    static const uint64_t line_pct = dev.props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU ? 90 : 97;
+    const uint64_t count_line = allowed / 100 * line_pct;
+    if (known && !by_blocks && used > count_line) {
+        const uint64_t over = used - count_line;
         budget = std::min(budget, total_bytes > over ? total_bytes - over : 0);
     }
+    // (longshot #404) and pipelines the driver refused for want of memory since the last look (guarded_graphics_held,
+    // guarded_compute_held count them): the count's excess over its line, 256 MB at least, whatever the count said. The count is
+    // read every 10 frames (3 s at an integrated GPU's 3.5 fps); the refusals say it sooner
+    static int64_t refusals_seen = 0;
+    const int64_t refusals = st_driver_out_of_memory.load(std::memory_order_relaxed);
+    if (refusals != refusals_seen && known && !by_blocks) {
+        const uint64_t over = std::max<uint64_t>(used > count_line ? used - count_line : 0, 256ull << 20);
+        budget = std::min(budget, total_bytes > over ? total_bytes - over : 0);
+        static int told;
+        if (told++ < 8)
+            logf("vk: the driver refused %lld pipeline(s) for want of memory (%llu MB used of %llu allowed): the textures give up %llu MB",
+                 (long long)(refusals - refusals_seen), (unsigned long long)(used >> 20), (unsigned long long)(allowed >> 20),
+                 (unsigned long long)(over >> 20));
+    }
+    refusals_seen = refusals;
     // (TICK-023) from what the driver allows (VK_EXT_memory_budget), less a margin: the whole process held to
     // RX_VK_VRAM_TARGET_PCT of it (80), the textures getting what the rest (mirrors, pools, pipelines, streams, swapchain and the
     // free space VMA's blocks hold) leaves. A 12 GB card ran at 9.8 of 10.9 GB allowed with the textures at 5.6 GB under the

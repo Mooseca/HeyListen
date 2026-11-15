@@ -167,6 +167,9 @@ void logf(const char* f, ...) {
     if (on_log) on_log(line);
 }
 static const struct FixtureHost { void (*log_flush)(); } fixture_host{}, *host = &fixture_host;   // (replay_fatal's)
+// (stream R4's RX_VK_PROF_FINE counters the cut code adds to: off here, so the scope timer adds nothing)
+struct ReplayWallStub { int64_t whole_ns = 0, whole = 0, dry_ns = 0, seg_ns = 0, big = 0; } rwall;
+struct WallAdd { explicit WallAdd(int64_t&) {} };
 #include "init_fatal.inc"
 void full_barrier(VkCommandBuffer cmd, const char* = "") {
     record(cmd, 'F');
