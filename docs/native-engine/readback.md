@@ -251,3 +251,82 @@ its end today; not changed).
   If the late start goes away, the late fix's wait (1.4-1.9 ms a frame) goes with it, and `NO_READBACK_WAIT`'s +17% is the bound of the gain.
   (2) The exposure pulse (15-16 frames, +8-15%) exists with and without the kick at about 1 in 10,000 frames; `RX_VK_READBACK_STRICT=1`
   is its known cure (18% on this driver): a cheaper exact rule is wanted. (3) The PC 3050 was not used by either session.
+
+## Third session (2026-11-14 night, main PC): what the late pieces wait on
+
+Question: the heavy submission is cut into 4 pieces at event-wait stops; the GPU starts piece 3 ~1 ms and piece 4 ~4.5 ms after the piece was
+submitted, with the GPU idle by our own timestamps, and every readback waits for piece 4. What does a piece wait on, and why is the wait satisfied
+so late? Everything below is castle-move on the main PC (RTX 5070, driver 617.42, 1280x720 window, `RX_VK_WATCH_KICK` on), the whole machine held,
+timelines by `RX_VK_TL_S=70` (about 104 fps with the probes on).
+
+### 1. At the API level a piece waits on nothing
+
+`submit_recording` (every piece, every held or batched submit) has **no wait semaphores and no events**: each submit signals the two timelines
+and a fence and that is all; no `VkEvent`, no `vkCmdWaitEvents`, no `vkSignalSemaphore` anywhere in the renderer. The only wait on the queue is
+the present's blit (the acquired image's semaphore; `RX_VK_ACQUIRE_FENCE=1` takes it off the queue). The game's GPU events are host-side stops of
+the replay, not GPU waits. The event a stopped piece waits for is a guest event the replay polls (the order thread, and `sync_watch`); the
+heavy queue's first piece waits for the CPU event the main thread signals (`cpu-signal` in the timeline: value 0 resets, value 1 signals,
+alternating between two event words). Those stops explain when a piece is *recorded and submitted*, which the timeline shows (piece 4 is submitted
+0.5 ms after the GPU ended piece 3: the replay resumes right after the GPU's write of the event word). They do not explain a GPU that is idle after
+the submit.
+
+### 2. The late start is the graphics queue holding new work: probes (`RX_VK_TL_PROBE`, logging only)
+
+Built: `RX_VK_TL_PROBE=1` (needs `RX_VK_TL` / `RX_VK_TL_S`): before each recording's queue submit a one-timestamp command buffer is submitted on the
+replay's queue (probe 1); `=2` also on a second queue of the same family (probe 3); with `RX_VK_PRESENT_QUEUE=1` also on the compute queue right
+after the piece (probe 2); `=3` adds a monitor thread that submits a probe on the replay's queue every 0.2 ms while the window is open; `RX_VK_PROBE_JOB=<n>`
+(+ `_EVERY`) adds synthetic jobs of n fills of a 256 MB buffer; `RX_VK_TL_FRAMES=<n>` lengthens the window; `RX_VK_QUEUE_PRIO` sets the queue priority.
+Results (scratch `probes.py`, `monitor.py`, `holes.py` under `E:\OOT\scratch-from-c\r2c`):
+
+- **A trivial probe submitted just before piece 4 starts on the GPU at the same instant as piece 4** (+4.4 to +5.0 ms after the submit, to within
+  0.01 ms), and a probe before piece 3 the same at +0.9-1.1 ms. So the delay is not the piece's content, size, signals or fence: it is the queue.
+- **The compute-family queue is not held**: its probe, submitted right after the piece, runs 0.013-0.03 ms after the submit in every frame, while
+  the graphics queue sits in its hole. The second queue of the graphics family (probe 3) is held too but differently (+0.3 to +2.1 ms).
+- **The monitor (a probe every 0.2 ms) shows the graphics queue gated in two windows a frame**: after the end of piece 2 (a ~1.1 ms job) the queue
+  runs nothing for **1.1-1.3 ms**, then runs everything queued back to back (2-3 us apart); after the end of piece 3 (0.55 ms) it runs the probes
+  already queued and then runs nothing for **4.9-5.05 ms**; probes and pieces submitted during that time all start together when it ends. The lengths
+  are the same in every frame (1.13-1.16 and 4.99-5.05 within a run; 4.5-5.4 on other runs) and are not related to anything the CPU does in
+  the window (no event of any thread falls at the end of a hole). Outside those two windows the queue answers in 6-20 us.
+- The windows and lengths are **the same** with: fullscreen (a 2560x1440 swapchain, `fullscreen=1` in the slot's options), `RX_VK_IMMEDIATE=1`
+  (immediate present mode), `RX_VK_ACQUIRE_FENCE=1`, `HOS_NO_PRIORITIES=1`, `RX_VK_QUEUE_PRIO=0`, `RX_VK_PRESENT_QUEUE=1`, no implicit Vulkan layers
+  (`VK_LOADER_LAYERS_DISABLE=~implicit~`: the RivaTuner layer, Steam's and Epic's overlays were loaded before), `RX_VK_NO_WRITEBACK=1` (piece 4's GPU
+  time falls from 0.20 to 0.03 ms: the write-back copies are nearly all it holds; the holes stay), `RX_VK_NO_HOST_IMPORT=1`, and with a **60 fps cap**
+  (`HL_FPS_LIMIT=60`: CPU not saturated; 1.13-1.16 and 4.9-5.04 ms again). Earlier sessions: `RX_VK_CHUNK=0`, `RX_VK_POOL_MIRROR=1`,
+  `RX_VK_BATCH`, a gap before the submit, holding pieces, empty submits and fence/semaphore queries after each submit.
+- **It is not a property of the GPU after any long job**: synthetic 1.2-1.4 ms fill jobs in the same process, at the title screen (light load), are
+  followed by no hole. At the title screen no hole appears at all (probes answer in 10-20 us); the holes belong to the game's real heavy
+  submission (about 160 render passes, 1,900 draws and 140 dispatches a frame, per `RX_VK_PASS_TIMING=1`).
+- The GPU clock is steady (P0, 2.89 GHz at 50 ms sampling); no other process uses the 3D engine more than 1% (`\GPU Engine` counters), yet the
+  counter gives HeyListen's 3D engine **82% busy** against ~25% of real work by our timestamps: Windows counts the holes as busy, so the engine
+  (or its context) is occupied by something that is not our timestamped work.
+- Not admin, so no ETW GPU trace: the next step is outside what an agent here can do.
+
+### 3. What this means for the frame
+
+The loop is: the main thread's event signal -> the replay (pieces 1-4 submitted over ~5 ms) -> the GPU's holes -> piece 4's end at ~9.7 ms ->
+readbacks of the next CPU phase (which arrive at ~7.8 ms and wait ~2 ms) -> the next signal. Without the 5 ms hole after piece 3 the GPU would be
+done at ~5.4 ms, the readbacks would not wait, and `RX_VK_NO_READBACK_WAIT`'s +17% is the bound of the gain. Piece 4 is almost only the write-back
+copies (0.17 of its 0.20 ms), which are what the readbacks wait for.
+
+Not built, and why: (a) the write-back copies of piece 4 on the compute-family queue (it is not held): the copies depend on the draws of pieces 1-3, the
+write-back machinery (`vk_memory.cpp`: captures, mirror syncs, late pages, the late fix) assumes one queue and `dev.present_mu`, and the compute queue
+for presents is off by default since the device lost of issue 1161; too large for what is verified; (b) writing back each piece's ranges at the end of
+that piece and telling the readbacks which piece wrote their range (so the meter, written by an earlier piece, would not wait for piece 4): needs per-piece
+write registration in `vk_memory.cpp` and a rule that no later piece rewrites the range; not started.
+
+### Tools an owner could run (not installed here, not downloaded)
+
+`wpr -start GPU -start CPU` (built in, needs an elevated shell) around a castle-move run, then the Windows Performance Analyzer or GPUView on the
+`.etl`: it shows what the 3D queue's hardware context waits on in those two windows. Also Nsight Systems (a GPU trace of the queue), and the same run with
+hardware-accelerated GPU scheduling toggled in Settings (the owner's setting; `HwSchMode` is not set in the registry here) and, if one exists, another
+NVIDIA driver.
+
+## Hand-over (third session)
+
+- Branch `stream/r2-readback`; new logging only: `RX_VK_TL_PROBE`, `RX_VK_PROBE_JOB`, `RX_VK_TL_FRAMES`, `RX_VK_QUEUE_PRIO` (diagnostics, default off, no behaviour
+  change when off). Scratch under `E:\OOT\scratch-from-c\r2c`: `tlrun.sh <slot> <name> ENV=..` (one run with the timeline, merged), `probes.py`, `monitor.py`,
+  `holes.py` (idle-while-queued windows), `late.py`, `gpu_sample.ps1` (`\GPU Engine` by process), `smi.ps1`.
+- The open question is exactly one: **what holds the graphics queue for ~1.1 ms after the end of piece 2 and ~5.0 ms after the end of piece 3 of the
+  heavy submission**, with new submits (any content) held, the compute queue free, and no CPU or API cause found. A reproduction outside the game that submits
+  the same kinds of work (passes, dispatches, barriers) and watches probes would show whether it is the driver; removing one kind of work at a time in the replay
+  (render passes, dispatches, mesh draws, the 2560x1440 targets) would show which one starts the hold.

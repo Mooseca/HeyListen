@@ -90,6 +90,7 @@ struct Device {
     VkQueue present_queue = VK_NULL_HANDLE;
     std::mutex present_queue_mu;
     uint32_t present_family = 0;   // (present_queue's family, the swapchain's images shared with it)
+    VkQueue probe_queue = VK_NULL_HANDLE;   // (stream R2, RX_VK_TL_PROBE=2: a second queue of the replay's family, for the timeline's probes)
 };
 extern Device dev;
 

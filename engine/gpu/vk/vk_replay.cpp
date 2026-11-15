@@ -138,8 +138,9 @@ void tl_at_present(int64_t presents) {
     if (!want) return;
     if (tl_start_ns && tl_now() >= tl_start_ns) tl_from = presents, tl_start_ns = 0;
     if (presents == tl_from && !tl_active.load()) tl_t0 = tl_now(), tl_n = 0, tl_active = 1, tl_gpu_open();
-    if (presents == tl_from + 14 && tl_from >= 0) tl_gpu_dump(tl_t0);   // (the recordings' times are read once their slots come round)
-    if (presents == tl_from + 3 && tl_active.load()) {
+    static const int64_t frames = getenv("RX_VK_TL_FRAMES") ? std::max(1, atoi(getenv("RX_VK_TL_FRAMES"))) : 3;   // (the window's length in presents)
+    if (presents == tl_from + frames + 11 && tl_from >= 0) tl_gpu_dump(tl_t0);   // (the recordings' times are read once their slots come round)
+    if (presents == tl_from + frames && tl_active.load()) {
         tl_active = 0;
         tl_gpu_close();
         const uint32_t n = std::min<uint32_t>(tl_n.load(), kTlMax);
@@ -690,6 +691,162 @@ uint64_t ts_last_end_seen(uint64_t* after_start) {
     }
     return before;
 }
+// ---- (stream R2, RX_VK_TL_PROBE=1, with RX_VK_TL / RX_VK_TL_S) is the GPU's late start of a piece the queue's or the piece's? Before each
+// recording's queue submit (and, with RX_VK_PRESENT_QUEUE=1, right after it on the presents' own compute queue) a one-timestamp command
+// buffer is submitted; where each one's timestamp falls against the piece's own start says whether a new submit reaches the GPU at once
+// while the piece waits (the piece's own content or dependencies) or not (the queue, the driver or the OS). Logging only ----
+constexpr uint32_t kProbes = 512;
+struct ProbeRec { uint64_t seq; uint32_t slot; int kind; int64_t host_ns; };   // (kind: 0 the replay's queue, 1 the presents' queue, 2 a second queue of the replay's family, 3 the replay's queue from the monitor thread)
+struct {
+    bool tried = false, ok = false;
+    VkQueryPool qp = VK_NULL_HANDLE;
+    VkCommandPool pool[4] = {};
+    VkCommandBuffer cb[4][kProbes];
+    std::mutex mu;   // (probe.n, recs and the buffers of kind 3, which the monitor thread submits)
+    int job_every = 32;   // (RX_VK_PROBE_JOB_EVERY: monitor iterations of 0.2 ms between jobs)
+    int job_fills = 0;                // (RX_VK_PROBE_JOB=<n>: a synthetic job of n fills of a 256 MB buffer, ~0.4 ms each, every 6.4 ms)
+    VkBuffer job_buf = VK_NULL_HANDLE;
+    VmaAllocation job_alloc = nullptr;
+    VkCommandBuffer job_cb[64];
+    int64_t job_host[64];
+    uint32_t job_n = 0;
+    uint32_t n = 0;
+    std::deque<ProbeRec> recs;
+} probe;
+bool probe_wanted() {
+    static const bool v = getenv("RX_VK_TL_PROBE") && atoi(getenv("RX_VK_TL_PROBE")) != 0;
+    return v && dev.calibrated_ts;
+}
+void probe_init() {
+    probe.tried = true;
+    VkQueryPoolCreateInfo qi{VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
+    qi.queryType = VK_QUERY_TYPE_TIMESTAMP;
+    qi.queryCount = 4 * kProbes + 128;
+    if (vkCreateQueryPool(dev.device, &qi, nullptr, &probe.qp) != VK_SUCCESS) return;
+    for (int k = 0; k < 4; k++) {
+        if ((k == 1 && !dev.present_queue) || (k == 2 && !dev.probe_queue)) continue;
+        VkCommandPoolCreateInfo ci{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
+        ci.queueFamilyIndex = k == 1 ? dev.present_family : dev.queue_family;
+        if (vkCreateCommandPool(dev.device, &ci, nullptr, &probe.pool[k]) != VK_SUCCESS) return;
+        VkCommandBufferAllocateInfo ai{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+        ai.commandPool = probe.pool[k];
+        ai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        ai.commandBufferCount = kProbes;
+        if (vkAllocateCommandBuffers(dev.device, &ai, probe.cb[k]) != VK_SUCCESS) return;
+        for (uint32_t i = 0; i < kProbes; i++) {
+            VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+            vkBeginCommandBuffer(probe.cb[k][i], &bi);
+            vkCmdWriteTimestamp2(probe.cb[k][i], VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, probe.qp, k * kProbes + i);
+            vkEndCommandBuffer(probe.cb[k][i]);
+        }
+    }
+    if (getenv("RX_VK_PROBE_JOB")) {
+        probe.job_fills = std::max(1, atoi(getenv("RX_VK_PROBE_JOB")));
+        if (getenv("RX_VK_PROBE_JOB_EVERY")) probe.job_every = std::max(1, atoi(getenv("RX_VK_PROBE_JOB_EVERY")));
+        if (!create_device_buffer(256ull << 20, VK_BUFFER_USAGE_TRANSFER_DST_BIT, probe.job_buf, probe.job_alloc)) probe.job_fills = 0;
+        VkCommandBufferAllocateInfo ai{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+        ai.commandPool = probe.pool[0];
+        ai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        ai.commandBufferCount = 64;
+        if (probe.job_fills && vkAllocateCommandBuffers(dev.device, &ai, probe.job_cb) != VK_SUCCESS) probe.job_fills = 0;
+        for (uint32_t i = 0; probe.job_fills && i < 64; i++) {
+            VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+            vkBeginCommandBuffer(probe.job_cb[i], &bi);
+            vkCmdWriteTimestamp2(probe.job_cb[i], VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, probe.qp, 4 * kProbes + 2 * i);
+            for (int k = 0; k < probe.job_fills; k++) vkCmdFillBuffer(probe.job_cb[i], probe.job_buf, 0, VK_WHOLE_SIZE, 0x01010101u * (k + 1));
+            vkCmdWriteTimestamp2(probe.job_cb[i], VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT, probe.qp, 4 * kProbes + 2 * i + 1);
+            vkEndCommandBuffer(probe.job_cb[i]);
+        }
+    }
+    probe.ok = true;
+}
+/// one probe on the replay's queue (dev.present_mu held) or on the presents' queue; seq: the recording it belongs to
+void probe_monitor_start();
+void probe_job_submit();
+void probe_submit(uint64_t seq, int kind) {
+    if (!tl_active.load(std::memory_order_relaxed) || !probe_wanted()) return;
+    if (!probe.tried) probe_init();
+    if (kind == 0) {
+        static const bool mon = getenv("RX_VK_TL_PROBE") && atoi(getenv("RX_VK_TL_PROBE")) >= 3;
+        if (mon) probe_monitor_start();
+    }
+    if (!probe.ok || (kind == 1 && !dev.present_queue) || (kind == 2 && !dev.probe_queue)) return;
+    std::lock_guard pl(probe.mu);
+    const uint32_t slot = probe.n++ % kProbes;
+    vkResetQueryPool(dev.device, probe.qp, kind * kProbes + slot, 1);
+    VkCommandBufferSubmitInfo cbi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO};
+    cbi.commandBuffer = probe.cb[kind][slot];
+    VkSubmitInfo2 si{VK_STRUCTURE_TYPE_SUBMIT_INFO_2};
+    si.commandBufferInfoCount = 1;
+    si.pCommandBufferInfos = &cbi;
+    probe.recs.push_back({seq, slot, kind, tl_now()});
+    while (probe.recs.size() > 8 * kProbes) probe.recs.pop_front();
+    if (kind == 1) {
+        std::lock_guard pq(dev.present_queue_mu);
+        vkQueueSubmit2(dev.present_queue, 1, &si, VK_NULL_HANDLE);
+    } else {
+        vkQueueSubmit2(kind == 2 ? dev.probe_queue : dev.queue, 1, &si, VK_NULL_HANDLE);
+    }
+}
+/// RX_VK_TL_PROBE=3: a probe on the replay's queue every ~0.2 ms while the window is open, whatever the replay is doing: where in the frame
+/// does a new submit wait, and until when
+void probe_job_submit() {   // (dev.present_mu held by the monitor)
+    std::lock_guard pl(probe.mu);
+    const uint32_t i = probe.job_n++ % 64;
+    vkResetQueryPool(dev.device, probe.qp, 4 * kProbes + 2 * i, 2);
+    VkCommandBufferSubmitInfo cbi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO};
+    cbi.commandBuffer = probe.job_cb[i];
+    VkSubmitInfo2 si{VK_STRUCTURE_TYPE_SUBMIT_INFO_2};
+    si.commandBufferInfoCount = 1;
+    si.pCommandBufferInfos = &cbi;
+    probe.job_host[i] = tl_now();
+    tl_ev("job-sub", i);
+    const VkQueue replay_queue = dev.queue;   // (a probe, not a replay submit: nothing held for a late fix is involved)
+    vkQueueSubmit2(replay_queue, 1, &si, VK_NULL_HANDLE);
+}
+void probe_monitor_start() {
+    static std::once_flag once;
+    std::call_once(once, [] {
+        std::thread([] {
+            SetThreadDescription(GetCurrentThread(), L"mkw_vk probe monitor");
+            for (uint64_t n = 1;; n++) {
+                if (!tl_active.load(std::memory_order_relaxed)) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                    continue;
+                }
+                {
+                    std::unique_lock lk(dev.present_mu, std::try_to_lock);
+                    if (lk.owns_lock()) {
+                        tl_ev("probe-sub", n);
+                        probe_submit(n | (1ull << 40), 3);
+                        if (probe.job_fills && n % (uint64_t)probe.job_every == 0) probe_job_submit();
+                    }
+                }
+                const int64_t until = tl_now() + 200000;
+                while (tl_now() < until) std::this_thread::yield();
+            }
+        }).detach();
+    });
+}
+/// the probes' times on the host clock, as timeline lines (tl_gpu_dump's own mapping: host_ms)
+template <class F> void probe_dump(F host_ms, uint64_t lo, uint64_t hi) {
+    if (!probe.ok) return;
+    std::lock_guard pl(probe.mu);
+    for (uint32_t i = 0; probe.job_fills && i < 64; i++) {
+        uint64_t t[2] = {0, 0};
+        if (vkGetQueryPoolResults(dev.device, probe.qp, 4 * kProbes + 2 * i, 2, sizeof t, t, 8, VK_QUERY_RESULT_64_BIT) != VK_SUCCESS || !t[0] || !t[1]) continue;
+        logf("vk: tl %9.3f GPU                    %-14s %#llx %#llx %#llx", host_ms(t[0]), "gpu-job+", (unsigned long long)i, 0ull, 0ull);
+        logf("vk: tl %9.3f GPU                    %-14s %#llx %#llx %#llx", host_ms(t[1]), "gpu-job-", (unsigned long long)i, 0ull, 0ull);
+    }
+    for (const ProbeRec& p : probe.recs) {
+        if (p.kind != 3 && (p.seq + 8 < lo || p.seq > hi)) continue;
+        uint64_t t = 0;
+        if (vkGetQueryPoolResults(dev.device, probe.qp, p.kind * kProbes + p.slot, 1, sizeof t, &t, 8, VK_QUERY_RESULT_64_BIT) != VK_SUCCESS || !t) continue;
+        logf("vk: tl %9.3f GPU                    %-14s %#llx %#llx %#llx", host_ms(t), p.kind == 1 ? "gpu-probe2" : p.kind == 2 ? "gpu-probe3" : p.kind == 3 ? "gpu-probe4" : "gpu-probe1", (unsigned long long)p.seq,
+             (unsigned long long)p.slot, 0ull);
+    }
+}
+
 void gpu_time_begin(Recording& r) {
     if (!ts_pool) {
         VkQueryPoolCreateInfo qi{VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
@@ -743,6 +900,7 @@ void tl_gpu_dump(int64_t t0_ns) {
         logf("vk: tl %9.3f GPU                    gpu-cmd-       %#llx %#llx %#llx", host_ms(g.ce), (unsigned long long)g.recseq, (unsigned long long)g.value,
              (unsigned long long)((g.ce - g.cs) * period / 1000));
     }
+    probe_dump(host_ms, tl_rec_lo, tl_rec_hi);
     logf("vk: tl gpu end");
 }
 void gpu_time_end(Recording& r, bool uploads) {
@@ -882,9 +1040,12 @@ void submit_recording(Recording& r, bool signal_value = true, uint64_t signal_at
     tl_ev("rec-locked", seq, r.value);
     queue_flush_locked();   // (TICK-060: recordings held for a fix go first, the fix applied (waited for here without a batch semaphore))
     PROF(PROF_QSUBMIT);
+    probe_submit(seq, 0);   // (RX_VK_TL_PROBE)
+    probe_submit(seq, 2);
     tl_ev("rec-qsubmit+", seq);
     const VkResult res = vkQueueSubmit2(dev.queue, 1, &si, r.fence);
     tl_ev("rec-qsubmit-", seq);
+    probe_submit(seq, 1);
     r.submitted = res == VK_SUCCESS;
     if (r.submitted && signal_value) note_signal_sent(signal.value);
     static int failures;

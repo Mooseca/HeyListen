@@ -272,8 +272,10 @@ bool create_device() {
     const float priority = 1.0f;
     VkDeviceQueueCreateInfo q{VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO};
     q.queueFamilyIndex = dev.queue_family;
+    const float priorities[2] = {getenv("RX_VK_QUEUE_PRIO") ? (float)atof(getenv("RX_VK_QUEUE_PRIO")) : 1.0f, 1.0f};   // (stream R2: RX_VK_QUEUE_PRIO, a diagnostic)
     q.queueCount = 1;
-    q.pQueuePriorities = &priority;
+    if (getenv("RX_VK_TL_PROBE") && atoi(getenv("RX_VK_TL_PROBE")) >= 2 && families[dev.queue_family].queueCount >= 2) q.queueCount = 2;   // (stream R2)
+    q.pQueuePriorities = priorities;
     // (hookshot) The presents on a queue of a compute family of their own, beside the replay's (RX_VK_PRESENT_QUEUE=1 / 0: on /
     // off; on by default with NVIDIA's driver on Windows, where it was measured). On the replay's queue vkQueuePresentKHR blocked
     // with dev.present_mu held, ~0.8 ms a present with frame interpolation at 4x and up to 8, and the game's main and presentation
@@ -446,6 +448,8 @@ bool create_device() {
 
     load_device(dev.device);
     vkGetDeviceQueue(dev.device, dev.queue_family, 0, &dev.queue);
+    dev.probe_queue = VK_NULL_HANDLE;
+    if (q.queueCount >= 2) vkGetDeviceQueue(dev.device, dev.queue_family, 1, &dev.probe_queue);
     dev.present_queue = VK_NULL_HANDLE;
     dev.present_family = dev.queue_family;
     if (compute_family != UINT32_MAX) vkGetDeviceQueue(dev.device, compute_family, 0, &dev.present_queue), dev.present_family = compute_family;
