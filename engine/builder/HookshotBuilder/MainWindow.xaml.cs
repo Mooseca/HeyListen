@@ -273,6 +273,7 @@ public partial class MainWindow : Window
         PrepareTick.IsChecked = !s.PrepareLater;
         if (!string.IsNullOrEmpty(s.Out)) OutPath.Text = s.Out;
         DlssTick.IsChecked = s.Dlss;
+        CodeModsTick.IsChecked = s.CodeMods;
         if (s.Romfs != null && s.Exefs != null && Directory.Exists(s.Romfs) && File.Exists(System.IO.Path.Combine(s.Exefs, "main")))
         {
             romfs = s.Romfs;
@@ -295,7 +296,7 @@ public partial class MainWindow : Window
         try
         {
             var s = new BuilderSettings { Out = OutPath.Text, Nup = romfs == null ? chosenNup : null, Romfs = romfs, Exefs = exefs,
-                                          Dlss = DlssTick.IsChecked == true,
+                                          Dlss = DlssTick.IsChecked == true, CodeMods = CodeModsTick.IsChecked == true,
                                           PrepareLater = PrepareTick.IsChecked != true };
             Directory.CreateDirectory(System.IO.Path.GetDirectoryName(SettingsPath)!);
             File.WriteAllText(SettingsPath, System.Text.Json.JsonSerializer.Serialize(s));
@@ -696,6 +697,7 @@ public partial class MainWindow : Window
         else return;
         args.AddRange(new[] { "--out", OutPath.Text, "--language", lang.Code });
         prepareNow = PrepareTick.IsChecked == true;
+        args.AddRange(new[] { "--code-mods", CodeModsTick.IsChecked == true ? "on" : "off" });
         Run(tools, ShaderStep.Args(args, prepareNow), dlss: DlssTick.IsChecked == true);
     }
 
@@ -708,6 +710,31 @@ public partial class MainWindow : Window
         "Do you accept NVIDIA's license?";
 
     /// The NVIDIA DLSS tick: NVIDIA's license first, and the tick stays only when it is accepted
+    void CodeModsChanged(object sender, RoutedEventArgs e) => SaveSettings();
+
+    /// "Which mods?" on the options page: the mods with code patches in the mods folder of the folder the game is built into
+    async void CodeModsList(object sender, RoutedEventArgs e)
+    {
+        var tools = Tools.Find();
+        if (tools == null) { MessageBox.Show(this, "The build tools are not in HeyListen's folder.", "HeyListen"); return; }
+        var mods = await CodeMods.List(tools, OutPath.Text);
+        CodeMods.Show(this, mods, OutPath.Text, canRebuild: false);
+    }
+
+    /// The launcher's "Code mods (exeFS)": the list, and the rebuild of the game folder (its kept game files, translated again) with
+    /// the option on or off, once the player has read the risks and the time and confirmed
+    async void LaunchCodeModsClick(object sender, RoutedEventArgs e)
+    {
+        var tools = Tools.Find();
+        if (tools == null) { MessageBox.Show(this, "The build tools are not in HeyListen's folder.", "HeyListen"); return; }
+        var mods = await CodeMods.List(tools, launchFolder);
+        if (CodeMods.Show(this, mods, launchFolder, canRebuild: true) is not { Rebuild: true } pick) return;
+        BeginUpdate(launchFolder, null);
+        VersionChip.Visibility = Visibility.Collapsed;
+        BuildTitle.Text = pick.On ? "Rebuilding with code mods" : "Rebuilding without code mods";
+        UpdateBuild(tools, launchFolder, pick.On ? "on" : "off");
+    }
+
     void DlssChanged(object sender, RoutedEventArgs e)
     {
         if (DlssTick.IsChecked == true &&
@@ -1201,7 +1228,7 @@ public partial class MainWindow : Window
     }
 
     /// The new tools are here: the folder built again with them (only what changed is compiled)
-    internal void UpdateBuild(Tools tools, string folder)
+    internal void UpdateBuild(Tools tools, string folder, string? codeMods = null)
     {
         download = null;
         if (rows.TryGetValue("download", out var d)) { d.Done(); d.Small("Build tools checked"); }
@@ -1210,7 +1237,10 @@ public partial class MainWindow : Window
                    File.Exists(System.IO.Path.Combine(Storage.NgxSdk, "LICENSE.txt"));
         // (prepareNow: the saved choice, read in BeginUpdate. The launcher's Update and the --update start after a self-update never
         // ran ApplySettings, so the tick there is only its default)
-        Run(tools, ShaderStep.Args(new List<string> { "--update", folder }, prepareNow), keepRows: true, dlss: dlss);
+        // (codeMods: the launcher's Code mods window chose; otherwise make_game.py keeps what the folder's last build chose)
+        var args = new List<string> { "--update", folder };
+        if (codeMods != null) args.AddRange(new[] { "--code-mods", codeMods });
+        Run(tools, ShaderStep.Args(args, prepareNow), keepRows: true, dlss: dlss);
     }
 
     // ================= the window =================

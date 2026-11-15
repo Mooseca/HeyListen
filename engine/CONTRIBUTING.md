@@ -243,8 +243,7 @@ the development guide's [reference](docs/development.md#switches-for-testing-and
 1. Fork the repository and branch from `main`. Name the branch for the change: `fix/...`, `linux/...`, `builder/...`,
    `docs/...`.
 2. Keep the pull request to one topic. Bug fixes do not carry refactors, and two unrelated fixes are two PRs.
-3. Write the title as a short imperative sentence, as the history does: "Stop scanning storage-buffer tables after
-   one pass", "Linux: a crash report gives the whole host stack". Start the body with why the PR is needed, in one or
+3. Write the title in the commit form below (`fix(vk): ...`, `feat(builder): ...`). Start the body with why the PR is needed, in one or
    two plain sentences a player could follow: the bug, the missing feature or the cost it removes ("The menu's text
    is cut off at 4K", "First starts spend 20 s waiting on a few shaders"). Then say what changed, how it was tested
    (GPU, driver, game area, fps before and after), and link the issue it fixes.
@@ -255,9 +254,32 @@ the development guide's [reference](docs/development.md#switches-for-testing-and
 6. Rebase or merge `main` when it has moved, and resolve conflicts in your branch rather than in the review.
 7. Do not include build output, dumps, generated files or a `.gitignore` bypass. Check `git status`.
 
-Commit subjects decide the next release: write them as Conventional Commits (`feat:`, `fix:`, and `!` or
-`BREAKING CHANGE:` for a break). The version rules, branches and changelog format are in
-[docs/versioning.md](docs/versioning.md).
+Commit subjects decide the next release: write them as Conventional Commits, `type(scope): subject`, and the same for
+a pull request's title. The version rules, branches and changelog format are in [docs/versioning.md](docs/versioning.md).
+
+| Type | For | Example |
+|---|---|---|
+| `feat` | something new a player or a contributor can use | `feat(builder): exeFS (code) mods, applied before the translation` |
+| `fix` | a bug fixed | `fix(vk): a picture larger than the window is filtered over all its pixels (#307)` |
+| `perf` | the same result, faster or lighter | `perf(vk): the light meter's readback waits only for its own write-back` |
+| `docs` | documents only | `docs(user-guide): the Linux section` |
+| `test` | checks only | `test(vk): the readback ticket's check reads the new wait log` |
+| `build` | build scripts, toolchain, profiles | `build(pgo): the renderer built with a play profile` |
+| `ci` | the workflows | `ci(linux): the AppImage on every push to main` |
+| `refactor` | code reshaped, behaviour unchanged | `refactor(host): one lock for the capture sequence` |
+| `chore` | anything else (housekeeping, versions, data lists) | `chore(states): the union of the pipeline state lists` |
+| `revert` | a commit undone | `revert: fix(vk): ...` |
+
+- **Scope**: the part touched, in lower case: `vk` (the Vulkan back end), `host`, `native` (the native engine's
+  modules), `nx2` (the game build), `builder`, `linux`, `menu`, `tools`, `release`, `docs`... One word; leave it out when
+  the change spans the whole tree.
+- **Subject**: English, at most ~72 characters, no full stop, saying what is true after the commit ("the light meter
+  waits for its write-back", not "changed the wait"). A Longshot or Hookshot port names the upstream number at the end:
+  `(#563)`.
+- **Break**: `!` after the type or scope (`feat(vk)!: ...`) and a `BREAKING CHANGE:` line in the body, for a change
+  that makes players lose something (their shader preparation, a saved option, an option's meaning).
+- **Merges** keep their subject in the same form: `merge: pull request 22 (Mooseca), title movie judder` or
+  `merge(native): feat/skip-title`.
 
 Maintainer commits record AI assistance with `Assisted-by:` and `Co-Authored-By:` trailers. If you used a tool, add
 the trailers that describe it; if you wrote the change yourself, there is nothing to add.

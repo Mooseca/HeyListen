@@ -380,9 +380,32 @@ layout emulators use: `mods/<name>/romfs/...` holds files that replace or add to
 `mods/contents/<title id>/<name>/romfs` work too. A folder whose name starts with `-` or `_` is off. When two mods
 have the same file, the one whose folder name sorts last wins, so name them `01-...`, `02-...` to set the order.
 
-Only RomFS mods are loaded. `exefs` patches (`.pchtxt`, `.ips`) are left out: Hookshot compiles the game's code ahead
-of time, so patching its instructions would need a rebuild. The log (`hookshot_log.txt`) names each mod and the files
-read from it.
+The game itself loads only RomFS mods. `exefs` patches (`.pchtxt`, `.ips`) are applied by the builder, at build time,
+because the game's code is compiled ahead of time: `nx2/make_game.py --code-mods on` (the builder's "Code mods (exeFS)")
+patches the work copy of the game's modules from `mods/<name>/exefs/` before the translation (`nx2/exefs_mods.py`; the
+copy kept in the game folder, `.hookshot_exefs`, stays as it was). The log (`hookshot_log.txt`) names each mod and the
+files read from it.
+
+Formats and offsets: `<build id>.ips` (IPS, `PATCH` ... `EOF`, 3-byte offsets, or IPS32, `IPS32` ... `EEOF`, 4-byte
+offsets; records are offset, 2-byte size, data, and a size of 0 is a run of 2-byte length and one byte) and `.pchtxt`
+(`@nsobid-`, `@flag offset_shift`, `@enabled` / `@disabled` blocks, `@stop`, `//` comments, hex or quoted values).
+Offsets count from the start of the module's file, whose header is 0x100 bytes (module address = offset - 0x100; a
+pchtxt address gets its offset_shift added first, usually 0x100). The mods are taken in the order of their folder names
+and a name starting with `-` or `_` is off, as for RomFS mods. A patch for another build id, one that writes outside
+the module's .text/.rodata/.data or into its header, an unreadable file, or two mods writing the same byte differently
+stops the build with the mod's name; nothing is half applied.
+
+The lift key (`nx2/make_game.py lift_key`) hashes the work copy of the modules, so patched modules give another key (the
+game is translated again, and again when the mod is removed), and a game with no code mod keeps the key it always had.
+The game folder remembers the option (`.hookshot_code_mods`), so the game's update keeps it.
+
+The native engine (`engine/host/hl_*.c`) answers some guest functions itself. The build writes
+`hookshot_code_patches.txt` beside the game (the guest address ranges the patches changed and the functions that
+contain them, after relocation; the function table of the lift gives each function's extent) and passes the same list to
+`nx2/hl_gates.py`: no entry gate and no step hook goes into a patched function, and at start `host/hl_patched.c` reads the
+file so that no `HL_ANSWER` is installed for one: the translated function, which carries the patch, runs, and the log
+says so per function. Native replacements of a block inside a function (`nx2/native_replace.py`) and entry gates already
+check the lifted text's hash, so a patch that changes it leaves them out too.
 
 A mod file larger than the game's own does not load unless the resource size table allows for it:
 `System/Resource/ResourceSizeTable.Product.111.Nin_Ounce_NVN2.rsizetable.zs` gives each file the memory the game sets

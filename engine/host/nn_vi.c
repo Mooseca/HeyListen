@@ -2,6 +2,7 @@
    layer, and the display's vsync event, signaled at 60 Hz by a host thread. HDR and VRR are reported unsupported,
    so the game takes its SDR path. Frames are paced at the native NVN layer's window acquire (the end of this file). */
 #include "hos.h"
+#include "../gpu/vk/vk_opt_ids.h"   /* (HL_OPT_FPS_LIMIT) */
 #include "../gpu/vk/vk_api.h"   /* (HOS_OPT_HDR_*: the Insert menu's HDR, answered by the renderer) */
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -117,7 +118,7 @@ static int fps_limit(void) {
         env = e ? atoi(e) : 0;
     }
     int rx_option(int id, int otherwise);
-    int v = env > 0 ? env : rx_option(10, 60);
+    int v = env > 0 ? env : rx_option(HL_OPT_FPS_LIMIT, 60);
     v = v < 30 ? 30 : v > 360 ? 360 : v;
     return rx_option(0, 1) && v > 60 ? v : 60;   /* (Per frame: the game's steps are whole frames of 1/60 s: 60) */
 }

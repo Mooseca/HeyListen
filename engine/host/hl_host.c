@@ -1,6 +1,8 @@
 /* (HeyListen native engine) The OS layer's common ground for the native modules (hl_host.h): the list of guest functions
    answered natively, and the callbacks the native side works through. docs/native-engine/README.md has the plan. */
 #include "hl_host.h"
+#include "hl_patched.h"
+#include "hos_paths.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -31,6 +33,50 @@ void hl_answer(uint64_t guest, A64Fn fn, HlOn on, const char *what) {
     nanswers++;
 }
 
+/* ---- exeFS (code) mods: the guest functions they patch are left to the lifted code (hl_patched.h) ---- */
+enum { DECLARED = 256 };
+static uint64_t declared[DECLARED];
+static int ndeclared;
+static volatile LONG patches_state;   /* 0: not read, 1: being read, 2: read */
+
+void hl_gate_declared(unsigned long long guest) {
+    if (ndeclared < DECLARED) declared[ndeclared++] = guest;   /* (constructors: one thread) */
+}
+
+static void patched_log(const char *line) { hos_log("%s", line); }
+
+/* the game folder's hookshot_code_patches.txt, read once, before the first answer is asked: every declared gate and step hook it
+   patches is named in the log (the lifted code was built without them) */
+static void patches_read(void) {
+    if (patches_state == 2) return;
+    if (InterlockedCompareExchange(&patches_state, 1, 0) != 0) {
+        while (patches_state != 2) Sleep(0);
+        return;
+    }
+    char path[MAX_PATH];
+    if (hos_game_path_a(path, sizeof path)) {
+        char *slash = strrchr(path, '\\');
+        char *fwd = strrchr(path, '/');
+        if (fwd > slash) slash = fwd;
+        if (slash) {
+            snprintf(slash + 1, sizeof path - (size_t)(slash + 1 - path), "hookshot_code_patches.txt");
+            FILE *f = fopen(path, "rb");
+            if (f) {
+                char *text = (char *)calloc(1, (size_t)1 << 20);
+                const size_t n = text ? fread(text, 1, ((size_t)1 << 20) - 1, f) : 0;
+                fclose(f);
+                if (text && n) {
+                    const int entries = hl_patched_parse(text);
+                    hos_log("hl: exeFS mods patch the game's code (%d entries in hookshot_code_patches.txt)", entries);
+                    for (int i = 0; i < ndeclared; i++) hl_patched_left(declared[i], "entry gate", patched_log);
+                }
+                free(text);
+            }
+        }
+    }
+    patches_state = 2;
+}
+
 static int answer_on(Answer *a) {
     for (;;) {
         const LONG s = a->state;
@@ -39,7 +85,10 @@ static int answer_on(Answer *a) {
         Sleep(0);
     }
     int on = 0;
-    if (!hl_supported_build()) {
+    patches_read();
+    if (hl_patched_left(a->guest, a->what, patched_log)) {
+        on = 0;   /* (an exeFS mod patches this function: the lifted one, which carries the patch, runs) */
+    } else if (!hl_supported_build()) {
         static volatile LONG told;
         if (!InterlockedExchange(&told, 1))
             hos_log("hl: off: this is not the build the native engine's addresses are of (%s)", hos_main_build_id);
@@ -67,6 +116,7 @@ void hl_gate_present(unsigned long long guest) {
 }
 
 int hl_gates_in(const char *what, const uint64_t *guest, int n) {
+    patches_read();
     char missing[256];
     int len = 0, all = 1;
     missing[0] = 0;

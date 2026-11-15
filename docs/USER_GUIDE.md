@@ -122,9 +122,40 @@ File mods work as in Hookshot: put them in a `mods` folder in the game folder, b
 emulators use: `mods\<name>\romfs\...` holds files that replace or add to the game's own. A folder whose name starts with
 `-` or `_` is off; when two mods have the same file, the folder whose name sorts last wins (name them `01-...`, `02-...`).
 Nothing is rebuilt: the game reads them at its next start, and `hookshot_log.txt` names each mod and the files read from it.
-Code patches (`exefs`, `.pchtxt`, `.ips`) are not loaded: the game's code is compiled ahead of time. A mod that makes
-files bigger must ship the game's resource size table with its entries grown; the details are in `engine/readme.md`
-(Mods).
+A mod that makes files bigger must ship the game's resource size table with its entries grown; the details are in
+`engine/readme.md` (Mods).
+
+### Code mods (exeFS)
+
+Code patches (`.ips`, `.pchtxt`) change the game's own instructions. The game's code is translated to PC code when it
+is built, so the **builder** applies them, before the translation, and the game has to be built again for them to count.
+Nothing is read from them when the game starts.
+
+1. Put the mod in `mods\<name>\exefs\` of the game folder: an `.ips` file named after the module's build id
+   (`<build id>.ips`, as Atmosphere reads it) or a `.pchtxt` file (any name; it names its build id on its `@nsobid-` line).
+   Only mods made for this game's build are accepted: a patch for another version stops the build with the mod's name.
+2. Open the builder. On the game folder's start page choose **Code mods (exeFS)**: it lists the mods it found with their
+   patches and what each applies to, tells the risks and how long the rebuild takes, and rebuilds the game when you confirm.
+   (When you build the game the first time, tick **Code mods (exeFS)** on the options page instead.) The choice stays with
+   the game folder: an update of the game applies the mods again. To take a code mod out, put `-` before its folder's name
+   (or delete it) and rebuild with the option on, or rebuild with it off.
+3. Start the game. `hookshot_log.txt` says which functions a code mod left to the translated code.
+
+What to expect:
+
+- **A rebuild costs a lot of time**: the whole game is translated again from the patched code, then only the compiled parts
+  that changed are compiled again. On the main PC (Ryzen 7 7800X3D, 8 build workers) the translation took 9 minutes and the compile and link 6 more: about 16 minutes in all; slower PCs take longer, and the builder shows its own estimate. Taking the mod out later costs the same. Without code mods nothing changes: a game
+  built without the option is built exactly as before.
+- **Code patches can break the game or the save**, or stop working after a game update. Keep a copy of your saves first.
+- Offsets: both formats count from the start of the module's file, whose header is 0x100 bytes long (a module's own address is
+  the offset minus 0x100); a `.pchtxt` offset gets its `@flag offset_shift` added first. A patch may change code, constants
+  and data, but only inside the module (a write outside it, into its header, or between its parts is refused). Two mods that
+  write the same byte differently are refused, the same value is fine.
+- Where the native engine answers a function itself (graphics recording, job system, physics boxes and so on), a patch inside
+  that function wins: the engine leaves that function to the translated code, which carries the patch, and logs it
+  (`hl: ... left to the lifted code: an exeFS mod patches it`). The build log says `NOT gated` for each entry gate left out.
+  That part of the engine's speed-up is off for that function.
+- The OS functions the game folder answers itself (the console's system software) cannot be patched: the build says so.
 
 ## Updates
 

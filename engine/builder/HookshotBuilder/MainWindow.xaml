@@ -185,6 +185,14 @@
                       Content="NVIDIA DLSS (downloads NVIDIA's SDK under NVIDIA's license)"/>
             <TextBlock Style="{StaticResource Note}" FontSize="12" Margin="26,4,0,0" TextWrapping="Wrap"
                        Text="For NVIDIA RTX graphics cards. NVIDIA's files stay on this PC: never share a game folder built with them."/>
+            <!-- exeFS (code) mods: nx2/exefs_mods.py patches the game's code before the translation; make_game.py's code-mods option -->
+            <CheckBox x:Name="CodeModsTick" Style="{StaticResource Tick}" IsChecked="False" Margin="0,14,0,0" Click="CodeModsChanged"
+                      Content="Code mods (exeFS): apply the patches found in the mods folder"/>
+            <StackPanel Orientation="Horizontal" Margin="26,4,0,0">
+              <TextBlock Style="{StaticResource Note}" FontSize="12" TextWrapping="Wrap" MaxWidth="560"
+                         Text="Code patches can break the game or the save. The game is translated before it is built, so a patched build takes the time of a full translation."/>
+              <Button Style="{StaticResource LinkButton}" Foreground="{StaticResource InkFaint}" Content="Which mods?" Margin="10,0,0,0" Click="CodeModsList"/>
+            </StackPanel>
           </StackPanel>
 
           </Grid>
@@ -295,6 +303,8 @@
               </StackPanel>
             </Button>
           </StackPanel>
+          <Button x:Name="LaunchCodeMods" Style="{StaticResource LinkButton}" Foreground="{StaticResource InkFaint}" HorizontalAlignment="Center"
+                  Margin="0,10,0,0" Content="Code mods (exeFS)…" Click="LaunchCodeModsClick"/>
           <Button x:Name="LaunchFolder" Style="{StaticResource LinkButton}" Foreground="{StaticResource InkFaint}" HorizontalAlignment="Center"
                   Margin="0,22,0,0" Content="Open the game folder" Click="LaunchFolderClick"/>
           <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,10,0,0">

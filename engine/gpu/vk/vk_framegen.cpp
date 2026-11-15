@@ -476,10 +476,17 @@ bool framegen_on() {
 }
 
 VkImage framegen_scale(VkCommandBuffer cmd, VkImageView src, VkImage image, uint32_t sw, uint32_t sh, const int crop[4], uint32_t dw, uint32_t dh) {
-    if (!opts.upscale && !opts.sharpness) return VK_NULL_HANDLE;
     if (!src || !image || !sw || !sh || !dw || !dh) return VK_NULL_HANDLE;
     if (crop && crop[2] > 0 && crop[3] > 0 &&
         (crop[0] < 0 || crop[1] < 0 || (uint32_t)crop[0] >= sw || (uint32_t)crop[1] >= sh)) return VK_NULL_HANDLE;
+    // (Ported from Longshot 5ad0f503 (#307). A picture larger than the window takes the pass even with the filter Off and Sharpness 0:
+    // the blit's linear filter reads 2 x 2 of the picture whatever the shrink, and fine detail shimmered; the pass filters over all of
+    // the picture's pixels one window pixel covers (fg_scale.comp filtered()))
+    const bool has_crop = crop && crop[2] > 0 && crop[3] > 0;
+    const uint32_t pw = has_crop ? std::min((uint32_t)crop[2], sw - (uint32_t)crop[0]) : sw;
+    const uint32_t ph = has_crop ? std::min((uint32_t)crop[3], sh - (uint32_t)crop[1]) : sh;
+    const bool shrink = pw > dw || ph > dh;
+    if (!opts.upscale && !opts.sharpness && !shrink) return VK_NULL_HANDLE;
     if (!init_scale()) return VK_NULL_HANDLE;
     // (the game draws into part of its window textures, 2048 x 1152 of 2560 x 1440 here: the filter was given the whole texture, and the
     // picture came out in the top left corner of the window with black around it. The crop first, then the filter)

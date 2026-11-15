@@ -22,17 +22,26 @@ void hl_answer(uint64_t guest, A64Fn fn, HlOn on, const char *what);
    int hl_gate_80ba6d80(Ctx *c): the function's arguments are in c as at its entry; return 1 with its results in c (x0,
    memory) when it answered, 0 to let the translated body run. It is called only while hl_gate_on_80ba6d80 is 1: set it
    when the module's switch is on and hl_supported_build() says 1. */
-#define HL_GATE(addr, hash) volatile int hl_gate_on_##addr; int hl_gate_##addr(Ctx *c)
+#define HL_GATE(addr, hash) \
+    __attribute__((constructor)) static void hl_gate_decl_##addr(void) { hl_gate_declared(0x##addr##ULL); } \
+    volatile int hl_gate_on_##addr; int hl_gate_##addr(Ctx *c)
 
 /* HL_STEP_HOOK(80706be0, "<hash>", <vreg>, <probe>); a line nx2/hl_gates.py puts after f_80706be0's one float divide of a
    time step, making it base x hos_frame_seconds_bits when that is not 0 (host/hl_step.c). Nothing in C. */
-#define HL_STEP_HOOK(addr, hash, reg, probe) extern const int hl_step_hook_##addr
+#define HL_STEP_HOOK(addr, hash, reg, probe) \
+    __attribute__((constructor)) static void hl_step_decl_##addr(void) { hl_gate_declared(0x##addr##ULL); } \
+    extern const int hl_step_hook_##addr
 
 /* Whether the gates are in the lifted code: nx2/hl_gates.py puts, beside each gate it puts in, a constructor that calls
    hl_gate_present(address) at start; a gate left out (its function's text hashes otherwise in this lift) never says so.
    hl_gates_in: 1 when every one of the n addresses is in; otherwise 0, and one log line naming `what` and the missing
    ones. A module whose gates share state (half native, half translated otherwise) switches them on only together. */
 void hl_gate_present(unsigned long long guest);
+
+/* exeFS (code) mods (hl_patched.h): every gate and step hook declares its function here, from a constructor, so that the start can
+   say which of them an exeFS mod patches (the builder left those out of the lifted code: nx2/hl_gates.py skip). A native answer
+   (HL_ANSWER) for a patched function is not installed: hl_answer's lookup leaves it to the lifted code. */
+void hl_gate_declared(unsigned long long guest);
 int hl_gates_in(const char *what, const uint64_t *guest, int n);
 
 /* The translated function at a guest address (the lifted table's, whatever answers the address now); NULL when there is

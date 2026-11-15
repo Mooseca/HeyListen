@@ -42,7 +42,7 @@ class BuildHarness:
         exefs.mkdir(exist_ok=True)
         self.gui = SimpleNamespace(
             out=value(str(folder / "out")), kind=value(kind), nup=value(str(nup)),
-            romfs=value(str(romfs)), exefs=value(str(exefs)), language=value("English (US)"), prepare=value(True),
+            romfs=value(str(romfs)), exefs=value(str(exefs)), language=value("English (US)"), prepare=value(True), code_mods=value(False),
             cfg={"previous": "kept"}, show_progress=lambda: self.events.append(("progress",)), read=lambda proc: None)
 
         def start_process(command, **kwargs):
@@ -83,7 +83,7 @@ class BuilderBuildJobsTests(unittest.TestCase):
         gui = harness.gui
         source = ["--nup", gui.nup.get()] if gui.kind.get() == "nup" else ["--romfs", gui.romfs.get(), "--exefs", gui.exefs.get()]
         expected = [sys.executable, "-I", str(ROOT / "nx2" / "make_game.py")] + source + [
-            "--out", gui.out.get(), "--language", "en-US"] + ([] if jobs is None else ["--jobs", str(jobs)])
+            "--out", gui.out.get(), "--language", "en-US", "--code-mods", "off"] + ([] if jobs is None else ["--jobs", str(jobs)])
         self.assertEqual(len(harness.processes), 1)
         command, options = harness.processes[0]
         self.assertEqual(command, expected)
@@ -91,7 +91,7 @@ class BuilderBuildJobsTests(unittest.TestCase):
                                        encoding="utf-8", errors="replace", start_new_session=True))
         self.assertEqual(harness.events[0][1], dict(previous="kept", kind=gui.kind.get(), nup=gui.nup.get(),
                                                   romfs=gui.romfs.get(), exefs=gui.exefs.get(), out=gui.out.get(), language="en-US",
-                                                  prepare="1"))
+                                                  prepare="1", code_mods="0"))
         self.assertEqual(harness.events[3][1], dict(target=gui.read, args=(gui.proc,), daemon=True))
 
     def test_positive_hookshot_jobs_is_passed_on(self):

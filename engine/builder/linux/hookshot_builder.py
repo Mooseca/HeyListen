@@ -25,6 +25,7 @@ sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(ROOT, "nx2"))
 sys.path.insert(0, os.path.join(ROOT, "third_party", "a64-kit", "tools"))
 import linux_update  # noqa: E402  (the release check and the part download)
+import exefs_mods  # noqa: E402  (code mods: the list and the folder's choice)
 import make_game  # noqa: E402  (LANGUAGES, BUILD_ID)
 import toolchain  # noqa: E402  (default_jobs: RX_JOBS)
 
@@ -41,6 +42,16 @@ def left_text(seconds):
         return "about a minute left"
     minutes = int(round(seconds / 60))
     return "about %d h %d min left" % (minutes // 60, minutes % 60) if minutes >= 60 else "about %d minutes left" % minutes
+
+
+# (what the Code mods window says; the same words as the Windows builder's CodeMods.cs)
+CODE_MODS_RISK = ("Code patches change the game's own instructions. They can crash the game, corrupt a save or stop working after a game update: "
+                  "keep a copy of your saves first. A patch made for another game version is refused, and the build stops with the mod's name. "
+                  "Where a patch changes a function the native engine replaces in part, that part falls back to the translated code "
+                  "(the build log says \"NOT gated\" for it). RomFS mods need none of this.")
+CODE_MODS_TIME = ("The whole game is translated to PC code again, then only the changed parts are compiled: about 15 minutes on a fast PC "
+                  "(measured: 9 minutes of translation, 6 of compiling), more on a slower one; the build screen shows the time. "
+                  "Taking a code mod out later costs the same.")
 
 
 def load_config():
@@ -180,6 +191,8 @@ class Builder(tk.Tk):
         code = self.cfg.get("language", "en-US")
         self.language = tk.StringVar(value=dict(make_game.LANGUAGES).get(code, names[0]))
         self.prepare = tk.BooleanVar(value=self.cfg.get("prepare", "1") != "0")   # (make_game.py's last step: off, at the first start)
+        self.code_mods = tk.BooleanVar(value=self.cfg.get("code_mods", "0") == "1")   # (make_game.py --code-mods)
+        self.pending_code_mods = None   # ("on" or "off": the launcher's Code mods window asked for a rebuild with it)
         self.check_text = tk.StringVar()
         self.space_text = tk.StringVar()
         self.stage_text = tk.StringVar()
@@ -249,6 +262,15 @@ class Builder(tk.Tk):
         row += 1
         ttk.Checkbutton(f, text="Prepare shaders now (unticked: at the game's first start, behind a black window)",
                         variable=self.prepare).grid(row=row, column=0, columnspan=3, sticky="w", **self.pad)
+        row += 1
+        mods = ttk.Frame(f)
+        mods.grid(row=row, column=0, columnspan=3, sticky="w", **self.pad)
+        ttk.Checkbutton(mods, text="Code mods (exeFS): apply the patches found in the mods folder", variable=self.code_mods).pack(side="left")
+        ttk.Button(mods, text="Which mods?", command=lambda: self.show_code_mods(os.path.expanduser(self.out.get().strip()), rebuild=False)).pack(
+            side="left", padx=self.px(8))
+        row += 1
+        ttk.Label(f, text="Code patches can break the game or the save. A patched build takes the time of a full translation.",
+                  wraplength=self.px(560)).grid(row=row, column=0, columnspan=3, sticky="w", **self.pad)
         row += 1
         ttk.Label(f, text="Takes about 45 minutes and needs 45 GB.").grid(row=row, column=0, columnspan=3, sticky="w", **self.pad)
         row += 1
@@ -379,7 +401,62 @@ class Builder(tk.Tk):
         self.launch_update = ttk.Button(buttons, text="Update", command=lambda: self.begin_update(folder))
         ttk.Button(buttons, text="Play", command=lambda: self.play_and_close(folder)).pack(side="right", padx=self.px(4))
         ttk.Button(buttons, text="Open folder", command=lambda: subprocess.Popen(["xdg-open", folder])).pack(side="right", padx=self.px(4))
+        ttk.Button(buttons, text="Code mods (exeFS)...", command=lambda: self.show_code_mods(folder, rebuild=True)).pack(side="right", padx=self.px(4))
         self.lookup_latest()
+
+    def show_code_mods(self, folder, rebuild):
+        """The mods with code patches in the folder's mods folder, each patch with its state, the risks and the time; with rebuild, the
+        folder's game built again with the option as ticked here (its kept game files, translated again) once the player confirms"""
+        win = tk.Toplevel(self)
+        win.title("Code mods (exeFS)")
+        win.transient(self)
+        f = ttk.Frame(win)
+        f.pack(fill="both", expand=True, padx=self.px(16), pady=self.px(12))
+        wrap = self.px(560)
+        ttk.Label(f, text="Code mods (exeFS)", font=("TkDefaultFont", 14, "bold")).pack(anchor="w")
+        ttk.Label(f, text="Put a mod in the mods folder of the game folder, in its own folder with an exefs folder inside: "
+                  "mods/<name>/exefs/<build id>.ips, or any name ending in .pchtxt. " + exefs_mods.mods_root(folder), wraplength=wrap).pack(
+            anchor="w", pady=self.px(6))
+        ttk.Label(f, text=CODE_MODS_RISK, wraplength=wrap, foreground="#a06000").pack(anchor="w", pady=self.px(6))
+        lines = []
+        try:
+            for mod in exefs_mods.listing(exefs_mods.mods_root(folder), os.path.join(folder, ".hookshot_exefs")):
+                lines.append(mod["name"] + ("" if mod["on"] else "  (off)"))
+                for p in mod["patches"]:
+                    if not mod["on"]:
+                        state = "off (its folder's name starts with - or _)"
+                    elif p["state"] == "ok":
+                        state = "for %s: %d record(s), %d byte(s)%s" % (p["module"], p["records"], p["bytes"], " (%s)" % p["note"] if p["note"] else "")
+                    else:
+                        state = "REFUSED (the build stops until it is turned off): " + p["note"]
+                    lines.append("    %s: %s" % (p["file"], state))
+        except Exception as error:   # (a mods folder that cannot be read)
+            lines.append("The mods could not be listed: %s" % error)
+        if not lines:
+            lines.append("No mod with code patches (.ips or .pchtxt in its exefs folder) was found.")
+        box = tk.Text(f, height=min(12, len(lines) + 1), width=80, wrap="word", font=("TkDefaultFont", 9))
+        box.insert("1.0", "\n".join(lines))
+        box.configure(state="disabled")
+        box.pack(fill="x", pady=self.px(6))
+        on = tk.BooleanVar(value=exefs_mods.read_state(folder))
+        if rebuild:
+            ttk.Checkbutton(f, text="Apply the code mods of this folder when the game is built", variable=on).pack(anchor="w", pady=self.px(6))
+        ttk.Label(f, text=CODE_MODS_TIME, wraplength=wrap).pack(anchor="w", pady=self.px(6))
+        row = ttk.Frame(f)
+        row.pack(anchor="e", pady=self.px(6))
+
+        def go():
+            if messagebox.askyesno("HeyListen", ("The game will be rebuilt %s code mods. " % ("with" if on.get() else "without")) + CODE_MODS_TIME +
+                                   "\n\nContinue?", parent=win):
+                win.destroy()
+                self.pending_code_mods = "on" if on.get() else "off"
+                self.show_progress("Rebuilding with code mods" if on.get() else "Rebuilding without code mods")
+                self.start_make_update(folder)
+
+        if rebuild:
+            ttk.Button(row, text="Rebuild the game now", command=go).pack(side="right", padx=self.px(4))
+        ttk.Button(row, text="Close", command=win.destroy).pack(side="right", padx=self.px(4))
+        win.grab_set()
 
     def begin_update(self, folder=None):
         if folder is not None:
@@ -421,7 +498,11 @@ class Builder(tk.Tk):
             return
         cmd = [sys.executable, "-I", os.path.join(ROOT, "nx2", "make_game.py"), "--update", folder] + \
             ([] if self.prepare.get() else ["--no-prepare-shaders"])   # (as the last build chose)
-        self.heading.configure(text="Updating your game")
+        if self.pending_code_mods:   # (the launcher's Code mods window chose; otherwise make_game keeps what the folder's last build chose)
+            cmd += ["--code-mods", self.pending_code_mods]
+            self.pending_code_mods = None
+        else:
+            self.heading.configure(text="Updating your game")
         self.stage_text.set("Compiling what changed")
         self.started = time.time()
         self.proc = subprocess.Popen(cmd, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
@@ -465,11 +546,11 @@ class Builder(tk.Tk):
             return messagebox.showerror("HeyListen", str(error))
         code = next((c for c, n in make_game.LANGUAGES if n == self.language.get()), "en-US")
         self.cfg.update(kind=self.kind.get(), nup=self.nup.get(), romfs=self.romfs.get(), exefs=self.exefs.get(), out=out, language=code,
-                        prepare="1" if self.prepare.get() else "0")
+                        prepare="1" if self.prepare.get() else "0", code_mods="1" if self.code_mods.get() else "0")
         save_config(self.cfg)
         # (issue 531) Without HOOKSHOT_JOBS or RX_JOBS, make_game chooses as on Windows, from the memory free now; this window chose
         # fewer, 80% of the total memory at 3.5 GB each, and the CPU sat at 29%
-        cmd = [sys.executable, "-I", os.path.join(ROOT, "nx2", "make_game.py")] + src + ["--out", out, "--language", code] + \
+        cmd = [sys.executable, "-I", os.path.join(ROOT, "nx2", "make_game.py")] + src + ["--out", out, "--language", code, "--code-mods", "on" if self.code_mods.get() else "off"] + \
             ([] if jobs is None else ["--jobs", str(jobs)]) + ([] if self.prepare.get() else ["--no-prepare-shaders"])
         self.show_progress()
         self.started = time.time()

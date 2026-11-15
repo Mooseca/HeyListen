@@ -141,6 +141,7 @@ ARGS = {
     "tests/test_evict_reason.py": ["--cxx", "{cxx}"],
     "tests/test_tl_time_domain.py": ["--cxx", "{cxx}", "--headers", "{vulkan_headers}"],
     "tests/test_jt_mark_export.py": ["--cxx", "{cxx}"],
+    "tests/test_vcore_video_acquire.py": ["--cxx", "{cxx}"],
 }
 
 # Python packages some tests import (CI installs them; the runner itself needs none)

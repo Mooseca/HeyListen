@@ -182,14 +182,23 @@ def apply_text(s, want, steps=None):
     return s, status
 
 
-def apply(gen, host=HOST, quiet=False):
-    """Returns the number of gates wanted that are in place."""
+def apply(gen, host=HOST, quiet=False, skip=None):
+    """Returns the number of gates wanted that are in place. skip: {address: mod name} of functions an exeFS mod patches (the builder's
+    code mods): no gate and no step hook goes into those (the translated, patched body runs), and a gate already there is taken out;
+    the build log says so for each. The step hooks go in both or neither, so one patched step function leaves both out."""
+    skip = {a: m for a, m in (skip or {}).items()}
     want = wanted(host)
     asked = wanted_steps(host)
+    for addr in sorted(a for a in set(want) | set(asked) if a in skip):
+        print("hl_gates: f_%s NOT gated: an exeFS mod patches it (mods/%s)" % (addr, skip[addr]))
+    if any(a in skip for a in asked):
+        asked = {}
+    want = {a: h for a, h in want.items() if a not in skip}
     state_path = os.path.join(gen, "hl_gates.state")
     # (FORM: the gates' lines as this script writes them; a new form makes a gen folder stamped by the old one read again)
     state = FORM + "\n" + "\n".join("%s %s" % kv for kv in sorted(want.items())) + "\n" + \
-        "\n".join("step %s %s" % (a, v) for a, v in sorted(asked.items()))
+        "\n".join("step %s %s" % (a, v) for a, v in sorted(asked.items())) + \
+        "\n".join("skip %s %s" % kv for kv in sorted(skip.items()))
     files = sorted(glob.glob(os.path.join(gen, "code_*.c")))
     stamp = state + "\n" + "\n".join("%s %d %d" % (os.path.basename(p), os.path.getsize(p), os.stat(p).st_mtime_ns) for p in files)
     if os.path.isfile(state_path):   # (nothing asked for changed and no file was written since: nothing to read)
@@ -220,7 +229,7 @@ def apply(gen, host=HOST, quiet=False):
         out, status = apply_text(s, want, steps)
         for addr, st in status.items():
             found[addr] = st
-            if not quiet:
+            if not quiet or st.startswith("NOT gated"):   # (a gate left out is always said: a code mod changed that function's text)
                 print("hl_gates: f_%s in %s: %s" % (addr, os.path.basename(path), st))
         if out != s:
             with open(path, "w", encoding="utf-8", newline="") as f:

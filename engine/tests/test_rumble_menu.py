@@ -176,6 +176,8 @@ def option_ids():
     for first, start, rest in re.findall(r"enum \{ (HOS_OPT_\w+) = (\d+), ([^}]*)\}", api):
         names = [first] + [n.strip() for n in rest.split(",") if n.strip()]
         value.update({n: int(start) + i for i, n in enumerate(names)})
+    ours = read("gpu", "vk", "vk_opt_ids.h")   # (HeyListen's own ids: the Frame rate limit, off vk_api.h)
+    value.update({n: int(v) for n, v in re.findall(r"#define\s+(HL_OPT_\w+)\s+(\d+)", ours)})
     table = block(replay, replay.index("t.option = [](int id) -> int {"))
     ids = []
     for name in re.findall(r"\bid == (\w+)", table):
