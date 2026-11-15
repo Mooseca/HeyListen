@@ -3272,6 +3272,8 @@ void checkpoint_mark(VkCommandBuffer cmd, uint64_t key, char kind) {
     set_checkpoint(cmd, i, seq);
 }
 
+namespace { void buffer_markers_watch(); }
+
 void buffer_markers_init() {
     if (!vkCmdWriteBufferMarkerAMD) return;
     const VkDeviceSize size = 8ull << 16;
@@ -3310,6 +3312,7 @@ void buffer_markers_init() {
     marker_buffer = buffer;
     marker_words = (volatile uint32_t*)words;
     logf("vk: RX_VK_CHECKPOINTS: VK_AMD_buffer_marker, a marker before each draw and dispatch (memory type %u)", type);
+    buffer_markers_watch();
 }
 
 namespace {
@@ -3337,6 +3340,72 @@ void buffer_markers_report() {
     const uint32_t end = std::max(start, stuck.empty() ? start + 8 : std::min(stuck.front(), start + 16));
     for (uint32_t s = start; s && s <= end && s <= n; s++) line(s == last_done ? "RUNNING after" : "running", s);
     for (size_t j = 0; j < stuck.size() && j < 12; j++) line("reached, earlier work unfinished", stuck[j]);
+}
+
+/// (issue 14) The markers read while the GPU is stuck, not only once the device is lost. On a Steam Deck the ring timed out
+/// and the submission never came back (no VK_ERROR_DEVICE_LOST, so checkpoints_report never ran), though the markers sit
+/// in host memory the CPU can read at any time. A thread looks at them four times a second: when markers the GPU reached
+/// have work unfinished and no marker has finished for RX_VK_CHECKPOINTS_STALL_S seconds (default 2: under amdgpu's
+/// lockup timeout, so before the reset), buffer_markers_report is logged then, once a stall (three at most).
+/// RX_VK_CHECKPOINTS_STALL_S=0: no watch, the report at the loss alone as before
+struct MarkerScan {
+    uint32_t done = 0, last_done = 0, pending = 0, n = 0;   // (done: in the last 65535; pending: reached, earlier work unfinished)
+};
+MarkerScan marker_scan() {
+    MarkerScan m;
+    m.n = checkpoint_n.load();
+    const uint32_t first = m.n > 0xFFFF ? m.n - 0xFFFF : 1;
+    for (uint32_t s = first; s && s <= m.n; s++) {
+        const uint32_t i = (s - 1) & 0xFFFF;
+        const bool r = marker_words[2 * i] == s, d = marker_words[2 * i + 1] == s;
+        if (d) m.done++, m.last_done = s;
+        else if (r) m.pending++;
+    }
+    return m;
+}
+// (the watch's call on each look: true when the GPU has been stuck stall_s seconds, then not again until a marker finishes.
+// Progress is the GPU's alone: more markers finished, or a later one. The CPU recording more is not (it can go on a while
+// with the GPU stuck), and the markers it records push the oldest out of the 65535, so fewer finished is not either)
+struct MarkerStall {
+    double stall_s = 2.0, since = 0;
+    MarkerScan last;
+    bool told = false;
+    bool step(const MarkerScan& m, double now) {
+        const bool moved = m.done > last.done || m.last_done > last.last_done;
+        last = m;
+        if (moved || !m.pending) {   // (progress, or nothing under way: the clock starts again)
+            since = now, told = false;
+            return false;
+        }
+        if (told || now - since < stall_s) return false;
+        return told = true;
+    }
+};
+double marker_stall_seconds() {
+    const char* e = getenv("RX_VK_CHECKPOINTS_STALL_S");
+    return e ? atof(e) : 2.0;
+}
+void buffer_markers_watch() {
+    const double stall_s = marker_stall_seconds();
+    if (!(stall_s > 0) || !marker_words) return;
+    logf("vk: RX_VK_CHECKPOINTS: the markers are logged too when the GPU finishes none for %.1f s (RX_VK_CHECKPOINTS_STALL_S)",
+         stall_s);
+    std::thread([stall_s] {
+        SetThreadDescription(GetCurrentThread(), L"mkw_vk marker watch");
+        MarkerStall w;
+        w.stall_s = stall_s;
+        const auto t0 = std::chrono::steady_clock::now();
+        for (int reports = 0; reports < 3;) {
+            Sleep(250);
+            const MarkerScan m = marker_scan();
+            const double now = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+            if (!w.step(m, now)) continue;
+            reports++;
+            logf("vk: GPU stalled: no marker finished for %.1f s, %u reached with earlier work unfinished (the markers now, "
+                 "before a reset)", now - w.since, m.pending);
+            buffer_markers_report();
+        }
+    }).detach();
 }
 } // namespace
 

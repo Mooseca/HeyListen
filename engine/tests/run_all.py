@@ -43,6 +43,7 @@ ARGS = {
     "tests/test_readback_ticket.py": ["--cxx", "{cxx}"],
     "tests/test_capture_claim.py": ["--cxx", "{cxx}"],
     "tests/test_pcie_link.py": ["--cxx", "{cxx}"],
+    "tests/test_sparse_queue.py": ["--cxx", "{cxx}"],
     "tests/test_shadow_fast.py": ["--cxx", "{cxx}"],
     "tests/test_collect_fast.py": ["--cc", "{cxx}"],
     "tests/test_late_fix_order.py": ["--cxx", "{cxx}"],
@@ -94,6 +95,7 @@ ARGS = {
     "tests/test_stick_dead_zone.py": ["--cc", "gcc", "--cxx", "g++"],
     "tests/test_menu_restart.py": ["--cxx", "g++", "--cc", "gcc"],
     "tests/test_output_resolution.py": ["--cxx", "{cxx}"],
+    "tests/test_marker_stall.py": ["--cxx", "{cxx}"],
     "tests/test_widescreen_shapes.py": ["--cc", "gcc"],
     "tests/test_nvn_buffer_map.py": ["--cc", "gcc"],
     "tests/test_nvn_host_tables.py": ["--cc", "gcc"],
@@ -137,6 +139,8 @@ ARGS = {
     "tests/test_astc_bc_policy.py": ["--cxx", "g++"],
     "tests/test_drawn_page_map.py": ["--cxx", "{cxx}"],
     "tests/test_evict_reason.py": ["--cxx", "{cxx}"],
+    "tests/test_tl_time_domain.py": ["--cxx", "{cxx}", "--headers", "{vulkan_headers}"],
+    "tests/test_jt_mark_export.py": ["--cxx", "{cxx}"],
 }
 
 # Python packages some tests import (CI installs them; the runner itself needs none)
@@ -162,6 +166,7 @@ SKIP = {
     "tests/test_linux_update.py": ({"windows"}, "the Linux builder's update and folder launcher, POSIX files and shell scripts"),
     "tests/test_oot_saves.py": ({"windows"}, "the save script's folder discovery is the Linux one (on Windows Hookshot's saves are in the game folder: --hookshot)"),
     "tests/test_linux_driver_fault_guard.py": ({"windows"}, "POSIX signals: the Linux guard"),
+    "tests/test_jt_mark_export.py": ({"windows"}, "the Linux exe's dynamic exports (on Windows the mark is a DLL export)"),
 }
 # (spirv-val: SPIRV-Tools comes with the Linux runner's packages, not on Windows)
 for _name in ("nx2/test_texture_phi_dominance.py", "nx2/test_unsigned_image_types.py", "nx2/test_depth_sample_types.py", "nx2/test_default_point_size.py", "nx2/test_draw_parameters.py", "nx2/test_coop_spirv.py",

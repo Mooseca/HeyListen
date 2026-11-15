@@ -91,6 +91,10 @@ struct Device {
     std::mutex present_queue_mu;
     uint32_t present_family = 0;   // (present_queue's family, the swapchain's images shared with it)
     VkQueue probe_queue = VK_NULL_HANDLE;   // (stream R2, RX_VK_TL_PROBE=2: a second queue of the replay's family, for the timeline's probes)
+    // (Linux, issue 14; RX_VK_SPARSE_QUEUE=1) a queue of another family for the sparse binds of a pool made of several dma-bufs
+    // (vk_memory.cpp import_dma_buf_pieces, the only user, under its own lock). VK_NULL_HANDLE: they go on `queue`
+    VkQueue sparse_queue = VK_NULL_HANDLE;
+    uint32_t sparse_family = UINT32_MAX;
 };
 extern Device dev;
 

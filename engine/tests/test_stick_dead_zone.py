@@ -127,6 +127,7 @@ int main(void) {
 enum MenuTab { TAB_CONTROLS };
 struct Options { int output_res = 0, resolution = 0, upscale = 0, dlss = 0, stick_dead_zone = 0; } opts;
 static int output_choice(int v) { return v; }
+static int output_choice_text(const char* s) { return output_choice(atoi(s)); }   // (vk_menu.cpp: also the sizes written out)
 ''' + block(menu, "struct Row {") + ";\n" + block(menu, "const char* tx_stick_dead_zone(") + "\n" + \
         "Row rows[] = {" + row.group(0) + "};\n" + block(menu, "const char* ini_key(") + r'''
 static int parse(const char* text) {

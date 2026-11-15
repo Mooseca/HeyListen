@@ -18,6 +18,7 @@ def main():
     fixture = r'''
 #include <algorithm>
 #include <cassert>
+#include <cstdarg>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -27,7 +28,7 @@ def main():
 using DWORD = unsigned long;
 constexpr int MAX_PATH = 260;
 DWORD hos_game_path_a(char *path, int size) { return snprintf(path, size, "./hookshot.exe"); }
-void hos_log(const char *, ...) {}
+void hos_log(const char *f, ...) { va_list a; va_start(a, f); vprintf(f, a); va_end(a); printf("\n"); }   // (the case's output: the warning)
 volatile uint64_t hos_wide_out = 0;   // (host/hos_main.c: the widescreen picture, 0 = none; nn_applet.c reads it)
 struct { int handheld, output_res; } opts;
 namespace mkwvk {
@@ -49,6 +50,9 @@ int main(int argc, char **argv) {
     assert(hos_rt_pool_size(305ull << 20) == ((mode == 2 ? 687ull : mode == 4 ? 610ull : 512ull) << 20));   // (512 MB at least: nn_applet.c)
     assert(kLastOutput == 4);
     assert(output_choice(-1) == 0 && output_choice(4) == 4 && output_choice(5) == 0);
+    // (issue 14: the sizes written out, as the menu reads the options file; any other size the game's)
+    assert(output_choice_text("1920x1080\n") == 3 && output_choice_text(" 5120x1440") == 4 && output_choice_text("2") == 2);
+    assert(output_choice_text("1280x800") == 0 && output_choice_text("1280") == 0 && output_choice_text("9") == 0);
     assert(step_output_choice(3, -1) == 3);
     assert(step_output_choice(3, 1) == 0 && step_output_choice(0, -1) == 3);
     assert(step_output_choice(0, 1) == 1 && step_output_choice(1, -1) == 0);
@@ -87,6 +91,10 @@ int main(int argc, char **argv) {
         (4, 1, None, 0, 2560, 1440, "2048x1152 (game's)"),
         (5, 0, None, 0, 2560, 1440, "2048x1152 (game's)"),
         (4, 0, None, 4, 5120, 1440, "5120x1440"),
+        ("1920x1080", 0, None, 3, 1920, 1080, "1920x1080"),   # (issue 14: a size written out)
+        (0, 0, "3840x2160", 2, 3840, 2160, "3840x2160"),
+        ("1280x800", 0, None, 0, 2560, 1440, "2048x1152 (game's)"),   # (not one of them: the game's, and said so)
+        (0, 0, "1280x800", 0, 2560, 1440, "2048x1152 (game's)"),
     )
     with tempfile.TemporaryDirectory(prefix="output-resolution-") as tmp:
         work = Path(tmp)
@@ -100,8 +108,14 @@ int main(int argc, char **argv) {
                 env.pop(key, None)
             if override is not None:
                 env["HOS_OUTPUT_RES"] = override
-            subprocess.run([str(exe), str(mode), str(w), str(h), label], cwd=work, env=env, check=True)
-    print("PASS: output sizes, menu order, 1080p override, handheld, render-target budgets and DLSS sizes at 1080p, and 5120x1440")
+            out = subprocess.run([str(exe), str(mode), str(w), str(h), label], cwd=work, env=env, check=True,
+                                 capture_output=True, text=True).stdout
+            unknown = str(saved if override is None else override) in ("5", "1280x800")   # (the values read that are none of them)
+            assert ("is not one of the output resolutions" in out) == unknown, (saved, override, out)
+            if unknown:
+                assert (f"HOS_OUTPUT_RES={override}" if override else f"output_res={saved}") in out, out
+    print("PASS: output sizes, menu order, 1080p override, handheld, render-target budgets and DLSS sizes at 1080p, 5120x1440, "
+          "and sizes written out (an unknown one logged)")
 
 
 if __name__ == "__main__":

@@ -35,6 +35,7 @@
 #include "vk_lag.h"       // (RX_VK_LAG_LOG)
 #include "vk_gprof.h"      // (RX_VK_PASS_TIMING)
 #include "import_hold.h"
+#include "sparse_queue.h"    // (Linux, issue 14: the pools' sparse binds, udmabuf's limit)
 #include "capture_merge.h"    // (TICK-043: the capture copied ahead)
 #include "mirror_inherit.h"   // (TICK-036 / #1127: what a new mirror takes from the retired pools' mirrors)
 #include "msync_diff.h"       // (TICK-048: the mirror syncs' diff)
@@ -251,6 +252,9 @@ bool import_dma_buf_pieces(uint64_t lo, uint64_t hi, uint64_t piece, Pool& p) {
     }
     std::vector<VkDeviceMemory> memories;
     std::vector<VkSparseMemoryBind> binds;
+    using clk = std::chrono::steady_clock;   // (where the import's time goes, logged below: issue 14's 975 ms was the fence wait)
+    const clk::time_point t0 = clk::now();
+    clk::time_point t1 = t0, t2 = t0;
     for (uint64_t off = 0; off < req.size; off += piece) {
         const uint64_t n = std::min(piece, req.size - off);
         const VkDeviceMemory m = dma_buf_memory(lo + off, n);
@@ -259,6 +263,7 @@ bool import_dma_buf_pieces(uint64_t lo, uint64_t hi, uint64_t piece, Pool& p) {
         binds.push_back({off, n, m, 0, 0});
     }
     VkResult res = VK_ERROR_UNKNOWN;
+    t1 = clk::now();
     if (binds.size() == (req.size + piece - 1) / piece) {
         VkSparseBufferMemoryBindInfo bb{buffer, (uint32_t)binds.size(), binds.data()};
         VkBindSparseInfo si{VK_STRUCTURE_TYPE_BIND_SPARSE_INFO};
@@ -271,7 +276,13 @@ bool import_dma_buf_pieces(uint64_t lo, uint64_t hi, uint64_t piece, Pool& p) {
             VkFenceCreateInfo fi{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
             vkCreateFence(dev.device, &fi, nullptr, &fence);
         }
-        {   // (on the queue, as the sparse textures' binds: nothing uses the new buffer yet, so no wait for earlier work)
+        if (dev.sparse_queue) {   // (RX_VK_SPARSE_QUEUE=1, sparse_queue.h: a queue nothing else uses, under fence_mu, so the fence
+            // waits for these binds alone, not for the frames queued on the replay's. The buffer is used only after the wait)
+            vk_tl_note("bind-sparse-pool+");
+            res = vkQueueBindSparse(dev.sparse_queue, 1, &si, fence);
+            vk_tl_note("bind-sparse-pool-");
+        } else {   // (on the queue, as the sparse textures' binds: nothing uses the new buffer yet, so no wait for earlier work.
+            // But the fence signals after all the queue's earlier work: the wait below is for the frames queued, issue 14)
             late_fix_wait_unlocked();   // (TICK-060m: a pending late fix waited for outside the queue's lock, as the other senders)
             std::lock_guard qk(dev.present_mu);
             queue_flush_locked();
@@ -279,10 +290,20 @@ bool import_dma_buf_pieces(uint64_t lo, uint64_t hi, uint64_t piece, Pool& p) {
             res = vkQueueBindSparse(dev.queue, 1, &si, fence);
             vk_tl_note("bind-sparse-pool-");
         }
+        t2 = clk::now();
         if (res == VK_SUCCESS) {
             res = vkWaitForFences(dev.device, 1, &fence, VK_TRUE, UINT64_MAX);
             vkResetFences(dev.device, 1, &fence);
         }
+    }
+    {
+        const clk::time_point t3 = clk::now();
+        auto ms = [](clk::time_point a, clk::time_point b) { return std::chrono::duration<double, std::milli>(b - a).count(); };
+        static int logged;
+        if (logged++ < 16)
+            logf("vk: pool %#llx..%#llx: %zu dma-bufs bound in %.1f ms (udmabuf and imports %.1f, the bind %.1f, its fence %.1f) on %s",
+                 (unsigned long long)lo, (unsigned long long)hi, memories.size(), ms(t0, t3), ms(t0, t1), ms(t1, t2), ms(t2, t3),
+                 dev.sparse_queue ? "a queue of its own" : "the replay's queue");
     }
     if (res != VK_SUCCESS) {
         vkDestroyBuffer(dev.device, buffer, nullptr);
@@ -339,6 +360,13 @@ bool import_dma_buf(uint64_t lo, uint64_t hi, Pool& p) {
             logf("vk: dma-bufs of at most %llu MB (udmabuf's limit %llu MB); larger pools %s", (unsigned long long)(piece >> 20),
                  (unsigned long long)(dmabuf_limit >> 20),
                  dev.sparse_buffers ? "are several, in a sparse buffer" : "are host-pointer imports (no sparse binding)");
+        // (issue 14: the kernel's default is 64 MB, and a pool in pieces can hold up the frame that first uses it, ~1 s on a
+        // Steam Deck, while its binds wait for the GPU. With the limit at 1 GB or more every pool is one dma-buf: no binds)
+        if (dmabuf_memfd >= 0 && sparse_queue::limit_hint(dmabuf_limit))
+            logf("vk: hint: udmabuf's limit is %llu MB. Raising it can avoid hitches when a large memory pool is first used: "
+                 "echo 1024 | sudo tee /sys/module/udmabuf/parameters/size_limit_mb (until a reboot), or a line "
+                 "'options udmabuf size_limit_mb=1024' in /etc/modprobe.d/udmabuf.conf (docs/USER_GUIDE.md, Linux)",
+                 (unsigned long long)(dmabuf_limit >> 20));
     }
     if (dmabuf_memfd < 0 || (lo & 4095) || (hi & 4095)) return false;
     if (hi - lo > piece) {

@@ -11,8 +11,16 @@ Runs one build, collects per-frame present intervals, writes `<dir>/bench.json`
 (plus the raw `present_trace.csv` / `presentmon.csv` and `game_log.txt`).
 Exit code 0 when frames were recorded, 2 when none were.
 
-On Linux, `--exe` is the game folder's `hookshot`; the saves the run guards (copied before, put back after) are
-`$XDG_DATA_HOME/hookshot/save` (`~/.local/share/hookshot/save`), and the running check uses `pgrep -x`.
+On Linux, `--exe` is the game folder's `hookshot`, and the running check uses `pgrep -x`. The run guards (copies
+into `<dir>/save-guard/<n>` before, puts back after) every save folder the game may write that exists: `user/save`
+beside the exe (and one folder up), and on Linux the game's data folder, `$XDG_DATA_HOME/heylisten/save` (when
+`XDG_DATA_HOME` is an absolute path, as `engine/host/hos_main.c` reads it; else `~/.local/share/heylisten/save`), and
+`.../hookshot/save`, where builds before the HeyListen names saved. `<dir>/save-guard/<n>.txt` names each copy's folder.
+`BENCH_KEEP_GAME_SAVES=1` turns the guard off.
+
+On Linux each run also records the machine (`environment` in bench.json) and, with an amdgpu card, the GPU's busy share
+(`gpu_busy`, and every sample in `gpu_busy.csv`): see bench.json below. `summarize.py` prints them as a second table
+when a directory has them.
 
 `--repeat N` (TICK-009) runs N launches back to back into `<dir>/run1` .. `run<N>`
 (each with its own watchdog, the game killed before the next one starts) and writes
@@ -134,11 +142,11 @@ membership for ETW. The scene is not controllable: Lichii has no input script, s
 `--scene` is only a label and the user positions the game; this is a gap. These are
 PresentMon's present intervals on the host swap chain, not guest (Switch) frames.
 
-## bench.json (schema_version 3)
+## bench.json (schema_version 4)
 
 | key | type | meaning |
 |---|---|---|
-| schema_version | int | 3 (TICK-013: low fps and budget shares added). 2 = launch-based warm-up, 1 = warm-up counted from the first present; both still read |
+| schema_version | int | 4 (environment and gpu_busy added). 3 = low fps and budget shares (TICK-013), 2 = launch-based warm-up, 1 = warm-up counted from the first present; all still read |
 | build | "hookshot"/"lichii" | |
 | exe, scene | string | inputs |
 | source | "hos_present_trace"/"presentmon" | where frame times came from |
@@ -156,6 +164,8 @@ PresentMon's present intervals on the host swap chain, not guest (Switch) frames
 | fps_1pct_low, fps_0_1pct_low | number | schema 3: 1000 / mean of the slowest 1% / 0.1% frames (see Summary metrics) |
 | over_8_33_ms_pct, over_6_94_ms_pct, over_16_7_ms_pct | number | schema 3: % of frames above 8.33 / 6.94 / 16.7 ms |
 | log_window_fps | [number] | Hookshot only, see above |
+| environment | object/null | schema 4, Linux (null elsewhere), read before the launch: `cpu_governor` (the CPUs' `scaling_governor`s, comma-separated when they differ), `thp_enabled` and `thp_shmem_enabled` (the chosen word of `/sys/kernel/mm/transparent_hugepage/enabled` and `shmem_enabled`), `udmabuf_size_limit_mb` (`/sys/module/udmabuf/parameters/size_limit_mb`, null when udmabuf is not loaded), `loadavg_start` (`/proc/loadavg`'s three), `kernel`, `mesa` (the drivers' `driverInfo` from `vulkaninfo --summary`, null without it). A field that cannot be read is null |
+| gpu_busy | object/null | schema 4, Linux with an amdgpu card (null otherwise; there is no NVIDIA reader): `source`, `from_s_after_launch` (the warm-up: samples before it are left out) and per card `pci`, `samples`, `mean_pct`, `p50_pct`, `p95_pct` of `/sys/class/drm/card<N>/device/gpu_busy_percent`, read every 0.2 s |
 | warnings | [string] | caveats of this run |
 
 ## Tests
@@ -163,4 +173,6 @@ PresentMon's present intervals on the host swap chain, not guest (Switch) frames
 `python -m pytest -q tools/bench` - parsers on sample files in `testdata/`, the warm-up and
 launch-offset logic, the fps spread, `summarize.py` on synthetic directories, the
 watchdog, the 1% / 0.1% low fps and the 120 / 144 / 60 Hz budget shares on synthetic traces,
-and end-to-end runs (`--repeat 2` included) against a fake game process. No real game is started.
+the save folders guarded and put back, the Linux environment and GPU busy readers on a fake sysfs,
+and end-to-end runs (`--repeat 2` included) against a fake game process. No real game is started, and the tests use a
+data folder of their own (`XDG_DATA_HOME`), never the user's saves.

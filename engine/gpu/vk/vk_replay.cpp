@@ -12,6 +12,9 @@
 // RX_VK_SHOT_EVERY-th one (default 300) there as a PNG.
 #include <algorithm>
 #include <sys/stat.h>
+#ifndef _WIN32
+#include <dlfcn.h>   // (jt_mark: hos_jt_mark_ext, looked up in the exe)
+#endif
 #include <atomic>
 #include <chrono>
 #include <cerrno>
@@ -52,6 +55,7 @@
 #include "vk_present_trace.h"
 
 #include "vk_internal.h"
+#include "vk_tl_clock.h"   // (RX_VK_TL: the timeline's host time domain)
 #include "vk_lag.h"   // (RX_VK_LAG_LOG)
 #include "readback_late.h"   // (RX_VK_READBACK_LATE)
 #include "vk_work.h"   // (after the others: counts the commands that do GPU work, for full_barrier)
@@ -69,7 +73,9 @@ void jt_mark(int kind, uint64_t v) {
         reinterpret_cast<void (*)(int, uint64_t)>(reinterpret_cast<void*>(GetProcAddress(GetModuleHandleW(nullptr), "hos_jt_mark_ext")));
     if (fn) fn(kind, v);
 #else
-    (void)kind, (void)v;
+    // (Linux: the exe exports it by name, nx2/build.py's --export-dynamic-symbol list; GetModuleHandle(nullptr) is no handle there)
+    static void (*const fn)(int, uint64_t) = reinterpret_cast<void (*)(int, uint64_t)>(dlsym(RTLD_DEFAULT, "hos_jt_mark_ext"));
+    if (fn) fn(kind, v);
 #endif
 }
 extern std::atomic<bool> movie_networks_slow;   // (vk_draw.cpp: the movie networks left out, issue 109)
@@ -323,20 +329,31 @@ bool batch_on() {
 // and a read in the gap took the light meter's sums from an earlier submission: OoT's auto-exposure jumped, the whole picture
 // 8-15% brighter for ~16 frames (an RX 9070 XT in Kokiri: up to 99 pulses in 2 minutes with the CPU busy, 0 with the wait,
 // at no measurable cost). On NVIDIA's driver the pulses were not seen and the wait cost ~18% (an RTX 5070 in Kokiri, pull
-// request 6). So on by default with RADV only; RX_VK_READBACK_STRICT=0 / 1: off / on on any driver
-bool readback_strict_on() {
-    static const bool on = [] {
+// request 6). So on by default with RADV only; RX_VK_READBACK_STRICT=0 / 1: off / on on any driver.
+// RX_VK_READBACK_STRICT=<hex size>[,<hex size>...] (any value but 0 and 1): only the ranges of exactly those sizes wait, the
+// others as with 0. The light meter's are 1040 and c0 (stream R2: 0x1040 x3 and 0xc0 a frame, from the ring helper f_80357060);
+// a stale meter is the pulse, the other rings (0x2000, 0x40) read a frame late gave a right picture (RX_VK_READBACK_LATE)
+bool readback_strict_wanted(uint64_t size) {
+    struct Strict { bool all = false; readback_late::Rules sizes; };
+    static const Strict s = [] {
         bool radv = false;
         VkPhysicalDeviceDriverProperties dp{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES};
         VkPhysicalDeviceProperties2 p2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
         p2.pNext = &dp;
         if (dev.physical) vkGetPhysicalDeviceProperties2(dev.physical, &p2), radv = dp.driverID == VK_DRIVER_ID_MESA_RADV;
         const char* e = getenv("RX_VK_READBACK_STRICT");
-        const bool v = e ? atoi(e) != 0 : radv;
-        logf("vk: readback waits for the write-back %s (RX_VK_READBACK_STRICT%s)", v ? "on" : "off", !e && radv ? ", on with RADV" : "");
-        return v;
+        Strict r;
+        if (e && strcmp(e, "0") && strcmp(e, "1")) {
+            r.sizes = readback_late::parse(e);
+            r.sizes.newest = false;   // (sizes only)
+            logf("vk: readback waits for the write-back for %d sizes (RX_VK_READBACK_STRICT=%s)", (int)r.sizes.sizes.size(), e);
+        } else {
+            r.all = e ? atoi(e) != 0 : radv;
+            logf("vk: readback waits for the write-back %s (RX_VK_READBACK_STRICT%s)", r.all ? "on" : "off", !e && radv ? ", on with RADV" : "");
+        }
+        return r;
     }();
-    return on;
+    return s.all || readback_late::wanted(s.sizes, size, false);
 }
 // (TICK-060, RX_VK_LATE_DEFER) the highest timeline value a submit sent to the queue signals: a capture's late value at or below it
 // is reached with nothing more submitted, so its wait can move to the queue (vk_memory.cpp take_capture)
@@ -870,7 +887,7 @@ void tl_gpu_dump(int64_t t0_ns) {
     static PFN_vkGetCalibratedTimestampsEXT get = (PFN_vkGetCalibratedTimestampsEXT)vkGetDeviceProcAddr(dev.device, "vkGetCalibratedTimestampsEXT");
     if (!dev.calibrated_ts || !get) return;
     VkCalibratedTimestampInfoEXT info[2]{{VK_STRUCTURE_TYPE_CALIBRATED_TIMESTAMP_INFO_EXT, nullptr, VK_TIME_DOMAIN_DEVICE_EXT},
-                                         {VK_STRUCTURE_TYPE_CALIBRATED_TIMESTAMP_INFO_EXT, nullptr, VK_TIME_DOMAIN_QUERY_PERFORMANCE_COUNTER_EXT}};
+                                         {VK_STRUCTURE_TYPE_CALIBRATED_TIMESTAMP_INFO_EXT, nullptr, tl_host_time_domain()}};   // (QPC; Linux: CLOCK_MONOTONIC, vk_tl_clock.h)
     uint64_t stamp[2] = {0, 0}, dev_dev = 0;
     LARGE_INTEGER freq, qpc;
     QueryPerformanceFrequency(&freq);
@@ -4259,9 +4276,8 @@ void invalidate(uint64_t gpu, uint64_t size) {
                 } else
                     rbs.mark(2);
                 // (sprint 5, RX_VK_READBACK_STRICT: the value itself reached on the GPU's timeline before the CPU reads)
-                static const bool strict = readback_strict_on();
                 static std::atomic<int64_t> st_strict{0};
-                if (strict && v > completed()) {
+                if (readback_strict_wanted(size) && v > completed()) {
                     wait_value(v);
                     rbs.mark(4);
                     if (st_strict.fetch_add(1) % 500 == 0) logf("vk: readback strict: %lld waits for the value past the recordings' timeline", (long long)st_strict.load());

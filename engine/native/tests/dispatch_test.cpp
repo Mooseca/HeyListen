@@ -37,6 +37,8 @@ constexpr GuestAddr kSched = kBase + 0x1000, kList = kBase + 0x2000, kContexts =
 // A second scheduler, its list, contexts, lane word, queues and cells, this far above the first's.
 constexpr GuestAddr kSecond = 0x500000;
 constexpr int kContextsMax = 6;
+constexpr GuestAddr kQueueBytes = 0x1400;   // (a context's handed queue: 640 jobs)
+static_assert(kQueues + kContextsMax * kQueueBytes <= kCells);
 
 struct Thread {   // a guest thread: its lane (its context's) and its stack
     int lane;
@@ -189,11 +191,13 @@ struct Model final : bridge::GuestRuntime {
                 std::mutex& m = mutex_of(ctx + offsetof(g::DispatchContext, mutex));
                 std::lock_guard lock(m);
                 if (__atomic_load_n(&c->state, __ATOMIC_SEQ_CST) < 2) continue;
-                if (c->queue_count < c->queue_room) {
-                    const int32_t i = c->queue_first + c->queue_count;
-                    at<GuestAddr>(c->queue)[i - (i < c->queue_room ? 0 : c->queue_room)] = job;
-                    c->queue_count++;
-                }
+                // (the guest drops the job when the queue is full, and a dropped job never runs: the stage would never
+                // end and every context would sleep for good. The queues have room for every job of a stage, so a full
+                // one is the model's mistake, said at once instead of a hang)
+                CHECK(c->queue_count < c->queue_room);
+                const int32_t i = c->queue_first + c->queue_count;
+                at<GuestAddr>(c->queue)[i - (i < c->queue_room ? 0 : c->queue_room)] = job;
+                c->queue_count++;
                 return;
             }
             if (__atomic_compare_exchange_n(&c->state, &v, job, false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST)) {
@@ -232,8 +236,11 @@ struct Setup {
             g::DispatchContext* c = m.at<g::DispatchContext>(ctx);
             c->lane = i + 1;
             c->lane_status = kLaneWord + off;
-            c->queue = kQueues + off + (GuestAddr)i * 0x100;
-            c->queue_room = 16;
+            // (room for every job of a stage of six_contexts_and_two_pushers, 640 against its 600: with 16, a context held
+            // up in a slow body while the others forwarded it its lane's jobs filled its queue, a job was dropped and the
+            // stage never ended: about one run in thirty hung on a 12-core PC, and CI's test_native_engine timed out)
+            c->queue = kQueues + off + (GuestAddr)i * kQueueBytes;
+            c->queue_room = (int32_t)(kQueueBytes / 8);
         }
         for (int i = 0; i < kContextsMax + 2; i++) threads[i] = {i + 1, kStacks + (GuestAddr)(i + 1) * 0x10000};
     }
@@ -439,6 +446,7 @@ void six_contexts_and_two_pushers() {
     Model m;
     m.slow_bodies = true;
     constexpr int kJobsPerStage = 600;
+    static_assert(kJobsPerStage <= (int)(kQueueBytes / 8));   // (no forward can find its context's queue full)
     Setup su(m, kContextsMax, 64, 256);
     bridge::Dispatcher d(m, {.native = true, .check = true});
     std::mt19937 rng(12345);

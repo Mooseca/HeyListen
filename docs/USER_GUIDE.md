@@ -98,6 +98,12 @@ on CachyOS with a Radeon RX 9070 XT (Mesa's RADV driver). Expect problems and re
   slower way (3 to 8 fps in Kokiri Forest on the Radeon above). Some distributions give that device to the logged-in user,
   others only to the `kvm` group: `sudo usermod -aG kvm $USER`, then log out and back in. If the device does not exist,
   load its kernel module: `sudo modprobe udmabuf`.
+- **A long hitch (up to a second) the first time an area is used**, with `vk: hint: udmabuf's limit is 64 MB` in the log:
+  the kernel lets `/dev/udmabuf` share at most 64 MB at once by default, so the game builds its larger memory blocks from
+  several pieces, and that can hold up a frame. Raise the limit until the next reboot with
+  `echo 1024 | sudo tee /sys/module/udmabuf/parameters/size_limit_mb` before you start the game, or for good with a file
+  `/etc/modprobe.d/udmabuf.conf` holding the line `options udmabuf size_limit_mb=1024` (then reboot). The log then says
+  `dma-bufs of at most 1024 MB`.
 - **Stutter**: programs that use a lot of CPU or GPU while you play (a local AI model, a big compile) make the game
   stutter much more than on a quiet PC.
 - **Building it yourself** instead of using the AppImage: `engine/CONTRIBUTING.md` (Linux) has the tools to install

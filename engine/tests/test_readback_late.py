@@ -69,6 +69,15 @@ def main():
     i_wait = inv.index("if (pend && !late) {")
     assert i_val < i_late < i_wait, "the rules are asked before the write-back's value is known, or after the wait"
     assert "const bool pend = v > completed();" in inv and "pend && readback_late_wanted" in inv, "a range that is not pending is asked"
+    # RX_VK_READBACK_STRICT: 0 / 1 / the driver's default as before, any other value a list of the sizes that wait (the light
+    # meter's: 1040,c0); the strict wait is asked by size, inside the pending range's wait
+    strict = function(rp, "bool readback_strict_wanted(uint64_t size) {")
+    assert 'getenv("RX_VK_READBACK_STRICT")' in strict and 'strcmp(e, "0") && strcmp(e, "1")' in strict, \
+        "0 and 1 are not kept apart from a list of sizes"
+    assert "readback_late::parse(e)" in strict and "r.sizes.newest = false" in strict, "the sizes are not parsed as sizes only"
+    assert "VK_DRIVER_ID_MESA_RADV" in strict, "the default is no longer RADV's"
+    i_strict = inv.index("readback_strict_wanted(size) && v > completed()")
+    assert i_wait < i_strict, "the strict wait is asked outside the pending range's wait"
     print("PASS the wiring")
 
 

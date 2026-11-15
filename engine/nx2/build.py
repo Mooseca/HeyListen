@@ -1048,9 +1048,11 @@ def main():
     if a.standalone and not a.only and not vk_only and LINUX:
         exe = os.path.join(out, EXE)   # (+ hookshot.map: crash offsets -> f_<guest address>)
         t = time.time()
-        # (--export-dynamic-symbol: the window's state, which the Vulkan back end's own Win32 calls read by name)
+        # (--export-dynamic-symbol: the window's state, which the Vulkan back end's own Win32 calls read by name, and the
+        # frame-timeline marks the renderer looks up, hos_jt_mark_ext: HOS_JOBTRACE, vk_replay.cpp jt_mark)
         r = subprocess.run([cc] + target() + ["-fuse-ld=lld", "-o", exe, "-Wl,-Map=" + exe + ".map", "-Wl,--gc-sections",
-                                              "-Wl,--export-dynamic-symbol=hos_posix_*", "@" + rsp] + HOT_ORDER() +
+                                              "-Wl,--export-dynamic-symbol=hos_posix_*", "-Wl,--export-dynamic-symbol=hos_jt_mark_ext",
+                                              "@" + rsp] + HOT_ORDER() +
                            (["-fprofile-instr-generate"] if PGO == "gen" else []) +
                            (FFMPEG_LX[1] if FFMPEG_LX else []) + HOST_LIBS + ["-lstdc++"],   # (engine/native's C++)
                            capture_output=True, text=True)

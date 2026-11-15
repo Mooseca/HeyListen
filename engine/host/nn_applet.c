@@ -87,20 +87,30 @@ HLE(_ZN2nn2oe18GetDesiredLanguageEv) {
    (MKW docked composes 3840 x 2160) */
 int hos_ini_option(const char *key, int otherwise);
 #define ini_option hos_ini_option
-int hos_ini_option(const char *key, int otherwise) {   /* (hookshot: the Insert menu's choice, gpu/vk/vk_menu.cpp; nn_vi.c reads it too) */
+/* (the options file's value for key, its last line, as text: 0 when it has none) */
+static int ini_text(const char *key, char *out, size_t size) {
     char path[MAX_PATH];
     const DWORD n = hos_game_path_a(path, MAX_PATH);
     char *slash = n ? (strrchr(path, 92) ? strrchr(path, 92) : strrchr(path, 47)) : NULL;   /* (linux: '/'; the game folder's, not bin\\'s) */
-    if (!slash) return otherwise;
+    if (!slash) return 0;
     snprintf(slash + 1, (size_t)(path + MAX_PATH - slash - 1), "hookshot_options.ini");
     FILE *f = fopen(path, "r");
-    if (!f) return otherwise;
+    if (!f) return 0;
     char line[80];
     const size_t len = strlen(key);
+    int found = 0;
     while (fgets(line, sizeof line, f))
-        if (!strncmp(line, key, len) && line[len] == '=') otherwise = atoi(line + len + 1);
+        if (!strncmp(line, key, len) && line[len] == '=') {
+            snprintf(out, size, "%s", line + len + 1);
+            found = 1;
+        }
     fclose(f);
-    return otherwise;
+    for (size_t k = found ? strlen(out) : 0; k && (out[k - 1] == '\n' || out[k - 1] == '\r'); k--) out[k - 1] = 0;
+    return found;
+}
+int hos_ini_option(const char *key, int otherwise) {   /* (hookshot: the Insert menu's choice, gpu/vk/vk_menu.cpp; nn_vi.c reads it too) */
+    char value[80];
+    return ini_text(key, value, sizeof value) ? atoi(value) : otherwise;
 }
 static int handheld(void) {
     static int v = -1;
@@ -111,12 +121,33 @@ static int handheld(void) {
    1 2560 x 1440, 2 3840 x 2160, 3 1920 x 1080, 4 5120 x 1440. The game's frame is its display size (2560 x 1440 as shipped;
    nx2/oot_patches.py apply_output_size asks hos_output_size) times its graphics scale (GetCurrentGraphicsScale: 0 x1, 1 x0.8,
    2 x0.667). Here it saw scale 1 (x0 left at the call before's answer), so 2048 x 1152; each explicit size uses x1. */
+/* (issue 14) An output_res= / HOS_OUTPUT_RES value: its number, 0-4, or that size written out (1920x1080); -1 for anything
+   else. gpu/vk/vk_menu.cpp output_choice_text reads the options file the same way */
+static int output_res_value(const char *s) {
+    static const unsigned sizes[][2] = {{2048, 1152}, {2560, 1440}, {3840, 2160}, {1920, 1080}, {5120, 1440}};
+    unsigned w = 0, h = 0;
+    int v = -1;
+    if (sscanf(s, " %ux%u", &w, &h) == 2) {
+        for (int i = 0; i < (int)(sizeof sizes / sizeof *sizes); i++)
+            if (sizes[i][0] == w && sizes[i][1] == h) return i;
+        return -1;
+    }
+    return sscanf(s, " %d", &v) == 1 && v >= 0 && v < (int)(sizeof sizes / sizeof *sizes) ? v : -1;
+}
 static int output_mode(void) {
     static int v = -1;
     if (v < 0) {
         static const char *const names[] = {"2048x1152 (the game's)", "2560x1440", "3840x2160", "1920x1080", "5120x1440"};
-        v = getenv("HOS_OUTPUT_RES") ? atoi(getenv("HOS_OUTPUT_RES")) : ini_option("output_res", 0);
-        if ((unsigned)v >= sizeof names / sizeof *names || handheld()) v = 0;
+        const char *env = getenv("HOS_OUTPUT_RES");
+        char saved[80];
+        const char *text = env ? env : ini_text("output_res", saved, sizeof saved) ? saved : NULL;
+        v = text ? output_res_value(text) : 0;
+        if (v < 0) {   /* (issue 14: output_res=1280x800 read as 1280, out of range, and the game's size followed with no word) */
+            hos_log("oe: %s=%s is not one of the output resolutions (0-4, or 2048x1152, 2560x1440, 3840x2160, 1920x1080, "
+                    "5120x1440): the game's", env ? "HOS_OUTPUT_RES" : "output_res", text);
+            v = 0;
+        }
+        if (handheld()) v = 0;
         hos_log("oe: output resolution %s", names[v]);
     }
     return v;

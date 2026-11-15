@@ -82,7 +82,7 @@ screen. It costs some GPU time on cards that cull quickly, so it is off unless s
 | `HOS_AUDIO_NO_EFFECTS=1` | The audio effects (reverbs, delay, biquad filters on mixes and splitter destinations) are left out: the dry sound, to compare |
 | `HOS_AUDIO_NO_REVERB=1` | Only the reverbs left out |
 | `HOS_LANGUAGE=<code>` | The game's language for this run, a code from `language.txt` |
-| `HOS_OUTPUT_RES=<0..3>`, `HOS_HANDHELD=1`, `HOS_ASPECT=<ratio>` | Over the options file: the output resolution (0 2048x1152, 1 2560x1440, 2 3840x2160, 3 1920x1080), the handheld profile, a picture wider than 16:9 (2.3889 for 3440x1440) |
+| `HOS_OUTPUT_RES=<0..4>`, `HOS_HANDHELD=1`, `HOS_ASPECT=<ratio>` | Over the options file: the output resolution (0 2048x1152, 1 2560x1440, 2 3840x2160, 3 1920x1080, 4 5120x1440, or one of those sizes written out; any other value is logged and the game's size kept), the handheld profile, a picture wider than 16:9 (2.3889 for 3440x1440) |
 | `HOS_DYNRES=0`, `HOS_REALTIME_STEP=0`, `HOS_TEXT_SPEED=<0..3>` | Over the options file: Resolution 100% (non-zero: Auto), Game speed Per frame (1: Real time), Text speed |
 | `RX_VK_FRAMEGEN=0`, `RX_VK_FRAMEGEN_MULT=<2..8>`, `RX_VK_PACE=0`, `RX_VK_UPSCALE=<0..2>` | No frame generation whatever the menu says; over the options file: its multiplier, frame pacing, the upscaling filter |
 | `RX_VK_DEVICE=<n>` | The graphics card listed as `vk: device <n>` in the log, over the menu's GPU device |
@@ -115,7 +115,7 @@ case-sensitive, and an unknown one is ignored.
 | `RX_VK_FLASH=1` | The flash detector, with `RX_VK_SHOTS` and `RX_VK_SHOT_EVERY=1`: writes the frames around a flash and dumps the next one |
 | `RX_VK_FRAMELOG=<file>` | Every frame shown, at 320x180, while `<file>.go` exists; `python -I scripts/framelog.py <file>` finds the flashes |
 | `RX_VK_DUMP=<present>[+<count>][,...]` | Every step of the frame after that present as PNGs, in `dump_<present>` under `RX_VK_DUMP_DIR` (or `RX_VK_SHOTS`, or the current folder); `RX_VK_DUMP_STEPS=<lo>-<hi>` and `RX_VK_DUMP_PROGS=<key>,...` narrow it |
-| `RX_VK_READBACK_STRICT=0` or `1` | Whether reads of GPU results (the light meter) wait for their write-back to land, not only for the recordings' timeline. On by default with RADV, where without it the auto-exposure pulses (the whole picture brighter for ~16 frames) when the CPU is busy; off elsewhere (on NVIDIA it cost ~18% and no pulses were seen). Set `=1` in `hookshot_env.txt` if the picture pulses on another driver. `RX_VK_FRAMELOG` shows the pulses; `RX_VK_EXPOSURE_LOG`'s factor does not |
+| `RX_VK_READBACK_STRICT=0`, `1` or `<hex size>,...` | Whether reads of GPU results (the light meter) wait for their write-back to land, not only for the recordings' timeline. A list of sizes makes only ranges of exactly those sizes wait: `1040,c0` is the light meter's, which stopped the pulses on RADV as `1` does (0 in 2 runs each against 52 and 23 with `0`) while waiting a few times less often. On by default with RADV, where without it the auto-exposure pulses (the whole picture brighter for ~16 frames) when the CPU is busy; off elsewhere (on NVIDIA it cost ~18% and no pulses were seen). Set `=1` in `hookshot_env.txt` if the picture pulses on another driver. `RX_VK_FRAMELOG` shows the pulses; `RX_VK_EXPOSURE_LOG`'s factor does not |
 | `RX_VK_PASS_TRACE=1` | The passes of the last frames, logged at a flash or a dark frame (`RX_VK_PASS_TRACE_AT=<n>`: every n-th present) |
 | `RX_VK_PROBE=1` or `2` | The centre texel after every pass: `probe_<frame>.txt` at a flash (1), or `probe_all_<n>.txt` at speed (2); `python -I scripts/probe.py` reads them |
 | `RX_VK_DUMP_FAILED=<dir>` | The native code of every program that does not translate, for `nx2/lower_test.py` (game data: keep it local) |
@@ -140,6 +140,7 @@ case-sensitive, and an unknown one is ignored.
 |---|---|
 | `RX_VK_VALIDATION` (set) | The Khronos validation layer |
 | `RX_VK_CHECKPOINTS=0` | No NVIDIA checkpoints (on by default; after a lost device they name the draw it stopped at) |
+| `RX_VK_CHECKPOINTS=1` | Without the NVIDIA ones (AMD, Intel): VK_AMD_buffer_marker's markers, logged after a lost device and also once the GPU has finished none for `RX_VK_CHECKPOINTS_STALL_S` seconds (2; 0: only after the loss), so a ring that times out with no submission coming back still names the work |
 | `RX_VK_HANG_DUMP=<file>` | Every thread's stack to the file once no frame was shown for `RX_VK_HANG_SEC` seconds (20) (Windows) |
 | `RX_VK_NOOPT` (set) | Pipelines built without the driver's optimisations |
 | `RX_VK_SKIP_PROG=<prefix>,...` | Leaves out the draws of these programs (default `53509044401d78d2`; `-` leaves out none) |
@@ -147,6 +148,7 @@ case-sensitive, and an unknown one is ignored.
 | `RX_VK_PRECOMPILE=0` or `1` | The shader preparation before the title off or on (on in builds made with `RX_RELEASE=1`, as the builders' are) |
 | `RX_VK_NO_PROGRAM_CACHE` (set) | Neither reads nor writes `hookshot_programs.bin` and the pipeline notes |
 | `RX_VK_MIRROR=0`, `RX_VK_MIRROR_MB=<MB>` | No VRAM mirrors of the game's memory pools (on for discrete cards); their budget |
+| `RX_VK_SPARSE_QUEUE=1` | Linux: a pool larger than udmabuf's limit (several dma-bufs in a sparse buffer) is bound on a queue of another family, not the replay's, so its import does not wait for every frame queued on the GPU (issue 14: ~1 s on a Steam Deck; 540 ms behind 540 ms of queued work against 2-4 ms on an RX 9070 XT). Off by default until run in the game. `vk: pool ...: N dma-bufs bound in ... ms (..., its fence ...)` shows where an import's time went |
 | `RX_VK_VRAM_MB=<MB>` | The texture cache's budget (default 70% of what the driver allows, at most 6 GB) |
 | `RX_VK_NO_DRAWN_PAGE_MAP=1` | A texture in a virtual pool that the GPU writes before anything uploads it has no page map noted at that write, as before: once the game has finalized it, its next check takes all of its storage for remapped and uploads it whole from guest memory over what the GPU drew (Ocarina of Time's HUD labels go blank after a zone change; issue 3's black surfaces flickering in Zora's Domain, which the log shows as `vk: upload over a drawn image` lines with the whole image dirty; `vk: uploads over a drawn image: N so far` counts them all past the log's 400 lines) |
 | `RX_VK_NO_WRITEBACK` (set) | GPU writes to mirrored pools are not copied back to guest memory (an experiment, for A/B) |
@@ -186,7 +188,7 @@ number is not the obvious one:
 | `gpu_device` | 0 Auto, n the n-th card with Vulkan 1.3 as the row lists them |
 | `frame_generation` | 0 Off, 2 to 8 the multiplier |
 | `resolution` | 0 Auto, 1 100%, 2 75%, 3 67%, 4 50% |
-| `output_res` | 0 2048x1152, 1 2560x1440, 2 3840x2160, 3 1920x1080 |
+| `output_res` | 0 2048x1152, 1 2560x1440, 2 3840x2160, 3 1920x1080, 4 5120x1440 (or the size written out, `1920x1080`; no other size) |
 | `upscaling` | 0 Off, 1 Catmull-Rom, 2 Lanczos |
 | `sharpness`, `rumble_strength`, `motion_sensitivity_x`, `motion_sensitivity_y` | percent |
 | `mouse_sensitivity` | hundredths: 100 is 1.00 |

@@ -241,6 +241,17 @@ struct Out {
 constexpr Out kOutputs[] = {{2048, 1152}, {2560, 1440}, {3840, 2160}, {1920, 1080}, {5120, 1440}};
 constexpr int kLastOutput = std::size(kOutputs) - 1;
 int output_choice(int v) { return v >= 0 && v <= kLastOutput ? v : 0; }
+// (issue 14) output_res= and HOS_OUTPUT_RES as host/nn_applet.c output_res_value reads them: 0-4, or one of the sizes written
+// out (1920x1080); anything else the game's
+int output_choice_text(const char* s) {
+    unsigned w = 0, h = 0;
+    if (sscanf(s, " %ux%u", &w, &h) == 2) {
+        for (int i = 0; i <= kLastOutput; i++)
+            if (kOutputs[i].w == w && kOutputs[i].h == h) return i;
+        return 0;
+    }
+    return output_choice(atoi(s));
+}
 // Display the sizes from smallest to largest while keeping the IDs used by saved settings.
 constexpr int kOutputOrder[] = {3, 0, 1, 2, 4};
 static_assert(std::size(kOutputOrder) == std::size(kOutputs));
@@ -1938,7 +1949,7 @@ void menu_init() {
             for (Row& r : rows) {
                 if (!r.value || strcmp(line, ini_key(r))) continue;
                 const int v = atoi(eq + 1);
-                *r.value = r.value == &opts.output_res ? output_choice(v) : std::min(std::max(v, r.lo), r.hi);
+                *r.value = r.value == &opts.output_res ? output_choice_text(eq + 1) : std::min(std::max(v, r.lo), r.hi);
             }
             has_resolution |= !strcmp(line, "resolution");
             v2 |= !strcmp(line, "options_version");
@@ -1977,7 +1988,7 @@ void menu_init() {
             if (r.value == &opts.upscale) *r.value = std::min(std::max(atoi(e), r.lo), r.hi);
     if (const char* e = getenv("HOS_REALTIME_STEP")) opts.realtime = atoi(e) != 0;
     if (const char* e = getenv("HOS_DYNRES")) opts.resolution = atoi(e) != 0 ? 0 : 1;
-    if (const char* e = getenv("HOS_OUTPUT_RES")) opts.output_res = output_choice(atoi(e));
+    if (const char* e = getenv("HOS_OUTPUT_RES")) opts.output_res = output_choice_text(e);
     restart_init();   // (what this run started with: the rows that take a restart differ from it once changed)
 }
 

@@ -19,10 +19,12 @@
 #include "vk_framegen.h"
 #include "vk_internal.h"
 #include "gpu_choice.h"
+#include "sparse_queue.h"
 #include "vk_menu.h"
 #include "vk_dlss.h"
 #include "vk_reflex.h"
 #include "vk_progress.h"
+#include "vk_tl_clock.h"   // (RX_VK_TL: the timeline's host time domain)
 
 namespace vkx {
 #define VKX_DEFINE(f) PFN_##f f;
@@ -256,6 +258,30 @@ bool create_device() {
     optional(VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME, dev.coop_matrix);
     optional(VK_KHR_SWAPCHAIN_MUTABLE_FORMAT_EXTENSION_NAME, dev.swap_mutable);   // (hookshot: the overlays, vk_imgui.cpp)
     if (getenv("RX_VK_TL") || getenv("RX_VK_TL_S")) optional(VK_EXT_CALIBRATED_TIMESTAMPS_EXTENSION_NAME, dev.calibrated_ts);   // (stream R2: the timeline's GPU side)
+#ifndef _WIN32
+    // (Linux) tl_gpu_dump asks for the device's and the host clock's time (vk_tl_clock.h: CLOCK_MONOTONIC, the shim's
+    // QueryPerformanceCounter); a domain the device does not list may not be asked for, so the GPU side (and RX_VK_TL_PROBE) is off
+    if (dev.calibrated_ts) {
+        const auto domains_fn = (PFN_vkGetPhysicalDeviceCalibrateableTimeDomainsEXT)instance_proc()(dev.instance, "vkGetPhysicalDeviceCalibrateableTimeDomainsEXT");
+        uint32_t nd = 0;
+        VkTimeDomainEXT domains[16];
+        if (domains_fn && domains_fn(dev.physical, &nd, nullptr) == VK_SUCCESS) {
+            nd = std::min<uint32_t>(nd, 16);
+            if (domains_fn(dev.physical, &nd, domains) < 0) nd = 0;
+        } else {
+            nd = 0;
+        }
+        std::string names;
+        for (uint32_t i = 0; i < nd; i++) names += std::string(i ? ", " : "") + tl_time_domain_name(domains[i]);
+        if (tl_time_domains_usable(domains, nd)) {
+            logf("vk: tl: GPU side calibrated against %s (domains: %s)", tl_time_domain_name(tl_host_time_domain()), names.c_str());
+        } else {
+            logf("vk: tl: GPU side off: the device lists no %s time domain beside DEVICE (domains: %s)", tl_time_domain_name(tl_host_time_domain()),
+                 names.empty() ? "none" : names.c_str());
+            dev.calibrated_ts = false;
+        }
+    }
+#endif
     dlss_device_extensions(want, exts);   // (hookshot: NVIDIA DLSS's, vk_dlss.cpp)
     reflex_device_extensions(want, exts);   // (hookshot: NVIDIA Reflex's, vk_reflex.cpp)
 
@@ -301,10 +327,34 @@ bool create_device() {
             if ((families[i].queueFlags & VK_QUEUE_COMPUTE_BIT) && !(families[i].queueFlags & VK_QUEUE_GRAPHICS_BIT))
                 compute_family = i;
     }
-    VkDeviceQueueCreateInfo qs[2] = {q, {VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO}};
-    qs[1].queueFamilyIndex = compute_family;
-    qs[1].queueCount = 1;
-    qs[1].pQueuePriorities = &priority;
+    VkDeviceQueueCreateInfo qs[3] = {q, {VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO}, {VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO}};
+    uint32_t queue_infos = 1;
+    if (compute_family != UINT32_MAX) {
+        qs[queue_infos].queueFamilyIndex = compute_family;
+        qs[queue_infos].queueCount = 1;
+        qs[queue_infos].pQueuePriorities = &priority;
+        queue_infos++;
+    }
+    // (Linux, issue 14: RX_VK_SPARSE_QUEUE=1) a queue of another family for the binds of the pools made of several dma-bufs,
+    // whose fence on the replay's queue waited for every frame queued before it (sparse_queue.h). Off: no queue more
+    dev.sparse_family = UINT32_MAX;
+#ifdef __linux__
+    if (const char* e = getenv("RX_VK_SPARSE_QUEUE"); e && atoi(e) != 0) {
+        static_assert(sparse_queue::kSparseBinding == VK_QUEUE_SPARSE_BINDING_BIT && sparse_queue::kGraphics == VK_QUEUE_GRAPHICS_BIT);
+        std::vector<uint32_t> flags(n);
+        for (uint32_t i = 0; i < n; i++) flags[i] = families[i].queueFlags;
+        dev.sparse_family = sparse_queue::pick_family(flags.data(), n, dev.queue_family, compute_family);
+        if (dev.sparse_family != UINT32_MAX) {
+            qs[queue_infos].queueFamilyIndex = dev.sparse_family;
+            qs[queue_infos].queueCount = 1;
+            qs[queue_infos].pQueuePriorities = &priority;
+            queue_infos++;
+            logf("vk: RX_VK_SPARSE_QUEUE: the pools' sparse binds on a queue of family %u (flags %#x), not the replay's",
+                 dev.sparse_family, flags[dev.sparse_family]);
+        } else
+            logf("vk: RX_VK_SPARSE_QUEUE: the pools' sparse binds stay on the replay's queue (no other family has sparse binding)");
+    }
+#endif
 
     // features: what the hardware has of what the replay uses (all of them on the GPUs MKW-class hardware maps to)
     VkPhysicalDeviceMeshShaderFeaturesEXT mesh{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT};
@@ -436,7 +486,7 @@ bool create_device() {
     dev.sparse_buffers = (families[dev.queue_family].queueFlags & VK_QUEUE_SPARSE_BINDING_BIT) && f.features.sparseBinding;
     VkDeviceCreateInfo ci{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
     ci.pNext = &f;
-    ci.queueCreateInfoCount = compute_family != UINT32_MAX ? 2 : 1;
+    ci.queueCreateInfoCount = queue_infos;
     ci.pQueueCreateInfos = qs;
     ci.enabledExtensionCount = (uint32_t)want.size();
     ci.ppEnabledExtensionNames = want.data();
@@ -453,6 +503,8 @@ bool create_device() {
     dev.present_queue = VK_NULL_HANDLE;
     dev.present_family = dev.queue_family;
     if (compute_family != UINT32_MAX) vkGetDeviceQueue(dev.device, compute_family, 0, &dev.present_queue), dev.present_family = compute_family;
+    dev.sparse_queue = VK_NULL_HANDLE;
+    if (dev.sparse_family != UINT32_MAX) vkGetDeviceQueue(dev.device, dev.sparse_family, 0, &dev.sparse_queue);
     if (dev.buffer_marker) buffer_markers_init();
     coopmat_init();
     reflex_device_created();

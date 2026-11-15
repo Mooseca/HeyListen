@@ -64,6 +64,8 @@ def summarize_dir(d: Path, warmup_override: float | None, origin_override: str |
         "over_8_33_pct": stats["over_8_33_ms_pct"],
         "over_6_94_pct": stats["over_6_94_ms_pct"],
         "over_16_7_pct": stats["over_16_7_ms_pct"],
+        "environment": meta.get("environment"),
+        "gpu_busy": meta.get("gpu_busy"),
     }
 
 
@@ -81,6 +83,24 @@ def markdown(results: list[dict]) -> str:
             f"{ft['p50']:.1f} ms | {ft['p95']:.1f} ms | {ft['p99']:.1f} ms | "
             f"{ft['max']:.0f} ms | {r['over_8_33_pct']:.1f}% | {r['over_6_94_pct']:.1f}% | "
             f"{r['over_16_7_pct']:.0f}% |")
+    env = environment_markdown(results)
+    return "\n".join(lines) + ("\n\n" + env if env else "")
+
+
+def environment_markdown(results: list[dict]) -> str:
+    """The machine each run had (bench.json schema 4, Linux): a second table, only when a directory records it."""
+    if not any(r.get("environment") or r.get("gpu_busy") for r in results):
+        return ""
+    lines = ["| Dir | Governor | THP | THP shmem | udmabuf limit MB | Load at start | Kernel | Mesa | GPU busy mean / p95 |",
+             "|---|---|---|---|---:|---|---|---|---|"]
+    for r in results:
+        e = r.get("environment") or {}
+        load = e.get("loadavg_start")
+        busy = "; ".join(f"{c['mean_pct']:.0f}% / {c['p95_pct']:.0f}%" for c in ((r.get("gpu_busy") or {}).get("cards") or [])
+                         if c.get("samples"))
+        cells = [e.get("cpu_governor"), e.get("thp_enabled"), e.get("thp_shmem_enabled"), e.get("udmabuf_size_limit_mb"),
+                 " ".join(f"{x:.2f}" for x in load) if load else None, e.get("kernel"), e.get("mesa"), busy or None]
+        lines.append(f"| {r['dir']} | " + " | ".join("-" if c is None else str(c) for c in cells) + " |")
     return "\n".join(lines)
 
 
