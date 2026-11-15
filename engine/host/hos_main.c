@@ -955,6 +955,8 @@ static _Thread_local uint64_t flight_transform_controller;
 static _Thread_local uint64_t flight_pose_actor;
 static _Thread_local float flight_transform_yaw;
 static int64_t flight_player_seen;
+static int64_t play_began;   /* (the first time the player ran, hos_now_ns clock; 0 before) */
+static int64_t process_start_ns;   /* (hos_now_ns when main began) */
 
 static void oot_update_player_cheats(Ctx *c, uint64_t actor, uint64_t components) {
     int rx_option(int id, int otherwise);
@@ -965,6 +967,12 @@ static void oot_update_player_cheats(Ctx *c, uint64_t actor, uint64_t components
     if (!flying) flying_actor = 0;
     const int64_t now = hos_now_ns();
     __atomic_store_n(&flight_player_seen, now, __ATOMIC_RELAXED);
+    if (!__atomic_load_n(&play_began, __ATOMIC_RELAXED)) {
+        __atomic_store_n(&play_began, now, __ATOMIC_RELAXED);
+        /* (the bench harness cuts its window here: tools/bench/run_bench.py, "play" origin; the clock is the harness's own) */
+        hos_log("play: began at clock %lld ns, %.2f s after the process started", (long long)now,
+                (double)(now - process_start_ns) / 1e9);
+    }
     if (marked_actor != actor || now - last_player_tick > 2000000000LL) marked_controller = 0;
     last_player_tick = now;
     int action = rx_option(HOS_OPT_CHEAT_ACTION, 0);
@@ -1081,10 +1089,24 @@ static void oot_update_player_cheats(Ctx *c, uint64_t actor, uint64_t components
 }
 #endif
 
-int hos_oot_flight_shortcut_ready(void) {
+/* Whether the player has run in the last quarter second: play is on (host/oot_autoload.c stops its presses on it). */
+int hos_oot_player_seen(void) {
 #if defined(_WIN32) || defined(__linux__)   /* (the debug tools: host/posix has what they call) */
     const int64_t seen = __atomic_load_n(&flight_player_seen, __ATOMIC_RELAXED);
     return seen && hos_now_ns() - seen < 250000000;
+#else
+    return 0;
+#endif
+}
+
+int hos_oot_flight_shortcut_ready(void) {
+    return hos_oot_player_seen();
+}
+
+/* When play began (hos_now_ns clock; 0 until the player has run once): host/nn_hid.c's HOS_INPUT_FROM_PLAY. */
+int64_t hos_oot_play_ns(void) {
+#if defined(_WIN32) || defined(__linux__)   /* (the debug tools: host/posix has what they call) */
+    return __atomic_load_n(&play_began, __ATOMIC_RELAXED);
 #else
     return 0;
 #endif
@@ -1325,6 +1347,9 @@ static int game_main(int argc, char **argv) {
 #ifdef _WIN32
     if (!narrow_paths_ok(argc, argv)) return 1;
     load_hookshot_env();
+#endif
+#if defined(_WIN32) || defined(__linux__)
+    process_start_ns = hos_now_ns();
 #endif
     occlusion_switch();
     {

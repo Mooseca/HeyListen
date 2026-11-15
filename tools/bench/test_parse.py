@@ -132,11 +132,11 @@ def test_end_to_end_with_fake_hookshot(tmp_path):
         exe.chmod(0o755)
     out = tmp_path / "out"
     t0 = time.monotonic()
-    rc = rb.main(["--exe", str(exe), "--build", "hookshot", "--scene", "kokiri-idle",
+    rc = rb.main(["--exe", str(exe), "--build", "hookshot", "--scene", "kokiri-idle", "--title", "input",
                   "--out", str(out), "--duration", "2", "--warmup-s", "0"])
     assert rc == 0 and time.monotonic() - t0 < 20
     data = json.loads((out / "bench.json").read_text())
-    assert data["schema_version"] == 4 and data["frames"] > 20
+    assert data["schema_version"] == 5 and data["frames"] > 20
     assert data["fps_1pct_low"] == pytest.approx(100.0) and data["fps_0_1pct_low"] == pytest.approx(100.0)
     assert data["frame_time_ms"]["p50"] == 10.0 and data["killed_by_harness"]
     # The fake game's return_ns is not the perf_counter clock, so the offset falls back
@@ -163,7 +163,7 @@ def test_fake_hookshot_repeat_writes_spread(tmp_path):
         exe.write_text('#!/bin/sh\nexec "%s" "%s"\n' % (sys.executable, game))
         exe.chmod(0o755)
     out = tmp_path / "out"
-    rc = rb.main(["--exe", str(exe), "--build", "hookshot", "--scene", "kokiri-idle",
+    rc = rb.main(["--exe", str(exe), "--build", "hookshot", "--scene", "kokiri-idle", "--title", "input",
                   "--out", str(out), "--duration", "2", "--repeat", "2", "--warmup-s", "0.5"])
     assert rc == 0
     for i in (1, 2):
@@ -403,8 +403,8 @@ def test_run_puts_every_save_folder_back(tmp_path):
     exe.write_text('#!/bin/sh\nexec "%s" "%s"\n' % (sys.executable, game))
     exe.chmod(0o755)
     out = tmp_path / "out"
-    assert rb.main(["--exe", str(exe), "--build", "hookshot", "--scene", "kokiri-idle", "--out", str(out),
-                    "--duration", "2", "--warmup-s", "0"]) == 0
+    assert rb.main(["--exe", str(exe), "--build", "hookshot", "--scene", "kokiri-idle", "--title", "input",
+                    "--out", str(out), "--duration", "2", "--warmup-s", "0"]) == 0
     assert (data_save / "slot0").read_bytes() == b"the user's own save"
     assert not (data_save / "slot1").exists()
     assert (beside / "old").read_text(encoding="utf-8") == "kept beside"
@@ -506,3 +506,111 @@ def test_summarize_environment_table(tmp_path, capsys):
     # (no directory records the machine: the table alone, as before)
     assert sm.main([str(old)]) == 0
     assert "Governor" not in capsys.readouterr().out
+
+
+# ------------------------------------------------------ the title: the game goes through it, the window starts at play
+def _fake_game(tmp_path, play_after_s, wait_line=None):
+    """A fake game writing a 100 fps trace on the harness's own clock; after play_after_s seconds it logs that play began
+    (as host/hos_main.c does), or, with None, logs wait_line (the title helper giving up) and plays on in the title."""
+    say = ("'[hos host] play: began at clock %d ns, 1.00 s after the process started' % now"
+           if play_after_s is not None else repr("[hos host] " + wait_line))
+    game = tmp_path / "fake_game.py"
+    game.write_text(
+        "import os, time\n"
+        "f = open(os.environ['HOS_PRESENT_TRACE'], 'w')\n"
+        "f.write('frame,return_ns,interval_ns\\n')\n"
+        "assert os.environ.get('HL_SKIP_TITLE') == '1' and os.environ.get('HOS_INPUT_FROM_PLAY') == '1'\n"
+        "t0 = time.perf_counter_ns(); logged = False\n"
+        "for i in range(1, 100000):\n"
+        "    now = time.perf_counter_ns()\n"
+        "    f.write('%d,%d,%d\\n' % (i, now, 0 if i == 1 else 10000000)); f.flush()\n"
+        "    if not logged and now - t0 > " + str(int((play_after_s or 0.3) * 1e9)) + ":\n"
+        "        logged = True\n"
+        "        print(" + say + ", flush=True)\n"
+        "    time.sleep(0.01)\n")
+    exe = tmp_path / ("hookshot.cmd" if sys.platform == "win32" else "hookshot.sh")
+    if sys.platform == "win32":
+        exe.write_text('@"%s" "%s"\n' % (sys.executable, game))
+    else:
+        exe.write_text('#!/bin/sh\nexec "%s" "%s"\n' % (sys.executable, game))
+        exe.chmod(0o755)
+    return exe
+
+
+def test_window_starts_at_play(tmp_path):
+    exe = _fake_game(tmp_path, 1.0)
+    out = tmp_path / "out"
+    rc = rb.main(["--exe", str(exe), "--build", "hookshot", "--scene", "kokiri-idle", "--out", str(out), "--duration", "3.5"])
+    assert rc == 0
+    data = json.loads((out / "bench.json").read_text())
+    assert data["title"] == "skip" and data["warmup_origin"] == "play" and data["status"] == "ok"
+    assert 0.8 < data["play_at_s"] < 2.0
+    # the window starts where play began, counted from the first present
+    assert data["window_start_s"] == pytest.approx(data["play_at_s"] - data["launch_offset_s"], abs=0.01)
+    assert 100 < data["frames"] < 260   # (3.5 s of run minus about 1 s before play, at about 100 fps)
+
+
+def test_a_run_that_never_reaches_play_is_failed_not_measured(tmp_path):
+    exe = _fake_game(tmp_path, None, "skip title: no saved game yet: the title screen stays")
+    out = tmp_path / "out"
+    t0 = time.monotonic()
+    rc = rb.main(["--exe", str(exe), "--build", "hookshot", "--scene", "castle-move", "--out", str(out), "--duration", "20"])
+    assert rc == 2 and time.monotonic() - t0 < 12   # (it did not wait for the whole duration)
+    data = json.loads((out / "bench.json").read_text())
+    assert data["status"] == "failed" and data["frames"] == 0 and data["play_at_s"] is None
+    assert "never reached play" in data["failure"]
+
+
+def test_scene_scripts_in_play_and_the_old_ones():
+    for name in ("kokiri-idle", "castle-move", "hyrule-walk"):
+        assert name in rb.SKIP_SCENES and name in rb.HOOKSHOT_SCENES
+        assert "A," not in rb.SKIP_SCENES[name] and ":A" not in rb.SKIP_SCENES[name]   # (no title presses)
+    assert rb.SKIP_SCENES["kokiri-idle"] == ""
+    assert rb.SKIP_SCENES["castle-move"].startswith("10:LUP+RLEFT/700,11:RLEFT/1900,")
+    assert rb.HOOKSHOT_SCENES["castle-move"].startswith(rb.LOAD_SAVE)   # (the old scenes are unchanged)
+
+
+def test_title_and_origin_defaults():
+    parse = rb.build_parser().parse_args
+    base = ["--exe", "x", "--scene", "castle-move", "--out", "o"]
+    a = parse(base)
+    assert rb.title_mode(a) == "skip" and rb.resolve_origin(a, "skip") == "play"
+    a = parse(base + ["--title", "input"])
+    assert rb.title_mode(a) == "input" and rb.resolve_origin(a, "input") == "launch"
+    a = parse(base + ["--input-script", "300:A"])   # (an explicit script keeps the old clock and the old window)
+    assert rb.title_mode(a) == "input" and rb.resolve_origin(a, "input") == "launch"
+    a = parse(base + ["--warmup-origin", "launch"])
+    assert rb.resolve_origin(a, "skip") == "launch"
+
+
+def test_window_start_and_labels():
+    assert rb.window_start_s("play", 0.0, 12.0, 31.5) == pytest.approx(19.5)
+    assert rb.window_start_s("play", 2.0, 12.0, 31.5) == pytest.approx(21.5)
+    assert rb.window_start_s("play", 0.0, 12.0, None) is None
+    assert rb.window_start_s("launch", 60, 12.0, 31.5) == pytest.approx(48.0)
+    assert rb.cut_label(0, "play", 12.0) == "from play"
+
+
+def test_play_line_parsed_on_the_harness_clock(tmp_path):
+    log = tmp_path / "game_log.txt"
+    log.write_text("[hos host] x\n[hos main] play: began at clock 105500000000 ns, 31.40 s after the process started\n")
+    assert rb.parse_play_line(log, 100_000_000_000) == (pytest.approx(5.5), None)
+    at, note = rb.parse_play_line(log, 900_000_000_000)   # (another clock: the line's own seconds)
+    assert at == pytest.approx(31.4) and note
+    assert rb.parse_play_line(tmp_path / "none.txt", 1) == (None, None)
+
+
+def test_summarize_starts_at_play(tmp_path, capsys):
+    import summarize as sm
+    d = tmp_path / "run"
+    d.mkdir()
+    (d / "present_trace.csv").write_text("frame,return_ns,interval_ns\n" + "".join(
+        "%d,%d,%d\n" % (i, i * 10_000_000, 0 if i == 1 else 10_000_000) for i in range(1, 1001)))
+    (d / "bench.json").write_text(json.dumps({
+        "build": "hookshot", "scene": "castle-move", "warmup_s": 0.0, "warmup_origin": "play",
+        "launch_offset_s": 1.0, "play_at_s": 6.0, "window_start_s": 5.0, "status": "ok"}))
+    assert sm.summarize_dir(d, None)["frames"] == 500   # (the last 5 s of 10 at 100 fps)
+    (d / "bench.json").write_text(json.dumps({
+        "build": "hookshot", "scene": "castle-move", "warmup_s": 0.0, "warmup_origin": "play",
+        "launch_offset_s": 1.0, "play_at_s": None, "window_start_s": None, "status": "failed"}))
+    assert sm.summarize_dir(d, None)["frames"] == 0

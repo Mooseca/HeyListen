@@ -3,6 +3,10 @@
 
 #include <windows.h>
 
+#ifdef __linux__
+#include "amdgpu_stats.h"
+#endif
+
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -44,8 +48,12 @@ template <class F> F sym(HMODULE m, const char* n) { return reinterpret_cast<F>(
 
 void nvml_open(const char* hint) {
     nv.tried = true;
+#ifdef __linux__
+    HMODULE lib = LoadLibraryA("libnvidia-ml.so.1");   // (the NVIDIA driver's NVML; dlopen through the posix shim)
+#else
     HMODULE lib = LoadLibraryA("nvml.dll");
     if (!lib) lib = LoadLibraryA("C:\\Program Files\\NVIDIA Corporation\\NVSMI\\nvml.dll");
+#endif
     if (!lib) return;
     auto init = sym<int (*)()>(lib, "nvmlInit_v2");
     auto count = sym<int (*)(unsigned*)>(lib, "nvmlDeviceGetCount_v2");
@@ -79,6 +87,32 @@ void nvml_sample(PerfStats& s) {
     if (nv.power && nv.power(nv.dev, &v) == 0) s.gpu_power_w = v / 1000.0f;
     if (nv.clock && nv.clock(nv.dev, 0 /* NVML_CLOCK_GRAPHICS */, &v) == 0) s.gpu_clock_mhz = (float)v;
 }
+
+// ---- amdgpu sysfs (Linux, AMD): the files found once on the sampler thread, read at its cadence (amdgpu_stats.h)
+#ifdef __linux__
+struct Amd {
+    bool tried = false;
+    amdgpu_stats::Files files;
+} amd;
+
+void amd_open(const PerfGpuId& id) {
+    amd.tried = true;
+    if (!id.vendor && !id.has_pci) return;
+    amdgpu_stats::Id a;
+    a.vendor = id.vendor, a.device = id.device, a.has_pci = id.has_pci;
+    a.domain = id.domain, a.bus = id.bus, a.dev = id.dev, a.function = id.function;
+    amd.files = amdgpu_stats::open("/sys", a);
+    if (!amd.files.any()) amd.files = {};
+}
+
+void amd_sample(PerfStats& s) {
+    if (!amd.files.any()) return;
+    const auto a = amdgpu_stats::sample(amd.files);
+    s.gpu_pct = a.gpu_pct, s.gpu_temp_c = a.temp_c, s.gpu_power_w = a.power_w, s.gpu_clock_mhz = a.clock_mhz;
+    s.vram_used_mb = a.vram_used_mb;
+    if (a.vram_total_mb > 0) s.vram_total_mb = a.vram_total_mb;
+}
+#endif
 
 // ---- CPU and memory
 uint64_t ft(const FILETIME& f) { return ((uint64_t)f.dwHighDateTime << 32) | f.dwLowDateTime; }
@@ -133,12 +167,16 @@ std::condition_variable cv;
 bool want = false, alive = false;
 char gpu_hint[96];
 float vram_total_hint = -1;
+PerfGpuId gpu_id_hint;
 
 void sampler() {
     PerfStats s{};
     snprintf(s.gpu_name, sizeof s.gpu_name, "%s", gpu_hint);
     cpu_name(s.cpu_name, sizeof s.cpu_name);
     if (!nv.tried) nvml_open(gpu_hint);
+#ifdef __linux__
+    if (!nv.ok && !amd.tried) amd_open(gpu_id_hint);
+#endif
     cpu_prev = {};
     std::unique_lock lk(mu);
     while (want) {
@@ -150,6 +188,9 @@ void sampler() {
         cpu_sample(s);
         mem_sample(s);
         nvml_sample(s);
+#ifdef __linux__
+        amd_sample(s);
+#endif
         lk.lock();
         std::memcpy(machine.cpu_name, s.cpu_name, sizeof s.cpu_name);
         std::memcpy(machine.gpu_name, s.gpu_name, sizeof s.gpu_name);
@@ -164,11 +205,12 @@ void sampler() {
 
 } // namespace
 
-void perf_sampling(bool on, const char* gpu_name, float vram_total_mb) {
+void perf_sampling(bool on, const char* gpu_name, float vram_total_mb, const PerfGpuId* id) {
     std::lock_guard lk(mu);
     if (on) {
         snprintf(gpu_hint, sizeof gpu_hint, "%s", gpu_name ? gpu_name : "");
         vram_total_hint = vram_total_mb;
+        if (id && !alive) gpu_id_hint = *id;   // (read by the sampler thread before its loop: set only when none runs)
         want = true;
         if (!alive) {
             machine = {};

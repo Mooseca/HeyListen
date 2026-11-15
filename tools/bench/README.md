@@ -106,6 +106,27 @@ bound because the file is buffered. If neither works, `launch_offset_s` is null 
 PresentMon capture starts after launch and its clock is not measured), so its warm-up
 counts from the first PresentMon row.
 
+## Window from play (schema 5)
+
+A run counted from launch (`--warmup-s`) measures the title and the loading when it is late out of the title. The named
+scenes (`kokiri-idle`, `kokiri-walk`, `hyrule-idle`, `hyrule-walk`, `castle-move`) therefore start the game with
+`HL_SKIP_TITLE=1` (the game presses A through the title and the file list by itself, from the newest save in the
+folder's `user/save`: `engine/host/oot_autoload.c`) and `HOS_INPUT_FROM_PLAY=1` (the scene's inputs count from the moment
+play begins, so they carry no title presses), and cut the window at that moment:
+
+- The game logs `play: began at clock <ns> ns, <s> s after the process started` when the player first runs. The harness
+  reads it on its own clock (the same QPC clock) and writes `play_at_s` (seconds after launch) into bench.json;
+  `warmup_origin` is `play` and `window_start_s` is where the window starts, in seconds after the first present.
+  `--play-settle-s N` leaves N more seconds out (default 0). `--warmup-s` is not used then (a warning says so).
+- A run that never reaches play (no save in the folder: the title stays; the presses did not get through) is
+  `status: "failed"` with `failure`, `frames` 0 and exit code 2, not measured. The run ends as soon as the game
+  logs that it stopped waiting for the title (no save), not at the end of the duration.
+- `--title input` is the old way: the scenes' own presses through the title from launch (scripts `HOOKSHOT_SCENES`) and
+  the `--warmup-s` window counted from launch, kept for comparisons with older runs. An `--input-script` also keeps it by
+  default (its times were written for the launch clock); `--title skip --input-script S` makes them count from play.
+  `--warmup-origin launch|play` chooses the cut apart from the title mode (`play` needs `--title skip`).
+- `summarize.py` takes the window of a play-origin run from `window_start_s`; a failed run shows 0 frames.
+
 ## Watchdog
 
 The game (and PresentMon) are launched as children of the script. They are killed
@@ -142,18 +163,22 @@ membership for ETW. The scene is not controllable: Lichii has no input script, s
 `--scene` is only a label and the user positions the game; this is a gap. These are
 PresentMon's present intervals on the host swap chain, not guest (Switch) frames.
 
-## bench.json (schema_version 4)
+## bench.json (schema_version 5)
 
 | key | type | meaning |
 |---|---|---|
-| schema_version | int | 4 (environment and gpu_busy added). 3 = low fps and budget shares (TICK-013), 2 = launch-based warm-up, 1 = warm-up counted from the first present; all still read |
+| schema_version | int | 5 (the play window: `title`, `play_at_s`, `window_start_s`, `status`, `failure`; `warmup_origin` may be `play`). 4 = environment and gpu_busy added; 3 = low fps and budget shares (TICK-013), 2 = launch-based warm-up, 1 = warm-up counted from the first present; all still read |
 | build | "hookshot"/"lichii" | |
 | exe, scene | string | inputs |
 | source | "hos_present_trace"/"presentmon" | where frame times came from |
 | started_utc | string | ISO 8601 |
 | duration_requested_s, wall_clock_s | number | requested vs actual run time |
 | warmup_s | number | frames before this many seconds are ignored (see Warm-up) |
-| warmup_origin | "launch"/"first_present" | what warmup_s is counted from (absent in schema 1 = first_present) |
+| warmup_origin | "launch"/"first_present"/"play" | what warmup_s is counted from (absent in schema 1 = first_present); `play`: the window starts when play began and warmup_s is the settle time after it |
+| title | "skip"/"input" | schema 5: how the run got through the title (see Window from play) |
+| play_at_s | number/null | schema 5: seconds from launch to the game's `play: began` line (null when it never came, also in runs of the old way that did not log it) |
+| window_start_s | number/null | schema 5: where the measured window starts, in seconds after the first present (null: failed) |
+| status, failure | "ok"/"failed", string/null | schema 5: failed = a `play` run that never reached play, nothing measured |
 | launch_offset_s | number/null | game launch to first present (see Warm-up) |
 | killed_by_harness | bool | game still running at the end and was killed |
 | watchdog_fired | bool | the hard timer (not the normal end) killed it |

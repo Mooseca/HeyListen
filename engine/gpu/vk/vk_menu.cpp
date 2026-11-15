@@ -621,6 +621,9 @@ Row rows[] = {
     {TAB_GAMEPLAY, "Microphone", &opts.mic, 0, 2 + kMaxMics, 1, tx_mic,
      "What the ocarina hears when the game's microphone option is on (playing an instrument, or humming).", hn_mic, false,
      true},
+    {TAB_GAMEPLAY, "Skip title screen", &opts.skip_title, 0, 1, 1, tx_onoff,   // (HL_OPT_SKIP_TITLE, vk_opt_ids.h, host/oot_autoload.c)
+     "Starts a launch with the most recent saved game: presses through the title screen and its file list. Does nothing "
+     "until the game has a save. Applies after a restart.", nullptr, true, true},
     {TAB_GAMEPLAY, "Discord status", &opts.discord, 0, 1, 1, tx_onoff,
      "Shows \"Playing Hookshot\" and the time played in your Discord status, while Discord runs on this PC.", nullptr, false,
      true},
@@ -2576,7 +2579,17 @@ void menu_tick() {
                 uint64_t vram = 0;
                 for (uint32_t i = 0; i < mp.memoryHeapCount; i++)
                     if (mp.memoryHeaps[i].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) vram += mp.memoryHeaps[i].size;
-                perf_sampling(true, pr.deviceName, (float)(vram >> 20));
+                PerfGpuId id;   // (the card's sysfs node on Linux: amdgpu_stats.h)
+                id.vendor = pr.vendorID, id.device = pr.deviceID;
+                if (dev.pci_bus_info) {
+                    VkPhysicalDevicePCIBusInfoPropertiesEXT pci{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PCI_BUS_INFO_PROPERTIES_EXT};
+                    VkPhysicalDeviceProperties2 p2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
+                    p2.pNext = &pci;
+                    vkGetPhysicalDeviceProperties2(dev.physical, &p2);
+                    id.has_pci = true;
+                    id.domain = pci.pciDomain, id.bus = pci.pciBus, id.dev = pci.pciDevice, id.function = pci.pciFunction;
+                }
+                perf_sampling(true, pr.deviceName, (float)(vram >> 20), &id);
             } else {
                 perf_sampling(false, nullptr, -1);
             }

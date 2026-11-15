@@ -245,7 +245,16 @@ static int64_t script_frame0;
 extern volatile LONG64 hos_present_count;   /* native game presents, not generated frames or HID polls */
 /* HOS_INPUT_FRAME_CLOCK=1: the existing script seconds/millisecond holds advance at 60 native frames per second.
    Live-file polling and HID diagnostics keep their wall clocks. Default/0/empty retains wall-clock scripts. */
+/* HOS_INPUT_FROM_PLAY=1 (HeyListen): the script's seconds count from the moment play begins (host/hos_main.c
+   hos_oot_play_ns: the player first runs) instead of from the first controller read, so a scene started with
+   HL_SKIP_TITLE=1 has the same inputs whatever time the title and the loading took. Nothing fires before play begins. */
+static int script_from_play;
+extern int64_t hos_oot_play_ns(void);   /* host/hos_main.c: 0 until the player has run */
 static int64_t script_elapsed_ms(int64_t now) {
+    if (script_from_play) {
+        const int64_t play = hos_oot_play_ns();
+        return play ? (now - play) / 1000000 : -((int64_t)1 << 40);
+    }
     if (!script_frame_clock) return (now - script_t0) / 1000000;
     const int64_t frames = InterlockedCompareExchange64(&hos_present_count, 0, 0) - script_frame0;
     return frames * 1000 / 60;
@@ -266,6 +275,9 @@ static void parse_script(void) {
         const char *e = getenv("HOS_INPUT_FRAME_CLOCK");
         script_frame_clock = e && atoi(e) != 0;
         if (script_frame_clock) script_frame0 = InterlockedCompareExchange64(&hos_present_count, 0, 0);
+        const char *p = getenv("HOS_INPUT_FROM_PLAY");
+        script_from_play = p && atoi(p) != 0;
+        if (script_from_play) hos_log("hid: the input script counts from the moment play begins (HOS_INPUT_FROM_PLAY)");
     }
     parse_presses(getenv("HOS_INPUT_SCRIPT"), 0, 0);
     if (npresses)
@@ -314,12 +326,13 @@ static void live_input(void) {
     fclose(f);
 }
 
+static const struct { const char *name; int b; int axis; int dir; } names[] = {
+    {"A", B_A}, {"B", B_B}, {"X", B_X}, {"Y", B_Y}, {"LS", B_LS}, {"RS", B_RS}, {"L", B_L}, {"R", B_R},
+    {"ZL", B_ZL}, {"ZR", B_ZR}, {"PLUS", B_PLUS}, {"MINUS", B_MINUS}, {"LEFT", B_LEFT}, {"UP", B_UP},
+    {"RIGHT", B_RIGHT}, {"DOWN", B_DOWN}, {"LUP", -1, 1, 1}, {"LDOWN", -1, 1, -1}, {"LLEFT", -1, 0, -1},
+    {"LRIGHT", -1, 0, 1}, {"RUP", -1, 3, 1}, {"RDOWN", -1, 3, -1}, {"RLEFT", -1, 2, -1}, {"RRIGHT", -1, 2, 1}};
+
 static int parse_presses(const char *s, int64_t base_ms, int live) {
-    static const struct { const char *name; int b; int axis; int dir; } names[] = {
-        {"A", B_A}, {"B", B_B}, {"X", B_X}, {"Y", B_Y}, {"LS", B_LS}, {"RS", B_RS}, {"L", B_L}, {"R", B_R},
-        {"ZL", B_ZL}, {"ZR", B_ZR}, {"PLUS", B_PLUS}, {"MINUS", B_MINUS}, {"LEFT", B_LEFT}, {"UP", B_UP},
-        {"RIGHT", B_RIGHT}, {"DOWN", B_DOWN}, {"LUP", -1, 1, 1}, {"LDOWN", -1, 1, -1}, {"LLEFT", -1, 0, -1},
-        {"LRIGHT", -1, 0, 1}, {"RUP", -1, 3, 1}, {"RDOWN", -1, 3, -1}, {"RLEFT", -1, 2, -1}, {"RRIGHT", -1, 2, 1}};
     int got = 0;
     const int64_t now_ms = script_elapsed_ms(hos_now_ns());
     while (s && *s) {
@@ -359,9 +372,41 @@ static int parse_presses(const char *s, int64_t base_ms, int live) {
     return got;
 }
 
+/* (HeyListen) Presses the host itself makes (host/oot_autoload.c: A through the title), in the script's syntax of one press,
+   "0:A/200": the buttons now, for that many milliseconds on the wall clock, whatever the script's own clock does (it can
+   be counting from play, which has not begun). A few at once; the one that ends first is replaced. */
+#define MAX_TAPS 8
+static struct { uint64_t buttons; int64_t end_ns; } taps[MAX_TAPS];
+void hos_hid_tap(const char *press) {
+    const char *s = strchr(press, ':');
+    if (!s) return;
+    s++;
+    uint64_t buttons = 0;
+    for (;;) {
+        const size_t n = strcspn(s, "+/,");
+        for (unsigned i = 0; i < sizeof names / sizeof *names; i++)
+            if (names[i].b >= 0 && strlen(names[i].name) == n && !strncmp(s, names[i].name, n)) buttons |= 1ULL << names[i].b;
+        s += n;
+        if (*s != '+') break;
+        s++;
+    }
+    const int64_t hold = *s == '/' ? strtol(s + 1, NULL, 10) : 200;
+    const int64_t now = hos_now_ns();
+    int slot = 0;
+    for (int i = 0; i < MAX_TAPS; i++)
+        if (taps[i].end_ns < taps[slot].end_ns) slot = i;
+    taps[slot].buttons = buttons;   /* (one caller, the input read: the end time is stored last, for a reader on another thread) */
+    __atomic_store_n(&taps[slot].end_ns, now + hold * 1000000, __ATOMIC_RELEASE);
+}
+
 static void scripted_input(uint64_t *buttons, int32_t stick[4]) {
     if (npresses < 0) parse_script();
     live_input();
+    {
+        const int64_t now = hos_now_ns();
+        for (int i = 0; i < MAX_TAPS; i++)
+            if (now < __atomic_load_n(&taps[i].end_ns, __ATOMIC_ACQUIRE)) *buttons |= taps[i].buttons;
+    }
     const int64_t ms = script_elapsed_ms(hos_now_ns());
     for (int i = 0; i < npresses; i++)
         if (ms >= presses[i].start_ms && ms < presses[i].end_ms) {
@@ -671,6 +716,8 @@ static void read_input(uint64_t *buttons, int32_t stick[4]) {
     *buttons = 0;
     memset(stick, 0, 4 * sizeof *stick);
     scripted_input(buttons, stick);
+    void hos_oot_autoload_input(void);   /* (host/oot_autoload.c: the Skip title screen row's presses) */
+    hos_oot_autoload_input();
     /* A scripted run (a test) takes no input from the player's devices until 5 s after its last press (a variable
        left set in a shell no longer leaves the game without controls), and otherwise the pads count only
        while the game's window is in front, like the keyboard: XInput is global, so a test run in the background

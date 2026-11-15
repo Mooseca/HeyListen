@@ -20,8 +20,16 @@ struct PerfStats {
     float gpu_pct, gpu_temp_c, gpu_power_w, gpu_clock_mhz, vram_used_mb, vram_total_mb;
 };
 
-/// Starts (on) or stops (off) the sampling thread. gpu_name is the Vulkan device's name, to find its NVML twin.
-void perf_sampling(bool on, const char* gpu_name, float vram_total_mb);
+/// The Vulkan device's ids, to find its sysfs node on Linux (amdgpu_stats.h): vendorID, deviceID and, with VK_EXT_pci_bus_info,
+/// its PCI address.
+struct PerfGpuId {
+    uint32_t vendor = 0, device = 0;
+    bool has_pci = false;
+    uint32_t domain = 0, bus = 0, dev = 0, function = 0;
+};
+/// Starts (on) or stops (off) the sampling thread. gpu_name is the Vulkan device's name, to find its NVML twin; id finds its
+/// amdgpu sysfs files on Linux (null: none).
+void perf_sampling(bool on, const char* gpu_name, float vram_total_mb, const PerfGpuId* id = nullptr);
 /// What the render thread waited for per frame, averaged over the last half second (-1: not counted)
 struct PerfWaits {
     float replay_ms = -1, gpu_ms = -1, pipe_wait_ms = -1, shader_wait_ms = -1, tex_uploads = -1;

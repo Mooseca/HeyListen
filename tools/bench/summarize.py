@@ -47,7 +47,12 @@ def summarize_dir(d: Path, warmup_override: float | None, origin_override: str |
     warmup = float(warmup_override) if warmup_override is not None else float(meta.get("warmup_s", 0.0))
     origin = origin_override or meta.get("warmup_origin", "first_present")
     offset = meta.get("launch_offset_s")
-    skip = rb.skip_from_first_present(warmup, origin, offset)
+    if origin == "play" and warmup_override is None:
+        # (schema 5: the window starts where the run's own harness cut it, when play began; a failed run has none)
+        start = meta.get("window_start_s")
+        skip = float("inf") if start is None else float(start)
+    else:
+        skip = rb.skip_from_first_present(warmup, origin, offset)
     vals = rb.window(rows, skip)
     stats = rb.compute_stats(vals)
     return {
