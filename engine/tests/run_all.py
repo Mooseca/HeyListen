@@ -84,6 +84,7 @@ ARGS = {
     "tests/test_reserved_core.py": ["--cxx", "g++"],
     "tests/test_fsr3_shaders.py": ["--glslang", "{glslang}", "--spirv-val", "{spirv_val}"],
     "tests/test_fg_scale_sharpen.py": ["--cxx", "g++"],
+    "tests/test_astc_bc_encode.py": ["--cxx", "{cxx}"],
     "tests/test_taau_env_lookup.py": ["--cxx", "g++"],
     "tests/test_target_overlap.py": ["--cxx", "g++"],
     "tests/test_segment_plan.py": ["--cxx", "g++"],

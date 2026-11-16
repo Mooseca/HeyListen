@@ -6,6 +6,10 @@
 //     (a later upload that brought some) is encoded in BC1's 3-colour mode with them transparent.
 //   mode 7, BC7 (8 bits a texel): mode 6 (one RGBA line, 7-bit endpoints with a p-bit each, 4-bit indices), and for a
 //     block whose alpha varies also mode 5 (RGB and alpha apart, 2-bit indices each): the one with less error.
+//     Texels of alpha 0 and 255 decode to exactly that (issue 16). Blending leaves the scene as it is only under alpha 0:
+//     mode 6's p-bit gave a transparent white block (255, 255, 255, 0) alpha 1, the nearest of its two choices, and a
+//     sprite's whole quad then lifted a dark scene by ~8 levels of 255 (blended in linear light): the light rectangles around
+//     the HUD's items, the minimap and the particles, measured on a 4K shot to the level.
 // Push constants and bindings are the BC3 encoder's (bc_encoder.comp), so both use one pipeline layout.
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
@@ -89,12 +93,32 @@ bool refine(float w[16], vec4 mask, inout vec4 e0, inout vec4 e1) {
     return true;
 }
 
+// the line's alpha ends put on the block's alpha 0 and 255 where it has them, and on its alpha when that is one value
+// (the axis and least squares leave them a little off)
+void pin_alpha(inout vec4 e0, inout vec4 e1, float alo, float ahi) {
+    if (alo == ahi) {
+        e0.a = alo, e1.a = alo;
+        return;
+    }
+    const bool low0 = e0.a <= e1.a;
+    if (alo == 0.0) {
+        if (low0) e0.a = 0.0;
+        else e1.a = 0.0;
+    }
+    if (ahi == 255.0) {
+        if (low0) e1.a = 255.0;
+        else e0.a = 255.0;
+    }
+}
+
 // ---- BC7 mode 6: one RGBA line, 7-bit endpoints and a p-bit each, 4-bit indices ----
-uvec4 quant6(vec4 e, bool opaque, out uint p) {
+// (an end of alpha 0 takes p-bit 0 and one of 255 p-bit 1, the only ones that give them back; else the nearer)
+uvec4 quant6(vec4 e, out uint p) {
     uvec4 best_q = uvec4(0);
     float best = 1e30;
     p = 0u;
-    for (uint pb = opaque ? 1u : 0u; pb < 2u; pb++) {
+    const uint pb_lo = e.a >= 255.0 ? 1u : 0u, pb_hi = e.a <= 0.0 ? 0u : 1u;
+    for (uint pb = pb_lo; pb <= pb_hi; pb++) {
         const uvec4 q = uvec4(clamp(round((e - float(pb)) * 0.5), 0.0, 127.0));
         const vec4 d = e - vec4(q * 2u + pb);
         const float err = dot(d, d);
@@ -103,7 +127,7 @@ uvec4 quant6(vec4 e, bool opaque, out uint p) {
     return best_q;
 }
 
-float mode6(bool opaque, out uvec4 block) {
+float mode6(float alo, float ahi, out uvec4 block) {
     vec4 mean = vec4(0.0);
     for (int i = 0; i < 16; i++) mean += px[i];
     mean /= 16.0;
@@ -114,8 +138,9 @@ float mode6(bool opaque, out uvec4 block) {
     uint bp0 = 0u, bp1 = 0u;
     uint bidx[16];
     for (int round_ = 0; round_ < 3; round_++) {
+        pin_alpha(e0, e1, alo, ahi);
         uint p0, p1;
-        const uvec4 q0 = quant6(e0, opaque, p0), q1 = quant6(e1, opaque, p1);
+        const uvec4 q0 = quant6(e0, p0), q1 = quant6(e1, p1);
         const vec4 E0 = vec4(q0 * 2u + p0), E1 = vec4(q1 * 2u + p1);
         vec4 pal[16];
         for (int k = 0; k < 16; k++) pal[k] = floor(((64.0 - W4[k]) * E0 + W4[k] * E1 + 32.0) / 64.0);
@@ -125,7 +150,10 @@ float mode6(bool opaque, out uvec4 block) {
         for (int i = 0; i < 16; i++) {
             float be = 1e30;
             uint bk = 0u;
+            // (a texel of alpha 0 or 255 only takes an entry of that alpha: the pinned end is one)
+            const bool pinned = px[i].a == 0.0 || px[i].a == 255.0;
             for (int k = 0; k < 16; k++) {
+                if (pinned && pal[k].a != px[i].a) continue;
                 const vec4 d = px[i] - pal[k];
                 const float e = dot(d, d);
                 if (e < be) be = e, bk = uint(k);
@@ -212,6 +240,7 @@ float mode5(out uvec4 block) {
         if (ec + ea == 0.0) break;
         refine(wc, vec4(1.0, 1.0, 1.0, 0.0), e0, e1);
         refine(wa, vec4(0.0, 0.0, 0.0, 1.0), e0, e1);
+        pin_alpha(e0, e1, alo, ahi);   // (8-bit alpha ends: pinned, an end is an entry, and the nearest entry is exact)
     }
     if (bci[0] >= 2u) {
         const uvec3 t = bc0;
@@ -309,18 +338,24 @@ uvec2 bc1() {
     return uvec2(b0 | (b1 << 16), bind);
 }
 
+// px as a BC7 block: mode 6, or mode 5 where the block's alpha varies and that has less error
+uvec4 bc7(float alo, float ahi) {
+    uvec4 b6, b5;
+    const float e6 = mode6(alo, ahi, b6);
+    if (ahi > alo && mode5(b5) < e6) return b5;
+    return b6;
+}
+
 void main() {
     const uvec3 id = gl_GlobalInvocationID;
     if (id.x >= pc.blocks_x || id.y >= pc.blocks_y) return;
     const ivec2 base = ivec2(id.xy) * 4;
     const ivec2 last = ivec2(int(pc.width), int(pc.height)) - 1;
-    bool opaque = true;
     float alo = 255.0, ahi = 0.0;
     for (int y = 0; y < 4; y++)
         for (int x = 0; x < 4; x++) {
             const vec4 t = round(imageLoad(source, ivec3(min(base + ivec2(x, y), last), int(id.z))) * 255.0);
             px[y * 4 + x] = t;
-            opaque = opaque && t.a >= 255.0;
             alo = min(alo, t.a), ahi = max(ahi, t.a);
         }
     const uint block = pc.out_offset + (id.z * pc.blocks_y + id.y) * pc.blocks_x + id.x;
@@ -330,13 +365,7 @@ void main() {
         dst.words[block * 2u + 1u] = b.y;
         return;
     }
-    uvec4 b6, b5;
-    const float e6 = mode6(opaque, b6);
-    uvec4 b = b6;
-    if (ahi > alo) {
-        const float e5 = mode5(b5);
-        if (e5 < e6) b = b5;
-    }
+    const uvec4 b = bc7(alo, ahi);
     dst.words[block * 4u] = b.x;
     dst.words[block * 4u + 1u] = b.y;
     dst.words[block * 4u + 2u] = b.z;
