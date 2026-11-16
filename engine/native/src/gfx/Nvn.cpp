@@ -52,6 +52,10 @@ constexpr ProcInfo kProcs[kProcCount] = {
     {"nvnDeviceGetTextureHandle", {3, 0, true}},
     {"nvnCommandBufferBindTexture", {4, 0}},
     {"nvnCommandBufferBindTexturesDeferred", {5, 0}},
+    {"nvnCommandBufferReportCounter", {3, 0}},
+    {"nvnCommandBufferResetCounter", {2, 0}},
+    {"nvnCommandBufferSetRenderEnable", {2, 0}},
+    {"nvnCommandBufferSetRenderEnableConditional", {3, 0}},
 };
 }   // namespace
 

@@ -1047,6 +1047,213 @@ shots (the textures in place everywhere: grass, rock, water, foliage, the HUD); 
 native; the record check (render-state and preparation state records) 188,119-280,577 calls compared a run, 0
 mismatched.
 
+## 11. Stream 2e, A: the recording job `0x80084de0` (reading; nothing native yet)
+
+**Shape.** `0x80084de0` (11,044 lifted lines, 6,524 guest instructions, a 0x3b0-byte frame) is one item body of the job
+group runner `0x8007fe60` (and of `0x80083960`). It records **one NVN command buffer for one key**: its x3 is a 0x70-byte
+key (a view or pass description: hashed with crc32 over its fourteen words), x0 a cache of recordings (entries of 0xe0
+bytes at +0x38, count +0x40, capacity +0x30, a mutex at +0x48 taken around the lookup through the SDK's lock imports),
+x2 a command-memory manager like `0x8006cd60`'s (an atomic slot counter at +0xb8, 0x98-byte slots at +0xd8, rings),
+x1 the pass, x4..x6 more of the item. It returns at once when the key's mask (x0+0x14 against the key's first word) or
+the count (x0+0x2c) says nothing to draw, or when x4+0xc bit 0 is set.
+
+**Its order.** (1) Find the key's entry (compare the hash at +0xc0, then the 0x70 bytes), else take the next one
+(+0x40 grows) and copy the key into it; the entry holds the NVN command buffer object the job records into. (2) Take a
+command-memory slot, give its control and command memory to the command buffer: **Initialize, AddControlMemory,
+AddCommandMemory, SetMemoryCallback(Data), BeginRecording, SetRecordingMode**, two ReportCounters; (3) the view:
+**SetScissor, SetViewport, SetDepthRange**, line width and point size; (4) **the draw loop** over the key's draw list
+(read from the visibility job's lists: their layout is stream V1's `visibility-job.md`), which inlines the draw function
+`0x80681320`'s work: the render-state function three times (its 36 calls each), the render-enable function
+(SetRenderEnable 4), counters (Report / Reset), and the sub-mesh submission's every path: the geometry mode (6),
+pre-recorded lists (CallCommands 4), mesh tasks (3), indexed draws through `0x8029fef0` / `0x8002a5f0` / `0x8008f840`,
+the cluster paths (`0x80029240`, `0x800a7f00`, `0x800a8120`, `0x835b4c50`, `0x814e6dc0`, `0x83607840`, `0x83607e80`,
+`0x83607fc0`, `0x83607730`), and calls the shared preparation `0x8008fc00` (2 sites) and `0x80078fc0` (1 site) itself;
+(5) **EndRecording**, the memory used read back, **Finalize**, the pool range flushed (GetFlags, FlushMappedRange), the
+handle kept in the slot and the entry. NVN sites: 154 of its 173 indirect calls (19 are virtual calls on scene objects).
+
+**What this means for the native loop.** *(Inference, not traced to the calls:)* the job is the producer of pre-recorded
+command lists that the scene pass and the sub-mesh submission call (CallCommands of a handle): a recording per key,
+its entry kept across frames by the key. Its
+draw loop is the draw function and the submission inlined, so a native loop is the native preparation, render state
+and submission composed under one native loop, plus the render-enable function, the counters, the indexed and
+mesh-task draws, with the cluster paths and the scene objects' virtual calls called back. The check is the whole
+item: the NVN calls of one call of `0x80084de0` (Initialize to Finalize) against the translated item's, plus the
+bytes written into the entry, the slot and the manager.
+
+### The loop's map (session 2f: read, and measured with an observing gate)
+
+**What one item does, in order** (guest addresses of the job; every step is one path of the one function):
+
+1. *Entry*: returns at once when the cache's mask (+0x14) does not meet the key's first word, its count (+0x2c) is not
+   positive, or the item's flag (x4+0xc bit 0) is set. Then the key's crc32 over its fourteen words; under the cache's
+   mutex (+0x48, the SDK's lock / unlock imports `0x83c62460` / `0x83c62470`) the entry whose hash (+0xc0) and 0x70
+   bytes (`0x83c61f00`, a compare) match, else a new one (+0x40 grows, the key copied in).
+2. *The slot*: an atomic add on the manager's counter (+0xb8) picks a 0x98-byte slot (+0xd8, by +0xe1 x +0xea); a scan
+   of the manager's ring entries (0x28 bytes, four at a time, `0x84f84`..`0x850bc`) picks the ring with the least used,
+   whose three indices are **written into the key** (+0x6c..+0x6e); under the manager's lock (+8) the slot takes its
+   memory: Initialize, AddControlMemory, AddCommandMemory, BeginRecording, SetMemoryCallback(Data), SetRecordingMode,
+   two ReportCounters; the view (SetScissor, SetViewport, SetDepthRange).
+3. *The draw function `0x80681320`, inlined once*: the 352-byte block built at sp+0x108 from the draw and the material
+   (`0x85600`..`0x85d40`: flags, SDK reads `0x83c61cf0` twice, line width and point size), then the key from the flag
+   bits and the dispatch: the item's list is a (start, count) pair at x5 over an array of 8-byte pointers to **draw
+   entries** (entry +0x8 a kind mask tested against the cache entry's first word, +0xe sub-key bits 0-3 and bit 4,
+   +0x10 the drawable). A count below 1 goes straight to the epilogue.
+   - key 0x80: a loop over the entries (`0x85d88`), per entry the render-state function's calls inlined when the
+     sub-key changes, counters (Reset / Report) and **the sub-mesh submission called** (`0x85ea0`);
+   - key 0x40 (`0x8746c`) and key 0 (`0x894f4`): loops over the entries and their sub-meshes, each calling **the shared
+     preparation** (`0x8758c`, `0x895b8`) and then the drawable's submission method (vtable +0x58): when it is
+     `0x80078fc0` its body is inlined there (geometry mode, CallCommands, indexed draw, mesh tasks, the cluster paths),
+     else the method is called (`0x8008f8e0`, a 200-instruction method that calls the preparation; `0x800955a0`);
+   - any other key: **one call of the per-variant draw** through the table at `0x84c29878` for the whole list (x0 the
+     list, w1 the count, x2 the block): template instances such as `0x8050f680` and `0x810385a0`, which call the
+     render-state function `0x80077d60` and the render-enable function `0x80078b10` themselves.
+4. *Epilogue* (`0x86694`..): the material's state callback when it is not the empty one; the render enable put back
+   (sp+0x1c8 / +0x1d0); an atomic add on the cache entry's +0xd8; the slot's ReportCounter; EndRecording (the handle
+   into slot +0x50), the memory used (slot +0x4c, +0x2c, slot +0x58 bit 0), Finalize, a global counter decremented
+   (`[0x84ca2d60]`+0xd1c), the pool's flags and its range flushed.
+
+**Threads.** The runners hand out whole items (each call is one key), so two threads never share an item; the shared
+steps are the cache's mutex (step 1), the manager's counter and lock (step 2) and the atomic adds of step 4. Items ran
+on 6 host threads in every scene.
+
+**The observing gate.** `HL_GATE(80084de0, "3ba04b5feac748d3")` (in `code_hot_7.c`, beside the two other gates): with
+`HL_GFX_CHECK=1` it lets the translated item answer and counts, per item, its NVN calls (the check's tap) and the
+route its draws took, from the return address the submission, preparation and render-state gates are called with
+(route bits: 1 the key-0x80 loop's call, 2 the key-0x40 loop's, 4 the key-0 loop's, 8 any other caller: a variant or a
+drawable's own method). Without the check it turns itself off at its first call. The line `hl gfx: loop map: ...`
+every 10 s. Main PC, `HL_GFX_CHECK=1`, 110 s a scene (counts at the last report; the other checks of the same runs at
+0 mismatches):
+
+| Scene | Items (at once) | No draw seen | Key-0x80 loop only | Key-0x40 / key-0 loops only | With a variant or a method | NVN calls: no draw / loops only / with a variant |
+|---|---:|---:|---:|---:|---:|---|
+| castle-move | 467,894 (23,436) | 240,557 | 37,635 | 6,312 / 36,445 | 146,945 | 6.2% / 9.4% / 84.4% of 99.4 M |
+| kokiri-idle | 416,619 (264) | 210,332 | 39,020 | 3,999 / 36,260 | 127,008 | 5.7% / 8.7% / 85.6% of 98.6 M |
+| hyrule-walk | 294,915 (21,948) | 154,361 | 24,308 | 3,228 / 19,118 | 93,900 | 7.4% / 8.5% / 84.1% of 63.4 M |
+
+What it says:
+
+- **Half the items draw nothing** a gate sees (the items that return at once are among them), at 26-35 NVN calls each of the others: the slot, the recording's frame (Initialize to
+  SetDepthRange, EndRecording to the flush) and an empty or fully masked list. *(Inference: the frame alone is 21-24
+  calls; the rest a few counters.)*
+- **The job's own loops, with the native leaves inside, carry 9% of its NVN calls**; 84-86% are in items whose draws go
+  through the per-variant draws or the drawables' own submission methods (`0x8008f8e0`, `0x800955a0`), which are guest
+  code. The largest items (3,338-3,344 NVN calls) are of that kind.
+- So a native loop that composes the native leaves only, as the brief puts it, is exact on 9% of the work and the empty
+  items; the rest needs the per-variant draws (about 130 template instances, section 8) and the two methods made native,
+  or called back from the native loop as guest calls.
+
+**Not built yet** (nothing of the item is native; there is no `HL_GFX_LOOP`): the native item. The order the map
+gives: (1) the item's frame (steps 1, 2 and 4) native. An entry gate answers a whole call, so the frame cannot be native
+with a translated step 3 in its middle; the first native item is therefore the **empty item** (a count below 1,
+or no entry passing the mask on the key-0x80 route, decidable at the entry by reading the list), checked whole (its
+NVN calls from Initialize to the flush, the key's three bytes, the cache entry, the slot and the manager's words); (2)
+the key-0x80 loop with the native submission and render state; (3) the key-0x40 / key-0 loops with the native
+preparation and the inlined submission, calling the methods back; (4) the per-variant draws, by template.
+
+## 12. Stream 2g: the items that draw nothing, and the variant family (reading and measuring; nothing native yet)
+
+The owner's direction (2026-11-14 evening) had two readings to test: (1) half the items draw nothing because the
+object methods start with a simple state test, and that filter lifted into a native loop removes half the calls into
+translated code; (2) the per-variant draws are one template instantiated per option set, so one function with a
+traits structure replaces the family. Both were tested against the code and measured with the observing gate
+(`HL_GFX_CHECK=1`, main PC, slot c, 110 s a scene; counts at the last report).
+
+### What makes an item empty, and what it must leave
+
+**Read** (the entry, the slot and the epilogue: guest `0x84de0`..`0x85d58` and `0x86694`..`0x8693c`):
+
+- The only early return is at the entry (the cache's mask +0x14 against the key's first word, its count +0x2c, the
+  item's flag x4+0xc bit 0): 264 to 626 items a run. No other test precedes the frame.
+- The item's list is a (start, count) pair at x5 over the cache's array of entry pointers (+0x20). All three inline
+  loops (keys 0x80, 0x40, 0) skip an entry whose kind mask (entry +8) does not meet the cache entry's first word (the
+  key's first word: the entry holds the key's copy); a variant key calls its variant with the whole list, whatever the
+  count. The key itself is computed only after the draw function's block is built (from the key's word +0x18, the
+  item's flags, the cache's +8, the material's callbacks).
+- **An empty item still does the whole frame**: the cache lookup under its mutex (a new entry when the key is new),
+  an atomic slot from the manager (+0xb8), the ring scan whose three indices are written into the slot (+0x6c..+0x6e),
+  the slot's memory taken under the manager's lock (+8), the item's pass object linked to the slot (+0x170, +0x178,
+  +0x180, +0xd8), **Initialize, AddControlMemory, AddCommandMemory, BeginRecording, (SetMemoryCallback and its data
+  when a global flag says so), SetRecordingMode, two ReportCounters, SetScissor, SetViewport, SetDepthRange,
+  SetLineWidth, SetPointSize** (the counters, the view and the last two each under a condition, not all read), the block built on the stack with one write outside it (the item's record +0x46a bit
+  0, when the material index changes), the epilogue's ReportCounter, **EndRecording** (handle into slot +0x50), the
+  memory used read back (+0x4c, +0x2c), **Finalize**, the global counter `[0x84ca2d60]`+0xd1c taken and put back,
+  the pool's flags (and a flush when bit 2 is set), the ring's used sizes advanced under the lock, the pass object
+  unlinked, and **when either memory used is not 0, the slot is appended to the cache entry's list (+0xc8 count, +0xd0
+  array)**: the recording is handed on to whoever replays the entry's list. *(Inference, not measured: a recording
+  holding the view state has command memory used, so an empty item's recording is handed on like any other.)*
+- So nothing of an empty item can be dropped on the code's evidence: its recording is listed for the consumer, its
+  slot and ring sizes are the manager's, its counters are the game's. A native empty item is the whole frame native
+  (about 1,000 of the 1,500 guest instructions read: the block build included, since its key decides whether a variant
+  is called), making the same NVN calls and the same writes; it is not a filter at the entry.
+
+**Measured** (the gate reads the list at the entry and files each item by class; "no draw" means no gate saw a
+submission, a preparation or a render-state call):
+
+| Scene | Items | Count below 1 | All entries masked (all drew nothing) | Live, no draw | Live, drew |
+|---|---:|---:|---:|---:|---:|
+| castle-move | 169,176 | 0 | 87,242 at 17.0 NVN calls each | 2,277 at 672 each | 79,031 at 466 each |
+| kokiri-idle | 329,901 | 0 | 170,179 at 17.0 | 4,106 at 763 | 155,293 at 478 |
+| hyrule-walk | 252,440 | 0 | 129,596 at 17.0 | 3,490 at 523 | 118,282 at 420 |
+
+What it says:
+
+- **The empty items are exactly the items whose every entry is masked** (none with a count below 1): decidable at the
+  entry by reading the list, as the owner thought, but the test is the job's own (the kind mask against the key), not
+  the methods', and passing it does not let the item return: the frame runs anyway. They carry 17 NVN calls each, all
+  of them the frame's.
+- The few live items without a draw seen (2,277) are heavy (672 NVN calls each): their draws go through paths no gate
+  sees (the variants' inlined submission); they are not empty.
+
+### The variant family: one template, but not where the work is
+
+**Read**: the table at `0x84c29878` has **256 entries, all distinct**, one per value of the 8-bit key. 253 of them are
+small bodies (90 to 476 lifted lines) with the same two direct callees (the render-state function `0x80077d60` and the
+render-enable function `0x80078b10`, plus the sub-mesh submission in three of them) whose sizes and indirect-call counts
+follow the key's bits exactly (bit 0 adds 4 indirect calls and about 40 lines in every family; the families of bits
+4-7 step 90-100, 195-211, 308-323, 410-428 lines): **one template instantiated over 8 option bits**, as the owner read
+it. Their NVN procedures are the same in every family (render enable, conditional render enable, a buffer's address;
+the families from 0x50 up add a counter reset and report), and their other indirect calls are the drawables' virtual
+methods: the instances are the loop and the state around the draw, the draws themselves are the methods'. Three
+entries are other code: key 5 `0x8008b3e0` (4,065 lines, 51 NVN sites), key 0xa0 `0x8008d640` (4,032 lines,
+49 NVN sites) and key 0xb0 `0x80522a20` (960 lines). The two large ones have the job's own draw loop's direct callees
+(the shared preparation, the cluster paths, the indexed draws: the same thirteen functions as the job) and the
+render-state and submission inlined: they are **the job's draw loop specialized for one key**, as keys 0x80, 0x40 and
+0 are inside the job, not instances of the small template. Keys 0, 0x40 and 0x80 have table entries the job does not use.
+
+**Measured** (an item whose off-loop draws come from a variant is filed under the table entry nearest below the first
+return address its gates saw; other first return addresses are the drawables' methods, filed by address):
+
+| Scene | Variant keys taken | Key 0xa0 (`0x8008d640`) | The small template's keys | Methods: `0x800955a0` / `0x8008f8e0` / `0x80296540` / `0x800715e0` |
+|---|---:|---|---|---|
+| castle-move | 4 | 9,998 items, 16.6 M NVN (41.6%) | 0x84, 0x4, 0x50: 1,501 items, 0.41 M (1.0%) | 10.4 M (26.2%) / 1.1 M / 0.56 M / 0.34 M |
+| kokiri-idle | 3 | 19,602 items, 33.3 M (41.5%) | 0x84, 0x4: 3,266 items, 1.48 M (1.8%) | 21.4 M (26.7%) / 2.0 M / 1.1 M / 0.66 M |
+| hyrule-walk | 3 | 15,332 items, 21.4 M (39.7%) | 0x84, 0x4: 2,553 items, 0.79 M (1.5%) | 12.8 M (23.8%) / 2.0 M / 0.84 M / 0.55 M |
+
+(Shares of all items' NVN calls in the run: 39.8 M, 80.2 M, 53.8 M. A method's figure is the NVN calls of the items
+whose first off-loop draw came from it, the job's own loop calls in those items included.)
+
+What it says:
+
+- The owner's reading holds for the table's structure (253 instances of one template), but **the template carries 1%
+  of the job's work** in these scenes: three of its 253 keys are taken. A parameterized native function for it is
+  cheap to write but nearly worthless now.
+- **The work is in two large, different bodies**: the key-0xa0 variant `0x8008d640` (about 40%), the job's draw loop
+  specialized and out of line, and the drawable's method `0x800955a0` (4,652 lines, 95 indirect calls; about 26%),
+  then the three smaller methods. These are the cut the code allows: `0x8008d640` composed from the native leaves the
+  way the job's own loops would be (render state, submission, preparation native, the cluster paths called back),
+  and `0x800955a0` read next.
+
+### Not done in this session
+
+- The native empty item (`HL_GFX_ITEM`) is not built: the reading above shows it is the whole frame, not an entry
+  filter, and its check has to compare a frame whose shared effects (the slot counter, the rings, the entry's list,
+  the NVN layer's recording) cannot be run twice: the native side must compute from a snapshot of what the frame reads,
+  into a recording whose return values (EndRecording's handle, the memory used) are taken from the translated run.
+- No picture validation: the build only observes (the translated item answers); the other checks of the same runs
+  stayed at 0 mismatches.
+- No crossings removed (nothing native). What the empty item would remove: its 17 NVN calls, each a crossing from
+  translated code into the NVN layer, become native calls under one gate crossing: 16 a item.
+
 ### The crossings a frame (`HL_GFX_TIME=1`, PC 3050, castle-move, 2026-11-14)
 
 `HL_GFX_TIME=1` counts and times, per presented frame, each graphics gate's calls from the translated code (answered
@@ -1065,6 +1272,196 @@ from translated loops; 2.5-3.0 ms of CPU a frame inside the preparation's gate o
 price of a crossing (out of lifted code, the gate's look at the call, back: the sub-mesh draw's declined calls) is about
 56 ns, so about 0.1 ms of CPU a frame for the crossings themselves; the rest is the native work and its NVN calls. A
 declined preparation costs as much as an answered one (1.6 us): its route is decided most of the way before it declines.
+
+## 13. Stream 2i: the key-0xa0 draw function `0x8008d640` (native on its plain entries)
+
+**What it is.** The function is reached only through the variant table (`0x84c29878`, no direct caller), so it is
+answered by pointer (`HL_ANSWER`, no lifted code changes; `hl_translated` gives the lifted body for the entries left to
+it). Arguments: x0 the item's list of draw entries (8-byte pointers), w1 their count, x2 the render-state block, x3 the
+key's first word, w5 the item's flags. It is a loop over the list that **keeps nothing between entries but the block**
+(and the command buffer): the prologue only saves registers and derives values from the arguments, the epilogue only
+restores them. So the translated function can be called on any sublist, in particular on one entry: **an entry the
+native code does not take is run by the translation on a list of that one, and the next entry is looked at natively**.
+That is the per-draw decline the brief asked for, with no item-level decision.
+
+**One entry** = a drawable and one of its sub-meshes (entry +16 the drawable, +8 a kind mask, +14 bits: 0-3 state sub-key,
+4 render enable, 6-9 sub-mesh, 10). In the function's order (offsets in bytes):
+
+1. Kind mask (+8) against x3: no match, nothing happens. *(native)*
+2. Render enable (entry bit 4) against block+91: differs, the render-enable function is inlined *(left)*. The state
+   sub-key (| 0x80 when the block's mask +104 meets the entry; bit 10 then set: left) against block+90: differs, the
+   render-state function is inlined *(left)*.
+3. The drawable's model (+8): its per-pass table (+64, 0x100 bytes a pass slot = block+56) gives the pass's **query
+   object** (+104) and a query base (+120); the model's class method (vtable +488) must be the game's usual one *(else
+   left)*. The query slot index = drawable+24 + model+244 x pass.
+4. Query not null and model+72 = 0 (**reset and report**): the command buffer's mark byte (+0x10) set, **ResetCounter**(cb,
+   1), query+40 = block+76; and, after the draw, the report slot's flag byte (query+32 array, index wrapped to query+24)
+   |= 1, **BufferGetAddress**(query+80) and **ReportCounter**(cb, 1, address + slot x 32).
+5. Block mask meets the entry (**conditional render**): when the (query, slot) pair differs from block+192 / +200:
+   **SetRenderEnable**(cb, 1) when one was set, then, with a query, BufferGetAddress and **SetRenderEnableConditional**(cb,
+   1, address + slot x 32) and the pair stored in the block; without a query only the SetRenderEnable and the pair
+   (0, 0xffffffff) stored.
+6. The sub-mesh (entry bits 6-9) against the drawable's count (+30 bits 4-7): out of range, no draw. Else: the drawable's
+   submission method (vtable +0x58) must be `0x80078fc0` *(else the method is called: left)*; geometry mode against block+59
+   *(differs: left)*; the shared preparation `0x8008fc00` (block, drawable, 0); on its result's bit 0: drawable+84
+   against the item flags' bit 3 and its own bit 5 *(left)*, draw kinds 0x51 *(clusters, indirect: left)*, instances
+   above 1 or no pre-recorded list on the sub-mesh record *(left)*; the plain case is the mark byte and **CallCommands**(cb,
+   1, record + 80), and the block's triangle counter (+80) += record+616.
+7. The global inline-write switch set: left (never seen).
+
+All the tests of an entry are read before anything is written (the preparation does not change them: it rewrites block
+bits 12, 13, 15 of +92, not the bit 5 read here), so an entry is native or translated whole.
+
+**Built.** `hl::bridge::KeyLoopBridge` (`bridge/LoopBridge.{h,cpp}`): `classify()` (the reads, the way: `EntryWay`),
+`run()` (the writes in place and the commands into a sink), `snapshot / restore` for the check; four NVN procedures
+added to the table (ReportCounter, ResetCounter, SetRenderEnable, SetRenderEnableConditional: 43 now); `hl_gfx_var_*`
+in the C surface; `host/hl_gfx.c`: `HL_ANSWER(0x8008d640)`, the translation on a one-entry list, the preparation
+called through `hl_gfx_prep_apply` directly (the gate's own native answer, no crossing) and through `a64_icall` of the
+function when it declines. Switch `HL_GFX_VAR`: 0 (default) the translation, 1 native on the plain entries, 2 only
+classify (every entry translated; the line `hl gfx: key loop` says how many take each way).
+
+**The check** (`HL_GFX_VAR_CHECK=1`; needs no `HL_GFX_CHECK`): for each entry the native code would take, the translated
+body runs first on that one entry with the NVN tap recording (each call of the preparation is a segment: its result and
+the block it left), the memory the entry may write (the block, the mark byte, the query's stamp and flag byte) is put
+back, the native entry runs into a recording with the preparation **replayed** from its segment (the preparation has its
+own checks), the two lists of calls and the bytes left are compared, and the translated run's state is put back. An entry
+whose preparation was not answered natively is not compared (counted).
+
+### Measured (main PC, slot a, 110 s a scene)
+
+**How the entries fall** (`HL_GFX_VAR=2`/`1`, counts at the last report; they vary a little with the scene's time):
+native about 33%, masked 3-4%, left: draw kinds 0x51 (clusters and indirect draws, heavy ones) 34-35%, the drawable's own
+submission method (`0x800955a0` and the other methods) 4-20%, render-enable change 3%, state change 3.5%, sub-key bit 10
+2.5%, geometry mode 0.4%. Conditional render with no query object is 16% of the entries at first sight (it was the
+largest "left" before it was written: the pair stored, nothing recorded). The model-class test failed 11 times, the
+inline-write switch, the item-flag bit 3 and bit 5, instances above 1 and a missing pre-recorded list never. So the plain
+path is a third of the entries and the **cluster path (a numeric kernel with the frustum and depth-pyramid tests) is the
+next third**, then the drawables' methods.
+
+**The check** (`HL_GFX_VAR_CHECK=1`, valid.sh, three scenes, build `s2i-var`): entries compared / NVN calls compared /
+mismatched: kokiri-idle 315,603 / 3,245,237 / 0; castle-move 287,132 / 2,986,749 / 0; hyrule-walk 82,856 / 853,745 / 0
+(14 entries of castle-move not compared: their preparation went to the translation). The entry's stamp store in the
+query object and the flag byte are shared with the items of other threads: 6, 8 and 2 entries had one of them overwritten
+between the two runs and are compared without those bytes (a first build, before that rule, logged 3-6 byte mismatches an
+scene, all at the query's stamp, all in entries whose stamp did not read back as the block's value in one of the runs).
+The call-by-call identity of the commands (procedure and arguments, guest pointers as values) and the 352 bytes of the
+block, the mark byte, the stamp and the flag byte are otherwise equal in every compared entry.
+
+**Native** (`HL_GFX_VAR=1`): castle-move ran to the end with no crash line (a late scene start: first runs after a new build
+spend a long start-up in the shader caches, in both slots, with the variable on or off), game speed ratio 32 in that run
+because of the start-up; hyrule-walk 60.5; kokiri-idle's first run stayed on its loading screen (the same start-up; the
+key loop never ran) and the rerun loaded and ran (97 fps in the first 66 s). The last shots of castle-move and hyrule-walk
+show the scene whole (the forest path at night, grass, the character, the HUD and the minimap). Not seen: kokiri-idle's
+native shots (the rerun was not made with shots). Memory unchanged by the brick (castle-move 3,184 MB game RAM, 17,521
+MB commit; hyrule-walk 3,036 / 17,583).
+
+**Crossings removed.** Per native entry the translated code made 1-2 calls of the shared preparation's gate and 1 to 6
+NVN calls out of lifted code (CallCommands, the query's reset, report and conditional render); the native entry makes
+the preparation's native answer directly (`hl_gfx_prep_apply`, no gate) and the NVN calls from C++. The log line counts
+them: castle-move 1.78 M NVN calls and 252 k preparations over its run, kokiri-idle 1.03 M and 146 k (about 150 NVN calls
+and 20 preparations a presented frame in kokiri-idle at 97 fps: the counters are totals, not per frame). The translated
+function's own loop work for those entries (about 100 guest instructions an entry) goes too.
+
+### What is left, in order of what the counts say
+1. The cluster entries (draw kinds 0x51, 34%): a port of the cull and merge kernel, or leaving them.
+2. The drawables' own methods (`0x800955a0`, 4-20%).
+3. The render-state and render-enable changes (6.5%: the inlined render-state function with the state objects at this
+   function's frame; `RenderState` takes the handles, the frame addresses of this copy are not yet read from the code).
+4. The empty items (the whole frame of `0x80084de0`): not started.
+
+## 14. Stream 2j: the cluster entries, the render-enable and render-state changes (native in the key-0xa0 function)
+
+**Cluster entries (kind bits 0x51).** The 34% "indirect" entries of section 13 are not one path. By the kind bits
+(drawable flags met with the item's) in the scenes: indirect draw (bit 4) 0; **a cluster entry holding this sub-mesh's
+index ranges 80% of them (28% of all entries)**; the culling loop (bit 7: frustum and depth-pyramid tests, a numeric
+kernel) 20% (5.5-6% of all entries); other cluster routes 0. The ranges path is plain: the drawable's cluster entry
+(table at drawable +120, 24 bytes an entry, indexed by the block's pass byte; entry +16 the sub-mesh it serves, +0 a
+list, +8 must be 0) points to a list of 6-byte records (first range, range count, descriptor; ended by a count of 0).
+Per record: one indexed draw from the descriptor's index buffer, count = last range's count + ((last offset - first
+offset) >> index shift), address = the buffer's address + the first offset, base vertex from the descriptor, base
+instance 1 and 1 instance (the commands: BufferGetAddress, then DrawElementsInstanced). The block's triangle counter
+gains a third of each count (signed multiply by the reciprocal, the game's rounding). No mark byte is set and the
+inline-write switch plays no part. `draw_clusters` in `LoopBridge.cpp`; a cluster entry whose +8 is not 0 or the culling
+loop is declined (the translation runs it).
+
+**Render enable and render state changes.** The entry's render enable differing from the block's runs the render-enable
+function (`0x80078b10`, inlined here): the enable byte kept, a conditional render in force turned off (SetRenderEnable;
+the block's query pair reset), the derived cull, polygon-mode, depth fields and the "applied last" fields rewritten;
+`apply_enable`. The render state (the sub-key against the block's +90, with bit 7 when the block's mask meets the entry
+and the block's mode bit 19 for the entry's bit 10) is the native `hl::gfx::RenderState`; the inlined copy keeps its five
+NVN state objects in this function's frame (blend at sp+168, colour +144, channel mask +148, depth-stencil +152, polygon
++140 from the function's sp: `StateBridge::Objects`). The enable function rewrites the state key, the mode bits and the
+query pair, so `classify` only decides that the entry may change them and `run` reads the block again between the two;
+the conditional-render decision uses the pair as the enable function leaves it. Declined: a material state callback (guest
+code), and a render-enable change with a conditional render in force while the inline-write switch is set (never seen).
+
+**Entries now** (castle-move / kokiri-idle / hyrule-walk, last report): native 67 / 68 / 66%, masked 4%, left: the
+drawables' submission methods 22% (`0x800955a0` 16-17%, `0x8008f8e0` 4-6%), culling clusters 6%, model-class method 0.8-1%,
+geometry mode 0.4%. `0x8008f8e0` is a method that sets the geometry mode, calls the shared preparation and then makes
+virtual calls on scene objects: mostly guest code. `0x800955a0` (4,652 lines, three preparation calls, 95 indirect calls)
+was not read this session.
+
+**Check** (`HL_GFX_VAR_CHECK=1`, valid.sh, build `s2j-var`): entries compared / NVN calls compared / mismatched:
+kokiri-idle 1,085,405 / 12,141,480 / 0; castle-move 491,274 / 5,645,920 / 0 (a first castle-move run stayed on its loading
+screen: start-up after a new build); hyrule-walk 776,902 / 8,875,130 / 0. Not compared (the preparation went to the
+translation): 2%.
+
+**Cost per entry (`HL_GFX_TIME=1`, castle-move, the same function timed per way).** An entry classified native costs 1,557 ns
+translated (`HL_GFX_VAR=2`, 1.03 M entries) and 1,565 ns answered natively (`HL_GFX_VAR=1`, 1.36 M entries; 9.5 NVN
+calls and one preparation an entry). **The native entry is not cheaper per call**: the time is the shared preparation (its
+native answer is the same in both) and the NVN calls, which go through the same table whether lifted or native code makes
+them. Entries are about 1,340 a frame, so 2.1 ms a frame either way. What would pay is emitting records straight into the
+back end (as the native state function can) instead of calling the NVN table, and the preparation itself. The coordinator's
+PC 3050 measurement of section 13's build (no difference) agrees.
+
+**Not done.** Culling clusters (a port of the frustum test `0x80029240`, the depth-pyramid test with its floating-point
+arithmetic and the run merging), `0x800955a0`, `0x8008f8e0`, geometry mode, the model-class case, and the empty items
+(the frame of `0x80084de0`: neither read nor whether an empty recording's memory used is non-zero measured).
+
+## 15. Stream 2k: the drawables' submission method `0x800955a0` (read for structure; nothing native yet)
+
+**What it is.** A drawable's submission method (vtable +0x58) called as (x0 the drawable, x1 the render-state block, x3
+the key's first word). It is **not one algorithm but a dispatcher with several variant bodies inlined**. It derives an
+index from the drawable's flags word (+92: bit 6 and the bits above it), the item's flags and the block's mask, reads the
+entry of a table of 16-byte entries (address, adjustment; table at `0x84c304a0`, 64 entries read: mostly small
+instantiations at `0x8366xxxx` of about 176 lines that call the shared preparation `0x8008fc00`, plus the large template
+bodies `0x800715e0` at index 8 and `0x80861440` at index 12), and then **compares that entry's address with a chain of
+known bodies and runs the matching body inline** (`0x808ef6b0`, `0x807cfa00`, `0x80861440` seen in the chain; these
+bodies are 1,450-1,650 lines each with one preparation call and one `0x8572f020` helper call, as separate functions too).
+Only an entry matching none is called. That is why the method is 4,652 lines with three preparation calls.
+
+**The inlined bodies' common shape** (read in the first two, 58-330 and 360-705): the drawable's per-pass array (+56
+pointer, +48 count, 16 bytes a record: a count word and a pointer at +8) indexed by the block's pass byte (+56) gives the
+list of sub-mesh records; per record the mask test against x3, the model's class method test (vtable +488 against the
+game's usual one), the query object of the model's pass table (+104 -> +1592, 0x270 bytes a pass), ResetCounter and
+ReportCounter around the draw, conditional render with the (query, slot) pair, SetRenderEnable, then the preparation and
+CallCommands of the record's pre-recorded list (record +80), the triangle counter at block +80 += record +616. That is the
+key-0xa0 entry's work of section 13 (the commands `BridgeCommands` already emits) in a loop over the drawable's own
+record list instead of over an item's entry list.
+
+**The call census** (each indirect call's target followed back to its proc global): 95 indirect calls = **76 NVN
+procedure calls** (BindUniformBuffer 35, BindStorageBuffer 23, CallCommands 5, SetGeometryProcessingMode 3,
+BufferGetAddress 3, ResetCounter 2, ReportCounter 2, SetRenderEnable 2, SetRenderEnableConditional 1) and **19 guest
+virtual calls** (14 through one object's vtable +40, the object reached by a global singleton's +1760 -> +216 -> +88 -> +0
+chain; 3 through a vtable +4008 on a global object; 1 through the vtable of an object found from the query object; 1 through
+an address outside the NVN table). Direct calls: the preparation 3 times, `0x8572f020` 4 times.
+
+**Where the NVN procedures fall (by line, three separable parts).**
+- Lines 58-1760 (the inlined bodies up to the dispatcher's tail): the plain per-record work above with BindUniformBuffer
+  15, SetGeometryProcessingMode 3, SetRenderEnable 2 and 3 virtual calls. The first two bodies are exactly the commands
+  the native key loop knows; the third adds uniform-block binds and geometry-mode switches.
+- Lines 2275-4100: BindUniformBuffer 20 and no virtual calls: the uniform-block assembly of the skinned / instanced path.
+- Lines 4100-4652: BindStorageBuffer 23 and 15 virtual calls: a storage-buffer path whose virtual calls reach scene
+  objects (guest code that must stay translated).
+
+**The cut proposed.** The first two bodies are plain NVN emission over data read in place and are separable: new ways in
+`classify()` taken when the drawable's method is `0x800955a0`, the table entry is the body's address, and the per-record
+conditions hold (mask, model-class test, no virtual hook); any other entry keeps calling the method translated, as for
+`0x80078fc0` today. The check is the one of section 13. To size it first: with `HL_GFX_VAR=2` count, for each entry that
+declines because of this method, the table entry address (which of the bodies it selects). **That census, the table's
+index bits, regions 3-6 line by line, and the 14 calls through vtable +40 are not done**: the session used its game time for the merge validation,
+and the bodies were mapped by their call structure, not read instruction by instruction.
+Nothing is built.
 
 ## Not established
 

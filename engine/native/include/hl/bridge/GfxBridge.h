@@ -464,6 +464,12 @@ public:
     /// Reads one call (x0 block, w1 key, sp the caller's stack pointer). False when the call would reach the material's
     /// state callback, which is guest code: the native version does not answer that call.
     bool read(GuestAddr block, uint64_t key, uint64_t sp, gfx::StateInputs& in, gfx::StateHandles& at) const;
+    /// The same with the five state objects' addresses given (a copy of the function inlined in another one keeps them in
+    /// its own frame).
+    struct Objects {
+        uint64_t blend = 0, color = 0, channel_mask = 0, depth_stencil = 0, polygon = 0;
+    };
+    bool read(GuestAddr block, uint64_t key, const Objects& objects, gfx::StateInputs& in, gfx::StateHandles& at) const;
     /// The polygon offsets of `block`'s material.
     class Offsets final : public gfx::PolygonOffsets {
     public:

@@ -59,6 +59,11 @@ enum class Proc : uint32_t {
     DeviceGetTextureHandle,
     CommandBufferBindTexture,
     CommandBufferBindTexturesDeferred,
+    // the key-0xa0 draw loop (KeyLoop in hl/bridge/LoopBridge.h)
+    CommandBufferReportCounter,
+    CommandBufferResetCounter,
+    CommandBufferSetRenderEnable,
+    CommandBufferSetRenderEnableConditional,
     Count
 };
 inline constexpr uint32_t kProcCount = (uint32_t)Proc::Count;

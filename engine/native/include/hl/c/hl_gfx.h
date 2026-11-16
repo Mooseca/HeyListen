@@ -145,6 +145,51 @@ void hl_gfx_prep_check_end(uint64_t result);
 int hl_gfx_prep_report(char *out, size_t cap);
 int hl_gfx_prep_shapes(char *out, size_t cap);
 
+/* ---- the key-0xa0 draw function (guest 0x8008d640: reached through the item body's table, answered by pointer) ---- */
+
+/* One call: x0 the list of draw entries, w1 their count, x2 the render-state block, x3 the key's first word, w5 the
+   item's flags, and the stack pointer at the entry. */
+typedef struct hl_gfx_var_call {
+    uint64_t list;
+    uint32_t count;
+    uint64_t block, mask;
+    uint32_t flags;
+    uint64_t sp;
+} hl_gfx_var_call;
+
+/* What the native loop calls back, on the thread that runs the call: the translated function on a sublist of the
+   entries (the function is a loop over its list and keeps nothing between entries but the block), and the shared
+   preparation (x0 block, x1 drawable; the function's own frame below the stack pointer `sp`), returning its w0. */
+typedef struct hl_gfx_var_host {
+    void *user;
+    void (*translate)(void *user, uint64_t list, uint32_t count);
+    uint64_t (*prepare)(void *user, uint64_t block, uint64_t drawable, uint64_t sp);
+    /* the check: 1 while the translated function runs on an entry the native version answers (the OS layer's tap then
+       feeds hl_gfx_var_check_call, and the preparation's gate hl_gfx_var_prep_begin / _end), 0 after */
+    void (*recording)(void *user, int on);
+} hl_gfx_var_host;
+
+/* Starts it (once; the hosts must outlive the process). native: 1 to answer the entries of the plain path natively, 0
+   to only classify them (every entry is then run by the translation). check: 1 to compare each native entry with the
+   translated one (see hl_gfx_var_check_*). Returns 1. */
+int hl_gfx_var_start(const hl_guest_host *host, const hl_gfx_host *gfx, int native, int check);
+uint64_t hl_gfx_var_address(void);
+uint64_t hl_gfx_var_prepare_return(void);
+
+/* The call, all of it: every entry natively or through host->translate. */
+void hl_gfx_var_run(const hl_gfx_var_call *call, const hl_gfx_var_host *host);
+
+/* The check, per entry the native version answers: the entry's translated run is recorded (the NVN calls the tap feeds,
+   each call of the shared preparation as a segment with its result and what it left in the block), the memory the
+   entry may write is put back, the native entry runs into a recording with the preparation replayed from its segment,
+   and the two lists of calls and the bytes left are compared; the translated run's state is then put back. */
+void hl_gfx_var_check_call(uint32_t proc, const uint64_t *x, const uint32_t *f);
+void hl_gfx_var_prep_begin(uint64_t block);
+void hl_gfx_var_prep_end(uint64_t result, int answered);
+
+/* One line of the function's counters. Returns the length written. */
+int hl_gfx_var_report(char *out, size_t cap);
+
 #ifdef __cplusplus
 }
 #endif
