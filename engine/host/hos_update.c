@@ -16,6 +16,74 @@ static int safe_tag(const char *s) {
         if (!isalnum((unsigned char)s[i]) && !strchr("._+-", s[i])) return 0;
     return 1;
 }
+
+/* a version to order, as builder/linux/linux_update.py release_key: a release tag (v0.3.2, v0.4.0-rc.1) or git describe's
+   v0.3.2-435-g1a2b3c4[-dirty], what a build from the Actions tab or a checkout carries: after v0.3.2, before any later release.
+   (issue 14: such a build, ahead of the release, was told the release was a new version.) 0: it names no release (dev, a bare
+   commit) */
+typedef struct { unsigned long num[8]; int count, release, after; } ver_key;
+
+/* (-N-g<hex>)?(-dirty)? up to the end: 1 after a tag, 0 nothing, -1 something else */
+static int ver_tail(const char *p) {
+    int after = 0;
+    if (p[0] == '-' && isdigit((unsigned char)p[1])) {
+        const char *q = p + 1;
+        while (isdigit((unsigned char)*q)) q++;
+        if (q[0] == '-' && q[1] == 'g' && q[2] && strchr("0123456789abcdef", q[2])) {
+            for (q += 2; *q && strchr("0123456789abcdef", *q); q++) {}
+            p = q, after = 1;
+        }
+    }
+    if (!strcmp(p, "-dirty")) return 1;
+    return *p ? -1 : after;
+}
+
+static int ver_parse(const char *s, ver_key *k) {
+    memset(k, 0, sizeof *k);
+    if (*s == 'v') s++;
+    else if (!isdigit((unsigned char)*s) || !strchr(s, '.')) return 0;   /* (no v: digits and a dot, not a bare commit) */
+    for (;;) {
+        int digits = 0;
+        unsigned long n = 0;
+        for (; isdigit((unsigned char)*s); s++)
+            if (++digits > 9) return 0;
+            else n = n * 10 + (unsigned long)(*s - '0');
+        if (!digits || k->count == 8) return 0;
+        k->num[k->count++] = n;
+        if (*s != '.') break;
+        s++;
+    }
+    int t = ver_tail(s);
+    k->release = 1;
+    if (t < 0) {   /* -rc.1: a prerelease, before its release; its name is not ordered (latest never names one) */
+        const char *q = s + 1;
+        while (isdigit((unsigned char)*q)) q++;
+        if (*s != '-' || (q[0] == '-' && q[1] == 'g')) return 0;
+        for (s++;;) {
+            if (!isalnum((unsigned char)*s)) return 0;
+            while (isalnum((unsigned char)*s)) s++;
+            if (*s != '.') break;
+            s++;
+        }
+        if ((t = ver_tail(s)) < 0) return 0;
+        k->release = 0;
+    }
+    k->after = t;
+    return 1;
+}
+
+/* whether the latest release is newer than the folder's version. When either names no release, it is offered when the
+   two differ, as before */
+static int ver_newer(const char *tag, const char *have) {
+    ver_key a, b;
+    if (!ver_parse(tag, &a) || !ver_parse(have, &b)) return strcmp(tag, have) != 0;
+    for (int i = 0; i < a.count || i < b.count; i++) {   /* (v1.0 before v1.0.0, as Python orders tuples) */
+        if (i == a.count || i == b.count) return i == b.count;
+        if (a.num[i] != b.num[i]) return a.num[i] > b.num[i];
+    }
+    if (a.release != b.release) return a.release;
+    return a.after > b.after;
+}
 #endif
 
 #ifdef _WIN32
@@ -114,7 +182,7 @@ void hos_update_check(void) {
         return;
     }
     fprintf(stderr, "update: this folder is %s, the latest release is %s\n", have, tag);
-    if (!strcmp(tag, have) || !strcmp(tag, skipped)) return;
+    if (!ver_newer(tag, have) || !strcmp(tag, skipped)) return;   /* (only a newer release: not one a development build is past) */
 
     wchar_t wtag[128], whave[128], wbuilder[MAX_PATH], text[2048];
     MultiByteToWideChar(CP_UTF8, 0, tag, -1, wtag, 128);
@@ -281,7 +349,7 @@ void hos_update_check(void) {
         return;
     }
     fprintf(stderr, "update: this folder is %s, the latest release is %s\n", have, tag);
-    if (!strcmp(tag, have) || !strcmp(tag, skipped)) return;
+    if (!ver_newer(tag, have) || !strcmp(tag, skipped)) return;   /* (only a newer release: not one a development build is past) */
     snprintf(path, sizeof path, "%shookshot_version.txt", dir);
     const int has_builder = installed_builder(builder, sizeof builder) ||
                             (read_value(path, "builder", builder, sizeof builder) && access(builder, X_OK) == 0);

@@ -98,7 +98,14 @@ static void WaitForSingleObject(HANDLE h, unsigned timeout) {
     require(h == &game_token && timeout == INFINITE, "changed game-thread wait");
     ++waited;
 }
-static void load_hookshot_env() {}
+static unsigned env_loads, submit_decisions;
+static void load_hookshot_env() { ++env_loads; }
+// (Linux) Mesa's submit-thread decision: after hookshot_env.txt, before SDL or any thread.
+[[maybe_unused]] static void submit_thread_at_start() {
+    require(env_loads == 1, "submit thread decided before hookshot_env.txt");
+    require(!loads && !inits && !windows && !threads, "submit thread decided after display or thread start");
+    ++submit_decisions;
+}
 
 #include "display_startup_actual.inc"
 
@@ -129,6 +136,11 @@ int main(int argc, char** argv) {
         try { status = app_main(app_argc, app_argv); }
         catch (const ProcessExit& exit) { status = exit.code; }
         require(game_argc == app_argc && game_argv == app_argv, "changed argument handoff");
+#ifdef __linux__
+        require(env_loads == 1 && submit_decisions == 1, "submit thread not decided once at start");
+#else
+        require(env_loads == 1 && !submit_decisions, "submit thread decided outside Linux");
+#endif
         if (mode == "load_failure" || mode == "init_failure" || mode == "window_failure") {
             require(status == 1, "unexpected display failure did not exit nonzero");
             require(flushes == 1 && logs.size() == 1, "startup error not logged and flushed once");

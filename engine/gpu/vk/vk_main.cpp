@@ -13,6 +13,9 @@
 #include <string>
 #include <thread>
 #include <vector>
+#ifndef _WIN32
+#include <dlfcn.h>   // (create_device: hos_posix_submit_thread_note, looked up in the exe)
+#endif
 
 #include "vk_api.h"
 #include "vk_draw.h"
@@ -544,7 +547,22 @@ bool create_device() {
     ci.pQueueCreateInfos = qs;
     ci.enabledExtensionCount = (uint32_t)want.size();
     ci.ppEnabledExtensionNames = want.data();
-    if (vkCreateDevice(dev.physical, &ci, nullptr, &dev.device) != VK_SUCCESS) {
+#ifndef _WIN32
+    {   // (Linux) Mesa's submit thread, read by Mesa in this vkCreateDevice: decided at process start, before any thread, and
+        // set for the whole process (host/hos_submit_thread.h, hos_main.c submit_thread_at_start): only said here, with the
+        // device now known. Nothing to say without an AMD card (the host's note is empty) or an older host (no note)
+        using Note = const char* (*)();
+        const Note note = (Note)dlsym(RTLD_DEFAULT, "hos_posix_submit_thread_note");
+        const char* said = note ? note() : nullptr;
+        if (said && *said) {
+            if (fadd_driver.driverID == VK_DRIVER_ID_MESA_RADV) logf("vk: RADV: Mesa's submit thread %s (decided at start)", said);
+            else logf("vk: the picked device is not RADV (driver %d): Mesa's submit thread was decided at start for the AMD card (%s), "
+                      "it reaches this device only if it is another Mesa driver", (int)fadd_driver.driverID, said);
+        }
+    }
+#endif
+    const VkResult created = vkCreateDevice(dev.physical, &ci, nullptr, &dev.device);
+    if (created != VK_SUCCESS) {
         logf("vk: vkCreateDevice failed");
         return false;
     }

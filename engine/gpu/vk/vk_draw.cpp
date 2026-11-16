@@ -2078,20 +2078,31 @@ VkPipeline build_graphics(const Program& p, const NvnState& s, const Targets& at
         // (from PR 430, YunaraDebugs: on AMD the task and mesh programs (OoT's foliage culling, following pointers through its
         // tables) hung the GPU when the driver's optimizer built them: a device lost one to four minutes into Kokiri, each time with
         // another of them first (RX 6600, issues 461 and 484); never in runs where they were built without it. They are built
-        // without it on AMD. RX_VK_MESH_OPT=1: with it, as the others)
-        static const bool amd = [] {
+        // without it on AMD's own drivers. RX_VK_MESH_OPT=1: with it everywhere; RX_VK_MESH_OPT=0: without it on every AMD driver.
+        // (issue 14, after upstream Hookshot eed4d912a / #1965: on Mesa's RADV it is the other way round: built WITHOUT the
+        // optimizer these programs run so long that the GPU is reset (Steam Deck, RDNA 2; a Deck tester's hang gone with
+        // RX_VK_MESH_OPT=1, two areas, frame 4380, 33 fps). So RADV builds them with it, as every other driver)
+        static const bool amd_own = [] {
+            VkPhysicalDeviceDriverProperties drv{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES};
+            VkPhysicalDeviceProperties2 pr{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, &drv};
+            vkGetPhysicalDeviceProperties2(dev.physical, &pr);
+            return pr.properties.vendorID == 0x1002 &&
+                   (drv.driverID == VK_DRIVER_ID_AMD_PROPRIETARY || drv.driverID == VK_DRIVER_ID_AMD_OPEN_SOURCE);
+        }();
+        static const bool amd_any = [] {
             VkPhysicalDeviceProperties pr{};
             vkGetPhysicalDeviceProperties(dev.physical, &pr);
             return pr.vendorID == 0x1002;
         }();
-        static const bool mesh_opt = getenv("RX_VK_MESH_OPT") != nullptr;
-        if (amd && !mesh_opt) {
+        static const char* const mesh_env = getenv("RX_VK_MESH_OPT");
+        const bool unoptimized = mesh_env ? (atoi(mesh_env) == 0 && amd_any) : amd_own;
+        if (unoptimized) {
             bool mesh = false;
             for (const Stage& st : p.stages) mesh |= (st.vk_stage & (VK_SHADER_STAGE_TASK_BIT_EXT | VK_SHADER_STAGE_MESH_BIT_EXT)) != 0;
             if (mesh) {
                 ci.flags |= VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT;
                 static std::atomic<int> told{0};
-                if (told++ < 1) logf("vk: task and mesh programs built without the driver's optimizer (AMD; RX_VK_MESH_OPT=1: with it)");
+                if (told++ < 1) logf("vk: task and mesh programs built without the driver's optimizer (AMD's own driver; RX_VK_MESH_OPT=1: with it)");
             }
         }
     }
