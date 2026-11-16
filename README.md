@@ -1,13 +1,43 @@
-# HeyListen
+<p align="center">
+  <img src="engine/assets/heylisten.png" alt="HeyListen: a glowing blue fairy" width="160">
+</p>
 
-A native Windows and Linux port of *The Legend of Zelda: Ocarina of Time* (**Nintendo Switch 2** build, title `0400486024DEC000`), made by statically recompiling **your own** copy of the game, with a Vulkan back end. HeyListen is a performance-focused fork of [Hookshot](https://github.com/NotRexed/Hookshot) by NotRexed.
+<h1 align="center">HeyListen</h1>
 
-This repository contains **no game code, keys, ROM or generated files**. Everything derived from the game is built locally from the user's own copy. HeyListen is not affiliated with or endorsed by Nintendo.
+<p align="center">
+  <b>A native Windows and Linux port of <i>The Legend of Zelda: Ocarina of Time</i> (Nintendo Switch 2),<br>
+  built on your PC from your own copy of the game.</b>
+</p>
+
+<p align="center">
+  <a href="https://github.com/Sacrappy/HeyListen/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/Sacrappy/HeyListen?label=release&color=3b82f6"></a>
+  <a href="https://github.com/Sacrappy/HeyListen/releases"><img alt="Downloads" src="https://img.shields.io/github/downloads/Sacrappy/HeyListen/total?color=3b82f6"></a>
+  <a href="https://github.com/Sacrappy/HeyListen/actions/workflows/linux.yml"><img alt="Linux checks" src="https://github.com/Sacrappy/HeyListen/actions/workflows/linux.yml/badge.svg?branch=main"></a>
+  <a href="LICENSE"><img alt="License: GPL-3.0-or-later" src="https://img.shields.io/badge/license-GPL--3.0--or--later-blue"></a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/Sacrappy/HeyListen/releases/latest"><b>Download</b></a> ·
+  <a href="docs/USER_GUIDE.md"><b>User guide</b></a> ·
+  <a href="https://github.com/Sacrappy/HeyListen/issues"><b>Report a problem</b></a> ·
+  <a href="CONTRIBUTING.md"><b>Contributing</b></a>
+</p>
+
+HeyListen statically recompiles **your own** copy of the game (title `0400486024DEC000`) into a native program with a
+Vulkan back end: no emulator. It is a performance-focused fork of [Hookshot](https://github.com/NotRexed/Hookshot) by
+NotRexed.
+
+This repository contains **no game code, keys, ROM or generated files**. Everything derived from the game is built
+locally from the user's own copy. HeyListen is not affiliated with or endorsed by Nintendo.
+
+> **Have an AMD or Intel GPU, a Steam Deck or a Linux PC?** Our test machines are NVIDIA only: your reports are the
+> most useful thing you can send. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 - [How to use](#how-to-use)
 - [Performance](#performance)
 - [HeyListen compared with Hookshot](#heylisten-compared-with-hookshot)
 - [Repository layout](#repository-layout)
+- [Contributing](#contributing)
 - [Credits](#credits)
 - [License](#license)
 
@@ -33,9 +63,24 @@ Problems: [issues](https://github.com/Sacrappy/HeyListen/issues) (include your G
 
 ## Performance
 
-Average frame rate, **frame generation off**, windowed, with the game's frame limit lifted. Machine: Ryzen 7 7800X3D, RTX 5070 12 GB, Windows 11 (scripted bench scenes from `tools/bench/`, picture and game speed checked on every run).
+**v0.4.0 against the other Ocarina of Time ports** (2026-11-16): in-game frame rate only, 2560x1440, 3D scene at
+100 %, no upscaler, no frame generation, uncapped, Link idle in each zone loaded from the same saves; PresentMon over
+the 40 s after each build's "in play" marker, without its first 3 s; the mean of two runs per zone.
 
-| Scene | Hookshot (fork point) | HeyListen now |
+| Machine | Zones | NX2navi 0.11.0-rc4 | Longshot v3.0.0-rc.4 | **HeyListen v0.4.0** |
+|---|---:|---:|---:|---:|
+| i5-10400F, RTX 3050 8 GB | 17 | 29.7 fps (1% low 22.6) | 35.6 fps (28.1) | **40.8 fps** (24.4) |
+| Ryzen 7 7800X3D, RTX 5070 12 GB | 13 | 68.0 fps (35.5) | 86.0 fps (51.4) | **96.2 fps** (43.6) |
+
+- HeyListen has the highest average frame rate in 14 of 17 zones on the RTX 3050 and 10 of 13 on the RTX 5070
+  (+15 % and +12 % over Longshot on average, +37 % and +41 % over NX2navi).
+- Its 1% lows are still below Longshot's: some frames in steady play take 100-350 ms. That is the next work item.
+- Per zone, the method and every caveat (present modes, a main-PC series run while the PC was in use, NVIDIA's shader
+  cache at its 1 GB default there): [docs/benchmarks/2026-11-16-v0.4.0-zones.md](docs/benchmarks/2026-11-16-v0.4.0-zones.md).
+
+**Against Hookshot, where HeyListen forked from.** Average frame rate, **frame generation off**, windowed, with the game's frame limit lifted. Machine: Ryzen 7 7800X3D, RTX 5070 12 GB, Windows 11 (scripted bench scenes from `tools/bench/`, picture and game speed checked on every run).
+
+| Scene | Hookshot (fork point) | HeyListen (Sprint 5) |
 |---|---:|---:|
 | Kokiri Forest | 54.2 fps | **90.0 fps** |
 | Castle Town (the Market) | 31-43 fps while moving | **89.3 fps** |
@@ -94,6 +139,13 @@ git remote add upstream-hookshot https://github.com/NotRexed/Hookshot.git   # on
 git fetch upstream-hookshot
 git subtree pull --prefix=engine upstream-hookshot main
 ```
+
+## Contributing
+
+Bug reports, crash reports, feature ideas and tests on other hardware help the most, above all from **AMD and Intel
+GPUs, the Steam Deck and Linux**: [open an issue](https://github.com/Sacrappy/HeyListen/issues/new) with your GPU,
+driver and `hookshot_log.txt` (never game files, keys or saves). Fixes are welcome as pull requests.
+[CONTRIBUTING.md](CONTRIBUTING.md) has how to report, build, test and send a change.
 
 ## Credits
 
