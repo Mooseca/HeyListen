@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def check_source():
     """The replay still cuts its segments with the rule, and the switches are still read"""
     src = (ROOT / "gpu/vk/vk_replay.cpp").read_text(encoding="utf-8")
-    for needle in ('#include "segment_plan.h"', "segment_plan::segment_count(total, per, recorders, kMaxBatch, one_round)",
+    for needle in ('#include "segment_plan.h"', "segment_plan::segment_count(total, per, recorders, seg_cap(), one_round)",
                    'getenv("RX_VK_PARALLEL_ROUNDS")', 'getenv("RX_VK_PARALLEL_SELF")', "if (self_rec) record_job(jobs[0].get());",
                    'getenv("RX_VK_PARALLEL_SEG")'):
         if needle not in src:

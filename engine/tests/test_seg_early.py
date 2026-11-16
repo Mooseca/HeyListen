@@ -56,6 +56,8 @@ def main():
     need("UbReadGuard ug;" in rep[i - 200:i], "a worker reads a render condition unguarded")
     i = rep.index("par_points.push_back({p + h.size, s, ub_updates.size(), par_conds.size(), dry_work});")
     need("if (seg_early_hook) seg_early_hook->on_point(par_points.back());" in rep[i:i + 300], "the hook is not called after a point")
+    need("seg_early_hook && dry_wanted_only() && !seg_early_hook->wants(dry_work, p + h.size)" in rep[i - 400:i],
+         "the dry pass copies the state at points no boundary takes (RX_VK_DRY_WANTED)")
 
     e = function(rp, "const uint8_t* replay_handle_early(")
     i_dry = e.index("jt_mark(13, 0);")
@@ -66,7 +68,9 @@ def main():
     need(after.index("seg_early_hook = nullptr;") < after.index("const size_t used = open + 1;"), "the hook outlives the dry pass")
     need("ub_growing.store(false, std::memory_order_release);" in after, "the growth flag is not cleared after the dry pass")
     hook = e[e.index("hook.on_point = [&](const ParPoint& q) {"):e.index("if (early) {")]
-    need("(int)open + 1 >= nplan || q.work < plan[open]" in hook, "a segment is handed out before its planned end is passed")
+    need("hook.wants = [&](int64_t work, const uint8_t* at) { return (int)open + 1 < nplan && work >= plan[open] && at != jobs[open]->g.p; };" in e,
+         "a segment is handed out before its planned end is passed")
+    need("if (!hook.wants(q.work, q.p)) return;" in hook, "the hook takes a point the plan does not want")
     need("n->s = q.s;" in hook and "&n->s" in hook, "the next segment points into the moving points' vector")
     need(hook.index("j->g.end = q.p;") < hook.index("par_pool.jobs.push_back"), "a segment is handed out before its end is set")
     need(e.index("submit_recording(r, false);") < e.index("record_job(last);"), "rec_cur is not submitted before the segments")

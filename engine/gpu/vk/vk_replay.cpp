@@ -1267,7 +1267,16 @@ struct UbGrowGuard {
     }
 };
 // (the dry pass calls on_point at each point it keeps while an early replay_handle runs; the replay thread's only)
-struct SegEarlyHook { std::function<void(const ParPoint&)> on_point; };
+struct SegEarlyHook {
+    std::function<void(const ParPoint&)> on_point;
+    /// (stream R5) whether on_point would take the point at this work count and place: the point's state (NvnState, ~27 KB) is copied
+    /// only for those (RX_VK_DRY_WANTED, default on, =0: every point's, as before)
+    std::function<bool(int64_t, const uint8_t*)> wants;
+};
+bool dry_wanted_only() {
+    static const bool on = !getenv("RX_VK_DRY_WANTED") || atoi(getenv("RX_VK_DRY_WANTED")) != 0;
+    return on;
+}
 SegEarlyHook* seg_early_hook = nullptr;
 size_t ub_first_of_recording = 0;  // (the current recording's first entry)
 uint64_t rec_value_now = 0;
@@ -2247,8 +2256,14 @@ void replay(VkCommandBuffer& cmd, NvnState& s, const uint8_t* p, const uint8_t* 
                     st_lean_left++;   // (TICK-061: a point no boundary can be at, RX_VK_DRY_LEAN: its state not copied)
                 } else if (dry_work % point_every == 0) {
                     if (lean_points) st_lean_kept++;
-                    par_points.push_back({p + h.size, s, ub_updates.size(), par_conds.size(), dry_work});
-                    if (seg_early_hook) seg_early_hook->on_point(par_points.back());   // (TICK-056, RX_VK_SEG_EARLY)
+                    // (the early path takes one point a boundary, the first at or after its planned place: a point none takes was a
+                    // copy of the whole state, 58 of them a big command buffer, the vector growing by moves of the same)
+                    if (seg_early_hook && dry_wanted_only() && !seg_early_hook->wants(dry_work, p + h.size)) {
+                        // (not a boundary)
+                    } else {
+                        par_points.push_back({p + h.size, s, ub_updates.size(), par_conds.size(), dry_work});
+                        if (seg_early_hook) seg_early_hook->on_point(par_points.back());   // (TICK-056, RX_VK_SEG_EARLY)
+                    }
                 }
                 if (dry_work == presync_kick_at) presync_early_start();   // (TICK-056: a command buffer big enough to be cut, likely)
             } else if (!worker) {
@@ -2319,7 +2334,30 @@ int64_t part_work = 0;
 // which a wait on the timeline value it signals at its end kept them from. A parallel replay's segments are recorded
 // at once, kMaxBatch of them at most: fewer than the slots)
 constexpr int kMaxParts = 32;
-constexpr int kMaxBatch = 6;   // (three recording threads: more segments only took slots and submits)
+constexpr int kMaxBatch = 12;   // (the arrays' size; seg_cap() is the number a command buffer is cut into at most)
+/// (stream R6, RX_VK_FINE_SEGMENTS, default on under 16 hardware threads, 0: off) a big command buffer cut into more segments than there
+/// are recorders: the last ones are short, and a recorder that is done takes the next, so the replay thread's own (last) segment, which
+/// starts when the dry pass is over, is a smaller share (PC 3050, castle-move: 4.7 -> 3.6 ms, the frame 36.0 -> 37.7 fps). Up to 10
+/// segments of ~128 draws and dispatches, not one round of at most one a recorder (as set by RX_VK_SEG_MAX, RX_VK_PARALLEL_SEG,
+/// RX_VK_PARALLEL_ROUNDS, each alone). 16 or more hardware threads (six recorders) keep 6 and 160: not measured there
+bool fine_segments() {
+    static const bool v = [] {
+        const char* e = getenv("RX_VK_FINE_SEGMENTS");
+        const bool on = e ? atoi(e) != 0 : std::thread::hardware_concurrency() < 16;
+        logf("vk: a big command buffer's segments: %s (RX_VK_FINE_SEGMENTS)", on ? "up to 10 of ~128 draws, more than recorders" : "one round, up to 6 of ~160 draws");
+        return on;
+    }();
+    return v;
+}
+/// (RX_VK_SEG_MAX=<n>) at most that many segments a command buffer: 10 with fine_segments, else 6 (three recording threads, more
+/// segments only took slots and submits)
+int seg_cap() {
+    static const int v = [] {
+        const char* e = getenv("RX_VK_SEG_MAX");
+        return e ? std::clamp(atoi(e), 2, kMaxBatch) : fine_segments() ? 10 : 6;
+    }();
+    return v;
+}
 
 void maybe_split(VkCommandBuffer& cmd) {
     static const int64_t every = getenv("RX_VK_CHUNK") ? atoll(getenv("RX_VK_CHUNK")) : 120;
@@ -2776,8 +2814,9 @@ const uint8_t* replay_handle_early(VkCommandBuffer& cmd, const uint8_t* h, bool 
     jobs[0]->s = state;
     jobs[0]->g = {h, nullptr, &jobs[0]->s, ub0, 0, serial0};
     SegEarlyHook hook;
+    hook.wants = [&](int64_t work, const uint8_t* at) { return (int)open + 1 < nplan && work >= plan[open] && at != jobs[open]->g.p; };
     hook.on_point = [&](const ParPoint& q) {
-        if ((int)open + 1 >= nplan || q.work < plan[open] || q.p == jobs[open]->g.p) return;
+        if (!hook.wants(q.work, q.p)) return;
         Job* j = jobs[open].get();
         j->g.end = q.p;
         {
@@ -2992,13 +3031,13 @@ const uint8_t* replay_handle(VkCommandBuffer& cmd, const uint8_t* h, bool may_st
     if (presync_kick_at && !seg_early_on() && (pk_big_last >> pk_this & 1)) presync_early_start(), presync_kick_at = 0;
     // (segments of ~RX_VK_PARALLEL_SEG draws and dispatches (default 160), taken in order by the threads and submitted
     // as each is done with those before it: the GPU starts on the first while the rest are recorded)
-    static const int64_t per = getenv("RX_VK_PARALLEL_SEG") ? std::max(32, atoi(getenv("RX_VK_PARALLEL_SEG"))) : 160;
+    static const int64_t per = getenv("RX_VK_PARALLEL_SEG") ? std::max(32, atoi(getenv("RX_VK_PARALLEL_SEG"))) : fine_segments() ? 128 : 160;
     // (TICK-050) RX_VK_PARALLEL_ROUNDS=1: no more segments than recorders, so that they are all recorded in one round (TICK-049:
     // ~830 draws gave 5 segments on 4 workers, the fifth recorded alone after the others). RX_VK_PARALLEL_SELF=1 (with it): the
     // replay thread records the first segment itself instead of only waiting, one recorder more; =2: it also takes segments
     // no worker has started yet before it waits for one (the pool's queue, in order). (TICK-054) ROUNDS on and SELF=2 by default
     // (=0: off): the frame is one serial loop through the Presentation Thread's replay, and its own segment was the slowest
-    static const bool one_round = !getenv("RX_VK_PARALLEL_ROUNDS") || atoi(getenv("RX_VK_PARALLEL_ROUNDS")) != 0;
+    static const bool one_round = getenv("RX_VK_PARALLEL_ROUNDS") ? atoi(getenv("RX_VK_PARALLEL_ROUNDS")) != 0 : !fine_segments();
     static const int self_mode = getenv("RX_VK_PARALLEL_SELF") ? std::clamp(atoi(getenv("RX_VK_PARALLEL_SELF")), 0, 2) : 2;
     static const bool self_rec = self_mode >= 1, self_help = self_mode >= 2;
     const int recorders = mkwvk::segment_plan::recorders(threads, self_rec);
@@ -3028,7 +3067,7 @@ const uint8_t* replay_handle(VkCommandBuffer& cmd, const uint8_t* h, bool may_st
         // size, another draw count) moves the boundaries or leaves planned ones unreached (those slots unused, the last segment
         // the rest); none reached: the whole buffer recorded on this thread. Too small a last count: the old path)
         const int64_t last_total = pk_total[pk_this];
-        const int nplan = mkwvk::segment_plan::segment_count(last_total, per, recorders, kMaxBatch, one_round);
+        const int nplan = mkwvk::segment_plan::segment_count(last_total, per, recorders, seg_cap(), one_round);
         if (nplan >= 2) {
             int64_t plan[kMaxBatch] = {};
             mkwvk::segment_plan::balanced_targets(pk_profile[pk_this], nplan, last_total, plan);
@@ -3065,7 +3104,7 @@ const uint8_t* replay_handle(VkCommandBuffer& cmd, const uint8_t* h, bool may_st
     if (dry_lean_on() && !only_boundary) {
         const int64_t pe = par_point_every();
         const int64_t T = count_work(h);
-        const int nplan = mkwvk::segment_plan::segment_count(T, per, recorders, kMaxBatch, one_round);
+        const int nplan = mkwvk::segment_plan::segment_count(T, per, recorders, seg_cap(), one_round);
         // (RX_VK_DRY_LEAN=1: the one-segment case only, exact whatever the dry pass finds. =2: the planned boundaries too, which
         // is exact only when the dry pass reaches the counted end; measured (TICK-061 screen 2) the segments came out other than
         // with every point (the first ~280 draws against ~180), the replay thread's own segment +0.8 ms: so =2 is not for play)
@@ -3106,7 +3145,7 @@ const uint8_t* replay_handle(VkCommandBuffer& cmd, const uint8_t* h, bool may_st
     static int64_t timed;
     dry_ms += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_dry0).count();
     if (wall_fine_on()) rwall.dry_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - t_dry0).count();
-    const int nseg = mkwvk::segment_plan::segment_count(total, per, recorders, kMaxBatch, one_round);
+    const int nseg = mkwvk::segment_plan::segment_count(total, per, recorders, seg_cap(), one_round);
     int64_t wants[kMaxBatch] = {};
     if (balance) mkwvk::segment_plan::balanced_targets(profile, nseg, total, wants);
     std::vector<Segment> seg;
