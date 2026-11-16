@@ -61,6 +61,14 @@ an option id of its own; the stall markers name the command a stuck GPU never fi
 
 **AMD FSR 4** as an Upscaler choice (and FSR 4's native anti-aliasing), next to DLSS, DLAA and FSR 3.1. It needs an
 RDNA 4 card (RX 9000 series); we had none to try it on, so it ships untested: please report how it looks and runs.
+It is not in a game folder unless asked for, and AMD's files are not included. To get it:
+1. Windows: tick **AMD FSR 4** in the Builder before you build (it is off by default), then build again (updating the folder is enough).
+2. Put AMD's `amd_fidelityfx_loader_vk.dll` and `amd_fidelityfx_upscaler_vk.dll` from the
+   [FidelityFX SDK 2.4 release](https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK) (`Kits/FidelityFX/signedbin`) in
+   the game folder or next to `bin\HeyListen.exe`. On Linux, a Vulkan FSR 4 library (`amd_fidelityfx_upscaler_vk.so`) beside
+   the game takes their place; the AppImage is built with FSR 4.
+
+With the tick and without the files, the Upscaler row says the files are missing; without the tick it offers FSR 3.1 only.
 The overlay's Scaling line now names the upscaler that draws (it said "bilinear" alone while DLSS drew).
 
 **Linux diagnostics** (#26): job traces, readback call sites, the overlay's shader and pipeline waits counted apart,

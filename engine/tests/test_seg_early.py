@@ -74,7 +74,10 @@ def main():
     need("n->s = q.s;" in hook and "&n->s" in hook, "the next segment points into the moving points' vector")
     need(hook.index("j->g.end = q.p;") < hook.index("par_pool.jobs.push_back"), "a segment is handed out before its end is set")
     need(e.index("submit_recording(r, false);") < e.index("record_job(last);"), "rec_cur is not submitted before the segments")
-    need(e.index("record_job(last);") < e.index("vkQueueSubmit2(dev.queue, 1, &si, j->r->fence)"), "the segments' submits are out of place")
+    sj = e[e.index("const auto submit_job = [&init_lost](Job* j) {"):e.index("std::condition_variable seg_cv;")]
+    need("vkQueueSubmit2(dev.queue, 1, &si, j->r->fence)" in sj, "a segment's submit is not submit_job's")
+    tail = e[e.index("record_job(last);"):]
+    need("submit_job(j);" in tail and tail.index("submit_job(j);") < tail.index("par_pool.done.wait("), "the segments' submits are out of place")
     need(e.index("par_pool.done.wait(lk, [] { return par_pool.pending == 0; });") < e.index("par_active = false;\n    texture_segments_begin(nullptr, 0);\n    seg_ms"),
          "par_active goes off before every segment is done")
     whole = e[e.index("if (used < 2 || !early) {"):e.index("*cut = true;")]

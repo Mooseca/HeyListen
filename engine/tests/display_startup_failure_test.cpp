@@ -106,6 +106,11 @@ static void load_hookshot_env() { ++env_loads; }
     require(!loads && !inits && !windows && !threads, "submit thread decided after display or thread start");
     ++submit_decisions;
 }
+// (Linux, Longshot #900) the driver environment chosen after the submit thread, before SDL or any thread.
+[[maybe_unused]] static void driver_env_choose() {
+    require(submit_decisions == 1, "driver environment chosen before the submit thread's decision");
+    require(!loads && !inits && !windows && !threads, "driver environment chosen after display or thread start");
+}
 
 #include "display_startup_actual.inc"
 

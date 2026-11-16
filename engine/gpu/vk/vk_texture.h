@@ -109,6 +109,9 @@ VkCommandBuffer upload_command_buffer();
 /// the same way: the early mirror pre-sync records its copies on a worker into a command buffer of its own (vk_replay.cpp)
 struct UploadTarget { VkCommandBuffer cmd = VK_NULL_HANDLE; bool used = false; };
 UploadTarget texture_upload_swap(UploadTarget to);
+/// (stream C1, RX_VK_EARLY_GPU) while set, this thread's first recording into its upload command buffer sets *flag (release) before
+/// anything is recorded; nullptr: no watch. The dry pass's uploads then hold back the segments not submitted yet (vk_replay.cpp)
+void texture_upload_watch(std::atomic<bool>* flag);
 /// A copy of an RGBA8 region (decoded ASTC kept as RGBA8) into a texture kept as BC3: through the encoder
 bool texture_copy_into_bc(VkCommandBuffer cmd, Texture* src, uint32_t src_level, uint32_t src_layer, int sx, int sy,
                           Texture* dst, uint32_t dst_level, uint32_t dst_layer, int dx, int dy, uint32_t w, uint32_t h,

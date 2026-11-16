@@ -389,8 +389,10 @@ void astc_trace_note(const Texture& tex) {
     if (!seen.insert(key).second) st_astc_again.fetch_add(1, std::memory_order_relaxed);
 }
 
+thread_local std::atomic<bool>* up_watch = nullptr;   // (stream C1, RX_VK_EARLY_GPU: texture_upload_watch)
 VkCommandBuffer upload_cmd() {
     if (!up_used) {
+        if (up_watch) up_watch->store(true, std::memory_order_release);
         up_used = true;
         full_barrier(up_cmd);   // (after the work submitted before: it may still read what is replaced)
     }
@@ -2902,6 +2904,9 @@ void texture_begin_recording(VkCommandBuffer upload, uint64_t value) {
 }
 VkCommandBuffer upload_command_buffer() {
     return upload_cmd();
+}
+void texture_upload_watch(std::atomic<bool>* flag) {
+    up_watch = flag;
 }
 UploadTarget texture_upload_swap(UploadTarget to) {
     const UploadTarget was{up_cmd, up_used};

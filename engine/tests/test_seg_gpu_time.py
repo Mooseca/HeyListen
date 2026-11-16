@@ -60,7 +60,7 @@ def main():
          "early path: a segment's timestamps are not begun after its upload command buffer")
     need(e.index("gpu_time_begin(*j->r);") < e.index("hook.on_point = [&](const ParPoint& q) {") < e.index("jt_mark(13, 0);"),
          "early path: timestamps begun after a segment can be handed out")
-    rj = e[e.index("const auto record_job = [&seg_cv, &seg_mu, &now_ns](Job* j) {"):e.index("// the dry pass, handing segments out")]
+    rj = e[e.index("const auto record_job = [&seg_cv, &seg_mu, &now_ns"):e.index("// the dry pass, handing segments out")]
     need("gpu_time_end(*j->r, j->uploads);" in rj, "early path: a segment's end timestamps are not written")
     if "gpu_time_end(*j->r, j->uploads);" in rj:
         at = rj.index("gpu_time_end(*j->r, j->uploads);")
