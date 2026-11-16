@@ -78,20 +78,6 @@ the 40 s after each build's "in play" marker, without its first 3 s; the mean of
 - Per zone, the method and every caveat (present modes, a main-PC series run while the PC was in use, NVIDIA's shader
   cache at its 1 GB default there): [docs/benchmarks/2026-11-16-v0.4.0-zones.md](docs/benchmarks/2026-11-16-v0.4.0-zones.md).
 
-**Against Hookshot, where HeyListen forked from.** Average frame rate, **frame generation off**, windowed, with the game's frame limit lifted. Machine: Ryzen 7 7800X3D, RTX 5070 12 GB, Windows 11 (scripted bench scenes from `tools/bench/`, picture and game speed checked on every run).
-
-| Scene | Hookshot (fork point) | HeyListen (Sprint 5) |
-|---|---:|---:|
-| Kokiri Forest | 54.2 fps | **90.0 fps** |
-| Castle Town (the Market) | 31-43 fps while moving | **89.3 fps** |
-| Hyrule Field | 49.1 fps | **85.5 fps** |
-
-Notes on the numbers:
-- HeyListen figures are the latest Sprint 5 measurements ([docs/tickets/SPRINT-5.md](docs/tickets/SPRINT-5.md)): Kokiri Forest standing, Castle Town moving, Hyrule Field walking. Run-to-run spread is a few fps.
-- Hookshot figures are from the first baseline ([docs/benchmarks/2026-11-baseline.md](docs/benchmarks/2026-11-baseline.md)) with Hookshot's serial replay (Kokiri Forest and Hyrule Field), and from the Castle Town ticket (TICK-027) for the Market's move and turn drops. They are the starting point of the fork, not today's upstream Hookshot.
-- A second, weaker bench PC (i5-10400F, RTX 3050 on PCIe 3.0 x4) gained 18-21% from the slow-link work: Kokiri Forest 30.9 to 37.2, Castle Town 29.1 to 34.4, Hyrule Field 31.4 to 37.2 fps at 1440p.
-- The sprint goal is a steady 120 fps average; it is not reached yet. Every benchmark and its method is in [docs/benchmarks/](docs/benchmarks/).
-
 ## HeyListen compared with Hookshot
 
 HeyListen's `engine/` is Hookshot's source imported with its history and kept in sync by subtree merges (last synced to Hookshot v2.0.13, commit `a2e6505`). Against Hookshot's current `main`, HeyListen is **317 commits ahead** (229 of them non-merge) and 643 behind: the newest Hookshot work is on the `sync/hookshot-12` branch and is not merged, because it measured about 29% slower on the same scenes with HeyListen's changes.
@@ -151,7 +137,8 @@ driver and `hookshot_log.txt` (never game files, keys or saves). Fixes are welco
 
 HeyListen is **made by Sacrappy**, with contributions from:
 
-- **[Mooseca](https://github.com/Mooseca)**: Linux (the engine builds again, the CI job, the game tested on a Radeon RX 9070 XT, what the players' guide says about it), the shaders prepared again when the program cache lost them, the checks that build and run again, the title movie's judder (no virtual core held while a picture decodes), the Full overlay's GPU numbers on Linux with AMD cards, and RADV's readback wait limited to the light meter (+26% on an RX 9070 XT).
+- **[Mooseca](https://github.com/Mooseca)**: Linux (the engine builds again, the CI job, the game tested on a Radeon RX 9070 XT, what the players' guide says about it), the shaders prepared again when the program cache lost them, the checks that build and run again, the title movie's judder (no virtual core held while a picture decodes), the Full overlay's GPU numbers on Linux with AMD cards, RADV's readback wait limited to the light meter (+26% on an RX 9070 XT), the Linux diagnostics (#26), the update offered only for a newer release (#29), Mesa's submit thread on RADV (+10 fps on an RX 9070 XT, #32), and the opening movie kept whole above 60 fps (#28, after Hookshot).
+- **[Longshot](https://git.magicbean.dev/MagicBeanDev/Longshot)** (MagicBeanDev), a sibling fork of Hookshot whose fixes HeyListen takes: Amateurwizrd (the window filter that averages a larger picture, #307), Yeetbot90 (a slow movie's pictures and Intel's Windows compile fault, #252; weak Intel laptops, #404), Guep (Intel integrated GPUs' uniform updates and pipeline cache, #189 and #190), nyannoying (Arc B-series device loss in Kokiri Forest, #444; a submit's capture missing pages marked again, #1083), Zelda Ootr (Steam Deck Game Mode starts that recompiled every pipeline, #900; read-backs after a timeout, #553 and #554; guest pages under an import, #468 and #469; unrolled software matrix multiplies, #1086, with sheep's matrix code), mooki (the import table scan, #431; shader programs over 1 MiB, #427; samplers past the driver's limit, #442), Yeetbot90 (ASTC decoded on the CPU for AMD's desktop-CPU graphics, #489) and SadTransGirl (per-frame render targets reused, #994).
 
 It stands on the work of many people. Everything below is credit due to Hookshot's own contributors, whose recompiler, builder and renderer do the work:
 

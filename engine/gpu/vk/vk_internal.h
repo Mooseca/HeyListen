@@ -339,6 +339,13 @@ void memory_rb_segments_begin(uint64_t base, uint64_t n);   // (and a parallel r
 void memory_note_gpu_write(uint64_t gpu, uint64_t size);
 /// (vk_replay.cpp) The GPU's progress on the recordings' timeline, and a wait for it to reach v
 uint64_t vk_timeline_completed();
+/// (longshot #442) The timeline's value without the write-backs it applies: a plain read, safe under the replay's lock
+uint64_t vk_timeline_reached();
+/// (longshot #442) The value the timeline reaches only after every recording made so far has finished on the GPU, parallel segments
+/// included: a resource let go now (a sampler retired) may be destroyed once vk_timeline_reached() is at or past it. 0: never
+uint64_t vk_retirement_value();
+/// (vk_draw.cpp, longshot #442) The samplers made, those retired and waiting for the GPU, those retired and destroyed in all, the limit
+void sampler_counts(uint32_t* made, uint32_t* retired_waiting, uint64_t* retired_total, uint64_t* destroyed, uint32_t* limit);
 /// (HeyListen, HL_TRACE) one of the back end's writes into guest memory, or a mirror's or an import's life, for the crash
 /// recorder (vk_api.h trace_gpu; nothing when it is off)
 inline void trace_gpu(uint32_t what, uint64_t guest, uint64_t size, uint64_t pool, uint64_t value) {

@@ -2146,7 +2146,140 @@ VkPipeline build_graphics(const Program& p, const NvnState& s, const Targets& at
 }
 
 // ---- samplers (by NVN sampler parameters) ----
-std::unordered_map<uint64_t, VkSampler> samplers;
+/// (longshot #442) What vkCreateSampler reads of the create info sampler_make fills in, less what no sample can reach: the anisotropy
+/// of a sampler without anisotropic filtering (Vulkan ignores it), the border colour of one no address mode clamps to its border.
+/// Two keys whose infos are equal get samplers that sample alike, so they share one (sampler_book). The comparison of a sampler
+/// that does not compare stays in it: a driver may compare anyway (the amd-fix note below, RX_VK_DREF_FROM_SAMPLER=1). 32-bit
+/// words without padding, compared as bytes (a bias of -0 apart from one of +0: two samplers, as two keys were)
+struct SamplerInfo {
+    uint32_t mag, min, mip, u, v, w;
+    float bias, aniso, min_lod, max_lod;
+    uint32_t aniso_on, compare_on, compare_op, border;
+    float custom[4];      // (a custom border colour's, else 0)
+    uint32_t reduction;   // (VK_SAMPLER_REDUCTION_MODE_* + 1; 0: none)
+    bool operator==(const SamplerInfo& o) const { return !std::memcmp(this, &o, sizeof o); }
+};
+static_assert(sizeof(SamplerInfo) == 19 * 4, "SamplerInfo is compared as bytes: no padding");
+struct SamplerInfoHash {
+    size_t operator()(const SamplerInfo& i) const {
+        uint32_t w[sizeof i / 4];
+        std::memcpy(w, &i, sizeof i);
+        uint64_t h = 0x5A;
+        for (const uint32_t x : w) h = mix(h, x);
+        return (size_t)h;
+    }
+};
+SamplerInfo sampler_info(const VkSamplerCreateInfo& ci) {
+    SamplerInfo i{};
+    i.mag = ci.magFilter, i.min = ci.minFilter, i.mip = ci.mipmapMode;
+    i.u = ci.addressModeU, i.v = ci.addressModeV, i.w = ci.addressModeW;
+    i.bias = ci.mipLodBias, i.min_lod = ci.minLod, i.max_lod = ci.maxLod;
+    i.aniso_on = ci.anisotropyEnable, i.aniso = ci.anisotropyEnable ? ci.maxAnisotropy : 0.0f;
+    i.compare_on = ci.compareEnable, i.compare_op = ci.compareOp;
+    const VkSamplerAddressMode b = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+    const bool border = ci.addressModeU == b || ci.addressModeV == b || ci.addressModeW == b;
+    i.border = border ? (uint32_t)ci.borderColor : 0u;
+    for (auto* n = static_cast<const VkBaseInStructure*>(ci.pNext); n; n = n->pNext) {
+        if (n->sType == VK_STRUCTURE_TYPE_SAMPLER_CUSTOM_BORDER_COLOR_CREATE_INFO_EXT && border)
+            std::memcpy(i.custom, reinterpret_cast<const VkSamplerCustomBorderColorCreateInfoEXT*>(n)->customBorderColor.float32,
+                        sizeof i.custom);
+        else if (n->sType == VK_STRUCTURE_TYPE_SAMPLER_REDUCTION_MODE_CREATE_INFO)
+            i.reduction = (uint32_t)reinterpret_cast<const VkSamplerReductionModeCreateInfo*>(n)->reductionMode + 1u;
+    }
+    return i;
+}
+/// (longshot #442) The samplers sampler_make made: one for each SamplerInfo, and the keys that resolve to each, under the replay's
+/// lock (ParLock; the atomics are read without it). A driver makes at most maxSamplerAllocationCount samplers (NVIDIA about 4000,
+/// NVK 4096): past that vkCreateSampler fails. The renderer never destroyed one, and made a new set at each Anisotropic filtering,
+/// Render resolution or Upscaler change (HeyListen issue 30: a frame rate that falls over long sessions). So before a new one would
+/// go past the room sampler_room keeps, the least recently resolved one is retired: out of every table at once (the keys here, each
+/// thread's `mine`, sampler_for's tables, the texture slots' copies of it and the descriptors kept by reuse: retired_gen,
+/// samplers_changed), and destroyed once the GPU is past every recording made so far (vk_retirement_value), since a thread's own
+/// tables may still hand it to the draws it is recording until it reads retired_gen again. Those tables hide a sampler's use from
+/// the book, so from half the retiring point on (watching) their entries last a present: each sampler in use resolves here once a
+/// present
+struct SamplerBook {
+    struct Made { VkSampler s; uint64_t used; };       // (used: tick when a key last resolved to it here; only the order to retire in)
+    struct Retired { VkSampler s; uint64_t after; };   // (destroyed once the timeline reaches after; 0: never)
+    std::unordered_map<SamplerInfo, Made, SamplerInfoHash> made;   // (the owner)
+    std::unordered_map<uint64_t, Made*> keys;   // (sampler_make's key -> its sampler in made; several keys may share one)
+    std::vector<Retired> retired;
+    uint64_t tick = 0;
+    std::atomic<uint64_t> retired_gen{0};   // (moves at each retirement: each thread's tables drop what they hold)
+    std::atomic<bool> watching{false};      // (near the device's limit, for good: the threads' tables last a present)
+    // (for the log lines and the count in the VRAM line, read without the lock)
+    std::atomic<uint32_t> made_n{0}, retired_n{0}, shared_keys{0};
+    std::atomic<uint64_t> retirements{0}, destroyed{0}, refused{0};
+};
+SamplerBook sampler_book;
+/// The retired samplers the GPU is done with (the timeline at completed), destroyed
+void samplers_reap(uint64_t completed) {
+    SamplerBook& b = sampler_book;
+    std::erase_if(b.retired, [&](const SamplerBook::Retired& r) {
+        if (!r.after || r.after > completed) return false;
+        vkDestroySampler(dev.device, r.s, nullptr);
+        b.destroyed.fetch_add(1, std::memory_order_relaxed);
+        return true;
+    });
+    b.retired_n.store((uint32_t)b.retired.size(), std::memory_order_relaxed);
+}
+/// The least recently resolved sampler retired (sampler_book). false: none, or no room to note it (it stays made: one not noted
+/// would never be destroyed)
+bool sampler_retire() {
+    SamplerBook& b = sampler_book;
+    if (b.made.empty()) return false;
+    auto lru = b.made.begin();
+    for (auto it = b.made.begin(); it != b.made.end(); ++it)
+        if (it->second.used < lru->second.used) lru = it;
+    try {
+        b.retired.push_back({lru->second.s, vk_retirement_value()});
+    } catch (const std::exception&) {
+        return false;
+    }
+    const SamplerBook::Made* gone = &lru->second;
+    std::erase_if(b.keys, [gone](const auto& kv) { return kv.second == gone; });
+    b.made.erase(lru);
+    b.retired_gen.fetch_add(1, std::memory_order_acq_rel);
+    b.made_n.store((uint32_t)b.made.size(), std::memory_order_relaxed);
+    b.retired_n.store((uint32_t)b.retired.size(), std::memory_order_relaxed);
+    b.shared_keys.store((uint32_t)b.keys.size(), std::memory_order_relaxed);
+    samplers_changed();   // (sampler_for's tables and the descriptors kept by reuse resolve theirs again)
+    const uint64_t n = b.retirements.fetch_add(1, std::memory_order_relaxed) + 1;
+    if (n == 1 || n % 1000 == 0)
+        logf("vk: samplers: %zu made, the device allows %u: the least recently used retired (%llu so far), each destroyed once "
+             "the GPU is past the recordings that may use it", b.made.size() + 1, dev.props.limits.maxSamplerAllocationCount,
+             (unsigned long long)n);   // (made + 1: as many as there were)
+    return true;
+}
+/// Whether sampler_make may make one more sampler. The room: maxSamplerAllocationCount (4000, Vulkan's least, when not known) less
+/// a reserve of 64 (a quarter of a smaller limit) for the renderer's other samplers (the blits', the upscalers', frame generation's)
+/// and an upscaler SDK's. From 3/4 of it the least recently resolved ones are retired, one for each made; the last 1/4 is for those
+/// made while retired ones are still the GPU's. Full only when the GPU may still use every one of those: then nothing is retired and
+/// the draw waits for a later present (a failed key's rule)
+bool sampler_room() {
+    SamplerBook& b = sampler_book;
+    const uint64_t limit = dev.props.limits.maxSamplerAllocationCount ? dev.props.limits.maxSamplerAllocationCount : 4000;
+    const uint64_t room = limit - std::min<uint64_t>(64, limit / 4), keep = room - room / 4;
+    if (!b.retired.empty()) samplers_reap(vk_timeline_reached());
+    if (b.made.size() + b.retired.size() >= room) {
+        static std::atomic<int> told{0};
+        if (told++ < 8)
+            logf("vk: samplers: %zu made and %zu retired that the GPU may still use fill the %llu this device allows "
+                 "(maxSamplerAllocationCount %u): a draw needing a new one waits for a later present", b.made.size(),
+                 b.retired.size(), (unsigned long long)room, dev.props.limits.maxSamplerAllocationCount);
+        return false;
+    }
+    if (b.made.size() >= keep / 2) b.watching.store(true, std::memory_order_relaxed);
+    while (b.made.size() >= keep && sampler_retire()) {}
+    return true;
+}
+/// (the VRAM line of the periodic log, vk_texture.cpp) the samplers made, those retired and not yet destroyed, and those retired in all
+void sampler_counts_read(uint32_t* made, uint32_t* retired_waiting, uint64_t* retired_total, uint64_t* destroyed, uint32_t* limit) {
+    const SamplerBook& b = sampler_book;
+    *made = b.made_n.load(std::memory_order_relaxed), *retired_waiting = b.retired_n.load(std::memory_order_relaxed);
+    *retired_total = b.retirements.load(std::memory_order_relaxed), *destroyed = b.destroyed.load(std::memory_order_relaxed);
+    *limit = dev.props.limits.maxSamplerAllocationCount;
+}
 VkSamplerAddressMode wrap(uint8_t w) {
     switch (w) {
     case NVN_WRAP_MODE_REPEAT: return VK_SAMPLER_ADDRESS_MODE_REPEAT;
@@ -2173,13 +2306,15 @@ bool sampler_cache_on();   // (hookshot, RX_VK_SAMPLER_CACHE and the Sampler cac
 VkSampler sampler_for(int id, bool compare) {
     static const bool on = !getenv("RX_VK_SAMPLER_CACHE") || atoi(getenv("RX_VK_SAMPLER_CACHE")) != 0;
     if (!on || id < 0 || id >= 4096) return sampler_make(id, compare);
-    struct Entry { uint64_t gen; VkSampler s; };
+    struct Entry { uint64_t gen; VkSampler s; uint64_t frame; };
     static thread_local Entry table[2][4096];   // (gen 0: never filled; the generation starts at 1)
     const uint64_t gen = sampler_registrations_generation();   // (read first: a registration after it makes the next call miss)
+    // (near the device's sampler limit, an entry lasts a present: the book sees the samplers in use, sampler_book)
+    const uint64_t frame = sampler_book.watching.load(std::memory_order_relaxed) ? texture_frame_no() : 0;
     Entry& e = table[compare ? 1 : 0][id];
-    if (e.gen == gen) return e.s;
+    if (e.gen == gen && e.frame == frame) return e.s;
     const VkSampler made = sampler_make(id, compare);
-    e = {gen, made};
+    if (made) e = {gen, made, frame};   // (a failed creation is retryable without a new registration)
     return made;
 }
 VkSampler sampler_make(int id, bool compare) {
@@ -2201,11 +2336,35 @@ VkSampler sampler_make(int id, bool compare) {
         std::memcpy(&w, b + i, std::min<size_t>(8, sizeof p - i));
         key = mix(key, w);
     }
-    static thread_local std::unordered_map<uint64_t, VkSampler> mine;   // (samplers are never destroyed)
+    static thread_local std::unordered_map<uint64_t, VkSampler> mine;   // (dropped at a retirement, its samplers may be going, and
+    static thread_local uint64_t mine_gen = 0, mine_frame = 0;          // at each present near the limit: sampler_for's note)
+    const uint64_t g = sampler_book.retired_gen.load(std::memory_order_acquire);
+    const uint64_t f = sampler_book.watching.load(std::memory_order_relaxed) ? texture_frame_no() : 0;
+    if (g != mine_gen || f != mine_frame) mine.clear(), mine_gen = g, mine_frame = f;
     if (auto m = mine.find(key); m != mine.end()) return m->second;
     ParLock lk;
-    auto it = samplers.find(key);
-    if (it != samplers.end()) return mine[key] = it->second;
+    SamplerBook& book = sampler_book;
+    if (auto it = book.keys.find(key); it != book.keys.end()) {
+        it->second->used = ++book.tick;
+        try { mine.emplace(key, it->second->s); } catch (const std::exception&) {}   // (the book still owns it)
+        return it->second->s;
+    }
+    // (longshot #442) A key whose sampler could not be made (the driver's limit, or its refusal) gets one attempt a present: unrelated
+    // keys go on, and a later present retries without a new registration
+    static uint64_t failed_frame = UINT64_MAX;
+    static std::unordered_set<uint64_t> failed;
+    static bool tracking_failed = false;
+    const uint64_t frame = texture_frame_no();
+    if (failed_frame != frame) {
+        failed.clear();
+        failed_frame = frame;
+        tracking_failed = false;
+    }
+    if (tracking_failed || failed.count(key)) return VK_NULL_HANDLE;
+    auto remember_failure = [&] {
+        book.refused.fetch_add(1, std::memory_order_relaxed);
+        try { failed.insert(key); } catch (const std::exception&) { tracking_failed = true; }
+    };
     VkSamplerCreateInfo ci{VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
     ci.magFilter = p.magf == NVN_MAG_FILTER_NEAREST ? VK_FILTER_NEAREST : VK_FILTER_LINEAR;
     ci.minFilter = (p.minf == NVN_MIN_FILTER_NEAREST || p.minf == NVN_MIN_FILTER_NEAREST_MIPMAP_NEAREST ||
@@ -2288,9 +2447,33 @@ VkSampler sampler_make(int id, bool compare) {
         rm.pNext = (void*)ci.pNext;
         ci.pNext = &rm;
     }
+    const SamplerInfo info = sampler_info(ci);
+    if (auto it = book.made.find(info); it != book.made.end()) {   // (another key's sampler samples alike: shared, not made again)
+        it->second.used = ++book.tick;
+        try { book.keys.emplace(key, &it->second); } catch (const std::exception&) {}   // (only the keys' table: made owns it)
+        book.shared_keys.store((uint32_t)book.keys.size(), std::memory_order_relaxed);
+        return it->second.s;
+    }
+    if (!sampler_room()) {   // (the device's samplers all in the GPU's hands: none made past its limit)
+        remember_failure();
+        return VK_NULL_HANDLE;
+    }
     VkSampler sm = VK_NULL_HANDLE;
-    vkCreateSampler(dev.device, &ci, nullptr, &sm);
-    samplers.emplace(key, sm);
+    if (vkCreateSampler(dev.device, &ci, nullptr, &sm) != VK_SUCCESS) {
+        remember_failure();   // (an error's output handle is undefined, not a resource to cache or destroy)
+        return VK_NULL_HANDLE;
+    }
+    SamplerBook::Made* made = nullptr;
+    try {
+        made = &book.made.emplace(info, SamplerBook::Made{sm, ++book.tick}).first->second;
+    } catch (const std::exception&) {
+        vkDestroySampler(dev.device, sm, nullptr);   // (only the new sampler whose ownership was not committed)
+        remember_failure();
+        return VK_NULL_HANDLE;
+    }
+    try { book.keys.emplace(key, made); } catch (const std::exception&) {}   // (only the keys' table: the next look finds it by info)
+    book.made_n.store((uint32_t)book.made.size(), std::memory_order_relaxed);
+    book.shared_keys.store((uint32_t)book.keys.size(), std::memory_order_relaxed);
     return sm;
 }
 
@@ -2829,6 +3012,7 @@ bool table_track_open(int logged, int seen, int unlimited) {
 struct TexSlot {
     uint32_t handle = 0, version = 0, samp_version = 0, tex_epoch = 0;
     uint64_t destroy_gen = ~0ull;
+    uint64_t samp_retired = 0, samp_frame = 0;   // (longshot #442: sampler_book.retired_gen, and the present near the sampler limit: see sampler_stamp)
     VkImageView view = VK_NULL_HANDLE;
     Texture* tex = nullptr;
     VkSampler sampler = VK_NULL_HANDLE;
@@ -3231,6 +3415,12 @@ void build_descriptors(const NvnState& s, const Program& p) {
                 // (the versions read before resolving: a registration after them is seen at the next draw)
                 const uint32_t version = sl ? texture_slot_version((int)(handle & 0xFFFFF)) : 0;
                 const uint32_t samp_version = sl ? sampler_slot_version((int)(handle >> 20)) : 0;
+                // (longshot #442: a slot's sampler is kept only while no sampler has been retired since, and, near the device's limit,
+                // for a present: the book sees the samplers in use. A retired one may be destroyed once the GPU is past the recordings)
+                const uint64_t samp_retired = sampler_book.retired_gen.load(std::memory_order_acquire);
+                const uint64_t samp_frame = sampler_book.watching.load(std::memory_order_relaxed) ? texture_frame_no() : 0;
+                if (sl && sl->valid && sl->samp_retired == samp_retired && sl->samp_frame == samp_frame) {}
+                else if (sl) sl->valid = false;
                 if (sl && sl->valid && sl->handle == handle && sl->version == version && sl->samp_version == samp_version &&
                     sl->destroy_gen != dgen_now && texture_gone_ring_on() && texture_kept_since(sl->tex, sl->destroy_gen, dgen_now))
                     sl->destroy_gen = dgen_now;   // (TICK-052: as texture_view_of's)
@@ -3256,7 +3446,7 @@ void build_descriptors(const NvnState& s, const Program& p) {
                     view = handle ? texture_view_of(handle, vt, ViewUse::Sample, VK_FORMAT_UNDEFINED, &tex) : VK_NULL_HANDLE;
                     sampler = sampler_for((int)(handle >> 20), d.is_depth);
                     if (sl)
-                        *sl = TexSlot{handle, version, samp_version, texture_epoch(), dgen_now, view, tex, sampler, true};
+                        *sl = TexSlot{handle, version, samp_version, texture_epoch(), dgen_now, samp_retired, samp_frame, view, tex, sampler, true};
                 }
                 upload_defer_ok = false;
                 if (dump_on()) dump_input('t', (uint32_t)(dw().imgs.size() - 0), handle, view ? tex : nullptr);
@@ -3344,6 +3534,11 @@ struct Pushed {
 };
 TLS_OBJECT(pushed, std::array<Pushed, 2>)   // [graphics, compute]
 } // namespace
+
+/// (vk_internal.h, longshot #442) The samplers made, those retired and not yet destroyed, those retired and destroyed in all, and the device's limit
+void sampler_counts(uint32_t* made, uint32_t* retired_waiting, uint64_t* retired_total, uint64_t* destroyed, uint32_t* limit) {
+    sampler_counts_read(made, retired_waiting, retired_total, destroyed, limit);
+}
 std::atomic<int64_t> st_driver_out_of_memory{0};
 void draw_skip_report(double frames) { skip_report_impl(frames), fine_report(frames); }
 void descriptors_disturbed() {

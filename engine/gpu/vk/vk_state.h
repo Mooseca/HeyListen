@@ -76,6 +76,9 @@ uint32_t texture_slot_version(int id);
 uint32_t sampler_slot_version(int id);
 /// Changes on any sampler registration: descriptor reuse checks the samplers its last build resolved
 uint64_t sampler_registrations_generation();
+/// (longshot #442) A sampler was retired or the samplers' make changed: the tables of what an id resolves to (sampler_for's, the
+/// descriptors kept by reuse) resolve theirs again
+void samplers_changed();
 
 /// One word of a driver constant bank (c0 / c2) as the NVN driver lays it out for the bound state
 uint32_t driver_bank_word(const NvnState& s, int bank, int stage, uint32_t offset);

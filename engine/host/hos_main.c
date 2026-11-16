@@ -27,6 +27,7 @@ const char *hos_version(void) { return HOOKSHOT_VERSION; }   /* (discord_rpc.c's
 #else
 #include <windows.h>   /* (linux: host/posix's) */
 #include <sys/mman.h>
+#include <sys/stat.h>
 #ifdef __linux__
 #include <sys/prctl.h>
 #include <sys/sysinfo.h>
@@ -491,6 +492,33 @@ static void submit_thread_at_start(void) {
     case HOS_SUBMIT_THREAD_USER_SET: snprintf(n, cap, "left as the user set it: MESA_VK_ENABLE_SUBMIT_THREAD=%.60s", user); break;
     case HOS_SUBMIT_THREAD_NO_AMDGPU: n[0] = 0; break;   /* (no AMD card: nothing to say) */
     }
+}
+/* (Linux) RADV_FORCE_VRS_CONFIG_FILE dropped before anything loads Vulkan. The Steam Deck's Game Mode sets it for Steam and
+   everything it starts, naming a file it writes the Half Rate Shading rate to (/tmp/radv_vrs.<random>, "1x1" when off). While
+   that file exists RADV forces VRS for the device and puts it into every graphics pipeline's key, so nothing built without it
+   is found, in the driver's cache or ours: a start from Game Mode compiled all the preparation's pipelines again (about 20 a
+   second on a Deck, 25-30 minutes) where one from the desktop loads them in seconds. Dropped only when it names a file that
+   exists, which is when RADV reads it; no other driver reads it. RX_VK_HALF_RATE_SHADING=1 keeps it. RADV_FORCE_VRS, a rate
+   someone set by hand, is never touched. Decided in main() beside submit_thread_at_start (the setenv is safe only while this
+   is the one thread); the note goes to stderr now and to the game's log once it is open (game_main) */
+static char driver_env_said[1024];
+static void driver_env_choose(void) {
+    const char *file = getenv("RADV_FORCE_VRS_CONFIG_FILE");
+    struct stat st;
+    if (!file || !*file || stat(file, &st) != 0) return;
+    const char *keep = getenv("RX_VK_HALF_RATE_SHADING");
+    if (keep && !strcmp(keep, "1")) {
+        snprintf(driver_env_said, sizeof driver_env_said,
+                 "vk: RADV_FORCE_VRS_CONFIG_FILE kept (RX_VK_HALF_RATE_SHADING=1): Steam's Half Rate Shading reaches the game, "
+                 "and RADV gives every graphics pipeline another key than the preparation's, so they are compiled again");
+    } else {
+        snprintf(driver_env_said, sizeof driver_env_said,
+                 "vk: RADV_FORCE_VRS_CONFIG_FILE=%.300s dropped: with it RADV gives every graphics pipeline another key than the "
+                 "preparation's and compiles them all again; Steam's Half Rate Shading has no effect here "
+                 "(RX_VK_HALF_RATE_SHADING=1 keeps it)", file);
+        unsetenv("RADV_FORCE_VRS_CONFIG_FILE");
+    }
+    fprintf(stderr, "%s\n", driver_env_said);
 }
 #endif
 
@@ -1439,6 +1467,7 @@ static int game_main(int argc, char **argv) {
 #ifdef __linux__
     if (submit_thread_note[0])   /* (decided in main, before any thread: submit_thread_at_start) */
         hos_log("env: Mesa's submit thread %s", submit_thread_note);
+    if (driver_env_said[0]) hos_log("%s", driver_env_said);   /* (decided in main: driver_env_choose) */
 #endif
     const char *image = NULL;
     for (int i = 1; i < argc; i++) {
@@ -1656,6 +1685,7 @@ int main(int argc, char **argv) {
        thread: its setenv is safe only while this is the one thread. HL_TRACE's dump threads, a constructor's, are the one
        exception, as for load_hookshot_env's own setenv) */
     submit_thread_at_start();
+    driver_env_choose();
 #endif
     game_argc = argc, game_argv = argv;
     int prepare_shaders = 0;

@@ -101,6 +101,42 @@ def step_site(s, addr, reg):
     return span[0] + body.index(divide) + len("    _v=a64_fpx_div32_div32(c,_a,_b);\n")
 
 
+# Movie hooks (host/hl_step.c HL_MOVIE_HOOK(83b7c710, "<hash>", <offset>)): at the one "+1" of the count a movie player keeps
+# at +<offset> of itself (x20), one line after the add, so that the count grows by hos_movie_frames(player) instead: the
+# frames' time in 60ths above a 60 cap, 1 otherwise. A call and no branch (the function's PGO record stays). The marker is
+# the address plus one, as a step hook's, so a tree that does not ask for it takes it out.
+WANT_MOVIE = re.compile(r'^HL_MOVIE_HOOK\(\s*([0-9a-f]{8})\s*,\s*"([0-9a-f]*)"\s*,\s*(\d+)\s*\)', re.M)
+MOVIE_ADD = ("    c->x[8]=recomp_load32(c,c->x[20] + %d);\n"
+             "    { uint64_t _a=c->x[8], _b=1ULL; uint64_t _r=_a+_b; _r&=0xFFFFFFFFULL; c->x[8]=_r; }\n")
+
+
+def movie_line(addr):
+    return ("    { extern uint32_t hos_movie_frames(uint64_t); c->x[8] = (c->x[8] - 1 + hos_movie_frames(c->x[20])) & 0xFFFFFFFFULL; }"
+            "   /* hl gate %s */\n" % step_id(addr))
+
+
+def wanted_movies(host=HOST):
+    """{address: (hash, offset)} of every HL_MOVIE_HOOK in host/hl_*.c"""
+    out = {}
+    for path in sorted(glob.glob(os.path.join(host, "hl_*.c"))):
+        with open(path, encoding="utf-8", errors="replace") as f:
+            for addr, h, off in WANT_MOVIE.findall(f.read()):
+                out[addr] = (h, int(off))
+    return out
+
+
+def movie_site(s, addr, off):
+    """the offset in s where f_<addr>'s movie hook line goes (right after the count's add), or None"""
+    span = body_of(s, addr)
+    if span is None:
+        return None
+    body = s[span[0]:span[1]]
+    add = MOVIE_ADD % off
+    if body.count(add) != 1:
+        return None
+    return span[0] + body.index(add) + len(add)
+
+
 def wanted(host=HOST):
     """{address: hash} of every HL_GATE in host/hl_*.c"""
     out = {}
@@ -132,12 +168,14 @@ def text_hash(s, addr):
     return hashlib.sha1(body.encode("utf-8")).hexdigest()[:16]
 
 
-def apply_text(s, want, steps=None):
+def apply_text(s, want, steps=None, movies=None):
     """(new text, {address: status}) for one file: gates of `want` whose function is here put in, others' taken out; the
-    step hooks of `steps` ({address: (vreg, probe)}, all of them found in the lift: apply) put in, others' taken out"""
+    step hooks of `steps` ({address: (vreg, probe)}, all of them found in the lift: apply) put in, others' taken out; the
+    movie hooks of `movies` ({address: offset}, each found with its hash: apply) the same"""
     status = {}
     steps = steps or {}
-    keep = set(want) | {step_id(a) for a in steps}
+    movies = movies or {}
+    keep = set(want) | {step_id(a) for a in steps} | {step_id(a) for a in movies}
     # (stale gates out first)
     def stale(m):
         if m.group(1) in keep:
@@ -155,6 +193,16 @@ def apply_text(s, want, steps=None):
             continue
         s = s[:at] + line + s[at:]
         status["step " + addr] = "hooked"
+    for addr, off in movies.items():
+        line = movie_line(addr)
+        if line in s:
+            status["movie " + addr] = "hooked already"
+            continue
+        at = movie_site(s, addr, off)
+        if at is None:
+            continue
+        s = s[:at] + line + s[at:]
+        status["movie " + addr] = "hooked"
     for addr, h in want.items():
         span = body_of(s, addr)
         if span is None:
@@ -184,20 +232,23 @@ def apply_text(s, want, steps=None):
 
 def apply(gen, host=HOST, quiet=False, skip=None):
     """Returns the number of gates wanted that are in place. skip: {address: mod name} of functions an exeFS mod patches (the builder's
-    code mods): no gate and no step hook goes into those (the translated, patched body runs), and a gate already there is taken out;
-    the build log says so for each. The step hooks go in both or neither, so one patched step function leaves both out."""
+    code mods): no gate and no step or movie hook goes into those (the translated, patched body runs), and a gate already there is
+    taken out; the build log says so for each. The step hooks go in both or neither, so one patched step function leaves both out."""
     skip = {a: m for a, m in (skip or {}).items()}
     want = wanted(host)
     asked = wanted_steps(host)
-    for addr in sorted(a for a in set(want) | set(asked) if a in skip):
+    movies_asked = wanted_movies(host)
+    for addr in sorted(a for a in set(want) | set(asked) | set(movies_asked) if a in skip):
         print("hl_gates: f_%s NOT gated: an exeFS mod patches it (mods/%s)" % (addr, skip[addr]))
     if any(a in skip for a in asked):
         asked = {}
     want = {a: h for a, h in want.items() if a not in skip}
+    movies_asked = {a: v for a, v in movies_asked.items() if a not in skip}
     state_path = os.path.join(gen, "hl_gates.state")
     # (FORM: the gates' lines as this script writes them; a new form makes a gen folder stamped by the old one read again)
     state = FORM + "\n" + "\n".join("%s %s" % kv for kv in sorted(want.items())) + "\n" + \
         "\n".join("step %s %s" % (a, v) for a, v in sorted(asked.items())) + \
+        "".join("\nmovie %s %s" % (a, v) for a, v in sorted(movies_asked.items())) + \
         "\n".join("skip %s %s" % kv for kv in sorted(skip.items()))
     files = sorted(glob.glob(os.path.join(gen, "code_*.c")))
     stamp = state + "\n" + "\n".join("%s %d %d" % (os.path.basename(p), os.path.getsize(p), os.stat(p).st_mtime_ns) for p in files)
@@ -221,12 +272,16 @@ def apply(gen, host=HOST, quiet=False, skip=None):
         else:
             print("hl_gates: WARNING: the step hooks' divides found at %d of %d (%s): none hooked" %
                   (len(seen), len(asked), " ".join(sorted(set(asked) - seen))))
+    movies_hooked = set()
     for path in files:
         with open(path, encoding="utf-8", newline="") as f:
             s = f.read()
-        if not want and not steps and "/* hl gate " not in s:
+        # (a movie hook goes in only where its function's text hashes as recorded; elsewhere a stale one is taken out)
+        movies = {a: off for a, (h, off) in movies_asked.items() if body_of(s, a) is not None and text_hash(s, a) == h}
+        if not want and not steps and not movies and "/* hl gate " not in s:
             continue
-        out, status = apply_text(s, want, steps)
+        out, status = apply_text(s, want, steps, movies)
+        movies_hooked |= {a for a in movies if movie_line(a) in out}
         for addr, st in status.items():
             found[addr] = st
             if not quiet or st.startswith("NOT gated"):   # (a gate left out is always said: a code mod changed that function's text)
@@ -237,6 +292,8 @@ def apply(gen, host=HOST, quiet=False, skip=None):
     for addr in want:
         if addr not in found:
             print("hl_gates: WARNING: f_%s is not in the lifted code: not gated" % addr)
+    for addr in sorted(set(movies_asked) - movies_hooked):
+        print("hl_gates: WARNING: f_%s's movie count not found with its recorded hash: not hooked" % addr)
     files = sorted(glob.glob(os.path.join(gen, "code_*.c")))
     stamp = state + "\n" + "\n".join("%s %d %d" % (os.path.basename(p), os.path.getsize(p), os.stat(p).st_mtime_ns) for p in files)
     with open(state_path, "w", encoding="utf-8") as f:

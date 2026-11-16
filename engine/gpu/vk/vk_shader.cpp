@@ -186,11 +186,22 @@ Code parse_code(const uint8_t* ctl, const std::vector<uint8_t>& area) {
     using Shader::Ampere::Instruction;
     std::vector<Instruction> native;
     Shader::Ampere::ProgramCaptureState capture;
+    // (ported from Longshot 609889f2, #427) A word the capture reads as a branch that would leave every program (to before its start,
+    // between two instructions, or past the largest program, 16 MiB: program_address_map.h) is no instruction of this one. The
+    // capture's end rules are narrower than the lowering's (a loop left only by predicated EXITs, a library function that ends the
+    // shader), so it can read on past the program's end into what follows it there. The program ends before that word: the lowering,
+    // which takes a program only to its own end with every branch inside it, says whether it does, and only if it does not is the
+    // program left out (logged below, naming the word)
+    uint32_t outside = ~0u;   // (that word's instruction number)
     for (uint32_t i = 0; hdr + (i + 1) * sizeof(Instruction) <= len; i++) {
         Instruction& insn = native.emplace_back();
         std::memcpy(&insn, area.data() + hdr + i * sizeof(Instruction), sizeof insn);
         const auto r = capture.Observe(insn, i);
-        if (r == Shader::Ampere::ProgramCaptureState::Result::InvalidTarget) return c;
+        if (r == Shader::Ampere::ProgramCaptureState::Result::InvalidTarget) {
+            native.pop_back();
+            outside = i;
+            break;
+        }
         if (r == Shader::Ampere::ProgramCaptureState::Result::Complete) break;
     }
     {   // (hookshot, for bisecting a bad translation) RX_VK_REJECT_STAGES=<n,...> (NVN stages) and RX_VK_REJECT_KEYS=
@@ -266,6 +277,10 @@ Code parse_code(const uint8_t* ctl, const std::vector<uint8_t>& area) {
         if (seen.size() < 400 && seen.insert(c.key).second) {
             const uint32_t at = lowered.error_offset / (uint32_t)sizeof(Instruction);
             const uint32_t op = at < native.size() ? (uint32_t)native[at].Bits(0, 12) : 0xFFFFFFFFu;
+            if (outside != ~0u)   // (the code before the word the capture stopped at does not lower: left out for that word, as before)
+                logf("vk: NVN2 program %016llx (stage %u): the branch at instruction %u (+%#x) goes outside the program (%#x code bytes), and "
+                     "the code before it does not lower", (unsigned long long)c.key, st, outside,
+                     (unsigned)(outside * sizeof(Instruction)), len - hdr);
             logf("vk: NVN2 program %016llx (stage %u) does not lower at +%#x: %s (native op %#x, %08x %08x %08x %08x)", (unsigned long long)c.key,
                  st, lowered.error_offset, std::string(lowered.error).c_str(), op, at < native.size() ? native[at].words[0] : 0,
                  at < native.size() ? native[at].words[1] : 0, at < native.size() ? native[at].words[2] : 0, at < native.size() ? native[at].words[3] : 0);
@@ -280,6 +295,14 @@ Code parse_code(const uint8_t* ctl, const std::vector<uint8_t>& area) {
             }
         }
         return c;
+    }
+    if (outside != ~0u) {   // (each program once, up to 64: it ended before the word the capture stopped at)
+        static std::mutex mu;
+        static std::unordered_set<uint64_t> seen;
+        std::lock_guard lk(mu);
+        if (seen.size() < 64 && seen.insert(c.key).second)
+            logf("vk: NVN2 program %016llx (stage %u) ends at +%#x, before the word at +%#x that would branch outside it (%#x code bytes)",
+                 (unsigned long long)c.key, st, lowered.source_size, (unsigned)(outside * sizeof(Instruction)), len - hdr);
     }
     c.texture_bound = lowered.required_texture_buffer;
     c.code.assign(sizeof(Shader::ProgramHeader) / 8, 0);
@@ -1085,7 +1108,9 @@ uint64_t disk_stamp() {
         // NaN guard, the matrix layout measured on this device. Without them a cache made on one GPU was used on another (a laptop's
         // integrated and dedicated GPUs), and RX_VK_NO_INVARIANT / RX_VK_NO_NAN_GUARD did nothing for programs already cached)
         using namespace Shader::Backend::SPIRV;
-        const uint32_t flags = (position_invariant ? 1u : 0u) | (frag_nan_guard ? 2u : 0u) | (mma_software ? 4u : 0u);
+        const uint32_t flags = (position_invariant ? 1u : 0u) | (frag_nan_guard ? 2u : 0u) | (mma_software ? 4u : 0u) |
+                               // (and the software multiplies' form, vk_coopmat.cpp choose_software_form: 0 for the loop, as before)
+                               (mma_software ? mma_software_form << 8 | (mma_software_form && mma_software_quad ? 1024u : 0u) : 0u);
         add(&flags, sizeof flags);
         add(mma_order_a.data(), sizeof(uint32_t) * mma_order_a.size());
         add(mma_order_b.data(), sizeof(uint32_t) * mma_order_b.size());

@@ -190,3 +190,11 @@ can, and they carry the marker of the address plus one (`hl gate 80706be1`), so 
 them, an older `hl_gates.py` included, takes them out as stale gates before it builds. The native main loop's prepare
 (`HL_MAINLOOP=1`) makes the global step the same way. The 60 Hz tick designed above is not needed for the systems the
 owner reported; it stays the answer for anything found counting frames with the fix on.
+
+**A movie's frame count (after upstream Hookshot a7cc747d5).** One such counter: the movie player adds 1 to a count at
+`+760` of itself each update (`0x83b7c710`), and a cutscene that shows a movie takes that count as its timeline's frame,
+placing its narration, its rumble and its own end by it. Above a 60 cap it ran fps / 60 too fast while the decoder kept
+the clock: at a cap of 120 the opening story movie went black at half its length. A third hook of the same kind, a movie
+hook (`HL_MOVIE_HOOK` in `host/hl_step.c`, marker `hl gate 83b7c711`), makes the step `hos_movie_frames(player)`: the
+frame's published seconds in 60ths, the rest carried to that player's next update, 1 when nothing is published
+(`HOS_FPS_MOVIE=0`: 1 always).

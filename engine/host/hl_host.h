@@ -32,6 +32,12 @@ void hl_answer(uint64_t guest, A64Fn fn, HlOn on, const char *what);
     __attribute__((constructor)) static void hl_step_decl_##addr(void) { hl_gate_declared(0x##addr##ULL); } \
     extern const int hl_step_hook_##addr
 
+/* HL_MOVIE_HOOK(83b7c710, "<hash>", <offset>); a line nx2/hl_gates.py puts after f_83b7c710's "+1" of the count at
+   +<offset> of the movie player (x20), making the step hos_movie_frames(player) (host/hl_step.c). Nothing in C. */
+#define HL_MOVIE_HOOK(addr, hash, offset) \
+    __attribute__((constructor)) static void hl_movie_decl_##addr(void) { hl_gate_declared(0x##addr##ULL); } \
+    extern const int hl_movie_hook_##addr
+
 /* Whether the gates are in the lifted code: nx2/hl_gates.py puts, beside each gate it puts in, a constructor that calls
    hl_gate_present(address) at start; a gate left out (its function's text hashes otherwise in this lift) never says so.
    hl_gates_in: 1 when every one of the n addresses is in; otherwise 0, and one log line naming `what` and the missing

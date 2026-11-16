@@ -26,6 +26,8 @@ OS = "windows" if WINDOWS else "linux"
 # Arguments some tests need. {name} is a tool or folder found below (find_tools); a check whose tools are missing is
 # skipped, or fails with --strict. Tests not listed run with no arguments and their own defaults.
 ARGS = {
+    "tests/test_sampler_retirement.py": ["--cxx", "{cxx}", "--headers", "{vulkan_headers}"],
+    "tests/test_mma_software.py": ["--cxx", "{cxx}", "--headers", "{spirv_headers}", "--spirv-val", "{spirv_val}"],
     "tests/test_native_float_atomic_add.py": ["--cxx", "{cxx}", "--headers", "{spirv_headers}", "--spirv-val", "{spirv_val}"],
     "tests/test_shader_module_guard.py": ["--cxx", "{cxx}"],
     "tests/test_png_publication.py": ["--cxx", "{cxx}"],
@@ -50,6 +52,14 @@ ARGS = {
     "tests/test_exe_base.py": ["--cxx", "{cxx}"],
     "tests/test_sparse_queue.py": ["--cxx", "{cxx}"],
     "tests/test_radv_submit_thread.py": ["--cxx", "{cxx}"],
+    "tests/test_driver_env_choose.py": ["--cxx", "{cxx}"],
+    "tests/test_readback_timeout_reuse.py": ["--cxx", "{cxx}"],
+    "tests/test_import_reach.py": ["--cxx", "{cxx}", "--headers", "{vulkan_headers}"],
+    "tests/test_pending_guest_import.py": ["--cxx", "{cxx}"],
+    "tests/test_vk_collect_window.py": ["--cxx", "{cxx}"],
+    "tests/test_astc_cpu.py": ["--cxx", "{cxx}"],
+    "tests/test_capture_past_end.py": ["--cxx", "{cxx}"],
+    "tests/test_target_pool_cap.py": ["--cxx", "{cxx}"],
     "tests/test_shadow_fast.py": ["--cxx", "{cxx}"],
     "tests/test_collect_fast.py": ["--cc", "{cxx}"],
     "tests/test_late_fix_order.py": ["--cxx", "{cxx}"],
@@ -81,6 +91,7 @@ ARGS = {
     "tests/test_lower_depbar.py": ["--cxx", "clang++"],
     "tests/test_lower_register_markers.py": ["--cxx", "clang++"],
     "tests/test_text_speed.py": ["--cc", "gcc"],
+    "tests/test_movie_frame_count.py": ["--cc", "gcc"],
     "tests/test_audio_in.py": ["--cc", "gcc", "--cxx", "g++"],
     "tests/test_upscale_fallback.py": ["--cxx", "g++"],
     "tests/test_reserved_core.py": ["--cxx", "g++"],

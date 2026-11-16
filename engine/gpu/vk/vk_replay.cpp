@@ -564,6 +564,11 @@ void wait_value(uint64_t v) {
 }
 } // namespace
 uint64_t vk_timeline_completed() { return timeline ? completed() : 0; }
+uint64_t vk_timeline_reached() {
+    uint64_t v = 0;
+    if (timeline) vkGetSemaphoreCounterValue(dev.device, timeline, &v);
+    return v;
+}
 int64_t vk_value_submitted_ns(uint64_t v);
 void vk_timeline_wait(uint64_t v) {   // (at most 250 ms: a submission held back behind the caller's thread goes on without it)
     if (!timeline || completed() >= v) return;
@@ -4850,6 +4855,13 @@ uint32_t crc32(const uint8_t* p, size_t n, uint32_t c = 0xFFFFFFFFu) {
     return c;
 }
 } // namespace
+
+// (vk_internal.h) Called while replaying, including workers joined before the next signal is issued. The current logical value may
+// already have completed before a stopped queue resumes. A new signal instead follows every recording using the resources being
+// retired, batched work and the unsignalled post-present interpolation recording included. Zero retains forever.
+uint64_t vk_retirement_value() {
+    return timeline && signaled != UINT64_MAX ? signaled + 1 : 0;
+}
 
 /// A submission or a wait came back VK_ERROR_DEVICE_LOST. Nothing sent from here on runs, and the replay kept going: no
 /// submission completed again, so no capture or staging arena was let go, and system memory filled until the window was
