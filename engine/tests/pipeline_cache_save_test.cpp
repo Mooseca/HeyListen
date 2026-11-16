@@ -108,6 +108,13 @@ void pcache_log_save(const char*, std::size_t, std::uint64_t, std::uint64_t, std
 constexpr int kFetchPollMs = 2000, kFetchPutOffs = 3, kFetchQueueMs = 10000;
 std::atomic<bool> pcache_save_owed{false};   // (vk_draw.cpp: a save put off, owed to the serial builds thread)
 thread_local bool pcache_save_between = false;
+// (vk_draw.cpp, S8: the gate for a save in play; here every save goes through, as with RX_VK_PCACHE_PLAY_SAVE=2)
+std::atomic<std::uint64_t> pcache_known_bytes{0};
+std::atomic<std::int64_t> pcache_saved_at_s{-1};
+constexpr std::uint64_t kPlaySaveSpareMB = 4096;
+int pcache_play_save_mode() { return 2; }
+std::uint64_t pcache_available_bytes() { return UINT64_MAX; }
+int pcache_play_save_gate(int, std::uint64_t, std::uint64_t, std::int64_t) { return 0; }
 bool serial_builds_on() { return false; }
 struct PcacheFetch {
     explicit PcacheFetch(int, bool = true) {}

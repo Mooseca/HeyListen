@@ -135,7 +135,8 @@ case-sensitive, and an unknown one is ignored.
 | `HOS_SAMPLE_ALL=<file>` | Every game and renderer thread every 2 ms while `<file>.go` exists (needs `HOS_PROFILE`); `scripts/crit.py`, `scripts/vkprof.py` and `scripts/hotlist.py` read it |
 | `HOS_THREAD_TIMES=<seconds>` | Every interval, the threads that used over 5% of a core |
 | `HOS_FPS_LOG` (set), `HOS_PRESENT_TRACE=<csv>` | The game's frame limiter, VRR flags and nominal rate every 300 presents; a CSV line per game present |
-| `RX_VK_FRAME_LOG=<csv>` | A CSV line per present: frame, seconds, frame time in ms |
+| `RX_VK_FRAME_LOG=<csv>` | A CSV line per present: frame, seconds, frame time in ms, QueryPerformanceCounter ticks (Windows) |
+| `HOS_LOG_QPC=1` | Every log line ends with ` @qpc <ticks>`, the clock of PresentMon's `TimeInQPC` and of the frame log's last column |
 | `RX_VK_PASS_TIMING=1` or `2` | GPU time per pass (2: per program too), logged every 600 presents |
 | `RX_VK_SLOW_LOG=<ms>` | The replay's times for each frame that took longer than this |
 | `HOS_PGO=<file>` | In a run of an `RX_PGO=gen` build: `<file>.reset` clears the counters, `<file>.dump` writes them to `<file>`. It is read before `hookshot_env.txt`, so set it in the environment |
@@ -150,6 +151,7 @@ case-sensitive, and an unknown one is ignored.
 | `RX_VK_HANG_DUMP=<file>` | Every thread's stack to the file once no frame was shown for `RX_VK_HANG_SEC` seconds (20) (Windows) |
 | `RX_VK_NOOPT` (set) | Pipelines built without the driver's optimisations |
 | `RX_VK_SPLIT_UBFLUSH=0/1` | A submission cut into parts (`RX_VK_CHUNK`): 1 each part writes the uniform updates recorded so far into game memory at its end, as before; 0 only the last part writes them all, as an unsplit submission does. Default 0 on Intel without VRAM mirrors (the iGPUs: white blocks and flashes in Kokiri Forest otherwise), 1 elsewhere |
+| `RX_VK_PCACHE_PLAY_SAVE=0/1/2` | The pipeline cache's saves in play: `1` (default) only when the free physical memory is at least twice the cache plus 4 GB and 5 minutes after the last one, on a background-mode thread (low I/O and memory priority); `0` never in play (the exit, the prepare and Restart now still save); `2` every time one is asked, as before |
 | `RX_VK_PCACHE_FETCH_LOCK=0/1` | A pipeline cache's data is fetched (`vkGetPipelineCacheData`) only with no pipeline build under way (Intel's Windows driver crashes otherwise); the background save is put off to the next request when builds run throughout. Default: on for Intel (vendor 0x8086) under Windows, off elsewhere; `1` forces it on any GPU |
 | `RX_VK_COMPUTE_QUICK_FIRST=0/1` | On one-at-a-time compute builds (Intel by default, `RX_VK_COMPUTE_SERIAL`): a dispatch's first pipeline is made without the optimizer and the optimized one after it, on the back lane; the prepare and the precompile ask for the first. Default `1`; `0`: one optimized build, as before |
 | `RX_VK_SKIP_PROG=<prefix>,...` | Leaves out the draws of these programs (default `53509044401d78d2`; `-` leaves out none) |

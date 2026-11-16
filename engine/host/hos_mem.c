@@ -56,6 +56,17 @@ void hos_mem_init(uint64_t image_end) {
 
 uint64_t hos_region_floor(void) { return region_floor; }
 
+/* (HeyListen, hl_mem.c's heap pass) the address regions at or above `from`, [addr, end) pairs in ascending order, at most
+   max of them (the lowest); returns how many */
+int hos_regions_above(uint64_t from, uint64_t (*out)[2], int max) {
+    int n = 0;
+    LOCK();
+    for (int i = nregions - 1; i >= 0 && n < max; i--)   /* (the list is kept descending) */
+        if (regions[i].addr >= from) out[n][0] = regions[i].addr, out[n][1] = regions[i].addr + regions[i].size, n++;
+    UNLOCK();
+    return n;
+}
+
 uint64_t hos_sys_alloc(uint64_t size, uint64_t align) {
     LOCK();
     uint64_t a = (sys_next + align - 1) & ~(align - 1);
