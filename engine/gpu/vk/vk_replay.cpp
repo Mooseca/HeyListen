@@ -1330,6 +1330,12 @@ int64_t vk_value_submitted_ns(uint64_t v) {   // (0: not submitted yet, or the r
 uint64_t ub_generation() {
     return ub_gen;
 }
+uint64_t ub_view(uint64_t* limit) {
+    // (every append and prune moves the epoch, so the epoch and this thread's limit fix the list as ub_overlay reads it: its size and, with
+    // RX_VK_UB_CUR_ONLY, which the memo leaves off, where it begins)
+    *limit = ub_limit;
+    return ub_list_epoch.load(std::memory_order_relaxed);
+}
 void ub_thread_off() {
     ub_limit = 0;
 }

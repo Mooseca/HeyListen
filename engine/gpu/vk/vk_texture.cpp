@@ -23,6 +23,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstring>
+#include <exception>
 #include <map>
 #include <deque>
 #include <memory>
@@ -251,6 +252,28 @@ std::mutex pool_mu;
 std::unordered_map<uint64_t, std::vector<Pooled>> target_pool;   // by pool_key_of
 uint64_t pool_bytes, pool_n, st_pool_reused, st_pool_made, st_pool_destroyed;
 uint8_t pool_pressure = 0;   // (VRAM near what the driver allows: texture_frame's budget) 0 normal, 1 short (>90%: half the pool), 2 critical (>97%: all given back)
+// (Hookshot 2972 by NotRexed, Longshot 91a1ae8b; issue 55 and 62) the commit the textures leave free for the rest of the system:
+// texture_frame's commit rule. RX_VK_COMMIT_RESERVE_MB (default 2560, 0: off). Windows only: Linux overcommits, and its limit is
+// not one commit can reach
+static uint64_t commit_reserve() {
+    static const uint64_t v = getenv("RX_VK_COMMIT_RESERVE_MB") ? (uint64_t)std::max(0, atoi(getenv("RX_VK_COMMIT_RESERVE_MB"))) << 20
+                                                                : 2560ull << 20;
+    return v;
+}
+// (what Windows lets the process commit before its limit, RAM plus the page file: GlobalMemoryStatusEx's ullAvailPageFile, the
+// limit less the whole system's commit. false where it cannot be read)
+static bool commit_headroom(uint64_t* free_bytes) {
+#if defined(_WIN32)
+    MEMORYSTATUSEX m{};
+    m.dwLength = sizeof m;
+    if (!GlobalMemoryStatusEx(&m)) return false;
+    *free_bytes = m.ullAvailPageFile;
+    return true;
+#else
+    (void)free_bytes;
+    return false;
+#endif
+}
 uint64_t pool_cap() {
     // (Longshot 1db4c290, #994) RX_VK_TARGET_POOL_MB=<MB>, else a twelfth of what the driver allows, 256 to 768 MB (target_pool.h)
     static const uint64_t mb = [] {
@@ -4606,7 +4629,28 @@ VkBufferView dummy_texel_view(VkFormat f) {
     }
     return views[texel_kind(f)];
 }
+// A guest GPU address may resolve to another imported buffer later. Keep the views with the actual backing,
+// and release them only where memory.cpp already destroys that backing after its recorded users complete.
+using TexelViewKey = std::tuple<VkFormat, uint64_t, uint64_t>;   // (format, offset, range)
+struct TexelViews {
+    std::map<TexelViewKey, VkBufferView> views;
+    uint64_t failed_frame = UINT64_MAX;
+};
+std::mutex texel_views_mu;
+std::map<VkBuffer, TexelViews> texel_views;
+uint64_t texel_registry_failed_frame = UINT64_MAX;
 } // namespace
+
+void release_texel_buffer_views(VkBuffer buffer) {
+    // Unpublished imports may also be dropped by the import worker. Never take pools_mu under this lock:
+    // the callers that retire a published buffer already hold pools_mu, and gpu_buffer takes it first.
+    std::lock_guard lk(texel_views_mu);
+    auto it = texel_views.find(buffer);
+    if (it == texel_views.end()) return;
+    for (const auto& [key, view] : it->second.views)
+        if (view) vkDestroyBufferView(dev.device, view, nullptr);
+    texel_views.erase(it);   // (a later import may receive the same numerical VkBuffer handle)
+}
 
 VkBufferView texel_buffer_view(const nvn_tex* t, const nvn_view* v, bool storage) {
     if (!t || !t->gpu) return VK_NULL_HANDLE;
@@ -4628,29 +4672,49 @@ VkBufferView texel_buffer_view(const nvn_tex* t, const nvn_view* v, bool storage
     const uint64_t size = (uint64_t)std::max(1u, t->d.width) * bpb;
     // (a formatted store into it: textures over that memory are uploaded again once the GPU is done)
     if (storage) texture_gpu_wrote(t->gpu, size);
-    static std::unordered_map<uint64_t, VkBufferView> views;
-    // (RX_VK_POOL_MIRROR: a pool never imported is read through its mirror, bound at every use as any buffer is: synced with the
-    // CPU's writes, and written back when the view is a storage one; the view kept by buffer and offset too)
-    BufferRef b;
-    const bool every_use = memory_pool_mirror_on();
-    if (every_use) b = gpu_buffer(t->gpu, size, storage ? kGpuBufferWritten : kGpuBufferRead);
-    const uint64_t key = mix(mix(mix(t->gpu, (uint64_t)f << 1 | storage), size), every_use ? mix((uint64_t)b.buffer, b.offset) : 0);
     st_import_texel_views.fetch_add(1, std::memory_order_relaxed);   // (TICK-019: a view of the imported pool itself, never its mirror)
     st_import_texel_bytes.fetch_add((int64_t)size, std::memory_order_relaxed);
-    auto it = views.find(key);
-    if (it != views.end()) return it->second;
-    if (!every_use) b = gpu_buffer(t->gpu, size);
-    VkBufferView bv = VK_NULL_HANDLE;
-    if (b && b.offset % std::max<uint64_t>(dev.props.limits.minTexelBufferOffsetAlignment, 1) == 0) {
-        VkBufferViewCreateInfo ci{VK_STRUCTURE_TYPE_BUFFER_VIEW_CREATE_INFO};
-        ci.buffer = b.buffer;
-        ci.format = f;
-        ci.offset = b.offset;
-        ci.range = std::min<uint64_t>(size, (uint64_t)dev.props.limits.maxTexelBufferElements * bpb);
-        vkCreateBufferView(dev.device, &ci, nullptr, &bv);
+    // Resolve and stamp even a cache hit: the address can be remapped, and cached-only bindings are not idle.
+    // (RX_VK_POOL_MIRROR: a pool never imported is read through its mirror, bound at every use as any buffer is: synced with the
+    // CPU's writes, and written back when the view is a storage one)
+    BufferRef b = gpu_buffer(t->gpu, size, memory_pool_mirror_on() && storage ? kGpuBufferWritten : kGpuBufferRead);
+    if (!b || b.offset % std::max<uint64_t>(dev.props.limits.minTexelBufferOffsetAlignment, 1)) return VK_NULL_HANDLE;
+    const uint64_t range = std::min<uint64_t>(size, (uint64_t)dev.props.limits.maxTexelBufferElements * bpb);
+    if (!range) return VK_NULL_HANDLE;
+    const TexelViewKey key{f, b.offset, range};
+    std::lock_guard lk(texel_views_mu);
+    auto owner = texel_views.find(b.buffer);
+    if (owner == texel_views.end()) {
+        if (texel_registry_failed_frame == frame_no) return VK_NULL_HANDLE;
+        try {
+            owner = texel_views.try_emplace(b.buffer).first;
+        } catch (const std::exception&) {
+            texel_registry_failed_frame = frame_no;
+            return VK_NULL_HANDLE;
+        }
     }
-    views[key] = bv;
-    return bv;
+    TexelViews& cache = owner->second;
+    auto it = cache.views.find(key);
+    if (it != cache.views.end()) return it->second;
+    if (cache.failed_frame == frame_no) return VK_NULL_HANDLE;   // (one failed allocation per backing and present)
+    VkBufferViewCreateInfo ci{VK_STRUCTURE_TYPE_BUFFER_VIEW_CREATE_INFO};
+    ci.buffer = b.buffer;
+    ci.format = f;
+    ci.offset = b.offset;
+    ci.range = range;
+    VkBufferView view = VK_NULL_HANDLE;
+    if (vkCreateBufferView(dev.device, &ci, nullptr, &view) != VK_SUCCESS) {
+        cache.failed_frame = frame_no;   // (an error's output handle is undefined; never cache or destroy it)
+        return VK_NULL_HANDLE;
+    }
+    try {
+        cache.views.emplace(key, view);
+    } catch (const std::exception&) {
+        vkDestroyBufferView(dev.device, view, nullptr);   // (only the new, uncommitted view)
+        cache.failed_frame = frame_no;
+        return VK_NULL_HANDLE;
+    }
+    return view;
 }
 
 Texture* texture_for_present(const nvn_tex* t) {
@@ -4989,6 +5053,29 @@ void texture_frame(uint64_t completed) {
                  (unsigned long long)(over >> 20));
     }
     refusals_seen = refusals;
+    // (Longshot 91a1ae8b) and Windows' commit limit (RAM plus the page file): every VRAM block is charged to the process's commit, as
+    // the guest's memory is. A run on an RTX 4060 Ti held private commit at the VRAM blocks plus ~21 GB the whole way (19.3 GB at the
+    // start, 35.4 GB in Hyrule Field with 13.3 GB of blocks); a 16 GB PC with a fixed 32 GB page file reached its 47.9 GB limit
+    // at 33.9 GB of its own, a guest commit failed while an area loaded, and the game's next write there crashed it. HeyListen
+    // issues 55 and 62: the renderer's own C++ allocation was the one refused (0x20474343) on a 32 GB PC. Below the reserve the
+    // shortfall comes off the textures' budget, as the driver's limit's excess does above; the eviction and the compaction then
+    // give blocks back. RX_VK_COMMIT_RESERVE_MB=<MB> (default 2560; 0: off)
+    {
+        uint64_t commit_free = 0;
+        const uint64_t reserve = commit_reserve();
+        if (reserve && commit_headroom(&commit_free) && commit_free < reserve) {
+            const uint64_t over = reserve - commit_free;
+            budget = std::min(budget, total_bytes > over ? total_bytes - over : 0);
+            static uint64_t said_at;
+            if (!said_at || frame_no - said_at >= 600) {
+                said_at = frame_no;
+                logf("vk: commit limit near: %llu MB of commit left (reserve %llu MB); the textures' budget down to %llu MB of "
+                     "their %llu MB (RX_VK_COMMIT_RESERVE_MB)", (unsigned long long)(commit_free >> 20),
+                     (unsigned long long)(reserve >> 20), (unsigned long long)(budget >> 20),
+                     (unsigned long long)(total_bytes >> 20));
+            }
+        }
+    }
     // (TICK-023) from what the driver allows (VK_EXT_memory_budget), less a margin: the whole process held to
     // RX_VK_VRAM_TARGET_PCT of it (80), the textures getting what the rest (mirrors, pools, pipelines, streams, swapchain and the
     // free space VMA's blocks hold) leaves. A 12 GB card ran at 9.8 of 10.9 GB allowed with the textures at 5.6 GB under the

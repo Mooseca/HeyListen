@@ -15,7 +15,7 @@
 extern "C" {
 #endif
 
-#define MKWVK_API_VERSION 14
+#define MKWVK_API_VERSION 15
 enum { HOS_OPT_CHEAT_HEARTS = 32, HOS_OPT_CHEAT_FLIGHT, HOS_OPT_CHEAT_ACTION, HOS_OPT_CHEAT_CAMERA };
 /* (hookshot) the Motion page's rows (host/pad_sdl.c reads them, vk_replay.cpp's option answers them): Motion controls on
    or off, the horizontal's and the vertical's sensitivity in percent, each turned around, and the deadzone (0 to 2) */
@@ -141,6 +141,11 @@ typedef struct MkwVkHost {
        sound, [2] shown late, [3] decoding time in ns, [4] decoders that did not start (the last three are not measured in
        HeyListen: 0). Returns the build's version (HOOKSHOT_VERSION, "v0.4.0 (source <hash>)") */
     const char *(*perf_info)(char *map, int cap, int64_t movie[5]);
+    /* (version 15, issue 55 and 62; Longshot 1280) a C++ allocation of the renderer's refused for 5 s at the commit limit (its
+       new_handler, gpu/vk/vk_main.cpp new_refused, which tried again meanwhile): the host's out-of-memory line and notice, waited
+       for, then the game stops, as for the host's own allocations (host/mkw_glue.c hos_alloc_failed). what names it in the
+       log. Does not return */
+    void (*out_of_memory)(const char *what);
 } MkwVkHost;
 enum {
     MKWVK_TRACE_WRITEBACK = 1,     /* a mirror's GPU writes copied into guest memory (in a submission) */

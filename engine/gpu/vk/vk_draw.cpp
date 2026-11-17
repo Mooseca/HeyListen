@@ -46,6 +46,7 @@
 #include "vk_shader.h"
 #include "vk_texture.h"
 #include "vk_ledger.h"   // (RX_VK_LEDGER)
+#include "ubo_memo.h"    // (HL_UBO_MEMO)
 #include "movie_upscale_policy.h"
 #include "skip_code.h"
 
@@ -2735,6 +2736,51 @@ thread_local bool grid_patch_want = false;
 thread_local uint64_t grid_patch_at = UINT64_MAX;
 thread_local VkBuffer grid_patch_buf = VK_NULL_HANDLE;   // (the stream c0 went to: PR 585's streams can move on)
 
+// (HeyListen, HL_UBO_MEMO=1, default off; ubo_memo.h) a uniform slot's answer kept per thread while the pools' stamp, the update list's
+// view and the replay segment stand. HL_UBO_MEMO_CHECK=1 (implies the switch): every hit is also worked out and compared (the buffer, the
+// offset, the range), the mismatches counted, the first twelve logged, a line every 10 s. Left off (the memo skips ledger marks and the
+// capture's exclusion notes of a hit): RX_VK_LEDGER, RX_VK_CAP_ONLY_GPU, RX_VK_UB_SNAPSHOT, RX_VK_UB_CUR_ONLY
+int ubo_memo_mode() {
+    static const int mode = [] {
+        const char* c = getenv("HL_UBO_MEMO_CHECK");
+        const char* e = getenv("HL_UBO_MEMO");
+        int v = c && *c && *c != '0' ? 2 : e && *e && *e != '0' ? 1 : 0;
+        if (!v) return 0;
+        const char* cap = getenv("RX_VK_CAP_ONLY_GPU");
+        // (RX_VK_CAP_ONLY_GPU is on by default: unset counts as on)
+        if (ledger_on() || !cap || (*cap && *cap != '0') || getenv("RX_VK_UB_SNAPSHOT") || getenv("RX_VK_UB_CUR_ONLY")) {
+            logf("hl ubo memo: left off (RX_VK_LEDGER, RX_VK_CAP_ONLY_GPU, RX_VK_UB_SNAPSHOT or RX_VK_UB_CUR_ONLY is set)");
+            return 0;
+        }
+        logf("hl ubo memo: the uniform slots' answers kept while the pools, the update list and the segment stand%s (HL_UBO_MEMO=1)",
+             v == 2 ? ", every hit compared with the full lookup (HL_UBO_MEMO_CHECK=1)" : "");
+        return v;
+    }();
+    return mode;
+}
+using UboMemoSlots = ubomemo::Entry[kNvnStages][16];
+UboMemoSlots& ubo_memo_slots() {
+    thread_local UboMemoSlots slots;
+    return slots;
+}
+void ubo_memo_compare(const VkDescriptorBufferInfo& memo, const VkDescriptorBufferInfo& full, uint64_t addr, uint64_t n, int stage,
+                      uint32_t index) {
+    static std::atomic<uint64_t> compared{0}, bad{0}, last_log{0};
+    compared++;
+    if (memo.buffer != full.buffer || memo.offset != full.offset || memo.range != full.range) {
+        if (bad++ < 12)
+            logf("hl ubo memo check: MISMATCH stage %d slot %u addr %#llx +%#llx: memo %p+%#llx (%#llx), full %p+%#llx (%#llx)", stage,
+                 index, (unsigned long long)addr, (unsigned long long)n, (void*)memo.buffer, (unsigned long long)memo.offset,
+                 (unsigned long long)memo.range, (void*)full.buffer, (unsigned long long)full.offset, (unsigned long long)full.range);
+    }
+    const uint64_t now = GetTickCount64();
+    uint64_t prev = last_log.load();
+    if (prev == 0) last_log.compare_exchange_strong(prev, now);
+    else if (now - prev >= 10000 && last_log.compare_exchange_strong(prev, now))
+        logf("hl ubo memo check: %llu memo hits compared, %llu mismatches", (unsigned long long)compared.load(),
+             (unsigned long long)bad.load());
+}
+
 VkDescriptorBufferInfo uniform_range(const NvnState& s, const Stage& st, uint32_t index) {
     VkDescriptorBufferInfo bi{VK_NULL_HANDLE, 0, VK_WHOLE_SIZE};
     const uint64_t align = std::max<uint64_t>(dev.props.limits.minUniformBufferOffsetAlignment, 16);
@@ -2818,6 +2864,27 @@ VkDescriptorBufferInfo uniform_range(const NvnState& s, const Stage& st, uint32_
         const uint64_t want = used ? std::max<uint64_t>(used, 16) : std::max<uint64_t>(u.size, 16);
         const uint64_t n = std::min<uint64_t>(std::min<uint64_t>(want, u.size ? std::max<uint64_t>(u.size, 16) : want),
                                               dev.props.limits.maxUniformBufferRange);
+        // (HeyListen, HL_UBO_MEMO: the answer of this slot's last build, while nothing that decided it moved: ubo_memo.h. The
+        // answer is kept only when it was the pool's buffer itself, which `direct` says below)
+        const int memo_stage = std::clamp(st.nvn_stage, 0, kNvnStages - 1);
+        const int memo_mode = ubo_memo_mode();
+        ubomemo::Entry* memo = nullptr;
+        ubomemo::Key memo_key;
+        VkDescriptorBufferInfo memo_hit{};
+        bool memo_hit_found = false;
+        if (memo_mode && u.addr < (1ull << 40) && !s.ubo_bytes[memo_stage][index - 3]) {
+            memo = &ubo_memo_slots()[memo_stage][index - 3];
+            uint64_t limit = 0;
+            memo_key = {u.addr, n, gpu_bind_stamp(), ub_view(&limit), limit, texture_segment()};
+            uint64_t a, b;
+            if (memo->hit(memo_key, &a, &b)) {
+                memo_hit = {(VkBuffer)(uintptr_t)a, b, n};
+                if (memo_mode == 1) return memo_hit;
+                memo_hit_found = true;   // (HL_UBO_MEMO_CHECK: the answer is worked out too, and compared)
+            }
+        }
+        bool direct = false;   // (the answer below is the pool's buffer, no copy: the one kind the memo keeps)
+        const auto full = [&]() -> VkDescriptorBufferInfo {
         const LedgerUse ledger_scope_(kUseUniform);   // (RX_VK_LEDGER: the block's memory, whichever way it reaches the GPU below)
         ledger_mark(u.addr, n, kUseUniform);
         // (HeyListen, HL_UBO_INLINE: a slot bound with its bytes: those, with the stream's updates over them as ub_overlay
@@ -2844,7 +2911,7 @@ VkDescriptorBufferInfo uniform_range(const NvnState& s, const Stage& st, uint32_
         // (RX_VK_UB_SNAPSHOT=1: the contents as they are now, in the stream, not the pool the GPU reads later)
         static const bool snapshot = getenv("RX_VK_UB_SNAPSHOT") != nullptr;
         BufferRef b = snapshot ? BufferRef{} : gpu_buffer_bind(u.addr, n, false);
-        if (b && b.offset % align == 0) return {b.buffer, b.offset, n};
+        if (b && b.offset % align == 0) return direct = true, VkDescriptorBufferInfo{b.buffer, b.offset, n};
         const uint64_t at = stream_alloc(n, align);   // (unaligned or outside the pools: copied into the stream)
         if (at == UINT64_MAX) return bi;
         FINE_N(FC_UBO_STREAM, 1);
@@ -2855,6 +2922,20 @@ VkDescriptorBufferInfo uniform_range(const NvnState& s, const Stage& st, uint32_
             logf("vk: uniform buffer %#llx +%#llx copied into the stream (%s; %lld so)", (unsigned long long)u.addr,
                  (unsigned long long)n, b ? "unaligned" : "outside the pools", (long long)copied);
         return {cur->stream, at, n};
+        };
+        const VkDescriptorBufferInfo r = full();
+        if (memo) {
+            if (memo_hit_found) ubo_memo_compare(memo_hit, r, u.addr, n, memo_stage, index);
+            // (the key as read before the answer: a list that moved meanwhile, or a stamp the answer itself moved, is not kept)
+            uint64_t limit = 0;
+            const uint64_t epoch_after = ub_view(&limit);
+            if (direct && ubomemo::storable(memo_key.epoch, epoch_after) && limit == memo_key.limit)
+                memo->store({u.addr, n, gpu_bind_stamp(), memo_key.epoch, memo_key.limit, memo_key.seg}, (uint64_t)(uintptr_t)r.buffer,
+                            r.offset);
+            else
+                memo->drop();
+        }
+        return r;
     }
     return bi;
 }

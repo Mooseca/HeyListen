@@ -60,6 +60,13 @@ namespace mkwvk {
 std::atomic<uint64_t> submits_queued{0}, submits_taken{0};
 namespace {
 
+// Every raw imported-buffer destruction goes through here, including unpublished allocation rollback.
+// Published imports reach it only at the existing completion/eviction gates; no additional GPU wait.
+void destroy_import_buffer(VkBuffer buffer) {
+    release_texel_buffer_views(buffer);
+    vkDestroyBuffer(dev.device, buffer, nullptr);
+}
+
 struct Pool {
     uint64_t lo = 0, hi = 0;   // guest range imported (aligned outwards)
     uint64_t range_lo = 0, range_hi = 0;   // (the game's pool range it was found for: pool_of's last hit)
@@ -260,7 +267,7 @@ bool import_dma_buf_pieces(uint64_t lo, uint64_t hi, uint64_t piece, Pool& p) {
     piece = piece / align * align;
     const uint64_t end = lo + req.size;
     if (!piece || (req.size & 4095) || end > host->guest_size()) {
-        vkDestroyBuffer(dev.device, buffer, nullptr);
+        destroy_import_buffer(buffer);
         if (dmabuf_failures++ < 8)
             logf("vk: pool %#llx..%#llx: sparse block %llu, size %llu: not in dma-bufs of %llu", (unsigned long long)lo,
                  (unsigned long long)hi, (unsigned long long)req.alignment, (unsigned long long)req.size, (unsigned long long)piece);
@@ -322,7 +329,7 @@ bool import_dma_buf_pieces(uint64_t lo, uint64_t hi, uint64_t piece, Pool& p) {
                  dev.sparse_queue ? "a queue of its own" : "the replay's queue");
     }
     if (res != VK_SUCCESS) {
-        vkDestroyBuffer(dev.device, buffer, nullptr);
+        destroy_import_buffer(buffer);
         for (VkDeviceMemory m : memories) vkFreeMemory(dev.device, m, nullptr);
         if (dmabuf_failures++ < 8)
             logf("vk: pool %#llx..%#llx: its %zu dma-bufs not bound (VkResult %d)", (unsigned long long)lo, (unsigned long long)hi,
@@ -398,7 +405,7 @@ bool import_dma_buf(uint64_t lo, uint64_t hi, Pool& p) {
         if (vkCreateBuffer(dev.device, &bi, nullptr, &buffer) != VK_SUCCESS) return false;
         const VkDeviceMemory memory = dma_buf_memory(lo, hi - lo);
         if (!memory) {
-            vkDestroyBuffer(dev.device, buffer, nullptr);
+            destroy_import_buffer(buffer);
             return false;
         }
         vkBindBufferMemory(dev.device, buffer, memory, 0);
@@ -531,7 +538,7 @@ bool import_pool(uint64_t lo, uint64_t hi, Pool& p) {
     const VkResult allocated = vkAllocateMemory(dev.device, &ai, nullptr, &p.memory);
     if (allocated != VK_SUCCESS) {
         import_result = allocated;
-        vkDestroyBuffer(dev.device, p.buffer, nullptr);
+        destroy_import_buffer(p.buffer);
         p.buffer = VK_NULL_HANDLE;
         import_remember_failure(lo, hi);
         return false;
@@ -1225,11 +1232,12 @@ uint64_t eager_captures() {
 // copied (85-95% of its pages, section 9). A GPU address below 1 TB is valid only inside a memory pool (NVN), so those pages
 // cannot be read by the GPU. 1: the import ranges are clipped to the game's pools before the capture scans them. 2 (a check):
 // captured as before, and the pages 1 would leave out counted. With 1 or 2 every replay read and buffer binding that reaches
-// into the left-out ranges is counted and the first ones logged (0 expected).
+// into the left-out ranges is counted and the first ones logged (0 expected). Default 1 since 2026-11-17 (PC 3050, castle-move x3:
+// 20.2 -> 22.8 fps, p50 -2.5 ms, 0 reads into left-out ranges, pictures right); RX_VK_CAP_ONLY_GPU=0 captures as before.
 int cap_only_gpu() {
     static const int v = [] {
         const char* e = getenv("RX_VK_CAP_ONLY_GPU");
-        const int m = e ? std::clamp(atoi(e), 0, 2) : 0;
+        const int m = e ? std::clamp(atoi(e), 0, 2) : 1;
         if (m) logf("vk: the capture's imported chunks %s the game's pools (RX_VK_CAP_ONLY_GPU=%d)",
                     m == 1 ? "clipped to" : "checked against", m);
         return m;
@@ -3788,7 +3796,7 @@ void bg_drain() {
     for (auto& [lo, p] : ready) {
         auto imp = imported.find(lo);
         if (imp != imported.end() && imp->second.hi >= p.hi) {
-            vkDestroyBuffer(dev.device, p.buffer, nullptr);
+            destroy_import_buffer(p.buffer);
             vkFreeMemory(dev.device, p.memory, nullptr);
             for (VkDeviceMemory m : p.pieces) vkFreeMemory(dev.device, m, nullptr);
             continue;
@@ -3806,7 +3814,7 @@ void bg_drain() {
         }
         if (overlap) {
             st_prefetch_dropped++;
-            vkDestroyBuffer(dev.device, p.buffer, nullptr);
+            destroy_import_buffer(p.buffer);
             vkFreeMemory(dev.device, p.memory, nullptr);
             for (VkDeviceMemory m : p.pieces) vkFreeMemory(dev.device, m, nullptr);
             continue;
@@ -5768,11 +5776,12 @@ void reap_mirrors() {   // (pools_mu held)
             logf("vk: addr mirror freed at gpu %#llx (value %llu, completed %llu)", (unsigned long long)vkGetBufferDeviceAddress(dev.device, &da),
                  (unsigned long long)dead_mirrors.front().value, (unsigned long long)mem_completed);
         }
+        release_texel_buffer_views(dead_mirrors.front().buffer);   // (RX_VK_POOL_MIRROR: texel views are made over mirrors too)
         destroy_buffer(dead_mirrors.front().buffer, dead_mirrors.front().alloc);
         dead_mirrors.pop_front();
     }
     while (!dead_imports.empty() && dead_imports.front().value <= mem_completed) {
-        vkDestroyBuffer(dev.device, dead_imports.front().buffer, nullptr);
+        destroy_import_buffer(dead_imports.front().buffer);
         vkFreeMemory(dev.device, dead_imports.front().memory, nullptr);
         for (VkDeviceMemory m : dead_imports.front().pieces) vkFreeMemory(dev.device, m, nullptr);
         if (dead_imports.front().hi) import_unpinned(dead_imports.front().lo, dead_imports.front().hi);
@@ -6162,7 +6171,7 @@ void import_unpinned(uint64_t lo, uint64_t hi) {   // (pools_mu held)
 void imports_give_back() {   // (pools_mu held)
     while (!evicted_pools.empty() && evicted_pools.front().mapped().retired_value <= mem_completed) {
         Pool& p = evicted_pools.front().mapped();
-        vkDestroyBuffer(dev.device, p.buffer, nullptr);
+        destroy_import_buffer(p.buffer);
         vkFreeMemory(dev.device, p.memory, nullptr);
         for (VkDeviceMemory m : p.pieces) vkFreeMemory(dev.device, m, nullptr);   // (a pool imported as several dma-bufs)
         evicted_pools.pop_front();

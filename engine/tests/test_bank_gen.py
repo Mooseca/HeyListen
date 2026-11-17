@@ -26,7 +26,10 @@ def main():
     bank = (vk / "vk_bank.cpp").read_text(encoding="utf-8")
     replay = (vk / "vk_replay.cpp").read_text(encoding="utf-8")
     draw = (vk / "vk_draw.cpp").read_text(encoding="utf-8")
-    fill = block(bank, "void driver_bank_fill(")
+    fill = block(bank, "static void driver_bank_fill_ref(")   # (the word path; HL_UBO_WRITER's native path below reads the same fields)
+    native = block(bank, "void ubo_writer_fill(")
+    if set(re.findall(r"\bs\.(\w+)", native)) - {"tex", "img", "samp", "ssbo"}:
+        raise SystemExit("the native bank writer reads more than tex_gen and ssbo_gen cover: " + str(set(re.findall(r"\bs\.(\w+)", native))))
     c2 = block(fill, "if (bank == 2) {")
     if set(re.findall(r"\bs\.(\w+)", c2)) - {"tex", "img", "samp"}:
         raise SystemExit("c2 is made from more than tex_gen covers: " + str(set(re.findall(r"\bs\.(\w+)", c2))))

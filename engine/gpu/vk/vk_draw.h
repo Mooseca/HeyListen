@@ -76,6 +76,9 @@ void draw_records_log(uint64_t frame_lo, uint64_t frame_hi);
 void pass_traces_log(uint64_t frame_lo, uint64_t frame_hi);   // (RX_VK_PASS_TRACE=1)
 /// Changes with every uniform update the stream makes (vk_replay.cpp): descriptors bound before may be stale
 uint64_t ub_generation();
+/// (HL_UBO_MEMO) the update list as this thread sees it: its epoch (returned) and this thread's place in it. Whether an update overlaps
+/// a range is a function of these two, and of the range
+uint64_t ub_view(uint64_t* limit);
 /// A background thread (shader translation, pipeline builds) reads guest memory from the captures only, never the stream's
 /// uniform updates: that list is the replay's, which grows and is pruned while such a thread runs
 void ub_thread_off();

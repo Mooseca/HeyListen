@@ -10,10 +10,12 @@
 #include <cstdio>
 #include <cstring>
 #include <mutex>
+#include <new>
 #include <string>
 #include <thread>
 #include <vector>
 #ifndef _WIN32
+#include <sys/sysinfo.h>   // (commit_left_mb)
 #include <dlfcn.h>   // (create_device: hos_posix_submit_thread_note, looked up in the exe)
 #endif
 
@@ -89,6 +91,44 @@ void logf(const char* fmt, ...) {
     std::vsnprintf(b, sizeof b, fmt, a);
     va_end(a);
     if (host) host->log(b);
+}
+
+// (issue 55 and 62, Longshot 1280) MB of commit left: RAM and page file on Windows, free RAM and swap elsewhere; -1 when unknown
+static long long commit_left_mb() {
+#ifdef _WIN32
+    MEMORYSTATUSEX m = {};
+    m.dwLength = sizeof m;
+    return GlobalMemoryStatusEx(&m) ? (long long)(m.ullAvailPageFile >> 20) : -1;
+#else
+    struct sysinfo si;
+    return sysinfo(&si) ? -1 : (long long)(((unsigned long long)si.freeram + si.bufferram + si.freeswap) * si.mem_unit >> 20);
+#endif
+}
+
+// (issue 55 and 62, Longshot 1280) The renderer's C++ allocations at the commit limit. An `operator new` that malloc refuses calls
+// this each time and tries again when it returns. Before, nothing did: the refusal was a std::bad_alloc that no catch
+// held (exception 0x20474343 in hookshot_vk.dll, "An unexpected error" or the crash window on a 32 GB PC), with none of the wait
+// that the host's own allocations have at the limit (host/mkw_glue.c hos_alloc_failed). Now a refusal with the commit nearly
+// all used waits 50 ms and tries again, for up to 5 s on this thread (a refusal more than 250 ms after its last try starts a
+// new 5 s), then the host's out-of-memory line and notice, and the game stops. A refusal with plenty of commit left is not
+// the limit (a size gone wrong, as a bad shader's): the std::bad_alloc as before, for the catch that holds it.
+static void new_refused() {
+    using clock = std::chrono::steady_clock;
+    static thread_local clock::time_point first, last;
+    static std::atomic<int> told{0};
+    const clock::time_point now = clock::now();
+    if (last == clock::time_point() || now - last > std::chrono::milliseconds(250)) first = now;
+    last = now;
+    const long long left = commit_left_mb();
+    if (left < 0 || left > 4096) throw std::bad_alloc();
+    if (now - first >= std::chrono::seconds(5)) {
+        logf("mem: the renderer's C++ allocations: still refused after 5 s at the commit limit (%lld MB of commit left)", left);
+        if (host && host->out_of_memory) host->out_of_memory("the renderer's C++ allocations");
+        throw std::bad_alloc();   // (a host with no out_of_memory: as before)
+    }
+    if (told.fetch_add(1) < 8)
+        logf("vk: a C++ allocation refused at the commit limit (%lld MB of commit left): tried again for up to 5 s", left);
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
 }
 
 namespace {
@@ -1180,6 +1220,7 @@ const MkwVkRenderer* mkwvk_init(const MkwVkHost* h) {
     using namespace mkwvk;
     if (!h || h->version != MKWVK_API_VERSION) return nullptr;
     host = h;
+    if (h->out_of_memory) std::set_new_handler(new_refused);   // (the renderer's C++ allocations at the commit limit: new_refused)
     if (!load_global()) {
         logf("vk: vulkan-1.dll not found");
         return nullptr;

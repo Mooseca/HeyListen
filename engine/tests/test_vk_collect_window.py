@@ -139,7 +139,7 @@ void stamp_page(uint64_t p, uint32_t g) {
 const std::vector<std::pair<uint64_t, uint64_t>> captured{{8 << kPageShift, 16 << kPageShift}};   // (pages 8-15)
 const std::vector<std::pair<uint64_t, uint64_t>>& capture_ranges_merged() { return captured; }
 void cap_view_bump() {}
-// (RX_VK_CAP_ONLY_GPU off, as by default; the scan's split onto the copy helpers off)
+// (RX_VK_CAP_ONLY_GPU=0; the scan's split onto the copy helpers off)
 int cap_only_gpu() { return 0; }
 bool cap_excl_hit(uint64_t, uint64_t) { return false; }
 void cap_born_take(std::vector<std::pair<uint64_t, uint64_t>>& out) { out.clear(); }

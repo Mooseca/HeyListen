@@ -838,7 +838,9 @@ game. It stays as the record kind and descriptor path brick D will use for block
 
 ### The rule and the switch
 
-`RX_VK_CAP_ONLY_GPU` (`gpu/vk/vk_memory.cpp`; default 0, the previous behaviour):
+`RX_VK_CAP_ONLY_GPU` (`gpu/vk/vk_memory.cpp`; **default 1 since 2026-11-17**: PC 3050, castle-move x3 per arm, 20.2 -> 22.8 fps,
+mean frame 49.7 -> 43.9 ms, p50 -2.5 ms, 0 reads or bindings into left-out ranges, pictures right; 0 is the previous behaviour.
+`HL_UBO_MEMO` stays off while it is on):
 - **1**: the capture's ranges are the mirrored imports **clipped to the game's pools** (every pool below 1 TB from
   `host->gpu_pools`, any size), plus the texture storage and the small pools as before (`capture_union_locked`, used by the
   capture, the pre-copy and `capture_ranges_merged`). The replay's own collection (`memory_collect_written`, whose host ranges
@@ -951,7 +953,7 @@ Question: does the back end replay late, answer the game's waits early, and is t
   piece went into. Early answers 99% -> 0.1%; the main thread blocks in sync waits 3.2 ms a frame (0.98 waits a frame, median 2.9 ms),
   none before; 71 fps against 70 (one run each, noise); the capture's count does not move (73 pages a frame against 87).
 
-## 11. The driver banks' native writer (`HL_UBO_WRITER=1`, off by default; stream N5)
+## 13. The driver banks' native writer (`HL_UBO_WRITER=1`, off by default; stream N5)
 
 **What the per-draw uniform work in the replay is.** Of a draw's descriptors, the bytes the replay makes itself are the driver banks: c2 (the
 texture, image and sampler handles, 8 bytes a slot, 0x20 to 0x968) and c0 (a 16-byte entry a storage buffer from 0x110 / 0x510 / 0x410 /
@@ -969,3 +971,32 @@ mesh (6, 7: the pointer table) are not handled and run it.
 **Check.** `HL_UBO_WRITER_CHECK=1` (implies the switch) runs both paths on every fill, compares the bytes, counts the mismatches, logs the
 first twelve and a line every 10 s (`hl ubo writer check: N bank fills compared, M mismatches`). `engine/tests/test_bank_write.py` compares
 the writer with a copy of the word path for every bank size from 0 to 0xA00 on random state: 255,216 banks, 0 mismatches.
+
+## 14. The user-uniform slot memo (`HL_UBO_MEMO=1`, off by default; stream HLE1)
+
+**What it takes out.** On the PC 3050 (kokiri-idle, fine profile, 3,005 draws a frame) the replay's user-uniform lookups are 2.00 ms a
+frame summed over threads: 4.76 calls a draw (a build resolves every uniform slot of the program, 5.5 a build, although one or two
+changed since the draw before), ~0.14 us a call; 0.02 a draw is an overlay copy and none a stream copy, so nearly every call ends as a
+pool-range memo hit of `gpu_buffer_bind` after the ledger marks, the capture checks, the stream's reservation and the update list's
+guard, gap and copy caches.
+
+**The memo.** `engine/gpu/vk/ubo_memo.h`: per thread, per (stage, slot), the last answer (buffer, offset) with the key it was made under:
+the range and the size the program reads, `gpu_bind_stamp()` (what `gpu_buffer_bind`'s own memo is keyed by), the update list's epoch and
+this thread's place in it (`ub_view`: every append and prune moves the epoch, a segment's worker moves its limit), and the replay
+segment. An entry is made only from an answer that was the pool's buffer itself (not an inline block, an overlay copy or a stream copy),
+below 1 TB (no virtual pool), and not when the list's epoch moved during the lookup. Left off: `RX_VK_LEDGER`, `RX_VK_CAP_ONLY_GPU`,
+`RX_VK_UB_SNAPSHOT`, `RX_VK_UB_CUR_ONLY`.
+
+**Check.** `HL_UBO_MEMO_CHECK=1` (implies the switch): every hit also runs the full lookup and compares buffer, offset and range; the
+mismatches are counted, the first twelve logged, a line every 10 s (`hl ubo memo check: N memo hits compared, M mismatches`).
+`engine/tests/test_ubo_slot_memo.py`: the header against a made-up world (6 million steps, the stamp, list and segment moving, the list
+moving during a lookup): 1.79 M hits, 0 mismatches; and the wiring of `uniform_range`.
+
+**Validation (PC 3050, slot b, function and picture only; no speed round).** Build `hle1` at da9607bd. `HL_UBO_MEMO_CHECK=1`: kokiri-idle
+359,376 memo hits compared, castle-move 6,531,552, hyrule-walk 7,043,323: **0 mismatches** in all three (the runs were on a machine shared
+with other streams and the first after a build re-prepares shaders, so their frame counts are low and not a measure). Pictures: the last
+shots of castle-move, hyrule-walk (`HL_UBO_MEMO_CHECK=1`) and kokiri-idle (`HL_UBO_MEMO=1`) show the Castle Town market whole and right,
+as `build/s5/refshots-*` (the scripted character stands elsewhere, the runs being slower). Fine profile, kokiri-idle: user uniform
+buffers 2.0-2.1 ms a frame with the memo (3,016-3,089 draws a frame) against 2.9-3.4 ms in a base run made minutes before on the busy
+machine and 2.00 ms in the C2 run: **not a measurement of the gain**, which is still to be made in a short A/B on an idle machine (the
+fine profile's `user uniform buffers` line, castle-move x3). Default off until then.

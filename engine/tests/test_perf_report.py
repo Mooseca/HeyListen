@@ -47,7 +47,7 @@ def wiring():
     check('"perf_pending", "perf_sent"' in switch_off and "perf_measure.store(false" in switch_off,
           "turning the row off stops the measuring and deletes perf_pending and perf_sent")
     check("perf_frame_shown();" in menu, "the frame hook is where the shown frames are counted")
-    check(re.search(r"#define MKWVK_API_VERSION 14\b", api) and "perf_info" in api, "the host's perf_info is in the API, version 14")
+    check(re.search(r"#define MKWVK_API_VERSION 1[4-9]\b", api) and "perf_info" in api, "the host's perf_info is in the API, version 14 or later")
     check("hos_perf_info" in (ROOT / "host/rx_backend.c").read_text(encoding="utf-8"), "rx_backend.c fills perf_info")
     check("perf_report_final(-1);" in (ROOT / "gpu/vk/vk_main.cpp").read_text(encoding="utf-8"),
           "the window's close writes the last summary")
