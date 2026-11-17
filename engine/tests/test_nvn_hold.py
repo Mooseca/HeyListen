@@ -99,7 +99,8 @@ class NvnHoldTests(unittest.TestCase):
     def test_sweep_keeps_held_recordings(self):
         sweep = block(self.nvn, "static void sweep_overwritten_copies(void)")
         self.assertIn("const uint64_t after = rx_nvn_pushed() + held_count();", sweep)
-        self.assertIn("dead[ndead].after = after;", sweep)
+        self.assertIn("dead_copy_add(pre, after);", sweep)   # (Hookshot d1ce8a4cd: the dead list's add in one place)
+        self.assertIn("dead[ndead].after = after;", block(self.nvn, "static void dead_copy_add("))
 
     def test_check_helpers_mark_the_pages_again(self):
         snap = block(self.rx, "int64_t hos_hold_snapshot(uint32_t **pages, uint8_t **copy)")
