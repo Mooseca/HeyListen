@@ -38,7 +38,7 @@ def main():
         game.mkdir()
         # (the player's file sets the game's switches only: not the system's variables, HOS_ENV_FILE or paths)
         (game / "hookshot_env.txt").write_text(
-            "HOS_T_BESIDE=1\nHOS_T_SHARED=beside\nVK_ADD_LAYER_PATH=/x\nLD_PRELOAD=/x.so\nPATH=C:\\x\nSDL_DYNAMIC_API=/x.so\n"
+            "HOS_T_BESIDE=1\nHL_T_NATIVE=0\nHOS_T_SHARED=beside\nVK_ADD_LAYER_PATH=/x\nLD_PRELOAD=/x.so\nPATH=C:\\x\nSDL_DYNAMIC_API=/x.so\n"
             "HOS_ENV_FILE=other.txt\nHOS_SAMPLE_FILE=/home/x/.bashrc\nRX_VK_DUMP_DIR=C:\\Users\\x\nRX_VK_SKIP_CODE=2c56,ab\n"
             "RX_VK_DLSS_DIR=/opt/ngx\nHOS_T_HOME=~\nSDL_VULKAN_LIBRARY=x.dll\nSDL_VIDEO_EGL_DRIVER=x.so\n"
             "SDL_AUDIODRIVER=pulseaudio\nHOS_T_UP=..\nHOS_SAMPLE_FILE=hookshot_vk.dll\nRX_VK_FRAME_LOG=x.txt\n"
@@ -80,7 +80,7 @@ static int is(const char *name, const char *want) {
     const char *v = getenv(name);
     return want ? v && !strcmp(v, want) : !v;
 }
-static void clear(void) { unsetenv("HOS_T_BESIDE"); unsetenv("HOS_T_OTHER"); unsetenv("HOS_T_SHARED"); unsetenv("VK_T_LAYER"); }
+static void clear(void) { unsetenv("HL_T_NATIVE"); unsetenv("HOS_T_BESIDE"); unsetenv("HOS_T_OTHER"); unsetenv("HOS_T_SHARED"); unsetenv("VK_T_LAYER"); }
 int main(int argc, char **argv) {
     (void)argc;
     unsetenv("HOS_ENV_FILE");                      /* out of the box: the file beside the game */
@@ -90,6 +90,8 @@ int main(int argc, char **argv) {
     CHECK(logged[0] == 0);                         /* (the log is not open yet when the file is read: nothing logged until it is) */
     hos_env_notes_log();
     CHECK(strstr(logged, "env: hookshot_env.txt sets HOS_T_BESIDE=1\n"));
+    CHECK(strstr(logged, "env: hookshot_env.txt sets HL_T_NATIVE=0\n"));   /* (the hybrid engine's HL_ switches: issue 30) */
+    CHECK(is("HL_T_NATIVE", "0"));
     CHECK(strstr(logged, "env: hookshot_env.txt sets HOS_T_SHARED=beside over the environment's exported\n"));
     CHECK(strstr(logged, "env: hookshot_env.txt sets RX_VK_SKIP_CODE=2c56,ab\n"));
     CHECK(!strstr(logged, "RX_VK_SKIP_CODE=2c56,ab over"));
