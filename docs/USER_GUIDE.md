@@ -5,6 +5,8 @@ HeyListen is a fork of [Hookshot](https://github.com/NotRexed/Hookshot) that tur
 first and little tested release). Nothing from the game is downloaded: the HeyListen Builder builds the game on your PC
 from the files you give it.
 
+Questions and help: the [HeyListen Discord](https://discord.gg/34GV5hdC3Q). Bugs: [GitHub issues](https://github.com/Sacrappy/HeyListen/issues).
+
 ## What you need
 
 - Windows 10 or 11, 64-bit, or Linux (see [the Linux section](#linux)); a CPU with AVX2, 16 GB of RAM or more.

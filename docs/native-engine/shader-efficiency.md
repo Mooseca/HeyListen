@@ -1,0 +1,224 @@
+# Where the translated shaders waste GPU time (stream P4, 2026-11-17)
+
+Question: the PC 3050 (RTX 3050, 1440p) is GPU-bound at ~20.3 ms of GPU work a frame in Kokiri and ~7 ms must go. The
+shaders are Maxwell/Ampere-class NVN programs translated to SPIR-V by our recompiler. Which of the translator's output
+costs GPU time that the original program did not, and what is each fix worth?
+
+This is a study: code reading, SPIR-V statistics of a program cache, and a join with the GPU times G2 and G3 measured. No game
+was run for it. Programs are named by their keys; no game code, SPIR-V or dump is in the repository (the tool below reads a
+local cache and writes counts only).
+
+Answer in one line: **in the frames that matter the translator's waste is the global-memory helper that every mesh, task,
+compute and many fragment programs call (a search over all candidate storage buffers, ~29 SPIR-V instructions a candidate, inlined
+at every access), and 5.4% of the whole cache's code is helper bodies nobody calls. Measured on the three biggest mesh programs it is
+worth 1.1 ms (Kokiri, one program: not inlining it) and 0.4-0.5 ms each (hoisting the ranges); the rest I can only estimate.
+The predicate/LOP3 chains (~9,000 BitFieldUExtract in the biggest mesh program) are a different thing: one translator bug, not a
+GPU cost the driver demonstrably pays, but cheap to fix.** The 7 ms do not come from here: at most ~2-3.5 ms of them can.
+
+## The tool
+
+`engine/scripts/spirv_stats.py` (test: `engine/tests/test_spirv_stats.py`).
+
+    python -I scripts/spirv_stats.py scan   <hookshot_programs.bin> --out <scratch dir>     one JSON line a stage, 2.5 min for 45k records
+    python -I scripts/spirv_stats.py report <scratch dir> --logs <g2 run dir> ... --top 25   totals, and the join with the GPU cost
+    python -I scripts/spirv_stats.py ops    <hookshot_programs.bin> --key <hex prefix>      opcode histogram of one program
+
+It reads the cache's records as `scripts/validate_spirv.py` does (packed ones through `compression.zstd`), walks each stage's SPIR-V once
+and counts: instructions by class, opcodes of interest (BitFieldUExtract, IEqual, Select, compare-exchange, loops), scalar width of
+arithmetic (f16 / f32 / f64 / i64), texture operations, local arrays, storage-buffer variables, and the **global-memory helper
+functions** (a function whose first parameter is an u64 address and that reaches a storage buffer through a branch: its body size, its
+call sites, its candidate count by ArrayLength, whether it is marked Inline, whether it is ever called). "Effective" instructions
+are body x call sites: what the code is if the driver inlines it, as it must where the helper is marked Inline. A constant-propagation
+pass over the pure integer ops counts what is foldable (every operand a constant). `report --logs` takes G2-style game logs
+(`RX_VK_PASS_TIMING=2`: the last "GPU pass timing" block gives the 20 programs whose runs of draws took the most and the top 25 spans,
+which include dispatches by program key) and averages them.
+
+Provenance of the numbers below: the cache is a copy of slot b's `hookshot_programs.bin` (2026-11-17 01:18, packed, 45,293 records, taken
+before any other run rewrote it; slot a's was rewritten under the first scan by another stream), kept in `E:\OOT\scratch-p4`. Twelve hot
+programs the current cache does not hold (1a7482c0..., da7a7ab2..., d8180bd8..., 9dc98871..., 26fe0c70..., 04829841... and others: the
+cache of the day of G2 held them) were read from slot hl's older cache. Duplicated stages (a record kept per pipeline state) are counted once.
+
+## The cache in numbers
+
+45,293 records, **39,853 programs, 80,130 distinct stages, 330.5 M SPIR-V instructions** (the median program is 34 KB packed).
+
+| stage | stages | instructions | global-helper call sites | stages with them | storage-buffer accesses bound at translation | helper bodies never called |
+|---|---:|---:|---:|---:|---:|---:|
+| fragment | 36,616 | 192.9 M | 130,465 | 9,965 | 303,263 | 4.2 M instr |
+| vertex | 34,765 | 84.5 M | 390,724 | 5,446 | 230,452 | 8.7 M |
+| compute | 6,306 | 29.6 M | 115,463 | 1,796 | 175,448 | 3.7 M |
+| mesh | 1,287 | 16.1 M | 44,942 | 819 | 67,515 | 0.6 M |
+| task | 1,156 | 7.5 M | 6,682 | 1,104 | 7,350 | 0.7 M |
+| all | 80,130 | 330.5 M | 688,276 | 19,130 | 784,028 | 17.9 M (5.4%) |
+
+* Direct (bound) storage-buffer accesses are 784k, helper call sites 688k: **47% of all global accesses stay global**, and in the mesh
+  programs that matter nearly all do (43ec86f35fd937b9's mesh: 77 helper calls, 10 direct; d8e59341cf4f629c: 72 and 21). What the pass
+  could bind it has bound; the rest are addresses built from a pointer loaded from memory or a choice among several buffers (see below).
+* The helper is 29 instructions a candidate (206 instructions for 7 candidates in 43ec's, 179 for 6 in d8e5's): two loads of the driver
+  bank, an ArrayLength, 64-bit adds, a compare-and-select to cap the range, two compares and a branch. 7 instructions of those
+  could be a constant-time table read (see the plan). Candidates in the widest helper: 2-4 in 13,000 stages, 8 in 1,180, **18 in 3,635** (the culling computes).
+* **Helper bodies the program never calls: 17.9 M instructions, 5.4% of the cache.** Every stage that uses global memory gets
+  load/write helpers for three widths plus nine atomics, a compare-exchange and the narrow-store helper whether or not it calls them
+  (43ec's mesh: three load variants, two are called; every write is dead). The driver drops them; they cost translation, SPIR-V size
+  and the driver's front end, not the GPU.
+* **8/16-bit stores: no call site anywhere** (global narrow store helper: 357 compute stages carry the body, 0 call; the storage buffer
+  path's own compare-exchange loop: 0 calls; the 17,787 compare-exchange operations in 655 stages are the atomics' helper bodies, dead).
+  The CAS-loop worry is not a cost in this cache.
+* **Predicate emulation: 6.2 M BitFieldUExtract (1.9% of instructions), 2.1 M IEqual; 1.89 M operations are foldable (every operand a
+  constant), 763k BitFieldUExtract of a constant base. Mesh stages hold 565k of those: 1.18 M of the mesh code's 16.1 M instructions
+  (7.4%), and 594 stages have over 1,000 foldable operations.** In 43ec86f35fd937b9's mesh 8,698 of 44,883 instructions are foldable and a chain of
+  Select/LogicalNot hangs on them (the largest programs of the cache, 93e3e999f2fb9fd8: 219,867 instructions, 5,896 foldable).
+* Float: 76.7 M f32 operations against 0.29 M f16 (fragment stages only: 12 in each of the hot ones); 8.7 M 64-bit integer operations
+  (the helper's address math; 4.3 M in the vertex stages alone). 709k texture operations. Local arrays: 254 stages, 92 KB in all
+  (the largest: 16 bytes in the hot mesh programs). Loops: 44k, 25.8k of them in fragment stages (typically one a program).
+
+## Which programs cost the GPU time (G2, PASS_TIMING=2, two runs a zone)
+
+G2's top-20-programs list and top spans cover 12.5 ms of Kokiri's 22.3 ms busy frame and 10.2 of Hyrule's 19.9: the rest is spread over
+hundreds of small spans. Of what is listed, **mesh pipelines are 7.2 ms (Kokiri) and 4.5 ms (Hyrule)**, compute 2.4 and 2.2,
+vertex+fragment 2.9 and 3.5.
+
+| program (stages) | Kokiri ms | Hyrule ms | the stage that matters | gm sites x candidates (effective instr) | direct | notes |
+|---|---:|---:|---|---|---:|---|
+| 43ec86f35fd937b9 (task, mesh, frag) | 2.41 | - | mesh 44,883 instr | 77 x 7 (15.9 k) | 10 | 8.7 k foldable, 14 loops; not inlined: 1.34 ms |
+| 918adef1afaa39d4 (task, mesh, frag) | 1.72 | - | mesh 12,849 | 4 x 5 (0.6 k) | 62 | helper-free: neither noinline nor hoist moves it |
+| d8e59341cf4f629c (mesh, frag) | 1.41 | 0.33 | mesh 9,242 | 72 x 6 (12.9 k) | 21 | hoist: 1.06 / 0.25 |
+| 739acd678ae08655, 4f0c0b40ab3a32cd, d905f52b7517c681 (Hyrule mesh) | - | 1.44, 1.42, 0.79 | mesh 8-9 k | 72-77 x 7 (14.8-15.9 k) | 10-27 | hoist: 0.96, 1.00, 0.55; noinline: 1.42, 1.83, 0.75 |
+| 1a7482c0ec9991ea (vertex, frag) | 1.07 | 0.92 | fragment 1,786 | none | - | fullscreen, 16 texture ops: no translator waste |
+| 89ca750f9852b7ca, 3b8c07f2eb4bb7d9, e3f341ac12c40e2c | 0.43, 0.23, 0.18 | | mesh | 72-144 x 6-7 (12.9-29.7 k) | 23-39 | |
+| da7a7ab28b8e73d9 (mesh, **fragment**) | 0.56 | | fragment 9,164 (1280x720 pass) | **109 x 5 (19.3 k)** | 26 | a fragment shader with 109 global loads |
+| 9dc98871eb7fc101 (compute, matrix net) | 0.42 | 0.42 | 23,909, 192 cooperative-matrix ops | none | - | the GPU's tensor path, nothing to remove |
+| ee7764a6b1ef459c (compute) | 0.41 | 0.44 | 11,826 | 112 x 6 (24.2 k) | 13 | |
+| 27ee9883e2a20323 (compute) | 0.36 | 0.29 | 11,128, 32 texture ops | 1 | 8 | |
+| 435a0138b9013040, cc62764061c44f6a (compute) | 0.21, 0.18 | 0.21 | 4.1 k, 14.7 k | 56 x 6, 72 x 8 (12.1 k, 19.4 k) | 13, 75 | |
+| 755a777ada52677d (compute, 35 dispatches of 1x1x1) | 0.20 | 0.26 | 1,736 | 3 | - | 5.6 us a dispatch: latency, not code |
+| e2db7bfe1ee2a837, e186e5d64641235d (vertex pull) | 0.19 | 0.14 | vertex 4.8-5.5 k | 72 x 4 (6.9 k) | | |
+
+Of the listed milliseconds, programs with global helpers: 9.4 of 12.5 (Kokiri) and 7.5 of 10.2 (Hyrule); with a mesh or compute
+stage using 20 or more calls: 4.9 and 4.5 ms (mesh alone).
+
+### What G3 and G5 already measured, program by program (ms a frame, PASS_TIMING=2 runs in `E:\OOT\scratch-g3\runs`)
+
+| program | default | helpers not inlined (mesh) | ranges hoisted (RX_VK_MESH_G3=1) | both |
+|---|---:|---:|---:|---:|
+| 43ec86f35fd937b9 (Kokiri) | 2.43 | **1.34** | 2.46 | 1.36 |
+| 918adef1afaa39d4 (Kokiri) | 1.69 | 1.68 | 1.72 | 1.73 |
+| d8e59341cf4f629c (Kokiri) | 1.45 | 1.47 | **1.06** | 1.48 |
+| 89ca750f9852b7ca (Kokiri) | 0.43 | 0.56 | **0.33** | 0.58 |
+| 4f0c0b40ab3a32cd (Hyrule) | 1.42 | 1.83 | **1.00** | 1.77 |
+| 739acd678ae08655 (Hyrule) | 1.44 | 1.42 | **0.96** | 1.38 |
+| d905f52b7517c681 (Hyrule) | 0.79 | 0.75 | **0.55** | 0.75 |
+| frame total, Kokiri / Hyrule | 22.4 / 19.9 | 21.3 / 20.2 | 21.7 / 18.4 | 21.8 / 20.3 |
+
+Hoisting is the better answer for every mesh program but one; the one it does nothing for, 43ec, gains 1.1 ms (45%) from leaving the
+helpers out of line. 4f0c has the same helper (77 sites, 7 candidates, 15.9 k instructions) as 43ec and loses 0.4 ms out of line:
+what separates them is the rest of the program (43ec's mesh is 44.9 k instructions, 4f0c's 9.4 k), so the code-size cliff is the whole
+program's, not the helper's. G5 (hoist in every stage, `RX_VK_GMEM_HOIST`): fragment +6.5 ms, compute +2.4 ms, vertex 0: the prologue costs
+every invocation what a search costs only the accesses reached.
+
+## The translator paths behind it
+
+* **Binding at translation time** (`ir_opt/global_memory_to_storage_buffer_pass.cpp`, `CollectStorageBuffers`): an access whose address
+  tracks to one constant-buffer slot is turned into a storage-buffer access; this is Eden's pass with Fritchii's native tracking, and it
+  is not the missing piece. What stays global is left on purpose: an address that mixes a pointer loaded from memory (`MixesLoadedPointer`,
+  the culling programs' instance and placement records), several candidate pointers (`native_candidates.size() > 1`: all bound, the access
+  left global), the c1 rule, a graphics stage's pointer from another buffer than c0 (`cbuf_load_rule`) and a split select/phi. These are
+  precisely the hot mesh programs' accesses: nothing more can be resolved statically without knowing where the pointer came from.
+* **The helper** (`backend/spirv/spirv_emit_context.cpp`, `DefineGlobalMemoryFunctions`, `define_body`): for each access width a function
+  that tests every candidate in turn (each: two cbuf loads, `ArrayLength`, 64-bit math, a conditional branch) and then, in compute (and
+  graphics stages where it is wanted), the page table (`guest_lookup`: the pool's device address from a 4 KB-page table, a physical-storage-buffer
+  load). Marked `Inline` for task and mesh (issue 994: with `DontInline` NVIDIA's compiler returned the second call's result for the first
+  in the tree task 3cb76827), `DontInline` elsewhere. `RX_VK_MESH_G3=1` makes each candidate's range once, in the first block, in two Private
+  variables; `RX_VK_MESH_NOINLINE=task|mesh|both` leaves the helper out of line.
+* **Predicate emulation**: the Ampere to Maxwell lowering (`frontend/ampere/lower_to_maxwell.h`) saves and restores predicates with P2R and R2P
+  (`save_predicate`/`restore_predicate`), and PLOP3 is three selects to 0/~0, a LOP3 and a test. R2P (`move_register_to_predicate.cpp`) emits per
+  predicate `BitFieldExtract(mask, index, 1)` with `GetZeroFromOp` attached to it: **the constant propagation pass does not fold an
+  instruction that has an associated pseudo-operation** (`FoldWhenAllImmediates`: `HasAssociatedPseudoOperation()`), so a
+  `BitFieldUExtract` of an immediate mask stays, with its IEqual and the Select that uses it, and the whole chain stays with it. That is the
+  763k constant-base extracts, and why G5's `RX_VK_GMEM_FOLD` (which targets the PLOP3 selects) found nothing: it did not touch this.
+* **8/16-bit stores**: `WriteGlobalU8/S8/U16/S16` (global) and the storage buffers' narrow stores go through a compare-exchange loop function.
+  No program of the cache calls either.
+
+## The ranked list
+
+Estimates are of the GPU ms of a Kokiri / Hyrule frame; "measured" is G3/G5's, the rest is my reading and marked so. Stamp impact: any
+change to the translator's source moves `HOOKSHOT_SHADER_STAMP`, so every player re-prepares shaders once (about the same wait as after
+any stamp change), except a switch read only at run time.
+
+| # | what | est. ms (K / H) | effort | risk | stamp | basis |
+|---|---|---|---|---|---|---|
+| 1 | **Size-aware inlining of the helper in big mesh programs**: helpers out of line (and no hoist) for a mesh stage whose code is past a threshold (43ec: 44.9 k instr), hoisted and inlined below it | **-1.1 / 0** (measured: 43ec 2.43 to 1.34) | S | M: NVIDIA's DontInline miscompile (issue 994) is known for the task stage; no picture was checked with `NOINLINE=mesh`; one data point for the threshold | yes | G3 runs g3-k-nimesh / g3-k-def |
+| 2 | **A range table the CPU prepares** (lo and end of each candidate, capped by its binding, as one 16-byte uniform entry) in place of the in-shader range math: 29 to ~8 instructions a candidate, **no prologue**, so it works where hoisting loses (fragment, compute, vertex) | **-0.8 to -1.5 / -0.8 to -1.5** (estimate) | M-L | M: a new descriptor binding written at each draw/dispatch of a program with global accesses; CPU cost | yes | helper = 29 instr/cand; G3 hoist removes the same math in mesh for -0.4/-0.5 a program (-26 to -31%); G5: its prologue costs +6.5 (fragment) / +2.4 (compute): the math is what costs; da7a7ab2's 109-site fragment 0.56 ms; compute helper programs ~1.4 ms |
+| 3 | **Fold constant predicate chains** (BitFieldUExtract/BitFieldSExtract of immediates with a Zero/Sign pseudo-op: replace the pseudo-ops by their value, then fold): 1.9 M ops cache-wide, 20-30% of the biggest mesh programs, the Selects that hang on them fold with them | 0 to -1 / 0 (estimate: the driver probably folds constants; the 43ec cliff suggests it may not fully) | S | L: pure folding | yes | the pass's `HasAssociatedPseudoOperation` early return; 565k constant extracts in mesh stages; also shrinks SPIR-V and the driver's compile |
+| 4 | **Stop emitting uncalled helpers** (write, atomic, CAS and narrow-store helpers only when an access of that kind exists; load widths likewise): 17.9 M instructions, 5.4% of the cache | 0 GPU (compile time) | S | L | yes | 3.7-8.7 M instr in each stage kind; the driver drops them, but not for free |
+| 5 | **Candidate order / fast path**: put the candidate the access hit last time first (a Private variable per helper), or test the single bound candidate before the loop | -0.1 to -0.4 / -0.1 to -0.4 (guess) | S | L | yes | search is a linear chain; only helps misses at the front |
+| - | 8/16-bit stores, CAS loops, f16 | 0 | | | | no call site; 0.29 M f16 operations of 330 M; GA10x runs f16 at the f32 rate |
+| - | indirect mesh conversion, pass breaks (G4) | 0 | | | | measured: no gain |
+| - | PLOP3 as booleans (G5's FOLD) | 0 | | | | measured: no change |
+
+**Sum.** #1 and #2 together are -1.9 to -2.6 ms Kokiri on top of G3's hoist (-0.6) if they do not overlap; #3 may add up to 1. That is
+**about 3 ms of the 7 ms** at best, and #2 is the only one of the three that is not already a measured number. The rest (4 ms) is the
+fullscreen and pixel work (G2: 3.5 ms of the pass time scales with pixels, 5 ms is a few 1-2.4 ms passes: 1a7482c0 1.07, d8180bd8c6ecc77b 0.49,
+da7a7ab2 0.56 ms) and the dispatch fixed costs (120 dispatches, 36 us each on average), none of which is translator waste in the SPIR-V I
+can see: 1a7482c0's fragment is 1,786 instructions of ordinary shading with 16 texture ops.
+
+## Plan for the top two
+
+### 1. Size-aware inlining (prototyped, default off)
+
+* In `collect_shader_info_pass.cpp` count the program's IR instructions (`Info::ir_instruction_count`). In `DefineGlobalMemoryFunctions`
+  (`inline_here`): for a mesh stage with `RX_VK_MESH_NOINLINE_ABOVE=<n>` set, the load helpers are `DontInline` when
+  `ir_instruction_count > n`, whatever `RX_VK_MESH_NOINLINE` says; below, nothing changes. The switch is a name under `RX_VK_MESH`, so it is
+  already in the cache stamp's prefix list, and `RX_VK_MESH_G3` continues to apply below the threshold (and is skipped above it, where the
+  prologue would only add code the helper no longer has).
+* Where to put n: 43ec's mesh is 44.9 k SPIR-V instructions (the IR count is lower; read it from the new log line), the others in the frame
+  are 8-14 k (3b8c07f2's 12.7 k with 144 sites is neutral out of line: 0.232 against 0.236). Start at the IR count that corresponds to 30 k SPIR-V instructions and
+  confirm on Kokiri's 43ec and on Hyrule (which must not move).
+* Test: (a) the PC 3050 A/B that G3 did: default, `RX_VK_MESH_G3=1`, `RX_VK_MESH_G3=1 RX_VK_MESH_NOINLINE_ABOVE=n`, 2 runs, Kokiri
+  and Hyrule, PASS_TIMING=2 for the per-program lines (43ec, d8e5, 4f0c, 739a must read 1.3 / 1.06 / 1.0 / 0.96); (b) **pictures**: the scene
+  shots of G5's four arms (trees in the sky is what issue 994 looked like: Kokiri's forest and Death Mountain's trees), because `NOINLINE=mesh` was never
+  checked against a picture. If it miscompiles, the single-exit form of the helper (one `OpReturnValue` at the end through a Function
+  variable) is the first thing to try: the driver bug reads like early-return handling.
+* Rollout: default on once (a) and (b) hold; the stamp moves once.
+
+### 2. The range table
+
+* Host: for each draw and dispatch whose program has global helpers (the pipeline knows: `info.uses_global_memory` and the candidate list),
+  write one `uvec4` a candidate (aligned base lo/hi, end lo/hi) into a per-frame uniform ring, at the same place the code already knows the
+  candidates' cbuf offsets and the bound range of each binding (`vk_draw.cpp` binds them: "the binding's own length"). The candidate set of a
+  program is fixed, so the table's layout is a compile-time constant of the program, and the table is two to 18 entries.
+* Shader: `define_body` reads the entry (one `OpLoad` of a `uvec4` from a UBO at a constant index: 1 load instead of 2 loads and an
+  ArrayLength) and the test becomes `addr - lo < len` on 64 bits, two instructions and a branch. Tables of storage buffers (`ssbo_tables`)
+  and the page table stay as they are. No prologue: fragment and compute programs pay only for accesses reached.
+* Expected: -29 to -8 instructions a candidate; 43ec's 206-instruction helper becomes ~70 and its inlined code 15.9 k to ~5 k, which may
+  make #1 unnecessary for it (test both: the table with inlined helpers against #1).
+* Risks: a new binding in every pipeline layout that uses global memory (the push block is used by rescaling and the page table: the
+  table cannot go there), the ring's CPU cost at draw rate (mesh draws are tens a frame, compute 120: small), the buffer-size cap at
+  bind time must match the shader's (`ArrayLength`) exactly or the null-descriptor case ("an entry the back end could not bind reads 0 instead of the page
+  table") breaks. G5's finding that the prologue costs per invocation is the reason the table must be host-made and read lazily.
+
+## Prototype status
+
+* `engine/scripts/spirv_stats.py` and its test: done, committed.
+* **#1 is prototyped behind `RX_VK_MESH_NOINLINE_ABOVE=<n>` (default off)**: `backend/spirv/global_helper_policy.h` (the decision, pure),
+  its use in `DefineGlobalMemoryFunctions` (the load helpers' inline flag and the hoisted ranges stand down for a mesh stage over n IR
+  instructions), `ir_instruction_count` in `EmitContext`, and a warning-level log line per mesh stage while the switch is set that
+  names its IR instruction count, which is how n is to be chosen (43ec's mesh is 44.9 k SPIR-V instructions; the log gives the IR figure to
+  put the threshold under). Test: `tests/test_global_helper_policy.py` (the decision's table, run, and the wiring checked in the source;
+  passes under WSL's g++, the Windows clang here cannot link). **Not built into the game and not run**: the emit context needs boost and fmt,
+  which this tree does not carry here. A build and the A/B of the plan above are the next step.
+* #3 (folding the constant predicate chains) is a ten-line change in `constant_propagation_pass.cpp` (replace the Zero/Sign pseudo-operations of
+  an immediate `BitFieldUExtract`/`BitFieldSExtract` by their values, then let `FoldWhenAllImmediates` run); I did not make it because it
+  needs a build and a before/after of the SPIR-V I cannot run here. The statistics tool measures it: rerun `scan` and compare `const_foldable`.
+
+## Not verified
+
+* GPU times are G2's and G3's runs, not new ones; the per-program lists hold the top 20 draws and top spans only (12.5 of 22.3 ms in
+  Kokiri, 10.2 of 19.9 in Hyrule); castle-move has no per-program run at all (G2 did not take one).
+* My "estimates" for #2, #3 and #5 are not measured. #1's 1.1 ms is G3's; its generalisation is one program.
+* The static counts say what the code is, not how often a thread runs it: 77 call sites of a mesh program are not 77 executions
+  a thread. That is why the join uses the measured ms and why "effective instructions" is a size, not a time.
+* The cache of the day (slot b, 2026-11-17) is the current translator's; the G3 programs' instruction counts match the dumps in
+  `E:\OOT\scratch-g3` to the instruction (43ec's mesh 44,883).
+* Whether the driver folds the constant predicate chains was not looked at (no `nvdisasm` of a compiled program here): #3's value is
+  open. A `nv-shader` dump of 43ec's mesh would answer it in minutes.

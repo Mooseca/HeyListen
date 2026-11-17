@@ -17,8 +17,10 @@ def main():
     draw = (ROOT / "gpu/vk/vk_draw.cpp").read_text(encoding="utf-8")
     start, end = draw.index("struct MarkerScan {"), draw.index("double marker_stall_seconds() {")
     ring = draw[draw.index("std::atomic<uint64_t> reach_seen[1 << 16];"):draw.index("// ---- end of the ring ----")]
-    work = draw[draw.index("/// What a marker's work is, for the report"):draw.index("const char* checkpoint_kind(char c) {")]
-    shape = draw[draw.index("struct Checkpoint {"):draw.index("Checkpoint checkpoints[1 << 16];")]
+    work = draw[draw.index("/// What a marker's work is, for the report"):draw.index("thread_local uint64_t fallback_payload_address")]
+    flags = draw[draw.index("// (what kind of mesh draw the thread's latest marker is"):draw.index("/// What a marker's work is, for the report")]
+    report = draw[draw.index("void buffer_markers_report() {"):draw.index("/// (issue 14) The markers read while")]
+    shape = draw[draw.index("constexpr uint8_t kCpKnown"):draw.index("Checkpoint checkpoints[1 << 16];")]
     fixture = r'''
 #include <atomic>
 #include <cassert>
@@ -26,11 +28,23 @@ def main():
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <algorithm>
 #include <string>
+#include <vector>
+#include <cstdarg>
+std::string logged;
+void logf(const char* f, ...) {
+    char t[1024];
+    va_list a;
+    va_start(a, f);
+    vsnprintf(t, sizeof t, f, a);
+    va_end(a);
+    logged += t, logged += "\n";
+}
 std::atomic<uint32_t> checkpoint_n{0};
 uint32_t words[2 << 16];
 volatile uint32_t* marker_words = words;
-''' + shape + "Checkpoint checkpoints[1 << 16];\nthread_local uint32_t checkpoint_last = 0;\n" + ring + work + draw[start:end] + r'''
+''' + shape + "Checkpoint checkpoints[1 << 16];\nthread_local uint32_t checkpoint_last = 0;\n" + ring + flags + work + draw[start:end] + report + r'''
 // (marker s reached: its top-of-pipe word; finished: its bottom-of-pipe word, all the work before it done)
 void reach(uint32_t s) { words[2 * ((s - 1) & 0xFFFF)] = s; }
 void finish(uint32_t s) { reach(s), words[2 * ((s - 1) & 0xFFFF) + 1] = s; }
@@ -114,6 +128,75 @@ int main() {
     assert(checkpoint_work_text(k) == ", mesh 5 x 1 x 1 groups");
     k.shape = 'I', k.a = 12;
     assert(checkpoint_work_text(k) == ", indirect, up to 12 records");
+    // (mesh draws: told apart by their flags, and labelled as mesh, not as a plain draw)
+    Checkpoint md{};
+    md.kind = 'd', md.shape = 'N', md.a = 40;
+    assert(std::string(checkpoint_label(md)) == "INDIRECT MESH draw of program");
+    assert(checkpoint_work_text(md) == ", mesh indirect, up to 40 records");   // (flags not noted: nothing claimed)
+    md.flags = kCpKnown | kCpTask | kCpCount | kCpConverted;
+    assert(checkpoint_work_text(md) == ", mesh indirect, up to 40 records (task+mesh), count read from GPU memory, records converted");
+    md.flags = kCpKnown;
+    assert(checkpoint_work_text(md) == ", mesh indirect, up to 40 records (mesh only)");
+    md.shape = 'M', md.a = 3, md.b = 1, md.c = 1, md.flags = kCpKnown | kCpTask;
+    assert(std::string(checkpoint_label(md)) == "MESH draw of program");
+    assert(checkpoint_work_text(md) == ", mesh 3 x 1 x 1 groups (task+mesh)");
+    md.shape = 'F';
+    assert(std::string(checkpoint_label(md)) == "fallback MESH draw of program");
+    md.shape = 'E';
+    assert(std::string(checkpoint_label(md)) == "draw of program");
+    Checkpoint cv{};
+    cv.kind = 's', cv.shape = 'C', cv.a = 42, cv.b = 16;
+    assert(std::string(checkpoint_label(cv)).find("CONVERSION fill") != std::string::npos);
+    assert(checkpoint_work_text(cv) == ", 42 records, stride 16");
+    cv.kind = 'y';
+    assert(std::string(checkpoint_label(cv)).find("CONVERSION copy") != std::string::npos);
+    Checkpoint dp{};
+    dp.kind = 'c';
+    assert(std::string(checkpoint_label(dp)) == "dispatch of program");
+    dp.kind = 'i';
+    assert(std::string(checkpoint_label(dp)) == "INDIRECT dispatch of program");
+
+    // (checkpoint_flags: onto the thread's latest marker only, and not onto a slot the ring has since taken for another marker)
+    for (auto& x : words) x = 0;
+    checkpoint_n = 0;
+    for (auto& c : checkpoints) c = Checkpoint{};
+    checkpoints[0] = {1, 5, 1, 'd', 'N', 0, 40, 0, 0};
+    checkpoint_last = 1;
+    checkpoint_flags(true, true, false);
+    assert(checkpoints[0].flags == (kCpKnown | kCpTask | kCpCount));
+    checkpoint_last = 1 + 65536;   // (the ring went round: that entry is marker 1's)
+    checkpoint_flags(false, false, true);
+    assert(checkpoints[0].flags == (kCpKnown | kCpTask | kCpCount));
+    checkpoint_last = 0;
+    checkpoint_flags(false, false, true);   // (no marker: nothing)
+    assert(checkpoints[0].flags == (kCpKnown | kCpTask | kCpCount));
+
+    // (the report: a stuck GPU with a mesh draw, a conversion and a dispatch queued behind what it reached)
+    for (auto& x : words) x = 0;
+    for (auto& c : checkpoints) c = Checkpoint{};
+    checkpoint_n = 20;
+    const char kinds[] = {'d', 'd', 'd', 'd', 'd', 'd', 'd', 'd', 'd', 'd', 's', 'y', 'd', 'c', 'c', 'd', 'd', 'd', 'd', 'd'};
+    for (uint32_t s = 1; s <= 20; s++) checkpoints[s - 1] = {0xABC0 + s, 7, s, kinds[s - 1], 'E', 0, 12, 3, 0};
+    checkpoints[12] = {0xAAA, 7, 13, 'd', 'N', kCpKnown | kCpTask, 42, 0, 0};   // (marker 13: an indirect mesh draw)
+    checkpoints[10].shape = 'C', checkpoints[11].shape = 'C';
+    for (uint32_t s = 1; s <= 8; s++) finish(s);
+    reach(9), reach(10);   // (reached, earlier work unfinished)
+    logged.clear();
+    buffer_markers_report();
+    assert(logged.find("RUNNING after: marker 8") != std::string::npos);
+    assert(logged.find("queued, never reached: markers 11..20 (10)") != std::string::npos);
+    assert(logged.find("queued: marker 11 (indirect-mesh CONVERSION fill, arguments at") != std::string::npos);
+    assert(logged.find("queued: marker 13 (INDIRECT MESH draw of program 0000000000000aaa, mesh indirect, up to 42 records (task+mesh)") != std::string::npos);
+    assert(logged.find("queued: marker 14 (dispatch of program") != std::string::npos);
+    assert(logged.find("work queued behind it (11..20): ") != std::string::npos);
+    assert(logged.find("1 x INDIRECT MESH draw of program") != std::string::npos);
+    assert(logged.find("2 x dispatch of program") != std::string::npos);
+    assert(logged.find("work in the 600 markers before the stuck point (1..8)") != std::string::npos);
+    // (nothing queued: said so)
+    for (uint32_t s = 1; s <= 20; s++) reach(s);
+    logged.clear();
+    buffer_markers_report();
+    assert(logged.find("queued, never reached: none") != std::string::npos);
     puts("ok");
 }
 '''

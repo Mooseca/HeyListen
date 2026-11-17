@@ -13,6 +13,7 @@
   <a href="https://github.com/Sacrappy/HeyListen/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/Sacrappy/HeyListen?label=release&color=3b82f6"></a>
   <a href="https://github.com/Sacrappy/HeyListen/releases"><img alt="Downloads" src="https://img.shields.io/github/downloads/Sacrappy/HeyListen/total?color=3b82f6"></a>
   <a href="https://github.com/Sacrappy/HeyListen/actions/workflows/linux.yml"><img alt="Linux checks" src="https://github.com/Sacrappy/HeyListen/actions/workflows/linux.yml/badge.svg?branch=main"></a>
+  <a href="https://discord.gg/34GV5hdC3Q"><img alt="Discord" src="https://img.shields.io/badge/discord-join-5865F2?logo=discord&logoColor=white"></a>
   <a href="LICENSE"><img alt="License: GPL-3.0-or-later" src="https://img.shields.io/badge/license-GPL--3.0--or--later-blue"></a>
 </p>
 
@@ -20,7 +21,8 @@
   <a href="https://github.com/Sacrappy/HeyListen/releases/latest"><b>Download</b></a> ·
   <a href="docs/USER_GUIDE.md"><b>User guide</b></a> ·
   <a href="https://github.com/Sacrappy/HeyListen/issues"><b>Report a problem</b></a> ·
-  <a href="CONTRIBUTING.md"><b>Contributing</b></a>
+  <a href="CONTRIBUTING.md"><b>Contributing</b></a> ·
+  <a href="https://discord.gg/34GV5hdC3Q"><b>Discord</b></a>
 </p>
 
 HeyListen statically recompiles **your own** copy of the game (title `0400486024DEC000`) into a native program with a

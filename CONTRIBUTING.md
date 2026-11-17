@@ -30,6 +30,7 @@ A screenshot, a video and `hookshot_log.txt` are fine and often necessary: the l
 | **Play further** | Areas, cutscenes, items and menus we have not reached find problems we have not seen. |
 | **Send a fix** | Fork, fix, test, open a pull request. Small, focused changes are the easiest to review. |
 | **Improve the docs** | The [user guide](docs/USER_GUIDE.md), this page and the developer docs. Corrections and clearer steps are welcome. |
+| **Join the Discord** | [discord.gg/34GV5hdC3Q](https://discord.gg/34GV5hdC3Q): help, test builds (pick *Tester* when you join) and development talk (*Developer*). Bugs still go to GitHub issues, so they are not lost. |
 
 ## Reporting a problem
 

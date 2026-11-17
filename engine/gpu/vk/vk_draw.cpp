@@ -3721,8 +3721,11 @@ bool bind_descriptors(VkCommandBuffer cmd, VkPipelineBindPoint bp, const Program
 // (shape and a, b, c: what the work is, set once the draw or dispatch knows: checkpoint_work. 'x' dispatch of a x b x c groups;
 // 'n' indirect dispatch; 'V' draw of a vertices, b instances; 'E' indexed draw of a indices, b instances; 'Q' quads drawn as
 // a indices, b instances; 'F' fallback draw of a vertices; 'I' indirect draw of up to a records; 'M' mesh draw of a x b x c
-// groups; 'N' indirect mesh draw of up to a records; 0 unknown)
-struct Checkpoint { uint64_t prog; uint64_t frame; uint32_t seq; char kind; char shape; uint32_t a, b, c; };
+// groups; 'N' indirect mesh draw of up to a records; 'C' the indirect conversion of a records, stride b; 0 unknown)
+// (flags: what a mesh draw is, set by checkpoint_flags: kCpKnown it was noted, kCpTask a task stage, kCpCount its count read from a GPU buffer,
+// kCpConverted its records the conversion's copy; the conversion's own markers, 's' fill and 'y' copy, name the arguments' address as prog)
+constexpr uint8_t kCpKnown = 1, kCpTask = 2, kCpCount = 4, kCpConverted = 8;
+struct Checkpoint { uint64_t prog; uint64_t frame; uint32_t seq; char kind; char shape; uint8_t flags; uint32_t a, b, c; };
 Checkpoint checkpoints[1 << 16];
 std::atomic<uint32_t> checkpoint_n{0};
 
@@ -3771,7 +3774,7 @@ thread_local uint32_t checkpoint_last = 0;   // (this thread's latest marker: ch
 void checkpoint(VkCommandBuffer cmd, const Program& p, char kind) {
     if (!checkpoints_on()) return;
     const uint32_t seq = checkpoint_seq(), i = (seq - 1) & 0xFFFF;
-    checkpoints[i] = {p.key, texture_frame_no(), seq, kind};
+    checkpoints[i] = {p.key, texture_frame_no(), seq, kind, 0, 0, 0, 0, 0};
     checkpoint_last = seq;
     set_checkpoint(cmd, i, seq);
 }
@@ -3781,6 +3784,18 @@ void checkpoint_work(char shape, uint32_t a, uint32_t b = 0, uint32_t c = 0) {
     Checkpoint& k = checkpoints[(checkpoint_last - 1) & 0xFFFF];
     if (k.seq != checkpoint_last) return;   // (the ring went round: the entry is another marker's)
     k.shape = shape, k.a = a, k.b = b, k.c = c;
+}
+bool mesh_has_task(const Program& p) {   // (a task stage in the program: the marker's flags; only with the markers on)
+    for (const Stage& st : p.stages)
+        if (st.vk_stage & VK_SHADER_STAGE_TASK_BIT_EXT) return true;
+    return p.fallback_task;
+}
+// (what kind of mesh draw the thread's latest marker is: with a task stage, a count read from the GPU, its records converted)
+void checkpoint_flags(bool task, bool counted, bool converted) {
+    if (!checkpoint_last) return;
+    Checkpoint& k = checkpoints[(checkpoint_last - 1) & 0xFFFF];
+    if (k.seq != checkpoint_last) return;
+    k.flags = (uint8_t)(kCpKnown | (task ? kCpTask : 0) | (counted ? kCpCount : 0) | (converted ? kCpConverted : 0));
 }
 /// What a marker's work is, for the report: "" when unknown.
 std::string checkpoint_work_text(const Checkpoint& k) {
@@ -3793,8 +3808,12 @@ std::string checkpoint_work_text(const Checkpoint& k) {
     case 'Q': snprintf(t, sizeof t, ", %u indices (quads) x %u instances", k.a, k.b); break;
     case 'F': snprintf(t, sizeof t, ", %u vertices (fallback)", k.a); break;
     case 'I': snprintf(t, sizeof t, ", indirect, up to %u records", k.a); break;
-    case 'M': snprintf(t, sizeof t, ", mesh %u x %u x %u groups", k.a, k.b, k.c); break;
-    case 'N': snprintf(t, sizeof t, ", mesh indirect, up to %u records", k.a); break;
+    case 'M': snprintf(t, sizeof t, ", mesh %u x %u x %u groups%s", k.a, k.b, k.c,
+                       !(k.flags & kCpKnown) ? "" : k.flags & kCpTask ? " (task+mesh)" : " (mesh only)"); break;
+    case 'N': snprintf(t, sizeof t, ", mesh indirect, up to %u records%s%s%s", k.a,
+                       !(k.flags & kCpKnown) ? "" : k.flags & kCpTask ? " (task+mesh)" : " (mesh only)",
+                       k.flags & kCpCount ? ", count read from GPU memory" : "", k.flags & kCpConverted ? ", records converted" : ""); break;
+    case 'C': snprintf(t, sizeof t, ", %u records, stride %u", k.a, k.b); break;
     default: return {};
     }
     return t;
@@ -3804,6 +3823,35 @@ const char* checkpoint_kind(char c) {
          : c == 'm' ? "mirror sync of pool"
          : c == 'b' ? "write-back of pool" : c == 'u' ? "upload of texture" : c == 'g' ? "GPU unswizzle of texture"
          : "?";
+}
+/// A marker's label for the report: its kind, told apart by what the draw is (the mesh draws are 'd' too, their shape says so) and by
+/// the work the indirect conversion adds. "...program" and "... at" are followed by the key (the conversion has the arguments' address).
+const char* checkpoint_label(const Checkpoint& k) {
+    switch (k.kind) {
+    case 'd': return k.shape == 'N' ? "INDIRECT MESH draw of program" : k.shape == 'M' ? "MESH draw of program"
+                   : k.shape == 'F' ? "fallback MESH draw of program" : "draw of program";
+    case 's': return "indirect-mesh CONVERSION fill, arguments at";
+    case 'y': return "indirect-mesh CONVERSION copy, arguments at";
+    case 'p': return "grid-patch copy for program";
+    default: return checkpoint_kind(k.kind);
+    }
+}
+/// What the markers in [from, to] are, counted by label ("12 draw of program, 3 INDIRECT MESH draw of program"): the work around the stuck
+/// point as a census. Capped to the ring's 65535 and to 4096 markers a look.
+std::string checkpoint_census(uint32_t from, uint32_t to) {
+    if (to > from + 4095) to = from + 4095;
+    std::vector<std::pair<std::string, uint32_t>> n;
+    for (uint32_t s = from; s && s <= to; s++) {
+        const Checkpoint& k = checkpoints[(s - 1) & 0xFFFF];
+        if (k.seq != s) continue;
+        const std::string label = checkpoint_label(k);
+        auto it = std::find_if(n.begin(), n.end(), [&](const auto& e) { return e.first == label; });
+        if (it == n.end()) n.emplace_back(label, 1);
+        else it->second++;
+    }
+    std::string out;
+    for (const auto& e : n) out += (out.empty() ? "" : ", ") + std::to_string(e.second) + " x " + e.first;
+    return out.empty() ? "none" : out;
 }
 
 thread_local uint64_t fallback_payload_address = 0, fallback_records_address = 0;   // (the draw's fallback buffers)
@@ -3867,10 +3915,10 @@ void device_fault_report() {
              (unsigned long long)v.vendorFaultData);
 }
 
-void checkpoint_mark(VkCommandBuffer cmd, uint64_t key, char kind) {
+void checkpoint_mark(VkCommandBuffer cmd, uint64_t key, char kind, char shape, uint32_t a, uint32_t b, uint32_t c) {
     if (!checkpoints_on()) return;
     const uint32_t seq = checkpoint_seq(), i = (seq - 1) & 0xFFFF;   // (TICK-061: see checkpoint_seq)
-    checkpoints[i] = {key, texture_frame_no(), seq, kind};
+    checkpoints[i] = {key, texture_frame_no(), seq, kind, shape, 0, a, b, c};
     checkpoint_last = 0;
     set_checkpoint(cmd, i, seq);
 }
@@ -3952,7 +4000,7 @@ void buffer_markers_report() {
     const uint32_t now_ms = steady_ms();
     const auto line = [now_ms](const char* what, uint32_t s) {
         const Checkpoint& k = checkpoints[(s - 1) & 0xFFFF];
-        logf("vk:   %s: marker %u (%s %016llx%s, frame %llu), %s", what, s, checkpoint_kind(k.kind), (unsigned long long)k.prog,
+        logf("vk:   %s: marker %u (%s %016llx%s, frame %llu), %s", what, s, checkpoint_label(k), (unsigned long long)k.prog,
              checkpoint_work_text(k).c_str(), (unsigned long long)k.frame, marker_seen_text(s, now_ms).c_str());
     };
     for (uint32_t s = last_done > 6 ? last_done - 6 : 1; last_done && s < last_done; s++) line("finished before", s);
@@ -3961,6 +4009,21 @@ void buffer_markers_report() {
     const uint32_t end = std::max(start, stuck.empty() ? start + 8 : std::min(stuck.front(), start + 16));
     for (uint32_t s = start; s && s <= end && s <= n; s++) line(s == last_done ? "RUNNING after" : "running", s);
     for (size_t j = 0; j < stuck.size() && j < 12; j++) line("reached, earlier work unfinished", stuck[j]);
+    // (what is queued behind them: set by the CPU, never reached. Mesh draws, dispatches and the indirect conversion can sit here, out of
+    // the window above, which only holds what the GPU reached)
+    uint32_t lastr = last_done;
+    for (uint32_t s = first; s && s <= n; s++)
+        if (marker_words[2 * ((s - 1) & 0xFFFF)] == s) lastr = s;
+    if (lastr < n) {
+        logf("vk:   queued, never reached: markers %u..%u (%u)", lastr + 1, n, n - lastr);
+        for (uint32_t s = lastr + 1; s <= n && s <= lastr + 8; s++) line("queued", s);
+    } else {
+        logf("vk:   queued, never reached: none");
+    }
+    const uint32_t cen_from = start > 600 ? start - 600 : 1;
+    logf("vk:   work in the 600 markers before the stuck point (%u..%u): %s", cen_from, start, checkpoint_census(cen_from, start).c_str());
+    if (lastr < n)
+        logf("vk:   work queued behind it (%u..%u): %s", lastr + 1, std::min(n, lastr + 4096), checkpoint_census(lastr + 1, n).c_str());
 }
 
 /// (issue 14) The markers read while the GPU is stuck, not only once the device is lost. On a Steam Deck the ring timed out
@@ -4071,12 +4134,12 @@ void checkpoints_report() {
         if (i >= (1u << 16)) continue;
         const Checkpoint& k = checkpoints[i];
         const auto kind = checkpoint_kind;
-        logf("vk:   stage %#x: marker %u (%s %016llx, frame %llu)", (unsigned)c.stage, k.seq, kind(k.kind),
-             (unsigned long long)k.prog, (unsigned long long)k.frame);
+        logf("vk:   stage %#x: marker %u (%s %016llx%s, frame %llu)", (unsigned)c.stage, k.seq, checkpoint_label(k),
+             (unsigned long long)k.prog, checkpoint_work_text(k).c_str(), (unsigned long long)k.frame);
         // (the ones before it, for context)
         for (uint32_t b = 1; b <= 6; b++) {
             const Checkpoint& o = checkpoints[(i - b) & 0xFFFF];
-            logf("vk:     before: %s %016llx", kind(o.kind), (unsigned long long)o.prog);
+            logf("vk:     before: %s %016llx%s", checkpoint_label(o), (unsigned long long)o.prog, checkpoint_work_text(o).c_str());
         }
         // (and the ones after it: what the GPU never reached)
         for (uint32_t b = 1; b <= 8; b++) {
@@ -6276,12 +6339,16 @@ bool mesh_indirect_convert(VkCommandBuffer cmd, const DrawArgs& d) {
     mb.srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, mb.srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT;
     mb.dstStageMask = VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, mb.dstAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT;
     vkCmdPipelineBarrier2(cmd, &di);
+    // (RX_VK_CHECKPOINTS: the conversion's fill and copy are transfer work between the game's culling dispatch and the mesh draws, ours: a
+    // marker each, at the arguments' address, so a stall report shows whether the GPU was in them)
+    checkpoint_mark(cmd, d.indirect, 's', 'C', n, stride);
     vkCmdFillBuffer(cmd, mesh_ring, off, (uint64_t)n * 12, 1u);
     mb.srcStageMask = VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, mb.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
     mb.dstStageMask = VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, mb.dstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
     vkCmdPipelineBarrier2(cmd, &di);
     std::vector<VkBufferCopy> regions(n);
     for (uint32_t i = 0; i < n; i++) regions[i] = {args.offset + (uint64_t)i * stride + 4 * word, off + (uint64_t)i * 12, 4};
+    checkpoint_mark(cmd, d.indirect, 'y', 'C', n, stride);
     vkCmdCopyBuffer(cmd, args.buffer, mesh_ring, n, regions.data());
     {   // (diagnosis, default off) RX_VK_G3_MESHCOUNT=1: the same counts into a host-visible twin of the ring, for mesh_count_note
         static const bool on = getenv("RX_VK_G3_MESHCOUNT") != nullptr;
@@ -7319,6 +7386,7 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
                 const uint32_t conv_n = (uint32_t)std::clamp(d.max, 1, 4096);
                 if (mesh_dbg) mesh_count_note(p.key, mesh_conv_off);
                 checkpoint_work('N', conv_n);
+                if (checkpoints_on()) checkpoint_flags(mesh_has_task(p), cnt && vkCmdDrawMeshTasksIndirectCountEXT, true);
                 if (cnt && vkCmdDrawMeshTasksIndirectCountEXT)
                     vkCmdDrawMeshTasksIndirectCountEXT(cmd, mesh_conv_buf, mesh_conv_off, cnt.buffer, cnt.offset, conv_n, 12);
                 else
@@ -7339,6 +7407,7 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
                 vkCmdPushConstants(cmd, p.layout, p.push_stages, Shader::Backend::SPIRV::MESH_FIRST_PUSH_OFFSET, 8, &firsts);
             }
             checkpoint_work('N', (uint32_t)std::max(d.max, 1));
+            if (checkpoints_on()) checkpoint_flags(mesh_has_task(p), cnt && vkCmdDrawMeshTasksIndirectCountEXT, false);
             if (cnt && vkCmdDrawMeshTasksIndirectCountEXT)
                 vkCmdDrawMeshTasksIndirectCountEXT(cmd, mesh_args.buffer, mesh_args.offset, cnt.buffer, cnt.offset, d.max, step);
             else
@@ -7354,6 +7423,7 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
                 vkCmdPushConstants(cmd, p.layout, p.push_stages, Shader::Backend::SPIRV::MESH_FIRST_PUSH_OFFSET, 8, &firsts);
             }
             checkpoint_work('M', (uint32_t)std::max(d.groups[0], 0), (uint32_t)std::max(d.groups[1], 1), (uint32_t)std::max(d.groups[2], 1));
+            if (checkpoints_on()) checkpoint_flags(mesh_has_task(p), false, false);
             vkCmdDrawMeshTasksEXT(cmd, (uint32_t)std::max(d.groups[0], 0), (uint32_t)std::max(d.groups[1], 1),
                                   (uint32_t)std::max(d.groups[2], 1));
         }
@@ -9133,6 +9203,7 @@ void dispatch(VkCommandBuffer cmd, NvnState& s, uint32_t x, uint32_t y, uint32_t
             if (grid_patch_at != UINT64_MAX) {   // (PR 252) the grid as the GPU has it, into the program's c0 (the full barrier
                 // above: the pass that wrote the arguments is done)
                 const VkBufferCopy gc{args.offset, grid_patch_at, 12};
+                checkpoint_mark(cmd, p.key, 'p', 'C', 1, 12);
                 vkCmdCopyBuffer(cmd, args.buffer, grid_patch_buf, 1, &gc);
                 VkMemoryBarrier2 gb{VK_STRUCTURE_TYPE_MEMORY_BARRIER_2};
                 gb.srcStageMask = VK_PIPELINE_STAGE_2_COPY_BIT, gb.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
