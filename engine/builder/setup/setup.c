@@ -1,4 +1,4 @@
-/* HookshotBuilder-Setup.exe: the one file players download. It reads the latest release's heylisten-setup.txt, downloads
+/* HeyListenBuilder-Setup.exe: the one file players download. It reads the latest release's heylisten-setup.txt, downloads
    the parts it names (the builder and its tools from this repository's release, llvm-mingw from its own official
    release), checks each one's SHA-256, unpacks them with Windows' own tar.exe into %LOCALAPPDATA%\HeyListenBuilder\<tag>
    and starts the builder there. Parts already downloaded and checked are used again; a release already installed just
@@ -9,7 +9,7 @@
        tag <tag>
        part <sha256> <bytes> <folder under the install> <top folder in the zip to rename, or -> <new name, or -> <url>
        run <the builder, relative to the install>
-   Build: clang -O2 -mwindows -municode setup.c setup_rc.o -lwinhttp -lbcrypt -lcomctl32 -lshell32 -lole32 -o HookshotBuilder-Setup.exe */
+   Build: clang -O2 -mwindows -municode setup.c setup_rc.o -lwinhttp -lbcrypt -lcomctl32 -lshell32 -lole32 -o HeyListenBuilder-Setup.exe */
 #define WIN32_LEAN_AND_MEAN
 #ifndef UNICODE
 #define UNICODE

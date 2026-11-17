@@ -67,7 +67,7 @@ class FinishOutputTests(unittest.TestCase):
 
     def finish(self, launcher=False):
         if launcher:
-            (self.root / "HookshotBuilder-Setup.exe").write_bytes(b"new synthetic launcher")
+            (self.root / "HeyListenBuilder-Setup.exe").write_bytes(b"new synthetic launcher")
         with mock.patch.object(make_game, "BESIDE", ["HeyListen.exe"]):
             # Comprehensions use globals. Keep one namespace, as in production, and discover only authored setup files.
             namespace = dict(make_game.__dict__, built=str(self.built), out=str(self.out), work=str(self.work),
@@ -154,7 +154,7 @@ class FinishOutputTests(unittest.TestCase):
 
         with mock.patch.object(make_game.shutil, "copy2", side_effect=observe_copy):
             self.finish(launcher=True)
-        self.assertEqual(copied, [self.source, self.image, self.root / "HookshotBuilder-Setup.exe"])
+        self.assertEqual(copied, [self.source, self.image, self.root / "HeyListenBuilder-Setup.exe"])
         self.assertEqual(binary.read_bytes(), self.source.read_bytes())
         self.assertEqual(self.destination.read_bytes(), b"new synthetic launcher")
         self.assertEqual((self.out / "image.bin").read_bytes(), self.image.read_bytes())
@@ -167,7 +167,7 @@ class FinishOutputTests(unittest.TestCase):
         copy = make_game.shutil.copy2
 
         def partial_launcher(source, destination):
-            if Path(source) == self.root / "HookshotBuilder-Setup.exe":
+            if Path(source) == self.root / "HeyListenBuilder-Setup.exe":
                 Path(destination).write_bytes(b"partial launcher")
                 raise OSError(errno.ENOSPC, "synthetic disk-full error")
             return copy(source, destination)

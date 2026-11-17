@@ -15,6 +15,8 @@ Writes <out>/<tag>/:
 The parts that did not change (Python, emsdk, CPM, wgpu-native, maybe third_party) are not written: heylisten-setup.txt points
 at this repository's builder-parts release for them (it mirrors the ones first made by upstream Hookshot, whose repository
 is gone), and at llvm-mingw's official release. No link of the list leads anywhere else: the build fails otherwise.
+                                     HeyListen-<tag>-Windows-x64.zip (the whole builder with recomplauncher.json at its top: what
+                                     RecompLauncher installs; tools/release/make_launcher_zip.py)
 Nothing is uploaded or tagged here: the maintainer does that (see the printed commands).
 """
 import argparse
@@ -36,11 +38,16 @@ FORBIDDEN = re.compile(r"(\.(nup|nsp|xci|nsz|xcz|nca|nso|keys|spv)$|(^|/)(romfs|
                        r"(^|/)(image\.bin|main|prod\.keys|title\.keys)$|_(pipelines|shaders|programs|prepared)\.bin$)", re.I)
 # Exact paths that match FORBIDDEN but hold no game data: upstream's public builder profile ships the lifted-C chunk
 # boundaries (57 guest addresses, nx2/chunks.py) under tools/work/image/
-ALLOWED = {"HookshotBuilder/tools/work/image/chunks.txt"}
+ALLOWED = {"HookshotBuilder/tools/work/image/chunks.txt", "tools/work/image/chunks.txt"}   # (the second: in the RecompLauncher zip, which has no folder on top)
+
+
+# (the CPM package of Vulkan Memory Allocator ships two sample shaders, compiled to SPIR-V: the RecompLauncher zip holds the cpm part)
+ALLOWED_RE = re.compile(r"^tools/cpm/vulkanmemoryallocator/[^/]+/bin/Shader\.(frag|vert)\.spv$")
 
 
 def forbidden(path):
-    return path.replace("\\", "/") not in ALLOWED and bool(FORBIDDEN.search(path))
+    path = path.replace("\\", "/")
+    return path not in ALLOWED and not ALLOWED_RE.match(path) and bool(FORBIDDEN.search(path))
 
 
 def run(cmd, **kw):
@@ -94,6 +101,14 @@ def check_assets(folder):
         sys.exit("refusing: these look like game data, keys or caches:\n  " + "\n  ".join(bad[:50]))
 
 
+def load_launcher_zip():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("make_launcher_zip", os.path.join(ROOT, "tools", "release", "make_launcher_zip.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     p.add_argument("--tag", help="the release's tag, e.g. v0.1.0 (required unless --allow-dirty)")
@@ -139,7 +154,7 @@ def main():
     llvm = out_of(py + [parts_py, "llvm-mingw", os.path.join(cache, "llvm")], env=env).splitlines()[-1]
     setup_dir = os.path.join(ENGINE, "builder", "setup")
     rc_o = os.path.join(work, "setup_rc.o")
-    setup = os.path.join(work, "HookshotBuilder-Setup.exe")
+    setup = os.path.join(work, "HeyListenBuilder-Setup.exe")
     run([os.path.join(llvm, "bin", "x86_64-w64-mingw32-windres.exe"), "setup.rc", "-O", "coff", "-o", rc_o], cwd=setup_dir)
     run([os.path.join(llvm, "bin", "x86_64-w64-mingw32-clang.exe"), "-O2", "-mwindows", "-municode", "setup.c", rc_o,
          "-lwinhttp", "-lbcrypt", "-lcomctl32", "-lshell32", "-lole32", "-o", setup], cwd=setup_dir)
@@ -187,6 +202,8 @@ def main():
     with open(os.path.join(dist, "RELEASE_NOTES.md"), "w", encoding="utf-8", newline="\n") as f:
         f.write(notes)
     shutil.copyfile(os.path.join(ROOT, "docs", "USER_GUIDE.md"), os.path.join(dist, "USER_GUIDE.md"))
+    #    RecompLauncher: the whole builder in one zip, recomplauncher.json at its top (tools/release/make_launcher_zip.py)
+    load_launcher_zip().make_zip(dist, tag, os.path.join(dist, load_launcher_zip().asset_name(tag)), forbidden=forbidden)
     check_assets(dist)
     sums = []
     for d, _, fs in os.walk(dist):
@@ -206,8 +223,9 @@ Publish (the maintainer, after review):
   gh release view builder-parts -R {r} || gh release create builder-parts -R {r} --prerelease --latest=false --title builder-parts --notes "Parts HeyListenBuilder.exe downloads"
   gh release upload builder-parts -R {r} "{d}/parts/"*.zip      (parts already there have the same name: skip them)
   git tag {t} && git push origin {t}
-  gh release create {t} -R {r} --title "HeyListen {t}" --notes-file "{d}/RELEASE_NOTES.md" "{d}/HeyListenBuilder.exe" "{d}/{l}" "{d}/SHA256SUMS.txt" "{d}/USER_GUIDE.md"
-""".format(r=REPO, d=dist, t=tag, l=LIST))
+  gh release create {t} -R {r} --title "HeyListen {t}" --notes-file "{d}/RELEASE_NOTES.md" "{d}/HeyListenBuilder.exe" "{d}/{l}" "{d}/SHA256SUMS.txt" "{d}/USER_GUIDE.md" "{d}/{z}"
+(the zip is what RecompLauncher installs: recomplauncher.json at its top; docs/recomplauncher.md)
+""".format(r=REPO, d=dist, t=tag, l=LIST, z=load_launcher_zip().asset_name(tag)))
     return 0
 
 

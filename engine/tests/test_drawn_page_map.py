@@ -111,6 +111,7 @@ void vw_note(Texture&) {}
 enum LedgerUse { kUseRendered };   // (RX_VK_LEDGER, vk_ledger.h)
 void ledger_mark(uint64_t, uint64_t, LedgerUse) {}
 void watch_tex(const Texture*, const char*) {}
+void drawn_writeback_note(Texture*) {}
 bool env_on(const char* name) {   // (vk_texture.cpp's, in its anonymous namespace)
     const char* e = getenv(name);
     return e && atoi(e) != 0;

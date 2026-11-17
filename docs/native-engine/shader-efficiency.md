@@ -222,3 +222,41 @@ can see: 1a7482c0's fragment is 1,786 instructions of ordinary shading with 16 t
   `E:\OOT\scratch-g3` to the instruction (43ec's mesh 44,883).
 * Whether the driver folds the constant predicate chains was not looked at (no `nvdisasm` of a compiled program here): #3's value is
   open. A `nv-shader` dump of 43ec's mesh would answer it in minutes.
+
+## Stream P5 results (2026-11-17/18, PC 3050, RTX 3050, 1440p; build of perf/shader-size)
+
+Switches: `RX_VK_FOLD_PSEUDO=1` (item 3, folds a constant BitFieldExtract/BitwiseAnd/Or/Xor that carries zero/sign flags: the flags get
+the value the back end would have made, then the instruction folds; default off; unit test `tests/test_pseudo_fold.py` builds real IR
+and runs the pass) and `RX_VK_MESH_NOINLINE_ABOVE=<IR instructions>` (item 1). Both are read by the translator: **the stamp moves**
+(`RX_VK_FOLD` joins the stamp's prefixes; the NOINLINE one was already under `RX_VK_MESH`), and every switch value is its own stamp, so each
+arm re-prepares the whole 31,985-program set (about 5 runs of 110 s before "prepared N shader programs" shows): measure only after that.
+
+* Mesh IR sizes (the log line `vk: mesh stage: <n> IR instructions, <w> SPIR-V words` while NOINLINE_ABOVE is set; SPIR-V words ~ 4.0 x IR):
+  43ec86f35fd937b9's mesh is 218,494 words (about 54 k IR); every other mesh of Kokiri and Hyrule listed above is 36-60 k words
+  (9-15 k IR). Threshold used: **30000 IR**. (Some meshes of the cache are bigger, to 268 k IR; none is in the two scenes.)
+* Fold, cache-wide (spirv_stats scan of the cache this build wrote, 39,947 programs; before = the same build without the switch):
+  foldable operations 1,912,456 -> 404,108 (-79%), total instructions 327.8 M -> 323.2 M (-1.4%), mesh stages 15.84 M -> 12.42 M (-21.6%),
+  mesh foldable 1,184,751 -> 58,836. 43ec's mesh: 43,471 -> 19,280 instructions (218 k -> 89 k words), foldable 8,698 -> 184.
+  The rest of the foldables (404 k) are other chains the pass leaves (not the R2P extracts).
+* GPU ms a frame (PASS_TIMING=2 run per arm) and fps (2 plain runs, then the PASS_TIMING run's fps in brackets: it is slower), 3 prepares + warm runs first:
+
+| arm | Kokiri GPU all | 43ec | Kokiri fps | Hyrule GPU all | Hyrule fps |
+|---|---:|---:|---|---:|---|
+| a default (G3 on) | 21.63 | 2.451 | 42.4, 38.7 | 18.23 | 48.7, 48.9 |
+| b NOINLINE_ABOVE=30000 | 20.51 | **1.335** | 43.8, 43.9 | 18.47 | 48.6, 45.5 |
+| c FOLD_PSEUDO=1 | 21.57 | 2.439 | 42.6, 42.1 | 18.33 | 48.6, 48.3 |
+| d b + c | 20.45 | 1.326 | 44.5, 44.5 | 18.40 | 48.4, 48.2 |
+
+  (An earlier pass with a threshold of 225,136, set above every mesh by a first attempt that read the log's IR counts wrong, gave arms b and
+  d identical to a and c: 21.58/21.61 ms, which shows the run-to-run noise at about 0.05 ms for the frame total.) The fold shrinks 43ec's
+  mesh to under half and the driver does not care: the constant chains were already folded by it (item 3's "0" estimate holds). The other
+  programs (d8e5, 4f0c, 89ca) move by under 0.03 ms; 739a and d905 jump 0.36-0.58 ms between arms in single timed runs and in arm c, which
+  has no code difference for them, so that is the noise of a span in one run.
+* Pictures (frame 9000-9600 of each arm, Kokiri forest and Hyrule field, 1440p scaled): trees, grass, house/wall, water, Link, fairy, HUD and
+  the leaf particles are right in all four arms; no tree-in-the-sky or garbage as in #994. Differences between arms are the scene's own
+  motion (fairy position, leaves, grass LOD), including between two runs of one arm.
+* Recommendation: **RX_VK_MESH_NOINLINE_ABOVE=30000 on by default** (-1.1 ms GPU, Kokiri +1.5 to +5 fps in the frame-limited runs, Hyrule unchanged);
+  the fold is correct and cuts SPIR-V and translation size (-1.4% of the cache, -22% of mesh code, driver compile time) at no GPU cost:
+  take it on for the size, with the same stamp move, once someone wants the smaller cache; it is not a speed item.
+
+**Decision (2026-11-17, owner):** both on by default from v0.4.1: `RX_VK_MESH_NOINLINE_ABOVE` = 30000 (`=0`: off), `RX_VK_FOLD_PSEUDO` on (`=0`: off). The shader stamp moves once with the release's other translator changes.

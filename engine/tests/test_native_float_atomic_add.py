@@ -224,7 +224,11 @@ INTEL_WIN = "INTEL_PROPRIETARY_WINDOWS"
 SWITCH_CASES = ([(None, "NVIDIA_PROPRIETARY", 0x2684, 0, 0), (None, "NVIDIA_PROPRIETARY", 0x2D04, BMG_MEASURED, 0)] +
                 [(None, INTEL_WIN, BMG, BMG_MEASURED, 1), (None, INTEL_WIN, BMG_B570, BMG_MEASURED + 100, 1),
                  (None, INTEL_WIN, BMG, 101 << 14 | 9153, 0), (None, INTEL_WIN, BMG, 101 << 14 | 6000, 0)] +
-                [(None, INTEL_WIN, g, BMG_MEASURED + 100, 0) for g in (MTL, ARL, LNL, IRIS_XE, ARC_A770)] +
+                [(None, INTEL_WIN, g, BMG_MEASURED + 100, 0) for g in (LNL, IRIS_XE, ARC_A770)] +
+                [(None, INTEL_WIN, g, 101 << 14 | 9175, 1) for g in (MTL, ARL)] +
+                [(None, INTEL_WIN, MTL, 101 << 14 | 9174, 0), (None, "INTEL_OPEN_SOURCE_MESA", MTL, 101 << 14 | 9175, 0)] +
+                [(None, INTEL_WIN, 0xB080, 101 << 14 | 9150, 1), (None, INTEL_WIN, 0xB0A0, 101 << 14 | 9175, 1),
+                 (None, INTEL_WIN, 0xB080, 101 << 14 | 9149, 0), ("0", INTEL_WIN, 0xB080, 101 << 14 | 9150, 0)] +
                 [(None, d, BMG, BMG_MEASURED, 0) for d in DRIVERS if d != INTEL_WIN] +
                 [(v, d, 0, 0, 1) for v in ("1", "on", "yes", "true", "2") for d in ("MESA_RADV", "NVIDIA_PROPRIETARY")] +
                 [(v, "AMD_PROPRIETARY", 0, 0, 1) for v in ("1", "on")] + [("1", "INTEL_OPEN_SOURCE_MESA", MTL, 0, 1)] +

@@ -107,10 +107,10 @@ The first start prepares the game's shaders, which takes a while. Later starts a
 ### On Linux
 
 1. Open the [latest release](https://github.com/Sacrappy/HeyListen/releases/latest) and download
-   `HeyListen-<version>-x86_64.AppImage`. It is HeyListen Builder with everything it needs inside.
+   `HeyListen-<version>-Linux-x64.AppImage`. It is HeyListen Builder with everything it needs inside.
 2. Allow it to run as a program. In most file managers: right-click it, open **Properties**, and turn on
    "Allow executing file as program" (the words differ between desktops). Or in a terminal:
-   `chmod +x HeyListen-*-x86_64.AppImage`.
+   `chmod +x HeyListen-*-Linux-x64.AppImage`.
 3. Double-click it. The HeyListen Builder window opens.
 4. Under **Game files**, choose **.nup file** or **romfs and exefs**, then press **Browse** to pick them. The builder
    checks the version.
@@ -464,10 +464,10 @@ You need:
 <summary>Linux, the AppImage from the command line</summary>
 
 ```sh
-./HeyListen-<version>-x86_64.AppImage --cli --nup ~/your-game.nup --out ~/Games/HeyListen   # make_game.py's options
-./HeyListen-<version>-x86_64.AppImage --play                    # the game the builder built last, without the window
-./HeyListen-<version>-x86_64.AppImage --play ~/Games/HeyListen   # the game in that folder
-./HeyListen-<version>-x86_64.AppImage --update ~/Games/HeyListen # the new release, and that folder built again
+./HeyListen-<version>-Linux-x64.AppImage --cli --nup ~/your-game.nup --out ~/Games/HeyListen   # make_game.py's options
+./HeyListen-<version>-Linux-x64.AppImage --play                    # the game the builder built last, without the window
+./HeyListen-<version>-Linux-x64.AppImage --play ~/Games/HeyListen   # the game in that folder
+./HeyListen-<version>-Linux-x64.AppImage --update ~/Games/HeyListen # the new release, and that folder built again
 ```
 
 `HOOKSHOT_JOBS=<n>` (or `--jobs <n>` with `--cli`) limits how many files compile at once.
@@ -671,6 +671,12 @@ are missing while it is set. Off unless set.
 
 The switches for scripted test runs, screenshots, frame dumps and profiles are in the
 [development guide](docs/development.md#switches-for-testing-and-debugging).
+
+`RX_VK_WB_MAX_KB=<KB>` stops the write-back of written GPU bindings larger than that. OoT writes tens of MB of culling
+lists and per-frame buffers through the GPU that the CPU never reads, and copying them back sat on every submit's
+memory sync: in Hyrule Field on a 10 GB RTX 3080, about 66 MB and 4.4 ms a submit, holding the scene at 45-48 fps.
+`RX_VK_WB_MAX_KB=1024` still copies the small results the CPU does read (the exposure meter and the like) and took the
+same scene to 59-60 fps. `0` or unset copies every written binding, as before.
 
 </details>
 

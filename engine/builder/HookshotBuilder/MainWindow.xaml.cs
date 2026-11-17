@@ -1168,10 +1168,11 @@ public partial class MainWindow : Window
         ShowPage(FilesPage);
     }
 
-    /// The setup (HookshotBuilder-Setup.exe beside this app) checks every part against its checksum and downloads the missing ones
+    /// The setup (HeyListenBuilder-Setup.exe beside this app, HookshotBuilder-Setup.exe in an older install) checks every part against its checksum and downloads the missing ones
     void Repair(object sender, RoutedEventArgs e)
     {
-        var setup = System.IO.Path.Combine(AppContext.BaseDirectory, "HookshotBuilder-Setup.exe");
+        var setup = System.IO.Path.Combine(AppContext.BaseDirectory, "HeyListenBuilder-Setup.exe");
+        if (!File.Exists(setup)) setup = System.IO.Path.Combine(AppContext.BaseDirectory, "HookshotBuilder-Setup.exe");
         if (File.Exists(setup))
         {
             Process.Start(new ProcessStartInfo(setup, "--repair") { UseShellExecute = false, WorkingDirectory = AppContext.BaseDirectory });

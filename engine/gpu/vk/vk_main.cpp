@@ -24,10 +24,14 @@
 #include "gpu_choice.h"
 #include "sparse_queue.h"
 #include "vk_menu.h"
+#include "perf_report.h"
+#include "report_info.h"
 #include "vk_dlss.h"
 #include "vk_fsr4.h"
 #include "vk_reflex.h"
+#include "vk_gpu_clock.h"
 #include "vk_progress.h"
+#include "mesh_mode.h"
 #include "vk_tl_clock.h"   // (RX_VK_TL: the timeline's host time domain)
 
 namespace vkx {
@@ -231,7 +235,13 @@ static bool env_off(const char* v) {
 }
 static bool native_fadd_wanted(const char* env, VkDriverId driver, uint32_t device, uint32_t version) {
     if (env) return !env_off(env);
-    return driver == VK_DRIVER_ID_INTEL_PROPRIETARY_WINDOWS && (device & 0xFF00u) == 0xE200u && version >= (101u << 14 | 9154u);
+    if (driver != VK_DRIVER_ID_INTEL_PROPRIETARY_WINDOWS) return false;
+    // (longshot #191, #816) also Meteor Lake and Arrow Lake iGPUs (0x7Dxx, 101.9175 on: the loop lost the device in Kokiri Forest,
+    // Kakariko and on Death Mountain Trail) and Panther Lake's Xe3 iGPUs (0xB0xx, 101.9150 on: on an Arc B390 the loop lost adds of
+    // the exposure's light sums, a milky white haze from the sky on; the native add gave a B580's picture)
+    return ((device & 0xFF00u) == 0x7D00u && version >= (101u << 14 | 9175u)) ||   // (Meteor Lake, Arrow Lake)
+           ((device & 0xFF00u) == 0xE200u && version >= (101u << 14 | 9154u)) ||   // (Battlemage)
+           ((device & 0xFF00u) == 0xB000u && version >= (101u << 14 | 9150u));     // (Panther Lake)
 }
 
 bool create_device() {
@@ -246,7 +256,19 @@ bool create_device() {
     };
     // (RX_VK_FORCE_MESH_FALLBACK=1, a test: mesh shaders not used where they are, so the no-mesh fallback the GTX 10xx and RX 5000
     // cards run (issue 640) can be tried on any GPU)
-    if (getenv("RX_VK_FORCE_MESH_FALLBACK") && atoi(getenv("RX_VK_FORCE_MESH_FALLBACK")) != 0) dev.mesh_shader = false;
+    // (hookshot, issue 2245; the switch is Longshot's 8694e3c6) mesh_mode.h: RX_VK_MESH_SHADERS=native or compute chooses, unset is
+    // Automatic, and RX_VK_FORCE_MESH_FALLBACK=1 is Compute over it. Automatic is the compute path on Linux with an RDNA 2 AMD GPU (RADV, mesh_mode.h's ID list; RDNA 3 and 4 keep native):
+    // its native task/mesh draws lose the GPU (an RX 6800, issue 51). native keeps them there. A GPU without mesh shaders runs the
+    // compute path whatever the choice
+#ifdef _WIN32
+    constexpr bool linux_os = false;
+#else
+    constexpr bool linux_os = true;
+#endif
+    const mesh_rule::Choice mesh_choice = mesh_rule::effective(
+        mesh_rule::choose(getenv("RX_VK_MESH_SHADERS"), getenv("RX_VK_FORCE_MESH_FALLBACK")), linux_os, dev.props.vendorID,
+        dev.props.deviceID);
+    if (mesh_choice.mode == 2) dev.mesh_shader = false;
     else optional(VK_EXT_MESH_SHADER_EXTENSION_NAME, dev.mesh_shader);
     optional(VK_EXT_EXTERNAL_MEMORY_HOST_EXTENSION_NAME, dev.external_memory_host);
     optional(VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME, dev.external_memory_fd);   // (guest memory as udmabufs: vk_memory.cpp import_dma_buf)
@@ -535,6 +557,17 @@ bool create_device() {
     // that write their vertices to buffers, drawn through an ordinary graphics pipeline. It needs buffer device addresses.
     dev.mesh_fallback = !dev.mesh_shader && f12.bufferDeviceAddress && !getenv("RX_VK_NO_MESH_FALLBACK");
     if (dev.mesh_fallback) logf("vk: no mesh shaders: task and mesh programs run as compute shaders (issue 640 fallback)");
+    // (hookshot, issue 996 and HeyListen issue 57; Hookshot d1d6caa7) a GPU with mesh shaders whose draws with a task stage run as
+    // compute: the default on AMD's Windows driver for RDNA 2 (Navi 21 to 23, mesh_mode.h's device list; the RX 6700 XT drew the Market
+    // dog as a flat pale silhouette), RX_VK_TASK_MESH_FALLBACK=0/1 decides over it, and Native (RX_VK_MESH_SHADERS=native) turns the
+    // default off. Mesh-only draws stay native. The Compute choice has no mesh shaders here: the whole compute path runs
+    bool task_mesh_fallback = mesh_rule::task_mesh_fallback_wanted(!linux_os, dev.props.vendorID, dev.props.deviceID, mesh_choice.mode,
+                                                                   getenv("RX_VK_TASK_MESH_FALLBACK"));
+    dev.task_mesh_fallback = task_mesh_fallback && dev.mesh_shader && f12.bufferDeviceAddress && !getenv("RX_VK_NO_MESH_FALLBACK");
+    if (dev.task_mesh_fallback) logf("vk: task + mesh programs use the compute fallback (RX_VK_TASK_MESH_FALLBACK=0: native)");
+    logf("vk: mesh shaders: %s, from %s: %s", mesh_choice.mode == 2 ? "Compute" : mesh_choice.mode == 1 ? "Native" : "Automatic",
+         mesh_choice.why, dev.mesh_shader ? (dev.task_mesh_fallback ? "native, task + mesh draws on the compute path" : "native")
+                         : dev.mesh_fallback ? "the compute path" : "none");
     if (robust) logf("vk: robust buffer access %s", robust_ok ? "on" : "not supported");
     f.features.robustBufferAccess = robust_ok ? VK_TRUE : VK_FALSE;   // (off by default: the game's accesses stay in their buffers)
     dev.features = f.features;
@@ -580,6 +613,9 @@ bool create_device() {
     if (dev.buffer_marker) buffer_markers_init();
     coopmat_init();
     reflex_device_created();
+    // (longshot: on the Steam Deck the GPU held at amdgpu's peak power state while the game runs (RX_VK_GPU_CLOCK=0: not), gpu_clock.h;
+    // the device's render node from VK_EXT_physical_device_drm, which needs no enabling to be asked)
+    gpu_clock_device_created(has_extension(exts, VK_EXT_PHYSICAL_DEVICE_DRM_EXTENSION_NAME));
     if (dev.push_descriptor) {
         VkPhysicalDevicePushDescriptorPropertiesKHR pp{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PUSH_DESCRIPTOR_PROPERTIES_KHR};
         VkPhysicalDeviceProperties2 p2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
@@ -755,6 +791,7 @@ bool create_swapchain(uint32_t width, uint32_t height) {
     }
     reflex_swapchain_info(ci);   // (NVIDIA Reflex: latency mode on)
     VkSwapchainKHR sc;
+    if (dev.swapchain) perf_event(perf_report::kSwapchainRecreated);   // (made again in play: the performance summary counts it)
     result = vkCreateSwapchainKHR(dev.device, &ci, nullptr, &sc);
     // Passing oldSwapchain retires it even when creation fails. Nothing may acquire from it again.
     if (dev.swapchain) {
@@ -1111,6 +1148,8 @@ const char* describe() {
 MkwVkRenderer table;
 
 } // namespace
+/// (heylisten) The shaders are being prepared (the start-up screen): the performance summary's "map" then (perf_report.cpp)
+bool shaders_preparing() { return prep_running.load(std::memory_order_relaxed); }
 } // namespace mkwvk
 
 // (hookshot) The window is being closed (host/display.c, host/posix/display_sdl.c, before they end the process): while the
@@ -1124,6 +1163,7 @@ __attribute__((visibility("default")))
 #endif
 void mkwvk_close_asked(void) {
     using namespace mkwvk;
+    perf_report_final(-1);   // (the performance summary's last: ExitProcess is _exit on Linux, so no atexit runs there)
     if (!prep_running.load() || prepare_stopped()) return;
     logf("vk: the window was closed while the shaders were prepared: stopping, what is done is kept");
     prepare_stop();
@@ -1149,6 +1189,7 @@ const MkwVkRenderer* mkwvk_init(const MkwVkHost* h) {
          dev.props.deviceName, VK_VERSION_MAJOR(dev.props.apiVersion), VK_VERSION_MINOR(dev.props.apiVersion),
          dev.props.driverVersion, dev.mesh_shader ? "yes" : "no", dev.external_memory_host ? "yes" : "no",
          dev.graphics_pipeline_library ? "yes" : "no");
+    mkwvk::report_info::log_lines();   // (the crash report's facts: host/hos_crash_dialog.h reads "vk: driver:" and "report:" lines)
     if (!dev.mesh_shader && !dev.mesh_fallback && !getenv("RX_VK_NO_MESH_WARNING")) {
         // (the game draws its foliage, grass and many effects with mesh shaders: without them those draws are left out and the
         // picture is broken (an RX 580's "static"-like scenes, 2026-11-08). Said once, on its own thread, and the game goes on.)

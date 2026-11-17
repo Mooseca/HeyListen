@@ -65,6 +65,12 @@ struct Device {
     bool swapchain_colorspace = false;   // (hookshot) VK_EXT_swapchain_colorspace: HDR10 surfaces are listed
     bool hdr = false;                    // (hookshot) the swapchain is HDR10 (ST 2084, Rec. 2020): framegen_hdr writes it
     bool mesh_fallback = false;   // (hookshot) no VK_EXT_mesh_shader: task and mesh programs as compute shaders (vk_shader.cpp)
+    // (hookshot, issue 996, d1d6caa7) the GPU has mesh shaders but the draws that have a task stage run through the compute fallback
+    // (AMD's Windows driver times out on them on RDNA 2, Navi 21 to 23; RX_VK_TASK_MESH_FALLBACK): mesh_mode.h. Mesh-only draws stay native
+    bool task_mesh_fallback = false;
+    bool uses_mesh_fallback(bool has_task) const {
+        return mesh_fallback || (task_mesh_fallback && has_task);
+    }
     // (hookshot) the float controls the device reports, a bit a width (1: 16 bits, 2: 32, 4: 64): a program declaring a denorm mode the
     // device lacks is invalid (vkCreateShaderModule's validation error), and an older driver need not ignore it (strip_float_controls)
     uint32_t denorm_preserve_widths = 0, denorm_flush_widths = 0;

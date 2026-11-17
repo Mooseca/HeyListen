@@ -21,7 +21,7 @@ struct Options {
     int dlss = 0;         // the Upscaler (its name from before FSR: options files and the tests' stand-ins keep it): 0 the game's
                           // own network, 1 NVIDIA DLSS, 2 NVIDIA DLAA (a build with NVIDIA's SDK only), 3 AMD FSR 3.1 (vk_fsr3.cpp),
                           // 4 AMD FSR 4, 5 its native AA (a build with FSR 4 only). upscaler_rows.h; vk_temporal.cpp. Saved as dlss
-    int dlss_model = 0;   // DLSS's network, by its preset: 0 K (transformer), 1 M, 2 L (second-generation transformer), 3 NVIDIA's
+    int dlss_model = 0;   // DLSS's network, by its preset: 0 K (transformer; E, the CNN, under 7 GB of video memory), 1 M, 2 L (second-generation transformer), 3 NVIDIA's
                           // default (upscaler_rows.h model_preset; vk_dlss.cpp). RX_VK_DLSS_PRESET over it
     int sharpness = 0;    // 0 to 100
     int fps_limit = 0;    // the game's frame rate above 60 (Real time only): 0 60, 1 90, 2 120, 3 144, 4 165, 5 240 (host/nn_vi.c; HOS_FPS_LIMIT)
@@ -61,6 +61,8 @@ struct Options {
     int audio_output = 0; // (hookshot) the speakers the game mixes for: 0 Auto (the default output's), 1 Stereo, 2 5.1; read once, at the start (host/nn_audio.c; HOS_AUDIO_CHANNELS)
     int skip_title = 0;   // (longshot) start with the most recent save, pressing through the title and its file list (host/oot_autoload.c); read at the start
     int discord = 1;   // (hookshot) the Discord status (host/discord_rpc.c): 1 on, shown while a Discord client runs on this PC
+    int send_perf = 0;    // (heylisten) "Send performance statistics" (gpu/vk/perf_report.cpp): 0 off (the default), 1 on; saved as send_performance_stats=
+    int send_crash = 0;   // (heylisten) "Send crash reports automatically" (host/hos_crash_dialog.c): 0 off, the crash window asks (the default), 1 on; send_crash_reports=
     int debug_tools = 0;   // (hookshot) the Debug tab's tools (#785: flight, free camera, teleport, inventory): 0 off; HOS_OOT_CHEATS=1 also turns them on
     int mic = 1;          // (hookshot) the ocarina's microphone: 0 Off, 1 the system's default, 2.. a device as host->mic_name lists it (host/nn_audio_in.c)
 };
@@ -69,6 +71,12 @@ extern Options opts;
 /// video memory than the preset is for. A 4GB preset on an 8 GB card kept 256 MB of mirrors and 2.2 GB of textures: the
 /// game's memory was read over PCIe and the textures made again every frame, 5 fps with the CPU idle (Discord, 11-08)
 bool preset_caps_memory();
+/// The card's video memory: its largest device-local heap (vk_memory.cpp), 0 when not known
+uint64_t device_vram_bytes();
+/// (a test: RX_VK_TEST_VRAM_MB=<n> takes the card's VRAM as at most n MB wherever the renderer sizes something by it: the
+/// mirrors' budget, the DLSS model row's small-card preset. With RX_VK_TEST_ALLOWED_MB a large card plays a small one's whole
+/// policy. Unset: the card's own)
+uint64_t test_vram_bytes(uint64_t heap);
 
 void menu_init();             // (the options from the file, once)
 void menu_set_gpu_count(int count);

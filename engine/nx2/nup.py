@@ -410,12 +410,18 @@ def extraction_path(out, part, rel, temporary_suffix=".part"):
     return dst
 
 
-def extract(nup, t, out, only=None, quiet=False):
+def extract(nup, t, out, only=None, quiet=False, progress=False):
+    """progress: `@@progress <0..1>` lines by bytes (the builder's progress events: its window and the launcher's bar)"""
     total = n = 0
-    for part in ("exefs", "romfs"):
-        if only and part != only:
-            continue
+    parts = [part for part in ("exefs", "romfs") if not only or part == only]
+    whole = sum(r[2] for part in parts for _, r in nup.walk(t[part])) if progress else 0
+    done = shown = 0
+    for part in parts:
         for rel, r in nup.walk(t[part]):
+            done += r[2]
+            if progress and whole and (done - shown) * 100 >= whole:   # (a line for each 1% at most)
+                shown = done
+                print("@@progress %.3f" % (done / whole), flush=True)
             dst = extraction_path(out, part, rel)
             if os.path.exists(dst) and os.path.getsize(dst) == r[2]:
                 continue          # (re-runs pick up where they stopped)
@@ -531,6 +537,7 @@ def main():
     ap.add_argument("--verify", action="store_true", help="read-only hashes/extents and expected game .zs headers; all titles unless --title")
     ap.add_argument("--title", help="index, version or title id (extract default: newest; verify default: all)")
     ap.add_argument("--only", choices=("exefs", "romfs"))
+    ap.add_argument("--progress", action="store_true", help="with --extract: @@progress <0..1> lines by bytes (the builder's)")
     a = ap.parse_args()
     if a.verify and a.extract:
         ap.error("--verify does not extract; run extraction separately")
@@ -569,7 +576,7 @@ def main():
             folder = parent
         free = shutil.disk_usage(folder).free
         print("extracting title %d (v%d) to %s (%.0f GB free)" % (t["index"], t["version"], a.extract, free / 1e9))
-        n, total = extract(nup, t, a.extract, a.only)
+        n, total = extract(nup, t, a.extract, a.only, progress=a.progress)
         print("done: %d files written, %.2f GB" % (n, total / 1e9))
         if a.only != "romfs":   # (main is ZBIC-compressed on firmware 22+: made a plain NSO for the tools)
             sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))

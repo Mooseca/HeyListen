@@ -65,6 +65,8 @@ constexpr int VK_STRUCTURE_TYPE_IMAGE_FORMAT_LIST_CREATE_INFO=2, VK_IMAGE_USAGE_
 struct VkImageFormatListCreateInfo {int sType;const void* pNext=nullptr;uint32_t viewFormatCount=0;const VkFormat* pViewFormats=nullptr;};
 VkFormat unorm_of(VkFormat f) {return f;}
 void reflex_swapchain_info(CreateInfo&) {}
+namespace perf_report { enum { kSwapchainRecreated = 2 }; }   // (heylisten: the performance summary counts a swapchain made again)
+void perf_event(int) {}
 struct Reflex {uint64_t swapchain=0,swapchain_generation=0;bool latency=false,frame_marked=false;int mode=-1;std::mutex mu;} cached;
 Reflex& rx(){return cached;}
 void reflex_swapchain_created(uint64_t sc) {cached.swapchain=sc;cached.latency=cached.frame_marked=true;cached.mode=1;}

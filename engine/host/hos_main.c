@@ -10,6 +10,7 @@
                 HOS_NVN_CONTINUE=1 (go on past nvnBootstrapLoader). */
 #include "hos.h"
 #include "hos_paths.h"
+#include "hos_run_logs.h"
 #include "../gpu/vk/vk_api.h"
 #include "../gpu/vk/oot_cheat_items.h"
 #include <math.h>
@@ -38,6 +39,7 @@ const char *hos_version(void) { return HOOKSHOT_VERSION; }   /* (discord_rpc.c's
 #include <unistd.h>
 #include <sys/syscall.h>
 #endif
+#include "hos_atomic_file.h"   /* (the files the saves' move copies, saves-moved.txt and the settings: whole or not at all) */
 /* (linux) the separator of the paths the executable's folder is joined with */
 #ifdef _WIN32
 #define SEP 92
@@ -46,6 +48,19 @@ const char *hos_version(void) { return HOOKSHOT_VERSION; }   /* (discord_rpc.c's
 #define SEP '/'
 #define SEP_S "/"
 #endif
+
+/* (heylisten) the map Link is in and his age, as the last map: line, for the performance summary (gpu/vk/perf_report.cpp
+   through MkwVkHost perf_info) and the crash report's "where in the game": "" while no save is loaded */
+static SRWLOCK map_lock = SRWLOCK_INIT;
+static char map_now[100];
+void hos_movie_stats(int64_t out[5]);   /* nn_video.c */
+const char *hos_perf_info(char *map, int cap, int64_t movie[5]) {
+    AcquireSRWLockShared(&map_lock);
+    snprintf(map, (size_t)cap, "%s", map_now);
+    ReleaseSRWLockShared(&map_lock);
+    hos_movie_stats(movie);
+    return HOOKSHOT_VERSION;
+}
 
 #ifdef A64_MEM_ZERO
 /* web: guest address = wasm address; the guest window is wasm memory below the host's data (-sGLOBAL_BASE) */
@@ -160,21 +175,23 @@ static int reserve_guest(void) {
            needed. HOS_GUEST_MEMFD=1: the memfd all the same) */
         const char *e = getenv("HOS_GUEST_MEMFD");
         int usable = 0;
-        unsigned long long limit_mb = 0;
         {
             const int u = open("/dev/udmabuf", O_RDWR | O_CLOEXEC);
             if (u >= 0) {
                 close(u);
+                /* (issue 1135) usable whatever size_limit_mb says: the renderer reads the limit itself and takes udmabuf's
+                   default, 64 MB, when it can't (gpu/vk/vk_memory.cpp import_dma_buf), and a limit too small only makes more
+                   dma-bufs. A Flatpak's or Steam's container shows /dev/udmabuf but not /sys/module */
                 FILE *f = fopen("/sys/module/udmabuf/parameters/size_limit_mb", "r");
-                if (f) {
-                    if (fscanf(f, "%llu", &limit_mb) != 1) limit_mb = 0;
+                if (f)
                     fclose(f);
-                }
-                usable = limit_mb > 0;
+                else
+                    hos_log("mem: udmabuf's size_limit_mb cannot be read (in a container?): its default, 64 MB, assumed");
+                usable = 1;
             }
             if (!usable && !e)
-                hos_log("mem: guest memory stays host-pointer imports for the GPU (slow submissions on AMD): %s",
-                        u < 0 ? "/dev/udmabuf cannot be opened" : "udmabuf's size_limit_mb cannot be read");
+                hos_log("mem: guest memory stays host-pointer imports for the GPU (slow submissions on AMD): "
+                        "/dev/udmabuf cannot be opened");
         }
         if (e ? atoi(e) != 0 : usable) {
             const int fd = (int)syscall(SYS_memfd_create, "hookshot-guest", 1u /* MFD_CLOEXEC */ | 2u /* MFD_ALLOW_SEALING */);
@@ -251,14 +268,7 @@ static int is_dir(const char *p) {
 }
 static int copy_tree(const char *from, const char *to) {
     if (!is_dir(from)) {
-        FILE *in = fopen(from, "rb"), *out = in ? fopen(to, "wb") : NULL;
-        int ok = in && out;
-        char buf[1 << 16];
-        for (size_t n; ok && (n = fread(buf, 1, sizeof buf, in)) > 0;) ok = fwrite(buf, 1, n, out) == n;
-        ok = ok && in && !ferror(in);
-        if (in) fclose(in);
-        if (out && fclose(out)) ok = 0;
-        return ok;
+        return hos_atomic_copy_file(from, to);   /* (each file whole under its name, or not there) */
     }
     if (!CreateDirectoryA(to, NULL) && !is_dir(to)) return 0;
     char pattern[MAX_PATH];
@@ -337,16 +347,31 @@ static const char *saves_dir(const char *beside) {
         char note[MAX_PATH];
         const char *sep = strrchr(beside, SEP);
         snprintf(note, sizeof note, "%.*s" SEP_S "saves-moved.txt", sep ? (int)(sep - beside) : 0, beside);
-        FILE *f = fopen(note, "w");
-        if (f) {
-            fprintf(f, "HeyListen's saves are now in\n%s\n\nThey moved there from the user folder that was here.\n", dir);
-            fclose(f);
-        }
+        char text[MAX_PATH + 160];
+        const int n = snprintf(text, sizeof text, "HeyListen's saves are now in\n%s\n\nThey moved there from the user folder that was here.\n", dir);
+        if (n > 0 && (size_t)n < sizeof text) hos_atomic_write(note, text, (size_t)n);
         hos_log("saves: moved from %s to %s", beside, dir);
     }
     return dir;
 }
 #endif
+
+/* (longshot #976) What a write of a setting that a kill cut left (host/hos_atomic_file.h), at the start, before the game reads any
+   setting: a "<name>.hosnew" beside the setting. language.txt and hookshot_options.ini are the game folder's; mouse_sens.txt is
+   the user folder's. */
+static void recover_writes(void) {
+    char path[MAX_PATH];
+    const DWORD len = hos_game_path_a(path, MAX_PATH);
+    char *slash = len ? strrchr(path, SEP) : NULL;
+    if (slash) {
+        snprintf(slash + 1, (size_t)(path + MAX_PATH - slash - 1), "language.txt");
+        hos_atomic_remove_stale(path);
+        snprintf(slash + 1, (size_t)(path + MAX_PATH - slash - 1), "hookshot_options.ini");
+        hos_atomic_remove_stale(path);
+    }
+    snprintf(path, sizeof path, "%s" SEP_S "mouse_sens.txt", hos_user_dir);
+    hos_atomic_remove_stale(path);
+}
 
 /* hookshot_env.txt beside the game: NAME=VALUE lines set as environment variables before anything reads them, for the
    switches players are asked to test (RX_VK_NOOPT and the rest). Lines starting with # are notes. On Linux this runs
@@ -362,6 +387,9 @@ static int env_line_allowed(const char *name, const char *value) {
     int ok = 0;
     for (size_t i = 0; i < sizeof prefixes / sizeof *prefixes; i++) ok |= !strncmp(name, prefixes[i], strlen(prefixes[i]));
     if (!ok || !strcmp(name, "HOS_ENV_FILE") || !strcmp(name, "SDL_DYNAMIC_API")) return 0;
+    /* (heylisten) nor the crash test (a developer's switch from the environment only: host/hos_crash_dialog.c) or where reports
+       go (HL_TELEMETRY_URL: never from a file the game folder holds) */
+    if (!strcmp(name, "HOS_CRASH_TEST") || !strcmp(name, "HL_TELEMETRY_URL")) return 0;
     /* (hookshot) nor the libraries SDL loads by name (SDL_VULKAN_LIBRARY, SDL_OPENGL_LIBRARY, SDL_VIDEO_GL_DRIVER,
        SDL_VIDEO_EGL_DRIVER...): a bare file name is looked for beside the game and in the current folder on Windows */
     if (!strncmp(name, "SDL_", 4) && (strstr(name, "_LIB") || strstr(name, "GL_DRIVER"))) return 0;
@@ -644,12 +672,30 @@ static const unsigned char oot_item_kinds[] = {OOT_CHEAT_ITEMS(OOT_NO_SECTION, O
 
 static int oot_item_count(Ctx *c, const char *name);
 
+static int oot_gamedata_bool(Ctx *c, uint32_t hash, int *value);
+static int oot_gamedata_string(Ctx *c, uint32_t hash, char *buf, size_t size);
 static void oot_inventory_refresh(Ctx *c, int64_t now) {
     void rx_option_set(int id, int value);
     static int64_t next;
     static int probed;
     if (now < next) return;
     next = now + 500000000LL;
+    {   /* (heylisten) the map Link is in and his age, logged when either changes: where a log's problem happened (the crash
+           report's "map" reads the last of these lines) and the performance summary's map */
+        static char logged[100];
+        char map[80], line[100];
+        int child = 1;
+        if (oot_gamedata_string(c, 0x1d6189dau, map, sizeof map) && map[0]) {   /* Sequence_CurrentBanc */
+            snprintf(line, sizeof line, "%s (%s)", map,
+                     oot_gamedata_bool(c, 0xcea220d3u, &child) ? (child ? "child" : "adult") : "age not known");
+            if (strcmp(line, logged)) {
+                hos_log("map: %s", line), snprintf(logged, sizeof logged, "%s", line);
+                AcquireSRWLockExclusive(&map_lock);
+                snprintf(map_now, sizeof map_now, "%s", line);
+                ReleaseSRWLockExclusive(&map_lock);
+            }
+        }
+    }
     for (unsigned i = 0; i < OOT_ITEM_COUNT; i++) rx_option_set(OOT_CHEAT_ITEM_BASE + (int)i, oot_item_count(c, oot_item_names[i]));
     if (!probed && oot_pouch_count(c, "Item_DekuSeed") >= 0) {
         probed = 1;   /* (one line naming every count, both spellings: which names the pouch knows) */
@@ -1445,6 +1491,11 @@ int main(int argc, char **argv) {
 static int game_main(int argc, char **argv) {
 #endif
 #ifdef _WIN32
+    {   /* (heylisten) the crash window's helper of this run (host/hos_crash_dialog.c): first, so it starts nothing of the game */
+        int hos_crash_helper_main(int argc, char **argv);
+        const int helper = hos_crash_helper_main(argc, argv);
+        if (helper >= 0) return helper;
+    }
     if (!narrow_paths_ok(argc, argv)) return 1;
     load_hookshot_env();
 #endif
@@ -1464,6 +1515,7 @@ static int game_main(int argc, char **argv) {
         if (set && !getenv("HOS_DPI_UNAWARE")) set((void *)(intptr_t)-4);
     }
 #endif
+    void hos_crash_record_prepare(const char *log_path);
     {   // (started from its icon the game has nowhere to log to: hookshot_log.txt beside it, last run only, for players to send in)
 #ifdef _WIN32
         {   /* (started again by the Insert menu's Restart now (host/hos_relaunch.c): the run before still has its log open until
@@ -1482,6 +1534,8 @@ static int game_main(int argc, char **argv) {
             char path[MAX_PATH + 32];
             DWORD n = hos_game_path_a(path, MAX_PATH);
             while (n && path[n - 1] != 92 && path[n - 1] != 47) n--;
+            memcpy(path + n, "hookshot_log.txt", 17);
+            hos_crash_record_prepare(path);   /* recovery before rotation; keep this run's actual destination */
             /* (the four runs before stay as hookshot_log.1.txt (the last) to .4.txt: a player who started the game again after a
                crash sent in the new run's log, and the crash was gone) */
             char from[MAX_PATH + 32], to[MAX_PATH + 32];
@@ -1492,16 +1546,31 @@ static int game_main(int argc, char **argv) {
                 MoveFileExA(from, to, MOVEFILE_REPLACE_EXISTING);
             }
             memcpy(path + n, "hookshot_log.txt", 17);
-            if (freopen(path, "w", stderr)) setvbuf(stderr, NULL, _IONBF, 0);
-        }
+            if (freopen(path, "w", stderr)) {
+                setvbuf(stderr, NULL, _IONBF, 0);
+                char gdir[MAX_PATH + 32];
+                memcpy(gdir, path, n), gdir[n] = 0;
+                hos_run_logs_make(gdir, path);   /* (logs/hookshot.log and .1 to .4: RecompLauncher's crash report) */
+            }
+        } else hos_crash_record_prepare(NULL);   /* an externally supplied stderr, not the game's log */
     }
     hos_log("hookshot %s", HOOKSHOT_VERSION);   /* (the log's first line: which build a report comes from) */
+    const char *hos_report_run_id(void);
+    hos_log("run_id: %s", hos_report_run_id());
+    void hos_crash_record_log_notes(void);
+    hos_crash_record_log_notes();
 #ifdef __linux__
     if (submit_thread_note[0])   /* (decided in main, before any thread: submit_thread_at_start) */
         hos_log("env: Mesa's submit thread %s", submit_thread_note);
     if (driver_env_said[0]) hos_log("%s", driver_env_said);   /* (decided in main: driver_env_choose) */
 #endif
     hos_env_notes_log();
+    /* (heylisten) the window after a crash: a helper that waits for this run to end (host/hos_crash_dialog.c), started before
+       the guest, the renderer, the sound and the input; none for --prepare-shaders, HOS_HEADLESS or HOS_CRASH_WATCH=0 */
+    void hos_crash_watch_start(int argc, char **argv);
+    hos_crash_watch_start(argc, argv);
+    void hos_perf_send_start(void);
+    hos_perf_send_start();   /* (the summaries the last runs left in perf_pending: only with Send performance statistics on and an address) */
     const char *image = NULL;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--romfs") && i + 1 < argc) hos_romfs_dir = argv[++i];
@@ -1560,11 +1629,14 @@ static int game_main(int argc, char **argv) {
     }
     if (getenv("HOS_TRACE")) hos_trace = 1;
     if (!hos_user_dir) hos_user_dir = "user";
+    recover_writes();   /* (what a write of a setting that a kill cut left: before anything reads the settings) */
     CreateDirectoryA(hos_user_dir, NULL);
     if (!reserve_guest()) {
         fprintf(stderr, "cannot reserve the guest window\n");
         return 1;
     }
+    void hos_crash_test_arm(void);
+    hos_crash_test_arm();   /* (HOS_CRASH_TEST: a crash on purpose, once the crash handlers are set up: host/hos_crash_dialog.c) */
 #ifdef A64_MEM_ZERO
     web_fs_init(NULL, hos_romfs_dir);
     /* (the whole file, no range: the server sends it brotli-compressed, 85 -> 26 MB) */
@@ -1697,6 +1769,8 @@ static int game_main(int argc, char **argv) {
     }
     call_guest(c, hos_entry_nnMain, sp, "nnMain");
     hos_log("nnMain returned");
+    void hos_crash_clean_end(void);
+    hos_crash_clean_end();
     return 0;
 }
 
@@ -1707,9 +1781,17 @@ static int game_argc;
 static char **game_argv;
 static DWORD WINAPI game_thread(void *p) {
     (void)p;
-    ExitProcess((UINT)game_main(game_argc, game_argv));
+    const UINT result = (UINT)game_main(game_argc, game_argv);
+    void hos_crash_clean_end(void);
+    hos_crash_clean_end();
+    ExitProcess(result);
 }
 int main(int argc, char **argv) {
+    {   /* (heylisten) the crash window's helper of this run (host/hos_crash_dialog.c): first, so it starts nothing of the game */
+        int hos_crash_helper_main(int argc, char **argv);
+        const int helper = hos_crash_helper_main(argc, argv);
+        if (helper >= 0) return helper;
+    }
     int hos_display_init(void);
     void hos_display_loop(void);
     load_hookshot_env();

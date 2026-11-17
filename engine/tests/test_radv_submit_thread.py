@@ -49,7 +49,7 @@ def check_source():
     need(0 <= s < host.find("static void submit_thread_at_start") < host.find("#endif", s + 1),
          "hos_main.c: submit_thread_at_start is Linux only")
     # Linux main(): hookshot_env.txt read, then the decision, then SDL (the first thread) and the game's thread
-    linux_main = body(host, "int main(int argc, char **argv) {\n    int hos_display_init(void);")
+    linux_main = body(host, "int main(int argc, char **argv) {\n    {   /* (heylisten) the crash window's helper")
     env = linux_main.find("load_hookshot_env();")
     decide = linux_main.find("submit_thread_at_start();")
     display = linux_main.find("hos_display_init()")

@@ -125,7 +125,8 @@ int main(void) {
 #include <cstring>
 #define CHECK(x) do { if (!(x)) { fprintf(stderr, "FAIL:%d %s\n", __LINE__, #x); exit(1); } } while (0)
 enum MenuTab { TAB_CONTROLS };
-struct Options { int output_res = 0, resolution = 0, upscale = 0, dlss = 0, stick_dead_zone = 0; } opts;
+struct Options { int output_res = 0, resolution = 0, upscale = 0, dlss = 0, stick_dead_zone = 0, send_perf = 0, send_crash = 0; } opts;
+bool telemetry_available() { return true; }   // (heylisten: the two telemetry rows' availability, perf_report.cpp)
 static int output_choice(int v) { return v; }
 static int output_choice_text(const char* s) { return output_choice(atoi(s)); }   // (vk_menu.cpp: also the sizes written out)
 ''' + block(menu, "struct Row {") + ";\n" + block(menu, "const char* tx_stick_dead_zone(") + "\n" + \

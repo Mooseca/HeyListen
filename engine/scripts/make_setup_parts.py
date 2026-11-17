@@ -1,7 +1,7 @@
 """(HeyListen: the setup is released as HeyListenBuilder.exe, its list is heylisten-setup.txt, its new parts
 HeyListenBuilder-<part>-<sha>.zip; parts first made upstream keep their names and are served from this repository too.)
 
-The parts HookshotBuilder-Setup.exe downloads (builder/setup/setup.c), from a Hookshot Builder package folder.
+The parts HeyListenBuilder-Setup.exe downloads (builder/setup/setup.c), from a Hookshot Builder package folder.
 
     python -I scripts/make_setup_parts.py <package folder> <tag> <out folder> [--base <url the parts are served from>]
                                           [--reuse <an earlier release's hookshot-setup.txt>]
@@ -82,7 +82,7 @@ def main():
 
     top = sorted(os.listdir(root))
     builder_files = [n for n in top if os.path.isfile(os.path.join(root, n)) and
-                     (n.startswith(("HookshotBuilder", "HeyListenBuilder")) or n in ("LICENSE", "README.txt"))]   # (HookshotBuilder-Setup.exe too: Repair runs it)
+                     (n.startswith(("HookshotBuilder", "HeyListenBuilder")) or n in ("LICENSE", "README.txt"))]   # (HeyListenBuilder-Setup.exe too: Repair runs it)
     runtime_files = [n for n in top if os.path.isfile(os.path.join(root, n)) and n not in builder_files]
     runtime_dirs = [n for n in top if os.path.isdir(os.path.join(root, n)) and n != "tools"]
     tools = sorted(os.listdir(os.path.join(root, "tools")))

@@ -36,6 +36,8 @@ struct Texture {
     std::vector<uint8_t> tail_bound;            // (per layer, or [0] with SINGLE_MIPTAIL: its mip tail has memory)
     std::vector<VkDeviceMemory> sparse_chunks;  // (the device memory blocks are taken from, 64 MB at a time)
     VkDeviceSize chunk_used = 0;
+    struct SparseFree { VkDeviceMemory memory; VkDeviceSize offset, size; };
+    std::vector<SparseFree> sparse_free;        // (taken for binds that failed: given out again before the chunks)
     VkSparseImageMemoryRequirements sparse_req{};
     uint32_t sparse_type = 0;
     VkDeviceSize sparse_align = 0;
@@ -67,6 +69,9 @@ struct Texture {
     uint64_t gpu_wrote_seen = 0;   // (the newest finished GPU write into its storage it was uploaded after)
     uint64_t last_written = 0;     // (the frame the GPU last wrote it: a render target, each frame it is used)
     uint64_t first_written = 0;    // (the frame its GPU contents began: written in that frame alone, a table the game baked)
+    uint64_t written_back_for = 0; // (the last_written its texels went into guest memory for: drawn_writeback.h)
+    bool writeback_noted = false;  // (in the list of textures waiting for that)
+    uint64_t written_back_hash = 0; // (its memory's hash after that write-back: still its own texels there, or the CPU's since)
     uint64_t verify_hash = 0;      // (RX_VK_VERIFY_DIM: its guest memory's hash when last uploaded)
     uint32_t checked_epoch = 0;
     uint64_t upload_value = 0;   // (the submission its last upload was recorded in, and the parallel replay's segment
@@ -204,6 +209,8 @@ uint64_t texture_bytes();
 void full_barrier(VkCommandBuffer cmd, const char* why = "barrier (other)");
 void pass_start_barrier(VkCommandBuffer cmd, const char* why);   // (TICK-016: left out after draws only)
 void dispatch_barrier(VkCommandBuffer cmd, const char* why);
+/// (hookshot) RX_VK_GAME_ORDER: the game's own barriers order back-to-back passes and dispatches (on NVIDIA by default; vk_texture.cpp)
+bool game_order();
 /// Full barriers recorded and left out (RX_VK_BARRIER_DEDUPE_OFF=1: none), since the start
 void barrier_stats(int64_t* made, int64_t* left_out);
 /// (hookshot) Set around a draw's sampled-texture lookups (vk_draw.cpp): a new ASTC texture there may wait for a later frame

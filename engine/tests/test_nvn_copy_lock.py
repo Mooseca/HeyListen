@@ -38,6 +38,9 @@ static void ReleaseSRWLockShared(SRWLOCK *l) { pthread_rwlock_unlock(l); }
 static LONG64 InterlockedAdd64(volatile LONG64 *p, LONG64 v) { return __atomic_add_fetch(p, v, __ATOMIC_SEQ_CST); }
 static void die(const char *fmt, ...) { va_list a; va_start(a, fmt); vfprintf(stderr, fmt, a); va_end(a); fputc('\n', stderr); exit(3); }
 static void hos_log(const char *fmt, ...) { (void)fmt; }
+static void *hos_xmalloc(size_t n, const char *w) { (void)w; void *p = malloc(n); if (!p) exit(3); return p; }
+static void *hos_xcalloc(size_t c, size_t n, const char *w) { (void)w; void *p = calloc(c, n); if (!p) exit(3); return p; }
+static void *hos_xrealloc(void *o, size_t n, const char *w) { (void)w; void *p = realloc(o, n); if (!p) exit(3); return p; }
 static int env_on(const char *n) { return getenv(n) != NULL; }
 static uint64_t replayed, pushed;
 static uint64_t rx_nvn_replayed(void) { return replayed; }

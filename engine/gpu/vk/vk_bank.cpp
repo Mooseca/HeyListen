@@ -14,6 +14,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 
+#include "bank_write.h"
 #include "vk_internal.h"
 #include "vk_state.h"
 
@@ -310,7 +311,8 @@ const PointerEntry* pointer_table(const NvnState& s, int stage) {
     return e;
 }
 
-void driver_bank_fill(const NvnState& s, int bank, int stage, uint8_t* d, uint32_t n) {
+// (the word-by-word fill, the reference of the native writer below: HL_UBO_WRITER=0 runs it alone, HL_UBO_WRITER_CHECK=1 beside it)
+static void driver_bank_fill_ref(const NvnState& s, int bank, int stage, uint8_t* d, uint32_t n) {
     std::memset(d, 0, n);
     if (stage < 0 || stage >= kNvnStages) return;
     auto put = [&](uint32_t off, uint32_t v) {
@@ -362,6 +364,58 @@ void driver_bank_fill(const NvnState& s, int bank, int stage, uint8_t* d, uint32
         }
     }
     if (stage == 0) put(0x610, std::bit_cast<uint32_t>(2047.9375f));
+}
+
+// (HeyListen, HL_UBO_WRITER=1, default off) the banks of a graphics stage (c2; c0 of the stages with a storage buffer table and no pointer
+// table) written by bank_write.h in one pass. Compute (stage 5), task and mesh (6, 7: the pointer table) and stages without a table
+// stay on the word-by-word fill. HL_UBO_WRITER_CHECK=1 (implies the switch): both run, the bytes are compared, the calls compared
+// and the mismatches counted (the first ones logged, a line every 10 s)
+namespace {
+bool ubo_writer_handles(int bank, int stage) {
+    if (stage < 0 || stage >= kNvnStages) return false;
+    if (bank == 2) return true;
+    return bank == 0 && stage != 5 && stage != 6 && stage != 7;
+}
+void ubo_writer_fill(const NvnState& s, int bank, int stage, uint8_t* d, uint32_t n) {
+    if (bank == 2) return bankw::write_c2(s.tex[stage], s.samp[stage], s.img[stage], d, n);
+    static constexpr uint32_t kTable[kNvnStages] = {0x110, 0x510, 0x410, 0x210, 0x310, 0, 0x670, 0x770};
+    if (!kTable[stage]) return std::memset(d, 0, n), void();
+    bankw::write_c0(s.ssbo[stage], kTable[stage], stage == 0, d, n);
+}
+}  // namespace
+
+void driver_bank_fill(const NvnState& s, int bank, int stage, uint8_t* d, uint32_t n) {
+    static const bool check = getenv("HL_UBO_WRITER_CHECK") && *getenv("HL_UBO_WRITER_CHECK") != '0';
+    static const bool on = check || (getenv("HL_UBO_WRITER") && *getenv("HL_UBO_WRITER") != '0');
+    if (!on || !ubo_writer_handles(bank, stage)) {
+        driver_bank_fill_ref(s, bank, stage, d, n);
+        return;
+    }
+    static std::atomic<bool> announced{false};
+    if (!announced.exchange(true))
+        logf("hl ubo writer: the graphics stages' driver banks written natively%s (HL_UBO_WRITER=1)",
+             check ? ", checked against the word path (HL_UBO_WRITER_CHECK=1)" : "");
+    ubo_writer_fill(s, bank, stage, d, n);
+    if (!check) return;
+    static std::atomic<uint64_t> compared{0}, bad{0}, bytes{0}, last_log{0};
+    thread_local std::vector<uint8_t> ref;
+    ref.resize(n);
+    driver_bank_fill_ref(s, bank, stage, ref.data(), n);
+    compared++, bytes += n;
+    if (std::memcmp(ref.data(), d, n)) {
+        if (bad++ < 12) {
+            uint32_t at = 0;
+            while (ref[at] == d[at]) at++;
+            logf("hl ubo writer check: MISMATCH bank c%d stage %d n %u first at %#x: word path %#x, native %#x", bank, stage, n, at,
+                 *(const uint32_t*)(ref.data() + (at & ~3u)), *(const uint32_t*)(d + (at & ~3u)));
+        }
+    }
+    const uint64_t now = GetTickCount64();
+    uint64_t prev = last_log.load();
+    if (prev == 0) last_log.compare_exchange_strong(prev, now);
+    else if (now - prev >= 10000 && last_log.compare_exchange_strong(prev, now))
+        logf("hl ubo writer check: %llu bank fills compared (%llu bytes), %llu mismatches", (unsigned long long)compared.load(),
+             (unsigned long long)bytes.load(), (unsigned long long)bad.load());
 }
 
 /// (hookshot) the bound compute program's texture and image slot counts (its control section's)

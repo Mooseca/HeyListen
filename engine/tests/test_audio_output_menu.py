@@ -39,7 +39,8 @@ static int device_channels, device_asked;
 static int au_device_channels(void) { device_asked++; return device_channels; }
 HOST
 struct Row { int tab; const char* name; int* value; };
-struct { int output_res, resolution, upscale, dlss, audio_output; } opts;
+struct { int output_res, resolution, upscale, dlss, audio_output, send_perf, send_crash; } opts;
+bool telemetry_available() { return true; }   // (heylisten: the two telemetry rows' availability, perf_report.cpp)
 MENU
 int main(int argc, char **argv) {
     assert(argc == 7);

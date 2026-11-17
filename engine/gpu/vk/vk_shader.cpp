@@ -542,6 +542,41 @@ private:
     std::unordered_map<uint64_t, bool> pointer_answers;   // (IsCbufStorageBufferPointer's)
 };
 
+/// (Lichii bd0171f7) Handle tables as descriptor arrays: a texture handle the shader reads from a table at an index of its
+/// own (OoT's clustered lights: each light's shadow map, read per pixel from the light table) becomes an array of the
+/// table's first entries, which the shader indexes per pixel. Without them those samples took a constant word on their
+/// path for the handle (the light table's address), bound no texture, and the lights' shadow tests read nothing: dark
+/// and green blocks on Zora's Domain's ice and snow (https://git.magicbean.dev/MagicBeanDev/Longshot/issues/52,
+/// https://github.com/NotRexed/Hookshot/issues/2509). Needs nonuniform sampled image array indexing (Vulkan 1.2's descriptor
+/// indexing) and room for the arrays in the descriptor limits. RX_VK_HANDLE_TABLES=0: off, the translation as without them
+/// (a test; in the cache's stamp). The log line names the check that turned them off
+bool handle_tables_on() {
+    static const bool on = [] {
+        const VkPhysicalDeviceLimits& l = dev.props.limits;
+        // (the first check that fails, with the device's value, so a tester's log says which; empty when all pass)
+        char why[160] = "";
+        const auto need = [&why](const char* what, uint64_t have, uint64_t least) {
+            if (!why[0] && have < least)
+                snprintf(why, sizeof why, "%s is %llu, under %llu", what, (unsigned long long)have, (unsigned long long)least);
+        };
+        if (!dev.vk12.shaderSampledImageArrayNonUniformIndexing)
+            snprintf(why, sizeof why, "no shaderSampledImageArrayNonUniformIndexing");
+        need("maxPerStageDescriptorSampledImages", l.maxPerStageDescriptorSampledImages, 256);
+        need("maxPerStageDescriptorSamplers", l.maxPerStageDescriptorSamplers, 256);
+        need("maxPerStageResources", l.maxPerStageResources, 256);
+        need("maxDescriptorSetSampledImages", l.maxDescriptorSetSampledImages, 512);
+        need("maxDescriptorSetSamplers", l.maxDescriptorSetSamplers, 512);
+        const bool can = !why[0];
+        const char* e = getenv("RX_VK_HANDLE_TABLES");
+        const bool want = !e || atoi(e) != 0;
+        if (!want) logf("vk: handle tables as descriptor arrays: off (RX_VK_HANDLE_TABLES=0)");
+        else if (can) logf("vk: handle tables as descriptor arrays: on");
+        else logf("vk: handle tables as descriptor arrays: off (%s)", why);
+        return want && can;
+    }();
+    return on;
+}
+
 Shader::Profile make_profile() {
     Shader::Profile p{};
     p.supported_spirv = 0x00010600;
@@ -577,6 +612,7 @@ Shader::Profile make_profile() {
 
 Shader::HostTranslateInfo host_info() {
     Shader::HostTranslateInfo h{};
+    h.support_handle_table_arrays = handle_tables_on();
     h.support_float64 = true;
     // (RX_VK_NO_F16, a test: the game's f16 math lowered to f32, as a card without f16 shaders would need (GTX 10xx, issue 98). Eden's
     // lowering made a picture of noise of Kokiri on an RTX card, so it is not used by itself)
@@ -688,25 +724,61 @@ uint32_t stage_cbuf_word(const NvnState& s, const Stage& st, uint32_t index, uin
     return 0;
 }
 
-uint32_t stage_handle(const NvnState& s, const Stage& st, uint32_t program) {
+namespace {
+/// Storage buffer `binding` of a stage: its address, as the stage's constant bank has it (0: none)
+uint64_t stage_storage_base(const NvnState& s, const Stage& st, uint32_t binding) {
+    if (binding >= st.info.storage_buffers_descriptors.size()) return 0;
+    const auto& d = st.info.storage_buffers_descriptors[binding];
+    return stage_cbuf_word(s, st, d.cbuf_index, d.cbuf_offset) |
+           (uint64_t)stage_cbuf_word(s, st, d.cbuf_index, d.cbuf_offset + 4) << 32;
+}
+uint32_t stage_storage_word(uint64_t base, uint32_t offset) {
+    uint32_t v = 0;
+    static const bool live = getenv("RX_VK_HANDLES_LIVE") != nullptr;
+    if (base) {
+        if (live) host->gpu_read(base + offset, &v, 4);
+        else ub_read(base + offset, &v, 4);
+    }
+    return v;
+}
+} // namespace
+
+uint32_t stage_handle(const NvnState& s, const Stage& st, uint32_t program, uint32_t element) {
     if (program >= st.info.handle_programs.size()) return 0;
     return Shader::EvaluateHandleProgram(
                st.info.handle_programs[program],
                [&](u32 index, u32 offset) -> u32 { return stage_cbuf_word(s, st, index, offset); },
-               [&](u32 binding, u32 offset) -> u32 {
-                   if (binding >= st.info.storage_buffers_descriptors.size()) return 0U;
-                   const auto& d = st.info.storage_buffers_descriptors[binding];
-                   const uint64_t base = stage_cbuf_word(s, st, d.cbuf_index, d.cbuf_offset) |
-                                         (uint64_t)stage_cbuf_word(s, st, d.cbuf_index, d.cbuf_offset + 4) << 32;
-                   uint32_t v = 0;
-                   static const bool live = getenv("RX_VK_HANDLES_LIVE") != nullptr;
-                   if (base) {
-                       if (live) host->gpu_read(base + offset, &v, 4);
-                       else ub_read(base + offset, &v, 4);
-                   }
-                   return v;
-               })
+               [&](u32 binding, u32 offset) -> u32 { return stage_storage_word(stage_storage_base(s, st, binding), offset); },
+               element)
         .value_or(0U);
+}
+
+void stage_handles(const NvnState& s, const Stage& st, uint32_t program, uint32_t count, uint32_t* out) {
+    if (program >= st.info.handle_programs.size()) {
+        std::fill(out, out + count, 0u);
+        return;
+    }
+    // (the constant words and storage buffer addresses the program reads are the same for every element: read once)
+    struct Word { u32 index, offset, value; };
+    std::array<Word, 16> words;
+    size_t num_words = 0;
+    const auto read_cbuf = [&](u32 index, u32 offset) -> u32 {
+        for (size_t w = 0; w < num_words; w++)
+            if (words[w].index == index && words[w].offset == offset) return words[w].value;
+        const u32 value = stage_cbuf_word(s, st, index, offset);
+        if (num_words < words.size()) words[num_words++] = {index, offset, value};
+        return value;
+    };
+    static_assert(Shader::Info::MAX_SSBOS <= 64, "one bit a binding");
+    std::array<uint64_t, Shader::Info::MAX_SSBOS> bases;
+    uint64_t known = 0;
+    const auto read_storage = [&](u32 binding, u32 offset) -> u32 {
+        if (binding >= bases.size()) return 0U;
+        if (!(known >> binding & 1)) bases[binding] = stage_storage_base(s, st, binding), known |= uint64_t{1} << binding;
+        return stage_storage_word(bases[binding], offset);
+    };
+    const auto& code = st.info.handle_programs[program];
+    for (uint32_t k = 0; k < count; k++) out[k] = Shader::EvaluateHandleProgram(code, read_cbuf, read_storage, k).value_or(0U);
 }
 
 namespace {
@@ -1201,7 +1273,7 @@ uint64_t disk_stamp() {
     // (and a GPU's mesh shaders: a file of native task and mesh programs is no use to the compute fallback, nor its to one)
     // (the fallback's bit is 0x12, not 2: a file a start-up made with programs marked native mesh and fallback at once (seed_translate)
     // is no use to it, and only a fallback GPU wrote one)
-    const uint32_t mesh = (dev.mesh_shader ? 1u : 0u) | (dev.mesh_fallback ? 0x12u : 0u);
+    const uint32_t mesh = (dev.mesh_shader ? 1u : 0u) | (dev.mesh_fallback ? 0x12u : 0u) | (dev.task_mesh_fallback ? 4u : 0u);
     add(&mesh, sizeof mesh);
     // (the records keep Shader::Info as it lies in memory: a cache written by another C++ library (the MSVC build's, then the
     // llvm-mingw one's libc++) has other layouts, and reading it crashed at start. The library and the sizes, so it starts again)
@@ -1215,6 +1287,11 @@ uint64_t disk_stamp() {
 #endif
     };
     add(abi, sizeof abi);
+    // (and handle tables off, host_info: only then, so the GPUs that have them keep one cache)
+    if (!handle_tables_on()) {
+        const uint32_t no_tables = 0x6e687462u;   // ("nhtb")
+        add(&no_tables, sizeof no_tables);
+    }
     {   // (the translation's per-GPU settings, set by coopmat_init at device creation: AMD/Intel's invariant positions, the colour
         // NaN guard, the matrix layout measured on this device. Without them a cache made on one GPU was used on another (a laptop's
         // integrated and dedicated GPUs), and RX_VK_NO_INVARIANT / RX_VK_NO_NAN_GUARD did nothing for programs already cached)
@@ -1241,7 +1318,7 @@ uint64_t disk_stamp() {
         add(&salign, sizeof salign);
     }
     for (char** e = _environ; e && *e; e++)
-        for (const char* pre : {"RX_VK_OOT", "RX_VK_MMA", "RX_VK_NATIVE", "RX_VK_NAN", "RX_VK_TASK_CAP", "RX_VK_NETWORK", "RX_VK_GP", "RX_VK_FOLLOW", "RX_VK_NO_FOLLOW", "RX_VK_NO_F16", "RX_VK_SHARED", "RX_VK_MESH", "RX_VK_NO_INVARIANT", "RX_VK_NO_NAN_GUARD", "RX_VK_MARKERS", "EDEN_"})
+        for (const char* pre : {"RX_VK_OOT", "RX_VK_MMA", "RX_VK_NATIVE", "RX_VK_NAN", "RX_VK_TASK_CAP", "RX_VK_NETWORK", "RX_VK_GP", "RX_VK_FOLLOW", "RX_VK_NO_FOLLOW", "RX_VK_NO_F16", "RX_VK_SHARED", "RX_VK_MESH", "RX_VK_FOLD", "RX_VK_NO_INVARIANT", "RX_VK_NO_NAN_GUARD", "RX_VK_MARKERS", "EDEN_"})
             if (!strncmp(*e, pre, strlen(pre))) add(*e, strlen(*e));
     return h;
 }
@@ -2029,7 +2106,7 @@ void translate_mesh_into(Program& p, const NvnState& s, const Code* task, const 
         Shader::Backend::Bindings bindings{};
         std::vector<std::vector<uint32_t>> kept;   // (each stage's SPIR-V, for the program cache: mesh programs were never kept,
                                                    // so each was translated and its pipeline built in the middle of play, every run)
-        const bool fallback{dev.mesh_fallback};   // (no mesh shaders: compute stages and a generated vertex stage)
+        const bool fallback = p.fallback;   // (no mesh shaders, or a task program on a GPU that runs those as compute: compute stages and a generated vertex stage)
         std::unique_ptr<Translation> task_t;
         const std::array<u32, 3> mesh_regs = mesh_registers_of(task, mesh);
         if (task) {
@@ -2079,6 +2156,11 @@ void translate_mesh_into(Program& p, const NvnState& s, const Code* task, const 
         mrt.mesh_fallback_task = task_t != nullptr;
         mrt.mesh_fallback_task_threads = task_t ? task_t->program.workgroup_size[0] : 0;
         const std::vector<uint32_t> mspirv = Shader::Backend::SPIRV::EmitSPIRV(profile(), mrt, mesh_t->program, bindings);
+        if (getenv("RX_VK_MESH_NOINLINE_ABOVE")) {   // (stream P5: the IR size the threshold is read against, with the SPIR-V's)
+            size_t ir_n = 0;
+            for (const Shader::IR::Block* b : mesh_t->program.blocks) ir_n += b->size();
+            logf("vk: mesh stage: %zu IR instructions, %zu SPIR-V words (RX_VK_MESH_NOINLINE_ABOVE)", ir_n, mspirv.size());
+        }
         kept.push_back(mspirv);
         Stage ms;
         ms.nvn_stage = bank_stage(mesh);
@@ -2221,6 +2303,7 @@ const Program* mesh_program_locked(const NvnState& s, const uint8_t color_types[
     static int logged;
     if (logged++ < 6) log_program_stages(s, "mesh draw");
     if (!mesh) return nullptr;
+    const bool fallback = dev.uses_mesh_fallback(task != nullptr);   // (a task program too, where task + mesh draws run as compute: mesh_mode.h)
     const uint64_t key = mesh_key(task, *mesh, fsc, prim, color_types);
     auto& variants = programs[key];
     program_cache_load(key, variants);
@@ -2228,7 +2311,7 @@ const Program* mesh_program_locked(const NvnState& s, const uint8_t color_types[
     for (auto& p : variants)
         if (!p->codes[0]) std::memcpy(p->codes, codes, sizeof codes);
     for (auto& p : variants) {
-        if (p->mesh != dev.mesh_shader || p->fallback != dev.mesh_fallback) continue;   // (another GPU's: native or fallback)
+        if (p->fallback != fallback || p->mesh == fallback) continue;   // (another GPU's: native or fallback)
         if (!p->ready.load(std::memory_order_acquire)) return p.get();
         if (p->failed) return nullptr;
         if (still_valid(s, *p)) return p.get();
@@ -2236,8 +2319,8 @@ const Program* mesh_program_locked(const NvnState& s, const uint8_t color_types[
     miss_note(key, "mesh", mesh->key, fsc ? fsc->key : 0, s, color_types, variants.size());
     auto p = std::make_unique<Program>();
     p->key = key;
-    p->mesh = dev.mesh_shader;   // (not a native mesh program: a fallback one is an ordinary graphics pipeline)
-    p->fallback = !dev.mesh_shader;   // (the GPU has no mesh shaders: its stages are compute and vertex)
+    p->mesh = !fallback;   // (not a native mesh program: a fallback one is an ordinary graphics pipeline)
+    p->fallback = fallback;   // (no mesh shaders, or a task program on a GPU that runs those as compute: its stages are compute and vertex)
     std::memcpy(p->codes, codes, sizeof codes);
     Program* raw = p.get();
     variants.push_back(std::move(p));
@@ -2545,7 +2628,8 @@ size_t program_cache_kept() {
 }
 /// (the precompile, before the game: vk_draw.cpp) the kept compute programs and those named, ready, each given to fn. The rest of the
 /// game's programs stay on disk until a draw asks for one
-size_t program_cache_load_some(const std::unordered_set<uint64_t>& wanted, const std::function<void(Program&)>& fn, bool computes) {
+size_t program_cache_load_some(const std::unordered_set<uint64_t>& wanted, const std::function<void(Program&)>& fn, bool computes,
+                               bool fallbacks) {
     disk_init();
     // (read and made on several threads, each with a handle of its own on the file: one after the other, the few hundred records
     // (about 200 MB) were a second or more of the start before the first pipeline was built, a CPU or the disk at a time)
@@ -2553,7 +2637,11 @@ size_t program_cache_load_some(const std::unordered_set<uint64_t>& wanted, const
     if (disk_on) {
         std::lock_guard lk(disk_mu);
         for (auto it = disk_records.begin(); it != disk_records.end();) {
-            if (wanted.count(it->first) || (computes && !it->second.empty() && (it->second[0].kind & 1))) {
+            // (fallbacks: and every program translated for the mesh fallback (kind 4), not only those play has drawn, whatever the
+            // compute list says: their compute pipelines, made in play, took AMD up to 12 s each on first sight, the foliage and the
+            // door white until then. Only a GPU without mesh shaders has such programs)
+            if (wanted.count(it->first) ||
+                (!it->second.empty() && ((computes && (it->second[0].kind & 1)) || (fallbacks && (it->second[0].kind & 4))))) {
                 work.push_back({it->first, std::move(it->second)});
                 it = disk_records.erase(it);
             } else {
@@ -2819,8 +2907,8 @@ std::unique_ptr<Program> seed_translate(const SeedStage* const by_stage[8], cons
     // the draws of the same program then used in place of the dynamic one: validation 07842 and 04879)
     const bool is_mesh = by_stage[7] != nullptr;
     if (is_mesh && !dev.mesh_shader && !dev.mesh_fallback) return nullptr;
-    p->mesh = is_mesh && dev.mesh_shader;
-    p->fallback = is_mesh && !dev.mesh_shader;
+    p->fallback = is_mesh && dev.uses_mesh_fallback(by_stage[6] != nullptr);
+    p->mesh = is_mesh && !p->fallback;
     if (is_mesh)
         translate_mesh_into(*p, *blank, by_stage[6] ? &code[6] : nullptr, code[7], nullptr, by_stage[1] ? &code[1] : nullptr, color_types);
     else if (p->compute) {
@@ -3009,9 +3097,9 @@ const Program* seed_variant_of(const uint64_t code[3], bool mesh, const uint32_t
     auto p = std::make_unique<Program>();
     p->key = mesh ? mesh_key(by_stage[6] ? &code_of[6] : nullptr, code_of[7], fs, nullptr, color_types)
                   : graphics_key(code_of[0], fs, attributes, color_types);
-    p->mesh = mesh && dev.mesh_shader;   // (as play makes it, mesh_program_locked: a fallback one is an ordinary graphics pipeline)
-    p->fallback = mesh && !dev.mesh_shader;
     if (mesh && !dev.mesh_shader && !dev.mesh_fallback) return nullptr;
+    p->fallback = mesh && dev.uses_mesh_fallback(by_stage[6] != nullptr);   // (as play makes it, mesh_program_locked: a fallback one is an ordinary graphics pipeline)
+    p->mesh = mesh && !p->fallback;
     p->codes[0] = code[0], p->codes[1] = code[1], p->codes[2] = code[2];
     questions_in = &questions, questions_at = 0, answers_in = &answers;
     struct Reset { ~Reset() { questions_in = nullptr, answers_in = nullptr; } } reset;

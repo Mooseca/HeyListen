@@ -210,4 +210,4 @@ jobs:
       - name: Parts to the linux-parts release
         run: engine/scripts/linux/publish_parts.sh dist/parts
       - name: AppImage and list to the tag's release
-        run: gh release upload "$RELEASE_TAG" --clobber dist/HeyListen-*-x86_64.AppImage dist/parts/heylisten-linux.txt dist/SHA256SUMS-linux.txt
+        run: gh release upload "$RELEASE_TAG" --clobber dist/HeyListen-*-Linux-x64.AppImage dist/parts/heylisten-linux.txt dist/SHA256SUMS-linux.txt

@@ -3,7 +3,7 @@
 # nothing made from it is in it: the game is built from the player's own copy, as on Windows.
 #
 #   scripts/linux/deps.sh        (first: the compiler, Python, FFmpeg, SDL2, headers into build-linux/deps)
-#   scripts/linux/appimage.sh    -> build-linux/HeyListen-<version>-x86_64.AppImage
+#   scripts/linux/appimage.sh    -> build-linux/HeyListen-<version>-Linux-x64.AppImage
 # The same image builds the game and, with --play, starts the one it saved.
 #
 # Built on the oldest system it is for (CI: Ubuntu 22.04): the sysroot it carries is that system's C library, so the
@@ -57,6 +57,8 @@ cp -a gpu/render/*.h "$T/gpu/render/"
 # (every gpu/vk header the host's sources include: v2.0.6 shipped without oot_cheat_items.h and no Linux build finished, issue 990.
 # tests/test_appimage_headers.py checks that this covers what host/ includes)
 for h in $(grep -rhoE 'gpu/vk/[A-Za-z0-9_]+[.]h' host | sort -u); do if [ -f "$h" ]; then cp -a "$h" "$T/gpu/vk/"; fi; done
+# (the one compat header the host includes: the crash helper and the crash record read the switches by its rule)
+mkdir -p "$T/gpu/vk/compat"; cp -a gpu/vk/compat/hookshot_env.h "$T/gpu/vk/compat/"
 cp -a third_party/opus "$T/third_party/"
 cp -a third_party/kenney_input "$T/third_party/"
 # (zstd's decoder: nx2/build.py compiles it into the game for host/hl_stream.c)
@@ -158,6 +160,8 @@ EOF
 cp builder/linux/AppRun "$APPDIR/AppRun"
 cp builder/linux/heylisten-builder.desktop "$APPDIR/"
 cp assets/heylisten.png "$APPDIR/heylisten.png"
+# (RecompLauncher reads this from inside the AppImage, at /recomplauncher.json: docs/recomplauncher.md)
+cp ../recomplauncher.json "$APPDIR/recomplauncher.json"
 mkdir -p "$APPDIR/usr/share/icons/hicolor/256x256/apps"
 cp assets/heylisten.png "$APPDIR/usr/share/icons/hicolor/256x256/apps/heylisten.png"
 
@@ -168,7 +172,7 @@ cp assets/heylisten.png "$APPDIR/usr/share/icons/hicolor/256x256/apps/heylisten.
 python3 scripts/linux/make_parts.py "$APPDIR" "$VERSION" "$B/parts" \
     --base "https://github.com/${GITHUB_REPOSITORY:-Sacrappy/HeyListen}/releases/download/linux-parts"
 
-OUT=$B/HeyListen-$VERSION-x86_64.AppImage
+OUT=$B/HeyListen-$VERSION-Linux-x64.AppImage
 rm -f "$OUT"
 ARCH=x86_64 APPIMAGE_EXTRACT_AND_RUN=1 "$DEPS/appimagetool" --runtime-file "$DEPS/runtime-x86_64" --comp zstd "$APPDIR" "$OUT"
 echo "$OUT: $(du -h "$OUT" | cut -f1)"

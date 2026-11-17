@@ -407,6 +407,9 @@ public:
     Id mesh_attributes{};
     Id mesh_map{};
     Id mesh_primitive_count{};
+    /// (hookshot) a fallback mesh workgroup's slot (task workgroup * threads + its index), read from the task's map in the
+    /// entry block (EmitMeshPrologue); invalid without a task program, where the slot is the workgroup id
+    Id mesh_fallback_slot{};
     Id mesh_shared_u32{};   ///< pointer type to one workgroup word
     Id mesh_primitive_indices{};
     MeshInfo mesh_info{};
@@ -430,6 +433,7 @@ public:
     // the payload, map and record buffers, pushed as device addresses; a generated vertex stage reads the records.
     bool mesh_fallback{};
     bool wants_mesh_fallback{};
+    u32 ir_instruction_count{};   ///< (hookshot, global_helper_policy.h) the program's IR instructions, counted before the emission
     Id mesh_fallback_word_ptr{};   ///< PhysicalStorageBuffer pointer to a block of one u32
     u32 mesh_fallback_payload_member_index{};
     u32 mesh_fallback_records_member_index{};

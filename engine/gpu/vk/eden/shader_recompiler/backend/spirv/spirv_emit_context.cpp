@@ -18,6 +18,7 @@
 #include "common/common_types.h"
 #include "common/div_ceil.h"
 #include "shader_recompiler/backend/spirv/emit_spirv.h"
+#include "shader_recompiler/backend/spirv/global_helper_policy.h"
 #include "shader_recompiler/backend/spirv/mma_layout.h"
 #include "shader_recompiler/backend/spirv/spirv_emit_context.h"
 
@@ -587,6 +588,9 @@ EmitContext::EmitContext(const Profile& profile_, const RuntimeInfo& runtime_inf
     DefineImages(program.info, image_binding, bindings.image_scaling_index);
     DefineAttributeMemAccess(program.info);
     DefineWriteStorageCasLoopFunction(program.info);
+    for (const IR::Block* const block : program.blocks) {
+        ir_instruction_count += static_cast<u32>(block->size());
+    }
     DefineGlobalMemoryFunctions(program.info);
     DefineRescalingInput(program.info);
     DefineRenderArea(program.info);
@@ -1207,13 +1211,22 @@ void EmitContext::DefineGlobalMemoryFunctions(const Info& info) {
         OpBranch(end_label);
         AddLabel(end_label);
     }};
-    // (RX_VK_MESH_G3=1, task and mesh stages, off by default: a name under RX_VK_MESH, so the program cache starts again with it) The
+    // (RX_VK_MESH_G3, task and mesh stages, on by default on every GPU, RX_VK_MESH_G3=0 off: a name under RX_VK_MESH, so a value set
+    // by hand has its own program cache, and the default moved the stamp once) The
     // search below worked each candidate's range out again at every global access, and a mesh program has ~80 of them inlined: two
     // loads, an ArrayLength and a dozen 64-bit operations a candidate, 40% of the code of OoT's 225k-word mesh shader, which NVIDIA runs
     // from the instruction cache's edge (1.1 ms of 1.5 ms came back with the helpers not inlined). Here a range (its aligned base, its
     // length in bytes) is made once, in the first block, and an access is a subtraction and a comparison.
-    static const bool g3_hoist{getenv("RX_VK_MESH_G3") != nullptr && atoi(getenv("RX_VK_MESH_G3")) != 0};
-    const bool hoist{g3_hoist && (stage == Stage::Task || stage == Stage::Mesh) && Sirit::ValidId(storage_types.U32.array)};
+    static const bool g3_hoist{getenv("RX_VK_MESH_G3") == nullptr || atoi(getenv("RX_VK_MESH_G3")) != 0};
+    // (RX_VK_MESH_NOINLINE_ABOVE=n, 30000 by default, =0: off: a mesh stage of more than n IR instructions keeps its helpers out of line and
+    // its ranges unhoisted, global_helper_policy.h)
+    static const u32 noinline_above{NoInlineAbove(getenv("RX_VK_MESH_NOINLINE_ABOVE"))};
+    const bool big_mesh{LeaveHelpersOutOfLine(stage == Stage::Mesh, ir_instruction_count, noinline_above)};
+    if (noinline_above != 0 && stage == Stage::Mesh) {
+        LOG_WARNING(Shader_SPIRV, "mesh stage of {} IR instructions: helpers {} (RX_VK_MESH_NOINLINE_ABOVE {})", ir_instruction_count,
+                    big_mesh ? "out of line" : "as before", noinline_above);
+    }
+    const bool hoist{g3_hoist && !big_mesh && (stage == Stage::Task || stage == Stage::Mesh) && Sirit::ValidId(storage_types.U32.array)};
     struct Range { Id lo, len; };
     std::map<std::pair<size_t, u32>, Range> ranges;   // (a plain buffer: (index, 0); a table's entry: (table + 100000, k))
     const u64 align_mask_all{~(profile.min_ssbo_alignment - 1U)};
@@ -1450,8 +1463,8 @@ void EmitContext::DefineGlobalMemoryFunctions(const Info& info) {
         static const bool gm_inline{!getenv("EDEN_NX2_GM_INLINE") || getenv("EDEN_NX2_GM_INLINE")[0] != '0'};
         // (RX_VK_MESH_NOINLINE=task|mesh|both, diagnosis, off by default: those stages' helpers not inlined; the stamp has it)
         static const char* const noinline_env{getenv("RX_VK_MESH_NOINLINE")};
-        const bool noinline_here{noinline_env && ((stage == Stage::Task && (strstr(noinline_env, "task") || strstr(noinline_env, "both"))) ||
-                                                   (stage == Stage::Mesh && (strstr(noinline_env, "mesh") || strstr(noinline_env, "both"))))};
+        const bool noinline_here{big_mesh || (noinline_env && ((stage == Stage::Task && (strstr(noinline_env, "task") || strstr(noinline_env, "both"))) ||
+                                                   (stage == Stage::Mesh && (strstr(noinline_env, "mesh") || strstr(noinline_env, "both")))))};
         const bool inline_here{gm_inline && (stage == Stage::Task || stage == Stage::Mesh ||
                                             (shift == 4 && runtime_info.inline_global_128_loads))};
         const Id func_id{OpFunction(type, inline_here && !noinline_here ? spv::FunctionControlMask::Inline : spv::FunctionControlMask::DontInline,

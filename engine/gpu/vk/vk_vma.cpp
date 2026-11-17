@@ -6,6 +6,7 @@
 #define VMA_DYNAMIC_VULKAN_FUNCTIONS 1
 #include "vk_internal.h"
 #include "vk_ledger.h"
+#include "vram_allowance.h"
 #include <vk_mem_alloc.h>
 #include <algorithm>
 #include <atomic>
@@ -517,6 +518,20 @@ bool vram_usage(uint64_t* used, uint64_t* budget, uint64_t* block_free) {
     // keep-rendered paths an 8 GB card takes when its VRAM fills (the rainbow textures of issue 993 were never seen here otherwise))
     static const uint64_t test_allowed = getenv("RX_VK_TEST_ALLOWED_MB") ? (uint64_t)atoi(getenv("RX_VK_TEST_ALLOWED_MB")) << 20 : 0;
     if (test_allowed && t > test_allowed) t = test_allowed;
+    // (longshot #1091) an allowance the driver gives as the count itself is past: AMD's Windows driver, once a process is over what it
+    // allows, reports the allowance as what the process uses, so every rule saw the count within it while the driver paged (frames of
+    // 1-15 s on 8 GB cards). vram_allowance::past_allowance makes it a tenth under the count: the rules give back until the driver
+    // reports an allowance over the count again. RX_VK_ALLOWED_AT_COUNT=0: as the driver says
+    static const bool at_count_rule = !getenv("RX_VK_ALLOWED_AT_COUNT") || atoi(getenv("RX_VK_ALLOWED_AT_COUNT")) != 0;
+    if (at_count_rule) {
+        const uint64_t was = t;
+        t = vram_allowance::past_allowance(u, t);
+        static std::atomic<int> told{0};
+        if (t != was && told.fetch_add(1, std::memory_order_relaxed) < 8)
+            logf("vk: the driver's allowance is the count itself (%llu MB used of %llu): past it, taken as %llu MB "
+                 "(RX_VK_ALLOWED_AT_COUNT=0: as the driver says)", (unsigned long long)(u >> 20), (unsigned long long)(was >> 20),
+                 (unsigned long long)(t >> 20));
+    }
     *used = u, *budget = t;
     if (block_free) *block_free = f;
     return t != 0;

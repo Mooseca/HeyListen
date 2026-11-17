@@ -42,7 +42,7 @@ def main():
     need("const bool quick = serial && intel_quick_compute() && !(ci.flags & VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT);" in build,
          "the quick build is not limited to the serial builds and the switch")
     need("if (quick) ci.flags |= VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT;" in build, "the first build keeps the optimizer")
-    made = build[build.index("q.compute_pipeline = made;"):]
+    made = build[build.index("std::atomic_ref<VkPipeline>(q.compute_pipeline).store(made, std::memory_order_release);"):]
     need("if (quick) jobs_push_serial([job] { compute_optimize(const_cast<Program&>(*job)); });" in made and
          "else cs_module_release(q);" in made, "the optimized build is not queued once the quick one is made, or its module is let go")
     need("jobs_push_serial(std::move(build), true)" in dispatch, "a dispatch's build is not in the serial thread's front lane")
@@ -51,7 +51,7 @@ def main():
 
     # (bound once made, the quick one kept: a recording may hold it)
     need("const VkPipeline optimized = p.compute_optimized.load(std::memory_order_acquire);" in dispatch and
-         "const VkPipeline bound = optimized ? optimized : p.compute_pipeline;" in dispatch and
+         "const VkPipeline bound = optimized ? optimized : pipe;" in dispatch and
          "vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, bound);" in dispatch,
          "the dispatch does not bind the optimized pipeline once made")
     opt = block(draw, "void compute_optimize(Program& q) {")

@@ -8,8 +8,8 @@
 // the newest one it finds in them. Windows' paths are wide all the way (GetModuleFileNameW, _wgetenv), so any folder name
 // works. On Linux NGX takes only ASCII paths: a folder named otherwise goes to it as /proc/self/fd/<n> (wide()), and the
 // runtime itself has to be in a folder whose real path is ASCII (the log and the menu say so when it is not). The Insert
-// menu's DLSS model row (opts.dlss_model, upscaler_rows.h) chooses DLSS's preset: K by default, M, L, or NVIDIA's default
-// (0). RX_VK_DLSS_PRESET=<letter> (or 0) over it. RX_VK_DLSS_LOG=1: NGX's own log in ours.
+// menu's DLSS model row (opts.dlss_model, upscaler_rows.h) chooses DLSS's preset: K by default (the CNN's E on a card with
+// less than 7 GB of video memory), M, L, or NVIDIA's default (0). RX_VK_DLSS_PRESET=<letter> (or 0) over it. RX_VK_DLSS_LOG=1: NGX's own log in ours.
 //
 // NVIDIA's NGX SDK is not part of Hookshot (NVIDIA's license): a local build fetches it (scripts/ngx_sdk.py) and builds with
 // HOOKSHOT_NGX_SDK, which compiles this file with HOOKSHOT_NGX. Without it only the stubs at the end are here.
@@ -29,6 +29,7 @@
 #endif
 
 #include "dlss_checks.h"
+#include "perf_report.h"
 #include "upscaler_rows.h"
 #include "vk_menu.h"
 #include "vk_paths.h"
@@ -265,7 +266,7 @@ bool ngx_init() {
 /// DLSS's preset: the DLSS model row's, RX_VK_DLSS_PRESET over it (upscaler_rows.h dlss_preset)
 unsigned wanted_preset() {
     static const char* const env = getenv("RX_VK_DLSS_PRESET");
-    return upscaler_rows::dlss_preset(opts.dlss_model, env && *env ? env : nullptr);
+    return upscaler_rows::dlss_preset(opts.dlss_model, env && *env ? env : nullptr, device_vram_bytes());
 }
 
 /// DLSS's feature for this output size and preset, made when either changes (cmd: its creation's work): the engine's
@@ -305,6 +306,7 @@ int prepare(VkCommandBuffer cmd, uint32_t rw, uint32_t rh, uint32_t ow, uint32_t
     const size_t nmodes = aa ? 2 : 5;
     NVSDK_NGX_PerfQuality_Value mode = modes[0];
     unsigned max_w = 0, max_h = 0, min_w = 0, min_h = 0;
+    unsigned create_w = ow, create_h = oh;   // (the feature's creation size: the mode's recommended one, DLAA's the output's)
     bool found = aa;
     if (aa) max_w = min_w = ow, max_h = min_h = oh;   // (DLAA: the render size is the output's, one size)
     for (size_t i = 0; i < nmodes && !found; i++) {
@@ -313,21 +315,24 @@ int prepare(VkCommandBuffer cmd, uint32_t rw, uint32_t rh, uint32_t ow, uint32_t
         float sharp = 0;
         if (NVSDK_NGX_FAILED(NGX_DLSS_GET_OPTIMAL_SETTINGS(s.caps, ow, oh, m, &w, &h, &xw, &xh, &nw, &nh, &sharp)) || !w) continue;
         if (rw >= nw && rh >= nh && rw <= xw && rh <= xh) {
-            mode = m, max_w = xw, max_h = xh, min_w = nw, min_h = nh, found = true;
+            mode = m, max_w = xw, max_h = xh, min_w = nw, min_h = nh, create_w = w, create_h = h, found = true;
             break;
         }
     }
     if (!found) return *fail = "no DLSS mode takes this render size", 0;
-    // (the DLSS model row's preset for every mode, K by default: NVIDIA's transformer model. 0: NVIDIA's own per mode)
+    // (the DLSS model row's preset for every mode, K by default: NVIDIA's transformer model, or its CNN's E under 7 GB of
+    // video memory. 0: NVIDIA's own per mode)
     static_assert(NVSDK_NGX_DLSS_Hint_Render_Preset_K == 11 && NVSDK_NGX_DLSS_Hint_Render_Preset_L == 12 &&
-                  NVSDK_NGX_DLSS_Hint_Render_Preset_M == 13 && NVSDK_NGX_DLSS_Hint_Render_Preset_Default == 0);
+                  NVSDK_NGX_DLSS_Hint_Render_Preset_M == 13 && NVSDK_NGX_DLSS_Hint_Render_Preset_Default == 0 &&
+                  NVSDK_NGX_DLSS_Hint_Render_Preset_E == upscaler_rows::kPresetE);
     for (const char* k : {NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_DLAA, NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_Quality,
                           NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_Balanced, NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_Performance,
                           NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_UltraPerformance,
                           NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_UltraQuality})
         NVSDK_NGX_Parameter_SetUI(s.params, k, preset);
     NVSDK_NGX_DLSS_Create_Params cp{};
-    cp.Feature.InWidth = max_w, cp.Feature.InHeight = max_h, cp.Feature.InTargetWidth = ow, cp.Feature.InTargetHeight = oh;
+    // Feature creation takes the mode's recommended size; the input images still cover its dynamic range.
+    cp.Feature.InWidth = create_w, cp.Feature.InHeight = create_h, cp.Feature.InTargetWidth = ow, cp.Feature.InTargetHeight = oh;
     cp.Feature.InPerfQualityValue = mode;
     // (LDR colour, already tonemapped: no exposure; motion at the render size, not jittered; depth not reversed)
     cp.InFeatureCreateFlags = NVSDK_NGX_DLSS_Feature_Flags_MVLowRes;
@@ -343,6 +348,8 @@ int prepare(VkCommandBuffer cmd, uint32_t rw, uint32_t rh, uint32_t ow, uint32_t
     s.feature_rw = max_w, s.feature_rh = max_h, s.feature_ow = ow, s.feature_oh = oh, s.min_rw = min_w, s.min_rh = min_h;
     s.feature_preset = preset;
     s.features_made++;
+    if (s.features_made > 1) perf_event(perf_report::kDlssRecreated);   // (made again in play: a stall; perf_report.cpp)
+    logf("vk: NVIDIA DLSS: feature create size %ux%u (recommended), input resources %ux%u", create_w, create_h, max_w, max_h);
     logf("vk: NVIDIA DLSS: feature %llu made (%s; frame %llu, %.1f ms of CPU): %ux%u (%ux%u to %ux%u) -> %ux%u, mode %d, "
          "preset %c%s", (unsigned long long)s.features_made, why, (unsigned long long)texture_frame_no(), made_ms, rw, rh,
          min_w, min_h, max_w, max_h, ow, oh, (int)mode, upscaler_rows::preset_letter(preset),

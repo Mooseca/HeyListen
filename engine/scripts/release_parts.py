@@ -197,7 +197,7 @@ def package(a):
     if os.path.exists(out):
         shutil.rmtree(out)
     shutil.copytree(a.publish, out)
-    copy(a.setup, os.path.join(out, "HookshotBuilder-Setup.exe"))   # (the builder's Repair runs it)
+    copy(a.setup, os.path.join(out, "HeyListenBuilder-Setup.exe"))   # (the builder's Repair runs it)
     copy(os.path.join(ROOT, "LICENSE"), os.path.join(out, "LICENSE"))
     tools = os.path.join(out, "tools")
     # (assets: HeyListen's icon resource, nx2/build.py; native: the native engine, compiled into the game by nx2/build.py)

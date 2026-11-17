@@ -15,7 +15,7 @@
 extern "C" {
 #endif
 
-#define MKWVK_API_VERSION 13
+#define MKWVK_API_VERSION 14
 enum { HOS_OPT_CHEAT_HEARTS = 32, HOS_OPT_CHEAT_FLIGHT, HOS_OPT_CHEAT_ACTION, HOS_OPT_CHEAT_CAMERA };
 /* (hookshot) the Motion page's rows (host/pad_sdl.c reads them, vk_replay.cpp's option answers them): Motion controls on
    or off, the horizontal's and the vertical's sensitivity in percent, each turned around, and the deadzone (0 to 2) */
@@ -135,6 +135,12 @@ typedef struct MkwVkHost {
        and its mirrors' and imports' lives, for the recorder's crash report: what (MKWVK_TRACE_*), the guest range, the
        pool's guest start, the submission's timeline value the write is recorded in, and the GPU's completed value now */
     void (*trace_gpu)(uint32_t what, uint64_t guest, uint64_t size, uint64_t pool, uint64_t value, uint64_t done);
+    /* (version 14, heylisten) the performance summary (gpu/vk/perf_report.cpp), asked about once a second while Send performance
+       statistics is on: the map Link is in and his age ("Kokiri Forest (child)", as the log's map: line; "" before a save is
+       loaded) into map, and the movies' totals so far (host/nn_video.c): [0] pictures shown, [1] skipped to keep up with the
+       sound, [2] shown late, [3] decoding time in ns, [4] decoders that did not start (the last three are not measured in
+       HeyListen: 0). Returns the build's version (HOOKSHOT_VERSION, "v0.4.0 (source <hash>)") */
+    const char *(*perf_info)(char *map, int cap, int64_t movie[5]);
 } MkwVkHost;
 enum {
     MKWVK_TRACE_WRITEBACK = 1,     /* a mirror's GPU writes copied into guest memory (in a submission) */

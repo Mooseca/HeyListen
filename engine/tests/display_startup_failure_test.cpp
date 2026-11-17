@@ -28,6 +28,8 @@ static std::string mode;
 static unsigned loads, inits, windows, threads, offscreen, signals, sleeps, flushes, waited, prepares;
 static std::vector<std::string> logs;
 void hos_discord_start() {} // Inert optional IPC startup; the fixture exercises display startup only.
+void hos_crash_clean_end() {}   // (host/hos_crash_record.c: the end of a run is no crash)
+int hos_crash_helper_main(int, char**) { return -1; } // (host/hos_crash_dialog.c: not a crash window's helper, the game itself)
 
 static void require(bool condition, const char* message) {
     if (!condition) throw std::runtime_error(message);

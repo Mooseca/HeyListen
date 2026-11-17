@@ -53,6 +53,13 @@ typedef struct { uint32_t magic; uint16_t w, h; uint32_t format, tiling; } Pref;
 
 /* (rgba NULL: a picture decoded as NV12 is kept as that alone; its pool makes the RGBA if a reader wants it) */
 typedef struct { uint8_t *rgba, *nv12; int w, h; int64_t pts; int last; } Picture;
+/* (heylisten) every movie's totals this session, for the performance summary (hos_perf_info, gpu/vk/perf_report.cpp): pictures
+   shown (taken by the game), skipped to keep up with the sound, shown late (not measured here: 0), decoding time in ns (not
+   measured: 0), decoders that did not start (0). Added as each happens, so a movie still playing at a summary counts too */
+static int64_t movie_totals[5];
+void hos_movie_stats(int64_t out[5]) {
+    for (int i = 0; i < 5; i++) out[i] = __atomic_load_n(&movie_totals[i], __ATOMIC_RELAXED);
+}
 /* a submission waiting to be decoded (pkt NULL: the stream's end) */
 typedef struct Pending { AVPacket *pkt; struct Pending *next; } Pending;
 #ifdef _WIN32
@@ -125,8 +132,7 @@ static void set_host(uint64_t obj, uint32_t magic, void *p) {
         if (i == nhost_objs) {
             if (nhost_objs == cap_host_objs) {
                 cap_host_objs = cap_host_objs ? cap_host_objs * 2 : 16;
-                host_objs = (HostObj *)realloc(host_objs, cap_host_objs * sizeof *host_objs);
-                if (!host_objs) hos_fatal(NULL, "video: out of memory");
+                host_objs = (HostObj *)hos_xrealloc(host_objs, cap_host_objs * sizeof *host_objs, "video: decoder table");
             }
             nhost_objs++;
         }
@@ -162,7 +168,7 @@ HLE(_ZN2nn5codec31CalculateDecoderImagePoolBufferEPmS1_RKNS0_27VideoDecoderImage
 /* InitializeDecoderImagePool(pool, void* memory, size, Preference const&, u32 count) */
 HLE(_ZN2nn5codec26InitializeDecoderImagePoolEPNS0_25VideoDecoderImagePoolTypeEPvmRKNS0_27VideoDecoderImagePreferenceEj) {
     const Pref *p = (const Pref *)GP(ARG(3));
-    Pool *o = (Pool *)calloc(1, sizeof *o);
+    Pool *o = (Pool *)hos_xcalloc(1, sizeof *o, "video: image pool");
     o->w = p->magic == PREF_MAGIC && p->w ? p->w : 1280, o->h = p->magic == PREF_MAGIC && p->h ? p->h : 720;
     o->format = p->magic == PREF_MAGIC ? (int)p->format : 2;
     o->count = (int)ARG(4) > 0 ? (int)ARG(4) : 1;
@@ -643,6 +649,7 @@ static void dec_acquire(Ctx *c) {
             d->qhead = (d->qhead + 1) % MAX_QUEUE, d->qn--;
             skipped++;
         }
+        __atomic_add_fetch(&movie_totals[1], skipped, __ATOMIC_RELAXED);
         if (skipped && video_log()) hos_log("video: %d pictures skipped to catch up with the movie's clock", skipped);
     }
     {   /* (HeyListen) And above 60 fps the game still takes one picture a frame: at 120 the movie ran at twice its speed,
@@ -677,6 +684,7 @@ static void dec_acquire(Ctx *c) {
             return;
         }
     }
+    __atomic_add_fetch(&movie_totals[0], 1, __ATOMIC_RELAXED);   /* (shown: a picture the game took) */
     Picture *p = &d->queue[d->qhead];
     Pool *o = (Pool *)host_of(d->slots[slot], POOL_MAGIC);
     /* (the picture at the pool's size: rows and columns past either are left out) */

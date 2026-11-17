@@ -121,7 +121,7 @@ def main():
     assert "guarded_compute(pcache," not in draw, "a build with pcache that does not hold it from a fetch"
     # (the masked clear's pipeline too, through guarded_graphics_held since the Intel gate: a raw create with pcache is none)
     assert "guarded_graphics(pcache," not in draw and "vkCreateGraphicsPipelines(dev.device, pcache," not in draw
-    assert draw.count("vkGetPipelineCacheData(") == 2, "a fetch outside the locked ones (the save's, the mapped write's under it)"
+    assert draw.count("vkGetPipelineCacheData(") == 3, "a fetch outside the locked ones (the save's, the mapped write's under it, and pcache_init's size query before any build)"
     with tempfile.TemporaryDirectory(prefix="pcache-fetch-") as tmp:
         source, exe = Path(tmp) / "check.cpp", Path(tmp) / "check.exe"
         source.write_text(HEAD + lock + MAIN, encoding="utf-8")

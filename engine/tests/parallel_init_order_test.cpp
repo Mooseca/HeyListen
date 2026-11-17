@@ -216,6 +216,7 @@ std::chrono::steady_clock::time_point bc_used_at;
 uint64_t bc_last_value = 0;
 std::atomic<bool> bc_have{false};
 constexpr uint32_t kBcLayers = 8;
+uint32_t bc_layers() { return kBcLayers; }   // (vk_texture.cpp: 1 under 8 GB; the scratch at its full size here)
 VkImage bc_scratch = VK_NULL_HANDLE, bc_scratch2 = VK_NULL_HANDLE;
 bool bc_scratch_fresh = false, bc_scratch2_fresh = false;
 bool bc_scratch_make() {

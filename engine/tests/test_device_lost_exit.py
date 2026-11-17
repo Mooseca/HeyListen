@@ -40,6 +40,8 @@ FIXTURE = r"""
 #include <mutex>
 #include <thread>
 #include <vector>
+namespace perf_report { enum { kDeviceLost = 1 }; }   // (heylisten: the performance summary's last, written once before the process ends)
+void perf_report_final(int) {}
 static std::atomic<int> reports{0};
 static std::atomic<bool> report_done{false};
 void checkpoints_report() {

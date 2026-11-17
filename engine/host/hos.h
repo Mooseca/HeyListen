@@ -14,6 +14,7 @@
 #define HOS_H
 #include "a64.h"
 #include <stdarg.h>
+#include <stddef.h>
 
 #define HLE(sym) void imp_##sym(Ctx *c)
 /* HOS_GAME_VERSION: the game update the address hooks below are for, from the build (build.py reads the main
@@ -53,6 +54,14 @@ int hos_game_is_mkw(void);
 #define HOS_GAME_TITLE "HeyListen"
 uint64_t hos_used_memory(uint64_t base);   /* (hos_mem.c) base + heap + the game's mapped pages: the used memory it is told */
 void hos_commit(uint64_t addr, uint64_t size);         /* (mkw_glue.c) guest pages made usable by host APIs */
+/* (mkw_glue.c, longshot issue 333) host memory the game cannot go on without: never NULL (but for 0 bytes). At the commit limit a
+   failed allocation is tried again for up to 5 s, as a guest commit is; then the out-of-memory line and notice, and the game stops.
+   what names it in the log. hos_out_of_memory: that line and notice, once a run (wait: shown here, or waited for, before the
+   caller stops the game) */
+void *hos_xmalloc(size_t size, const char *what);
+void *hos_xcalloc(size_t count, size_t size, const char *what);
+void *hos_xrealloc(void *old, size_t size, const char *what);
+void hos_out_of_memory(int wait);
 /* (HeyListen) 1: the heap and the address regions are reserved when the game asks for them and committed where they are
    first touched (mkw_glue.c commit_on_touch), instead of whole. A system call given a guest buffer needs hos_commit on
    it first: the kernel does not come through the handler. HOS_LAZY_COMMIT=0: committed whole, as before */
@@ -140,7 +149,8 @@ int hos_thread_priority(HosThread *t, int set, int value);
 int hos_thread_core(HosThread *t);
 int hos_cores(void);
 /* virtual cores (hos_thread.c, HOS_VCORES=1): a guest thread gives its core up for a block (hos_vcore_away: 1 if it
-   held one) and takes one again after it (hos_vcore_back); checkpoints hand it to a better waiter that asked */
+   held one, or ran without one since an escape) and takes one again after it (hos_vcore_back); checkpoints hand it to a
+   better waiter that asked */
 int hos_vcores_on(void);
 int hos_vcore_away(void);
 void hos_vcore_back(void);

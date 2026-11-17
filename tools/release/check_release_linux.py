@@ -2,7 +2,7 @@
 
     python3 -I tools/release/check_release_linux.py <tag> <dir>
 
-<dir> holds what the Linux workflow built: HeyListen-<tag>-x86_64.AppImage, and parts/ with the update parts
+<dir> holds what the Linux workflow built: HeyListen-<tag>-Linux-x64.AppImage, and parts/ with the update parts
 (HeyListenLinux-*.zip) and heylisten-linux.txt. The same refusals as tools/release/make_release.py makes for the Windows
 files:
 
@@ -74,7 +74,7 @@ def main():
 
     if not re.fullmatch(r"v[0-9]+(\.[0-9]+)*(-[0-9A-Za-z.]+)?", tag):
         sys.exit("%s is not a release tag (v0.3.2)" % tag)
-    image = os.path.join(dist, "HeyListen-%s-x86_64.AppImage" % tag)
+    image = os.path.join(dist, "HeyListen-%s-Linux-x64.AppImage" % tag)
     parts_dir = os.path.join(dist, "parts")
     listing = os.path.join(parts_dir, LIST)
     others = sorted(n for n in os.listdir(dist) if n.endswith(".AppImage") and n != os.path.basename(image))
@@ -157,6 +157,13 @@ def main():
                 bad("the AppImage's %s is not the release's list" % name)
         if not os.path.isfile(os.path.join(root, "heylisten-builder.desktop")) or not os.path.isfile(os.path.join(root, "heylisten.png")):
             bad("the AppImage has no heylisten-builder.desktop or heylisten.png")
+        # (RecompLauncher reads it from inside the AppImage: docs/recomplauncher.md)
+        manifest_in = os.path.join(root, "recomplauncher.json")
+        manifest_repo = os.path.join(ROOT, "recomplauncher.json")
+        if not os.path.isfile(manifest_in):
+            bad("the AppImage has no recomplauncher.json (RecompLauncher reads it from inside)")
+        elif os.path.isfile(manifest_repo) and sha256(manifest_in) != sha256(manifest_repo):
+            bad("the AppImage's recomplauncher.json is not the repository's")
 
     if problems:
         sys.exit("refusing:\n  " + "\n  ".join(problems))

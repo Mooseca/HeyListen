@@ -5,6 +5,8 @@
    there. TPIDRRO_EL0 (thread-local region): 0x200 bytes; the SDK's nn::os keeps the current ThreadType* at
    +0x1F8, so lifted SDK code that reads it inline finds the same thread the HLE knows. */
 #include "hos.h"
+#include "hos_crash_record.h"
+#include "hos_report_prefixes.h"
 #include <stdio.h>
 #include <stdlib.h>
 #define WIN32_LEAN_AND_MEAN
@@ -43,8 +45,10 @@ struct HosThread {
     /* the kernel side (hos_svc.c): this thread's Horizon handle and the event it blocks on */
     uint32_t kernel_handle;
     HANDLE wake;
-    /* virtual cores (HOS_VCORES): the core held + 1 (0: none), the last one, a better waiter's request, queued */
-    int vc_held, vc_last, vc_queued;
+    /* virtual cores (HOS_VCORES): the core held + 1 (0: none), the last one, a better waiter's request, queued, and
+       whether it has run without one since an escape (vc_acquire; until its next block, hos_vcore_away, or the next
+       hos_vcore_back); vc_starved: waiting longer than HOS_VCORE_STARVE_US (it goes first at the next release) */
+    int vc_held, vc_last, vc_queued, vc_escaped, vc_starved;
     volatile int vc_kick;
     int64_t vc_since, vc_took;   /* (when it began to wait for a core; when it took the one it holds) */
     int vc_tid;   /* (Linux: the host thread that last asked for a core as this thread, for vc_where) */
@@ -176,12 +180,47 @@ static int log_take_locked(char **out) {
     return n;
 }
 
+/* (hookshot) A batch goes out in one write. stderr is unbuffered (hos_main.c), so each line was a write of its own: 30-90 a
+   second in play, every one extending the log file. With the game on a slow disk (a SATA SSD, 90% full) those writes kept
+   the disk busy: its 4 KB reads took 10-200 ms where they take 0.4 ms, and what the game read from it meanwhile (a page of
+   its own code, a file of the game's) waited as long: the long frames of a session. */
 static void log_write(char **lines, int n) {
-    for (int i = 0; i < n; i++) {
-        fputs(lines[i], stderr);
-        free(lines[i]);
+    size_t total = 0;
+    for (int i = 0; i < n; i++) total += strlen(lines[i]);
+    char *all = n > 1 ? (char *)malloc(total + 1) : NULL;
+    if (all) {
+        size_t at = 0;
+        for (int i = 0; i < n; i++) {
+            const size_t len = strlen(lines[i]);
+            memcpy(all + at, lines[i], len);
+            at += len;
+            free(lines[i]);
+        }
+        fwrite(all, 1, total, stderr);
+        free(all);
+    } else {   /* (one line, or no memory for the batch: line by line) */
+        for (int i = 0; i < n; i++) {
+            fputs(lines[i], stderr);
+            free(lines[i]);
+        }
     }
     fflush(stderr);
+}
+
+/* (hookshot) and the writer waits a little after the line it is woken for, so the lines of that time go out together: a few
+   writes a second however many lines there are. A queue half full goes out at once, before a burst can fill it (a full
+   queue has the thread that logs write the line itself). HOS_LOG_BATCH_MS=<ms> (default 250, at most 2000; 0: the lines
+   there are at each wake, as before). Nothing waiting is lost: every way out writes the queue first (log_flush,
+   log_crash_filter), and the writer holds no lock while it waits */
+enum { LOG_BATCH_FULL = 1024 };
+static DWORD log_batch_ms(void) {
+    static int ms = -1;
+    if (ms < 0) {
+        const char *e = getenv("HOS_LOG_BATCH_MS");
+        const int v = e && *e ? atoi(e) : 250;
+        ms = v < 0 ? 0 : v > 2000 ? 2000 : v;
+    }
+    return (DWORD)ms;
 }
 
 static DWORD WINAPI log_main(void *p) {
@@ -191,6 +230,10 @@ static DWORD WINAPI log_main(void *p) {
     for (;;) {
         AcquireSRWLockExclusive(&log_lock);
         while (!log_count) SleepConditionVariableSRW(&log_cv, &log_lock, INFINITE, 0);
+        /* (log_queue wakes it at each line: until the time is up or the queue half full) */
+        const ULONGLONG until = GetTickCount64() + log_batch_ms();
+        for (ULONGLONG now; log_count < LOG_BATCH_FULL && (now = GetTickCount64()) < until;)
+            SleepConditionVariableSRW(&log_cv, &log_lock, (DWORD)(until - now), 0);
         const int n = log_take_locked(batch);
         AcquireSRWLockExclusive(&log_write_lock);
         ReleaseSRWLockExclusive(&log_lock);
@@ -309,6 +352,10 @@ void hos_log(const char *fmt, ...) {
     va_start(ap, fmt);
     vsnprintf(buf, sizeof buf, fmt, ap);
     va_end(ap);
+    if (!strncmp(buf, HOS_REPORT_DEVICE_LOST_PREFIX, sizeof HOS_REPORT_DEVICE_LOST_PREFIX - 1))
+        hos_crash_record_fatal(NULL, "device lost");
+    else if (!strncmp(buf, HOS_REPORT_FATAL_PREFIX, sizeof HOS_REPORT_FATAL_PREFIX - 1))
+        hos_crash_record_fatal(NULL, strstr(buf, "VK_ERROR_DEVICE_LOST") ? "device lost" : "Vulkan fatal");
     log_format(line, sizeof line, cur ? cur->name : "host", buf, qpc);
     if (log_queue(line)) return;
     fputs(line, stderr);
@@ -316,12 +363,13 @@ void hos_log(const char *fmt, ...) {
 }
 
 void hos_fatal(Ctx *c, const char *fmt, ...) {
+    if (!c) c = hos_ctx();
+    hos_crash_record_fatal(c ? c->x : NULL, "hos_fatal");
     char buf[1024];
     va_list ap;
     va_start(ap, fmt);
     vsnprintf(buf, sizeof buf, fmt, ap);
     va_end(ap);
-    if (!c) c = hos_ctx();
     log_flush();
     fprintf(stderr, "[hos %s] FATAL: %s", cur ? cur->name : "host", buf);
     if (c) fprintf(stderr, " (lr %#llx sp %#llx)", (unsigned long long)c->x[30], (unsigned long long)c->x[31]);
@@ -1290,15 +1338,23 @@ void hos_thread_log_handles(void) {
    then the one waiting longest). A waiter better than a holder asks it to give the core up (vc_kick), which it does at
    its next checkpoint (every nn::os call and SVC: hos_vcore_checkpoint), as Horizon would run the better thread at
    once. Guest code with no checkpoint (a spin loop) keeps its core, so a waiter that has waited too long runs anyway
-   without one (an "escape", logged with the holders): HOS_VCORE_ESCAPE_US for a better waiter (default 1000),
-   HOS_VCORE_ESCAPE_EQ_US otherwise (20000). Every 5 s the log has a "vcores:" line. GetCurrentCoreNumber answers the
+   without one (an "escape", logged with the holders): HOS_VCORE_ESCAPE_US for a better waiter, HOS_VCORE_ESCAPE_EQ_US
+   otherwise (both 2000000: 2 s). An escape runs a thread with no core while the holder still runs on it, so two threads
+   share per-core state (#1929); it is kept only as a deadlock breaker. 250 ms was the default before: on the 25-minute
+   route it escaped 6-8 times a run, at waits that ended by themselves within 1.2 s (0 escapes at 2 s, frame times the
+   same or better). A thread that waits only because better threads keep winning its core (they take it in turns at every
+   block, or one of them runs on) is starved, not deadlocked, and an escape runs it beside the holder for nothing: once
+   it has waited HOS_VCORE_STARVE_US (1000000: 1 s; 0: never) it goes before every other waiter at the next release of a
+   core it may use, and asks the worst holder of those cores to give the core up, whatever its priority. It runs a turn,
+   the holders ask for the core back as for any worse thread, and a wait that long ends in a grant, not an escape (#262;
+   the 5 s line counts these grants). Every 5 s the log has a "vcores:" line. GetCurrentCoreNumber answers the
    core a thread holds. */
 #if !defined(__EMSCRIPTEN__)
 static SRWLOCK vc_lock = SRWLOCK_INIT;
 static HosThread *vc_owner[16];
 static HosThread *vc_queue[1024];
 static int vc_nq;
-static struct { int64_t takes, waits, wait_ns, max_ns, escapes, kicks, yields, since; } vc_st;
+static struct { int64_t takes, waits, wait_ns, max_ns, escapes, kicks, yields, boosts, since; } vc_st;
 
 int hos_vcores_on(void) {
     static int on = -1;
@@ -1315,9 +1371,11 @@ static unsigned vc_allowed(HosThread *t) {
     if (!m) m = 1u << hos_thread_core(t);
     return m;
 }
-/* a runs before b */
+/* a runs before b: a starved waiter first (the one waiting longest first among them), then by priority */
 static int vc_better(HosThread *a, HosThread *b) {
-    return a->priority != b->priority ? a->priority < b->priority : a->vc_since < b->vc_since;
+    if (a->vc_starved != b->vc_starved) return a->vc_starved;
+    if (!a->vc_starved && a->priority != b->priority) return a->priority < b->priority;
+    return a->vc_since < b->vc_since;
 }
 /* a free core t may run on (its last one, its ideal one, then the lowest), or -1; holding vc_lock */
 static int vc_free_for(HosThread *t) {
@@ -1335,6 +1393,7 @@ static void vc_take(HosThread *t, int c) {
     t->vc_last = c + 1;
     t->vc_kick = 0;
     t->vc_took = hos_now_ns();
+    t->vc_starved = 0;
 }
 static void vc_dequeue(HosThread *t) {
     for (int i = 0; i < vc_nq; i++)
@@ -1350,6 +1409,7 @@ static void vc_grant(int c) {
     for (int i = 0; i < vc_nq; i++)
         if ((vc_allowed(vc_queue[i]) >> c & 1) && (!best || vc_better(vc_queue[i], best))) best = vc_queue[i];
     if (!best) return;
+    vc_st.boosts += best->vc_starved;
     vc_dequeue(best);
     vc_take(best, c);
     WakeConditionVariable(&best->vc_cv);
@@ -1358,10 +1418,10 @@ static void vc_thread_log(double secs);
 static void vc_stats_locked(int64_t now) {
     if (!vc_st.since) vc_st.since = now;
     if (now - vc_st.since < 5000000000LL) return;
-    hos_log("vcores: %lld takes, %lld waits (mean %.0f us, longest %.1f ms), %lld kicks, %lld yields, %lld escapes in %.0f s",
+    hos_log("vcores: %lld takes, %lld waits (mean %.0f us, longest %.1f ms), %lld kicks, %lld yields, %lld starved grants, %lld escapes in %.0f s",
             (long long)vc_st.takes, (long long)vc_st.waits, vc_st.waits ? vc_st.wait_ns / 1e3 / vc_st.waits : 0.0,
-            vc_st.max_ns / 1e6, (long long)vc_st.kicks, (long long)vc_st.yields, (long long)vc_st.escapes,
-            (now - vc_st.since) / 1e9);
+            vc_st.max_ns / 1e6, (long long)vc_st.kicks, (long long)vc_st.yields, (long long)vc_st.boosts,
+            (long long)vc_st.escapes, (now - vc_st.since) / 1e9);
     vc_thread_log((now - vc_st.since) / 1e9);
     memset(&vc_st, 0, sizeof vc_st);
     vc_st.since = now;
@@ -1556,11 +1616,12 @@ static void vc_where(HosThread *h, char *out, size_t cap) {
 }
 #endif
 static void vc_acquire(HosThread *t) {
-    static int64_t esc_better = -1, esc_eq, slice;
+    static int64_t esc_better = -1, esc_eq, slice, starve;
     if (esc_better < 0) {
-        esc_eq = vc_env_ns("HOS_VCORE_ESCAPE_EQ_US", 250000);
-        esc_better = vc_env_ns("HOS_VCORE_ESCAPE_US", 250000);
+        esc_eq = vc_env_ns("HOS_VCORE_ESCAPE_EQ_US", 2000000);
+        esc_better = vc_env_ns("HOS_VCORE_ESCAPE_US", 2000000);
         slice = vc_env_ns("HOS_VCORE_SLICE_US", 2000);
+        starve = vc_env_ns("HOS_VCORE_STARVE_US", 1000000);
     }
 #ifdef __linux__
     static _Thread_local int my_tid;
@@ -1595,8 +1656,9 @@ static void vc_acquire(HosThread *t) {
     for (;;) {
         /* the worst holder worse than t on a core t may use gives it up at its next checkpoint; after
            HOS_VCORE_SLICE_US (2000) of waiting, a holder as good as t does too (a time slice: Horizon would leave
-           it running, but its threads never run two at once on one core, which the game's per-core data needs). The
-           holder sees the request at its next nn::os call or SVC, or at a loop header (the interrupt polls) */
+           it running, but its threads never run two at once on one core, which the game's per-core data needs); once
+           t is starved (HOS_VCORE_STARVE_US), the worst holder there is, whatever its priority. The holder sees the
+           request at its next nn::os call or SVC, or at a loop header (the interrupt polls) */
         const unsigned m = vc_allowed(t);
         HosThread *worst = NULL;
         for (int k = 0; k < vc_cores(); k++) {
@@ -1606,6 +1668,11 @@ static void vc_acquire(HosThread *t) {
         if (!worst && hos_now_ns() - t0 > slice)
             for (int k = 0; k < vc_cores() && !worst; k++)
                 if ((m >> k & 1) && vc_owner[k] && vc_owner[k]->priority == t->priority) worst = vc_owner[k];
+        if (!worst && t->vc_starved)
+            for (int k = 0; k < vc_cores(); k++) {
+                HosThread *h = vc_owner[k];
+                if ((m >> k & 1) && h && (!worst || h->priority > worst->priority)) worst = h;
+            }
         if (worst && !worst->vc_kick) {
             worst->vc_kick = worst->priority > t->priority ? 1 : 2;
             Ctx *rc = worst->run_ctx;   /* (a fiber's context while it runs one) */
@@ -1620,8 +1687,11 @@ static void vc_acquire(HosThread *t) {
             break;
         }
         const int64_t waited = hos_now_ns() - t0;
+        if (starve > 0 && waited > starve) t->vc_starved = 1;
         if (waited > (worst ? esc_better : esc_eq)) {
             vc_dequeue(t);
+            t->vc_starved = 0;
+            t->vc_escaped = 1;
             vc_st.escapes++;
             static int logged;
             if (logged < 400) {   /* (40 were all spent in a zone's load: the escapes of steady play went unlogged) */
@@ -1690,7 +1760,7 @@ static void vc_release(HosThread *t) {
     vc_grant(c);
     ReleaseSRWLockExclusive(&vc_lock);
 }
-/* gives the core to a waiter allowed on it that is better than t (strict) or as good (a yield) */
+/* gives the core to a waiter allowed on it that is better than t (strict) or as good (a yield), or starved */
 static void vc_yield(HosThread *t, int strict) {
     if (!t->vc_held) return;
     AcquireSRWLockExclusive(&vc_lock);
@@ -1698,7 +1768,7 @@ static void vc_yield(HosThread *t, int strict) {
     int any = 0;
     for (int i = 0; i < vc_nq && !any; i++) {
         HosThread *w = vc_queue[i];
-        any = (vc_allowed(w) >> c & 1) && (strict ? w->priority < t->priority : w->priority <= t->priority);
+        any = (vc_allowed(w) >> c & 1) && (w->vc_starved || (strict ? w->priority < t->priority : w->priority <= t->priority));
     }
     t->vc_kick = 0;
     if (any) vc_st.yields++;
@@ -1707,15 +1777,29 @@ static void vc_yield(HosThread *t, int strict) {
     vc_release(t);
     vc_acquire(t);
 }
+/* 1 when the caller is to take a core again after its block (hos_vcore_back): it gave its core up, or it has run without
+   one since an escape. An escape lasts until the thread's next block, as every other thread waits for a core after one;
+   it took none again before, so an escaped thread ran with no core, and the core number of a core another thread held,
+   for the rest of its life (issue 1929) */
 int hos_vcore_away(void) {
     HosThread *t = cur;
-    if (!hos_vcores_on() || !t || !t->vc_held) return 0;
+    if (!hos_vcores_on() || !t) return 0;
+    if (!t->vc_held) {
+        const int escaped = t->vc_escaped;   /* (only the outermost block of nested ones takes the core again) */
+        t->vc_escaped = 0;
+        return escaped;
+    }
     vc_release(t);
     return 1;
 }
 void hos_vcore_back(void) {
     HosThread *t = cur;
-    if (hos_vcores_on() && t && !t->vc_held) vc_acquire(t);
+    if (!hos_vcores_on() || !t) return;
+    /* after it the thread holds a core or has escaped again (vc_acquire sets the flag again): the escape the flag stood
+       for has ended, also at a back without its away (a thread's start). A flag left up while a core is held would make
+       a later inner block's away answer 1 and take a core in the middle of the outer block */
+    t->vc_escaped = 0;
+    if (!t->vc_held) vc_acquire(t);
 }
 /* Lifted code calls this from its interrupt polls with the loop's guest registers still in host registers (a64_poll_cur,
    mkw_glue.c: the poll hands over no context, so the compiler need not spill them). It, and everything it calls, must never

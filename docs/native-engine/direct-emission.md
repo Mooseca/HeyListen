@@ -950,3 +950,22 @@ Question: does the back end replay late, answer the game's waits early, and is t
 - **D. `RX_VK_SYNC_HONEST=1`** (default off, 20 lines, `vk_replay.cpp` `value_end`): a fence waits for the recording the last
   piece went into. Early answers 99% -> 0.1%; the main thread blocks in sync waits 3.2 ms a frame (0.98 waits a frame, median 2.9 ms),
   none before; 71 fps against 70 (one run each, noise); the capture's count does not move (73 pages a frame against 87).
+
+## 11. The driver banks' native writer (`HL_UBO_WRITER=1`, off by default; stream N5)
+
+**What the per-draw uniform work in the replay is.** Of a draw's descriptors, the bytes the replay makes itself are the driver banks: c2 (the
+texture, image and sampler handles, 8 bytes a slot, 0x20 to 0x968) and c0 (a 16-byte entry a storage buffer from 0x110 / 0x510 / 0x410 /
+0x210 / 0x310, and the vertex stage's float at 0x610), filled by `driver_bank_fill` (`vk_bank.cpp`) whenever the stage's texture or storage
+generation moved and the last upload was not the same (`uniform_range`, `vk_draw.cpp`). The user uniform blocks cost more (0.70 ms a frame
+against 0.17 for the banks, `docs/benchmarks/2026-11-11-tick050-replay-rounds.md`) but copy no bytes in the usual case: a pool range lookup
+and the stream's overlay. The game's own writer of the per-draw ring blocks (section 9) is translated code and is not identified: it is not
+touched.
+
+**The native path.** `engine/gpu/vk/bank_write.h` (no Vulkan, no `NvnState`): every region of these banks is the bound array masked to its
+low 32-bit words, so it is written as a copy the compiler vectorizes, whole slots first and the slot the bank's size cuts last (whole dwords
+only, as the word path's puts), with the zero gaps cleared once. The word path stays as `driver_bank_fill_ref`; compute (stage 5), task and
+mesh (6, 7: the pointer table) are not handled and run it.
+
+**Check.** `HL_UBO_WRITER_CHECK=1` (implies the switch) runs both paths on every fill, compares the bytes, counts the mismatches, logs the
+first twelve and a line every 10 s (`hl ubo writer check: N bank fills compared, M mismatches`). `engine/tests/test_bank_write.py` compares
+the writer with a copy of the word path for every bank size from 0 to 0xA00 on random state: 255,216 banks, 0 mismatches.

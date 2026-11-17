@@ -186,8 +186,11 @@ static void thread_unref(HThread *t) {
         free(t);
     }
 }
+/* (NULL when calloc is refused: CreateThread then fails as Windows' does, rather than write through NULL; issue 333's notice
+   thread is started after a host allocation kept failing, when this one may be refused too) */
 static HThread *thread_new(void) {
     HThread *t = (HThread *)calloc(1, sizeof *t);
+    if (!t) return NULL;
     t->h.type = H_THREAD;
     monitor_init(&t->mu, &t->cv);
     return t;
@@ -244,6 +247,10 @@ static void *thread_entry(void *p) {
 HANDLE CreateThread(void *attr, SIZE_T stack, LPTHREAD_START_ROUTINE fn, void *arg, DWORD flags, DWORD *id) {
     (void)attr;
     HThread *t = thread_new();
+    if (!t) {
+        last_error = ERROR_NOT_ENOUGH_MEMORY;
+        return NULL;
+    }
     t->fn = fn, t->arg = arg, t->refs = 2;   /* (the handle's and the thread's own) */
     pthread_attr_t a;
     pthread_attr_init(&a);
@@ -1145,6 +1152,10 @@ static void on_signal(int sig, siginfo_t *si, void *uctx) {
             context_to(uc, &ctx);
             return;
         }
+    /* Keep POSIX metadata in the unused tail, without changing NumberParameters
+       (the legacy CRASH log's read/write interpretation stays unchanged). */
+    rec.ExceptionInformation[13] = (ULONG_PTR)sig;
+    rec.ExceptionInformation[14] = (ULONG_PTR)(intptr_t)si->si_code;
     if (unhandled && unhandled(&ep) == EXCEPTION_CONTINUE_EXECUTION) {
         context_to(uc, &ctx);
         return;
@@ -1160,12 +1171,13 @@ static void on_signal(int sig, siginfo_t *si, void *uctx) {
         return;
     }
     signal(sig, SIG_DFL);
+    if (si->si_code <= 0) raise(sig);   /* sent signals cannot re-fault; real faults keep their original core siginfo */
 }
 static void install_signals(void) {
     static int done;
     if (done) return;
     done = 1;
-    const int sigs[] = {SIGSEGV, SIGBUS, SIGILL, SIGFPE};
+    const int sigs[] = {SIGSEGV, SIGBUS, SIGILL, SIGFPE, SIGABRT};
     for (size_t i = 0; i < sizeof sigs / sizeof sigs[0]; i++) {
         struct sigaction sa;
         memset(&sa, 0, sizeof sa);

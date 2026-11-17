@@ -50,7 +50,7 @@ class MissingNupTests(unittest.TestCase):
             return actual_stat(path, *args, **kwargs)
 
         def run(command, *args, **kwargs):
-            self.assertEqual(command, make_game.PY + ["nx2/nup.py", str(self.package), "--extract", str(self.out / ".game")])
+            self.assertEqual(command, make_game.PY + ["nx2/nup.py", str(self.package), "--extract", str(self.out / ".game"), "--progress"])
             self.events.append("extract")
             raise SystemExit(0)   # Stop at the real extraction request; never run a tool or read a package.
 

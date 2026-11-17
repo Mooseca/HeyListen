@@ -12,7 +12,7 @@
 #include <cstring>
 
 #include "imgui.h"
-#include "vk_imgui.h"
+#include "vk_ui_fonts.h"
 
 namespace mkwvk::ui {
 

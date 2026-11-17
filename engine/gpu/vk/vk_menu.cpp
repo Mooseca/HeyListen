@@ -27,12 +27,15 @@
 #include <vector>
 
 #include "vk_paths.h"
+#include "../../host/hos_atomic_file.h"   // (the options file is written whole or not at all)
 #include "vk_menu.h"
 #include "vk_perf.h"
+#include "perf_report.h"   // (telemetry_available, perf_frame_shown: the two telemetry rows)
 #include "vk_menu_hit.h"
 #include "vk_draw.h"   // (pipeline_cache_save: Restart now keeps what was built)
 #include "oot_cheat_items.h"
 #include "vk_progress.h"   // (StartupView, version_text: the start-up screen)
+#include "vk_imgui.h"   // (the renderer's side of the overlay: begin, fonts, logo, record)
 #include "vk_ui.h"
 #include "vk_menu_keys.h"   // (which gamepad buttons confirm and go back: those A and B are bound to)         // (how it looks: Dear ImGui, vk_imgui.h)
 #include "vk_work.h"   // (after the others: counts the commands that do GPU work, for full_barrier)
@@ -239,9 +242,10 @@ const char* tx_dlss_model(int v) {
         else snprintf(b, sizeof b, "NVIDIA default (RX_VK_DLSS_PRESET)");
         return b;
     }
+    if (ur::cnn_for_vram(v, device_vram_bytes())) return "CNN (E)";
     return t[std::clamp(v, 0, ur::kModels - 1)];
 }
-/// The DLSS model: the value chosen; variant 1: the game's own upscales (the row waits for DLSS or DLAA); variant 2: set for
+/// The DLSS model: the value chosen (the K row's on a card under 7 GB: why it is E); variant 1: the game's own upscales (the row waits for DLSS or DLAA); variant 2: set for
 /// this run by RX_VK_DLSS_PRESET
 const char* hn_dlss_model(int v, int variant) {
     static const char* const t[] = {
@@ -252,9 +256,12 @@ const char* hn_dlss_model(int v, int variant) {
     };
     static const char* const unused = "Used by NVIDIA DLSS and DLAA: choose one in the Upscaler row.";
     static const char* const env = "Set for this run by RX_VK_DLSS_PRESET.";
+    static const char* const cnn = "NVIDIA's CNN model, chosen for graphics cards with less than 7 GB of memory: less video "
+                                   "memory and GPU time than the transformer.";
     if (variant < 0) variant = dlss_preset_env() ? 2 : upscaler() == ur::GAME ? 1 : 0;
     if (variant == 1) return unused;
     if (variant == 2) return env;
+    if (variant == 0 && ur::cnn_for_vram(v, device_vram_bytes())) return cnn;
     return variant == 0 ? t[std::clamp(v, 0, ur::kModels - 1)] : nullptr;
 }
 const char* tx_percent(int v) {
@@ -355,9 +362,20 @@ const char* hn_resolution(int v, int variant) {
 }
 /// A row with nothing else to choose here: shown without its arrows, Left and Right leave it (and the saved value) alone
 bool row_fixed(const int* value) {
-    return (value == &opts.reflex && !reflex_available()) || (value == &opts.dlss && ur::upscaler_fixed(upscalers_available())) ||
+    return ((value == &opts.send_perf || value == &opts.send_crash) && !telemetry_available()) || (value == &opts.reflex && !reflex_available()) || (value == &opts.dlss && ur::upscaler_fixed(upscalers_available())) ||
            (value == &opts.resolution && ur::resolution_fixed(upscaler())) || (value == &opts.upscale && !filter_needed()) ||
            (value == &opts.dlss_model && ur::model_fixed(upscaler(), dlss_preset_env() != nullptr));
+}
+/// (heylisten) The two telemetry rows: Off or On, and "Not available in this build" when the build has no address to send to
+/// (nx2/addresses.ini's telemetry= is empty), where nothing can be sent whatever the row says
+const char* tx_telemetry(int v) {
+    if (!telemetry_available()) return "Not available in this build";
+    return v ? "On" : "Off";
+}
+const char* hn_telemetry(int v, int variant) {
+    (void)v;
+    if (variant > 0) return nullptr;
+    return telemetry_available() ? nullptr : "This build has no address to send to, so nothing is sent.";
 }
 const char* tx_output_res(int v) {
     static char b[32];
@@ -659,6 +677,15 @@ Row rows[] = {
     {TAB_GAMEPLAY, "Skip title screen", &opts.skip_title, 0, 1, 1, tx_onoff,   // (HL_OPT_SKIP_TITLE, vk_opt_ids.h, host/oot_autoload.c)
      "Starts a launch with the most recent saved game: presses through the title screen and its file list. Does nothing "
      "until the game has a save. Applies after a restart.", nullptr, true, true},
+    {TAB_GAMEPLAY, "Send performance statistics", &opts.send_perf, 0, 1, 1, tx_telemetry,
+     "Off by default. On: the game counts how its frames go (frame times, stutters and what they waited on, per map) and sends "
+     "a summary of the counts, without your name or any ID; what is kept of it is totals for all players. Every 5 minutes of play "
+     "and at exit it writes a summary to perf_pending in the game folder, and sends it at the next start; perf_sent keeps a copy "
+     "of what was sent. Turning it off deletes both folders. See docs/performance-statistics.md.", hn_telemetry, false, true},
+    {TAB_GAMEPLAY, "Send crash reports automatically", &opts.send_crash, 0, 1, 1, tx_telemetry,
+     "Off by default: after a crash a window asks what to do. On: the crash report (the error, your PC's hardware, the end of the "
+     "log, the settings, with your home folder, user name and device names taken out) is sent at once, without the window; if it "
+     "cannot be sent the window shows as usual.", hn_telemetry, false, true},
     {TAB_GAMEPLAY, "Discord status", &opts.discord, 0, 1, 1, tx_onoff,
      "Shows \"Playing Hookshot\" and the time played in your Discord status, while Discord runs on this PC.", nullptr, false,
      true},
@@ -974,6 +1001,8 @@ const char* ini_key(const Row& r) {
     if (r.value == &opts.resolution) return "resolution";
     if (r.value == &opts.upscale) return "upscaling";
     if (r.value == &opts.dlss) return "dlss";   // (as opts.dlss and RX_VK_DLSS)
+    if (r.value == &opts.send_perf) return "send_performance_stats";   // (host/hos_telemetry.h reads both of these)
+    if (r.value == &opts.send_crash) return "send_crash_reports";
     static char k[32];
     size_t n = 0;
     for (const char* p = r.name; *p && n + 1 < sizeof k; p++) k[n++] = *p == ' ' ? '_' : (char)tolower(*p);
@@ -1086,21 +1115,29 @@ void save() {
         }
         fclose(f);
     }
-    if (FILE* f = fopen(ini_path().c_str(), "w")) {
+    // (longshot #976: written whole or not at all, beside the file and moved over it: a crash or a kill in the write left the
+    // options file empty or cut short, and the next start took it for the player's settings)
+    std::string out;
+    const auto put = [&out](const char* fmt, auto... a) {
+        char b[600];
+        const int n = snprintf(b, sizeof b, fmt, a...);
+        if (n > 0) out.append(b, std::min<size_t>((size_t)n, sizeof b - 1));
+    };
+    {
         for (const Row& r : rows)
-            if (r.value) fprintf(f, "%s=%d\n", ini_key(r), *r.value);
-        if (!mic_want.empty()) fprintf(f, "microphone_device=%s\n", mic_want.c_str());   // (hookshot: also while it is unplugged)
+            if (r.value) put("%s=%d\n", ini_key(r), *r.value);
+        if (!mic_want.empty()) put("microphone_device=%s\n", mic_want.c_str());   // (hookshot: also while it is unplugged)
         // (2: game_speed below 2 was only ever the old default, see menu_init; 3: the mouse's buttons are bindings, see
         // host/nn_hid.c binds_load)
-        fprintf(f, "options_version=3\n");
-        fputs(others.c_str(), f);
-        if (!can_bind()) fputs(kept.c_str(), f);
+        put("options_version=3\n");
+        out += others;
+        if (!can_bind()) out += kept;
         for (int i = 0; i < HOS_KEY_N && can_bind(); i++) {   // (the keys-only controls, HOS_KEY_*, have no pad_ line)
-            if (i < HOS_SW_N) fprintf(f, "pad_%s=%d\n", bind_names[i], host->binding(HOS_BIND_PAD, i, 0));
-            fprintf(f, "key_%s=%d,%d\n", bind_names[i], host->binding(HOS_BIND_KEY, i, 0), host->binding(HOS_BIND_KEY, i, 1));
+            if (i < HOS_SW_N) put("pad_%s=%d\n", bind_names[i], host->binding(HOS_BIND_PAD, i, 0));
+            put("key_%s=%d,%d\n", bind_names[i], host->binding(HOS_BIND_KEY, i, 0), host->binding(HOS_BIND_KEY, i, 1));
         }
-        fclose(f);
     }
+    hos_atomic_write(ini_path().c_str(), out.data(), out.size());
 }
 
 /// A row's new value v, as the arrows set it (dir: 1 up, -1 down, for the rows that skip or wrap), saved unless !keep
@@ -2088,6 +2125,7 @@ void menu_note_present_sizes(uint32_t picture_w, uint32_t picture_h, uint32_t wi
 void menu_note_frame(bool game_frame, int shown) {
     if (shown) {
         shown_frames.fetch_add(shown, std::memory_order_relaxed);
+        perf_frame_shown();   // (the performance summary's frame, when it is on: perf_report.cpp)
         if (opts.show_fps) perf_note_frame();   // (the overlay's frame times: vk_perf.cpp)
     }
     if (game_frame) game_frames.fetch_add(1, std::memory_order_relaxed);

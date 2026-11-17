@@ -56,6 +56,7 @@ void hos_log(const char *format, ...) {
 }
 void hos_log_flush(void) { flush_calls++; }
 
+void hos_crash_clean_end(void) {}   /* (host/hos_crash_record.c: the end of a run is no crash) */
 /* ACTUAL_DISPLAY_STARTUP */
 
 static void run_startup(void (*start)(void)) {

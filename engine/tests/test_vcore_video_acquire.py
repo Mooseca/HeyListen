@@ -196,7 +196,7 @@ def main():
                        through(src, "typedef struct { uint8_t *rgba, *nv12;", "} Picture;"),
                        through(src, "typedef struct Pending {", "} Pending;"),
                        through(src, "typedef struct {\n    AVCodecContext *ctx;", "} Dec;"),
-                       "static volatile LONG64 submissions;"))
+                       "static volatile LONG64 submissions;", "static int64_t movie_totals[5];"))
     fixture = HARNESS.replace("@TYPES@", types).replace("@ACQUIRE@", block(src, "static void dec_acquire(Ctx *c) {"))
     compiler = shutil.which(args.cxx)
     if not compiler:

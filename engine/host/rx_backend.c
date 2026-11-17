@@ -58,6 +58,7 @@ int hos_mic_count(void);            /* nn_audio_in.c: the microphones, for the I
 const char *hos_mic_name(int index);
 void hos_mic_select(int mode, const char *name, int index);
 void hos_bind(int set, int button, int slot, int code);
+const char *hos_perf_info(char *map, int cap, int64_t movie[5]);   /* hos_main.c: the performance summary's map and movies */
 int hos_prompts_face(void);         /* prompts.c */
 #if defined(A64_WRITE_TRACK) && !defined(__EMSCRIPTEN__)
 void hos_mark_written(const void *p, size_t n);
@@ -277,7 +278,7 @@ static MkwVkHost vk_host = {   /* (not const: trace_gpu set when HL_TRACE is on)
     hos_gpu_maps_generation, nvn_vmap_generation, hos_reserved_cpus, host_collect_in, host_guest_alloc,
     host_watch_guest_writes, hos_pad_raw, hos_binding, hos_bind, host_aspect_ratio, host_take_key_press,
     hos_mouse_pointer, hos_mic_count, hos_mic_name, hos_mic_select, hos_sdl_gyro_status, hos_log_flush, hos_prompts_face,
-    host_romfs_dir, NULL,
+    host_romfs_dir, NULL, hos_perf_info,
 };
 
 static const MkwVkRenderer *vk;   /* the Vulkan back end, when it was chosen and started */
@@ -423,6 +424,10 @@ int rx_prepare_shaders(void) {
 /* (hookshot) the window is being closed: a back end still preparing its shaders stops and keeps what it made first (a few
    seconds at most). One without the export (an older one) has nothing to keep */
 void rx_close_asked(void) {
+    /* (first, before anything that takes time: the player asked to quit, so however the process ends from here (a second
+       close of a window that stopped answering) the crash window says nothing; a crash still counts: host/hos_crash_dialog.h) */
+    void hos_crash_quit_asked(void);
+    hos_crash_quit_asked();
     if (!vk_module) return;
     void (*close_asked)(void) = (void (*)(void))(void *)GetProcAddress(vk_module, "mkwvk_close_asked");
     if (close_asked) close_asked();
