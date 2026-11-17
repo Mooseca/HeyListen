@@ -72,6 +72,11 @@ struct Texture {
     uint64_t upload_value = 0;   // (the submission its last upload was recorded in, and the parallel replay's segment
     uint64_t upload_seg = 0;     // that recorded it: one before it in the stream uploads it again)
     uint64_t dry_value = 0;      // (D4: the submission the parallel replay's dry pass last marked it written in)
+    // (a new ASTC texture held back by the upload budget, upload_defer: the present it was first held back at plus one (0: not
+    // waiting) and the steady clock then, the last present a draw found it held back, and how many lookups found it so)
+    uint64_t defer_frame = 0, defer_seen = 0;
+    int64_t defer_ns = 0;
+    uint32_t defer_asks = 0;
     uint64_t last_frame = 0;  // the present it was last used in (the cache's age)
     uint64_t first_render_frame = 0;   // the present it was first rendered into in (0: never)
     uint64_t last_value = 0;  // the timeline value of the last submission that used it
