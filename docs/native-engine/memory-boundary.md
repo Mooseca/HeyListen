@@ -1943,3 +1943,54 @@ Lines to read:
 - `vk: write-backs of never-imported pools through staging` (IMPORTS ASKED FOR must stay 0);
 - `hl drop:` (MISMATCHES 0, the longest touch);
 - the ledger's tables.
+
+## 21. The commit plateau and `HL_COMMIT_LEAN` (MEM2, 2026-11-17)
+
+Windows charges every committed private page, resident or not. In play the private commit plateaus at 18-22 GB, and a PC whose
+commit limit (RAM + page file) is near that crashes: a failed commit of the guest heap, a `bad_alloc` in the replay, a failed
+Vulkan allocation (#55, #62). PC 3050 (RTX 3050, commit limit 50 GB), 420-500 s runs of `castle-move` and a Market zone loop
+(`ZONE_CYCLES`), `RX_VK_RES_LOG=1`, MB.
+
+### Where the plateau is (castle walk, `HOS_HOST_SPLIT` census at 242 s, private commit 17.2 GB)
+
+| Owner | Commit | In RAM | What it is |
+|---|---:|---:|---|
+| Guest window (heap + regions + image) | 7303 | 2299 | committed on first touch, then cold pages leave the working set but stay committed |
+| Driver regions of 32-128 MB beside VRAM | 5500 | 76 | the driver's system commit for VRAM: follows the VMA blocks (textures, targets, mirrors 1.7-2.0 GB, free space in blocks 1 GB) |
+| Driver arenas (private 512 MB and up, 128-512) | 2529 | 2448 | pipelines made at the start; not the zones' |
+| C and Windows heaps | 1481 | 1202 | the engine's objects |
+| Images (exe, DLLs) | 909 | 244 | |
+| Private 8-32 / 1-8 MB, tagged captures and BAR | ~1900 | ~700 | |
+
+Over a zone loop the window grows by 2-3 GB (the game's own heaps), the VRAM-following regions by 1-2 GB. The plateau of the
+loop: 20.7 GB.
+
+### What gives commit back, ranked by GB at the plateau (same hardware, all on the build of this branch)
+
+| # | Lever | Commit | Risk | State |
+|---:|---|---:|---|---|
+| 1 | No pool import, a mirror per pool, cold granules of decoded resources and of mirrored pools dropped (`RX_VK_POOL_MIRROR`, `RX_VK_NO_HOST_IMPORT`, `HOS_GUEST_PAGES`, `HL_MEM_DROP`, `HL_MEM_DROP_POOLS`; sections 14, 15, 19) | -3.3 GB (castle 17.5 -> 14.2), -4.5 GB (zone loop 20.7 -> 16.2); the window 7.3 -> 4.5 GB at 242 s, imports 0 | the substrate and a spill file in the temp folder (up to 4 GB); write-backs cross PCIe | **now chosen by the commit limit** (`HL_COMMIT_LEAN`) |
+| 2 | Images in generations, empty blocks given back (`RX_VK_IMAGE_GENERATIONS`) | up to 1-3 GB (the free space in VMA blocks) | a 30-70 ms image make when a block is made | not measured here; still off |
+| 3 | Driver arenas (precompiled pipelines on demand) | 2-3 GB | first-use hitches | not touched (PREP1's area) |
+| 4 | BC cache cap, captures | 0.3-1 GB | | off the table: small |
+| 5 | Longshot's sparse mirrors (`cf605c85`) and 4 MB import chunks (`ec638a48`) | ~0.5 GB of the mirrors | a large port into a diverged `vk_memory.cpp`; lever 1 already ends the imports, so the chunk size no longer matters | not ported |
+
+### `HL_COMMIT_LEAN`
+
+`host/hos_main.c commit_lean_choose`, Windows, after `hookshot_env.txt` is read: the set of lever 1 is turned on (each switch only
+if the environment or the file does not name it) when the commit limit (`ullTotalPageFile`) is under `HL_COMMIT_LEAN_BELOW_MB`
+(default 40960); `HL_COMMIT_LEAN=1` forces it on, `=0` off. The log says which (`mem: commit-lean set on/off ...`). The PC 3050
+(limit 50325 MB) stays off by default; a 16 GB PC and a 32 GB PC with a small page file turn it on. Checks in the lean runs
+(`HL_MEM_DROP_CHECK`, `RX_VK_POOL_MIRROR_CHECK`): 0 mismatches, imports asked for 0, 3357 MB dropped in all, 1921 restores of
+421 MB (0.1 a second), no failure, pictures as the base's (`RX_VK_SHOTS`, Market). **Not measured: frame rate.** The runs
+shared the machine with another game and the census run slows the game; the write-backs of lever 1 cost PCIe traffic and
+the restores a touch's latency (section 19: 10-49 ms at the longest).
+
+### A first-touch commit refused at the commit limit (#55)
+
+Two crashes (GTX 1080 Ti 16 GB, thread `OptimizeChangeBanc`; GTX 1660 Ti 32 GB, `ARes Loading`) were the game's own store to a valid
+heap address right after `mem: ... could not be committed on first touch (error 1455 ...)`: `commit_on_touch` gave the fault on
+when the commit was refused. Now (`host/mkw_glue.c`) a refused commit (`ERROR_COMMITMENT_LIMIT`) is tried again every 50 ms for
+up to 5 s, as the host's own allocations are, with the drops' hold let go while it sleeps; past that the out-of-memory notice is
+shown and the game stops with "out of memory" rather than faulting. `hos_commit` (the kernel's buffers) waits the same way.
+`HOS_TEST_COMMIT_REFUSE=<ms>` refuses every first-touch commit for that long after the first, to see the wait in a run.

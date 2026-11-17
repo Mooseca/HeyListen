@@ -23,6 +23,7 @@ struct Stage {
     VkShaderModule module = VK_NULL_HANDLE;
     Shader::Info info;
     std::vector<uint8_t> c1;   // its c1 constants (the code area's tail)
+    uint32_t spirv_words = 0;  // (its SPIR-V's size, 32-bit words, for a program read back from the program cache; 0: not known)
 };
 
 /// A texture handle the stage reads from a storage buffer: its handle program (Shader::Info::handle_programs, Eden's

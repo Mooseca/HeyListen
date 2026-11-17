@@ -1831,6 +1831,7 @@ void program_cache_read(FILE* in, std::mutex* mu, uint64_t key, const std::vecto
                 ok = false;
                 break;
             }
+            st.spirv_words = (uint32_t)spirv.size();
             st.module = make_module(spirv);
             ok = ok && st.module;
             if (shader_key_on()) all_spirv.push_back(std::move(spirv));

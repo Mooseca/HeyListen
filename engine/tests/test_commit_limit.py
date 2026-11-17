@@ -46,6 +46,22 @@ def main():
     if tex.find("commit_headroom(&commit_free)") > tex.find("static int failures_seen = 0;"):
         raise SystemExit("FAIL: the commit rule comes after the budget's last limit")
     print("PASS: the textures give commit back near Windows' commit limit")
+    # (MEM2, #55: the first-touch commit of guest memory refused at the limit waits and stops with the notice, it no longer
+    # gives the fault on to the game's own store)
+    glue = (ROOT / "host" / "mkw_glue.c").read_text(encoding="utf-8")
+    retry = block(glue, "static int commit_retry(")
+    if "ERROR_COMMITMENT_LIMIT" not in retry or "Sleep(50)" not in retry or "i < 100" not in retry:
+        raise SystemExit("FAIL: commit_retry is not 100 tries of 50 ms at ERROR_COMMITMENT_LIMIT")
+    if "if (held) hos_gp_hold(0);" not in retry:
+        raise SystemExit("FAIL: commit_retry sleeps with the drops' hold taken")
+    touch = block(glue, "static LONG CALLBACK commit_on_touch(")
+    for need in ("commit_retry(GP(guest & ~0xFFFFULL), 0x10000, 1)", "hos_out_of_memory(1);", "hos_fatal(NULL, \"out of memory"):
+        if need not in touch:
+            raise SystemExit("FAIL: the first-touch handler lacks: " + need)
+    commit = block(glue, "void hos_commit(uint64_t addr, uint64_t size)")
+    if "tries >= 100" not in commit or "ERROR_COMMITMENT_LIMIT" not in commit:
+        raise SystemExit("FAIL: hos_commit does not try again at the commit limit")
+    print("PASS: a guest commit refused at the commit limit waits, then the out-of-memory stop")
 
 
 if __name__ == "__main__":

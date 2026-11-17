@@ -162,8 +162,16 @@ void hos_commit(uint64_t addr, uint64_t size) {
     hl_drop_kernel_begin(lo, hi);
     /* (HOS_GUEST_PAGES: dropped granules the kernel is given are restored by their owner first, and the commit goes piece
        by piece over a range the drops split) */
-    if (hos_gp_ready() && hos_gp_touches(GP(lo), (size_t)(hi - lo)) ? !hos_gp_commit(GP(lo), (size_t)(hi - lo))
-                                                                     : !hos_plain_commit(GP(lo), (size_t)(hi - lo))) {
+    int failed = 0;
+    for (int tries = 0;; tries++) {   /* (MEM2: at the commit limit, 1455, tried again every 50 ms for up to 5 s, as the first-touch commit) */
+        failed = hos_gp_ready() && hos_gp_touches(GP(lo), (size_t)(hi - lo)) ? !hos_gp_commit(GP(lo), (size_t)(hi - lo))
+                                                                             : !hos_plain_commit(GP(lo), (size_t)(hi - lo));
+        if (!failed || GetLastError() != ERROR_COMMITMENT_LIMIT || tries >= 100) break;
+        if (tries == 0) hos_log("mem: commit of %#llx bytes at %#llx refused at the commit limit: trying again for up to 5 s",
+                                (unsigned long long)(hi - lo), (unsigned long long)lo);
+        Sleep(50);
+    }
+    if (failed) {
         const DWORD err = GetLastError();
         hos_log("mem: commit of %#llx bytes at %#llx failed (error %lu)", (unsigned long long)(hi - lo),
                 (unsigned long long)lo, err);
@@ -226,6 +234,47 @@ DWORD WINAPI hos_out_of_memory_box(LPVOID closing) {
     return 0;
 }
 
+/* (HeyListen, MEM2; #55 crashes of a GTX 1080 Ti 16 GB (Kokiri, OptimizeChangeBanc) and a GTX 1660 Ti 32 GB (ARes Loading): a
+   guest write to a valid heap address right after "could not be committed on first touch (error 1455)": the first-touch commit
+   was refused at Windows' commit limit and the handler gave the fault on, so the game's own store crashed.) A commit refused
+   with ERROR_COMMITMENT_LIMIT is tried again every 50 ms for up to 5 s, as the host's own allocations are (hos_alloc_failed):
+   the renderer's textures give commit back below RX_VK_COMMIT_RESERVE_MB, a drop (HL_MEM_DROP) frees some, other programs
+   end. held: the caller holds hos_gp_hold, which is let go while this sleeps (the drops that free commit wait on it).
+   HOS_TEST_COMMIT_REFUSE=<ms>: every first-touch commit is refused as at the limit for that many ms after the first one (a
+   test of the wait in a run; off when unset). Returns 1 when the commit succeeded. */
+static int commit_refused_now(void) {
+    static volatile LONG64 until;   /* (0: not started, else GetTickCount64 of the end) */
+    static const char *volatile test = (const char *)1;
+    if (test == (const char *)1) { const char *e = getenv("HOS_TEST_COMMIT_REFUSE"); test = e && atoi(e) > 0 ? e : NULL; }
+    if (!test) return 0;
+    const LONG64 now = (LONG64)GetTickCount64();
+    if (!until) InterlockedCompareExchange64(&until, now + atoi(test), 0);
+    if (now < until) { SetLastError(ERROR_COMMITMENT_LIMIT); return 1; }
+    return 0;
+}
+static int commit_try(uint8_t *a, SIZE_T n) {
+    if (commit_refused_now()) return 0;
+    return VirtualAlloc(a, n, MEM_COMMIT, PAGE_READWRITE) != NULL;
+}
+static int commit_retry(uint8_t *a, SIZE_T n, int held) {
+    static volatile LONG recovered;
+    for (int i = 0; i < 100; i++) {   /* (100 x 50 ms, as hos_alloc_failed) */
+        if (held) hos_gp_hold(0);
+        Sleep(50);
+        if (held) hos_gp_hold(1);
+        const SIZE_T piece = i == 99 ? 0x1000 : n;   /* (the last try with the page alone) */
+        if (commit_try(a, piece)) {
+            const LONG k = InterlockedIncrement(&recovered);
+            if (k <= 8 || (k & 255) == 0)
+                hos_log("mem: a guest commit of %#llx bytes at the commit limit succeeded after %d ms (%ld so far)",
+                        (unsigned long long)piece, (i + 1) * 50, (long)k);
+            return 1;
+        }
+        if (GetLastError() != ERROR_COMMITMENT_LIMIT) return 0;
+    }
+    return 0;
+}
+
 static LONG CALLBACK commit_on_touch(EXCEPTION_POINTERS *info) {
     EXCEPTION_RECORD *rec = info->ExceptionRecord;
     if (rec->ExceptionCode != EXCEPTION_ACCESS_VIOLATION || rec->NumberParameters < 2) return EXCEPTION_CONTINUE_SEARCH;
@@ -262,7 +311,19 @@ static LONG CALLBACK commit_on_touch(EXCEPTION_POINTERS *info) {
             hos_log("mem: %lld MB of the game's memory committed on first touch", (long long)(total >> 20));
         /* (HOS_GUEST_PAGES: not while a drop splits the reservation, which fails commits in it meanwhile) */
         hos_gp_hold(1);
-        if (VirtualAlloc(GP(guest & ~0xFFFFFULL), 0x100000, MEM_COMMIT, PAGE_READWRITE)) return hos_gp_hold(0), EXCEPTION_CONTINUE_EXECUTION;
+        if (commit_try(GP(guest & ~0xFFFFFULL), 0x100000)) return hos_gp_hold(0), EXCEPTION_CONTINUE_EXECUTION;
+        if (GetLastError() == ERROR_COMMITMENT_LIMIT) {   /* (the commit limit: wait, then stop with the notice, rather than fault the game's store) */
+            hos_log("mem: the megabyte at %#llx was refused at the commit limit (error %lu): trying again for up to 5 s",
+                    (unsigned long long)(guest & ~0xFFFFFULL), (unsigned long)ERROR_COMMITMENT_LIMIT);
+            if (commit_retry(GP(guest & ~0xFFFFULL), 0x10000, 1)) return hos_gp_hold(0), EXCEPTION_CONTINUE_EXECUTION;
+            hos_gp_hold(0);
+            if (hos_gp_is_dropped(p)) return EXCEPTION_CONTINUE_EXECUTION;
+            hos_log("mem: %#llx could not be committed on first touch after 5 s at the commit limit (error %lu)",
+                    (unsigned long long)guest, GetLastError());
+            hos_out_of_memory(1);
+            hos_fatal(NULL, "out of memory (RAM plus the page file): the game's memory at %#llx", (unsigned long long)guest);
+            return EXCEPTION_CONTINUE_SEARCH;
+        }
         /* (the megabyte around it cannot be committed as one: a part of it is not this reservation's to commit, as
            memory the renderer has mapped over the window. The 64 KB around the touch then, and the page alone: a
            run crashed here on 2026-11-13 with the megabyte alone tried) */
@@ -286,8 +347,9 @@ static LONG CALLBACK commit_on_touch(EXCEPTION_POINTERS *info) {
     static volatile LONG touched;
     if (InterlockedIncrement(&touched) <= 16)
         hos_log("mem: %#llx committed on first touch (nothing handed it out)", (unsigned long long)guest);
-    return VirtualAlloc(GP(guest & ~0xFFFFULL), 0x10000, MEM_COMMIT, PAGE_READWRITE) ? EXCEPTION_CONTINUE_EXECUTION
-                                                                                      : EXCEPTION_CONTINUE_SEARCH;
+    if (commit_try(GP(guest & ~0xFFFFULL), 0x10000)) return EXCEPTION_CONTINUE_EXECUTION;
+    if (GetLastError() == ERROR_COMMITMENT_LIMIT && commit_retry(GP(guest & ~0xFFFFULL), 0x10000, 0)) return EXCEPTION_CONTINUE_EXECUTION;
+    return EXCEPTION_CONTINUE_SEARCH;
 }
 
 /* A crash nothing handles: what, where (mkw.exe+offset: nx2/dllmap.py reads mkw.map the same way), and the guest

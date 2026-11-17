@@ -47,6 +47,7 @@
 #include "vk_texture.h"
 #include "vk_ledger.h"   // (RX_VK_LEDGER)
 #include "ubo_memo.h"    // (HL_UBO_MEMO)
+#include "predict_limits.h"   // (what the prediction of pipelines holds itself to)
 #include "movie_upscale_policy.h"
 #include "skip_code.h"
 
@@ -8605,6 +8606,44 @@ bool prepare_is_update() {
     lazy_update.store(true);
     return true;
 }
+namespace {
+/// (RX_VK_RES_LOG's "process memory" numbers for the preparation's progress line: the process's private commit and what its C heaps
+/// hold in use, in MB. A preparation that holds on to what it translated shows here, long before the commit limit refuses a
+/// C++ allocation)
+void prepare_mem(unsigned long long* private_mb, unsigned long long* heaps_mb) {
+    struct Counters {
+        DWORD cb, PageFaultCount;
+        SIZE_T PeakWorkingSetSize, WorkingSetSize, QuotaPeakPagedPoolUsage, QuotaPagedPoolUsage, QuotaPeakNonPagedPoolUsage,
+            QuotaNonPagedPoolUsage, PagefileUsage, PeakPagefileUsage, PrivateUsage;
+    };
+    struct Summary { DWORD cb; SIZE_T allocated, committed, reserved, max_reserve; };
+    using MemInfo = BOOL(WINAPI*)(HANDLE, Counters*, DWORD);
+    using HeapSum = BOOL(WINAPI*)(HANDLE, DWORD, Summary*);
+    static const MemInfo mem_info = (MemInfo)(void*)GetProcAddress(GetModuleHandleA("kernel32.dll"), "K32GetProcessMemoryInfo");
+    static const HeapSum heap_sum = (HeapSum)(void*)GetProcAddress(GetModuleHandleA("kernel32.dll"), "HeapSummary");
+    Counters m{};
+    m.cb = sizeof m;
+    if (mem_info) mem_info(GetCurrentProcess(), &m, sizeof m);
+    unsigned long long alloc = 0;
+    HANDLE heaps[64];
+    const DWORD nh = GetProcessHeaps(64, heaps);
+    for (DWORD i = 0; i < nh && i < 64 && heap_sum; i++) {
+        Summary su{};
+        su.cb = sizeof su;
+        if (heap_sum(heaps[i], 0, &su)) alloc += su.allocated;
+    }
+    *private_mb = (unsigned long long)(m.PrivateUsage >> 20);
+    *heaps_mb = alloc >> 20;
+}
+/// The commit the system still has to give (MB): its limit, RAM and the page file, less what every process has committed. A C++
+/// allocation that finds none is refused ("0 MB of commit left"): the game's own, and any other program's. The driver's compiles
+/// ask the process's heaps for what they need, and a program of a million SPIR-V words took gigabytes of them, all there was
+unsigned long long commit_left_mb() {
+    MEMORYSTATUSEX m{};
+    m.dwLength = sizeof m;
+    return GlobalMemoryStatusEx(&m) ? (unsigned long long)(m.ullAvailPageFile >> 20) : ~0ull;
+}
+}  // namespace
 /// Every shader of the game, before its first start (vk_shader.cpp, the seed): once for this translator. True: prepared now.
 /// background: in play, behind the game: a few workers at idle priority, translation only (the driver's part is left to first use:
 /// its compiler crashing in here would take the game with it)
@@ -8799,9 +8838,12 @@ bool prepare_run(void (*progress)(size_t done, size_t total), bool background) {
             // (every 10 s: what a run cut short by its time limit still says, and what the driver built so far is listed already)
             stat_at = std::chrono::steady_clock::now();
             if (shader_key_on()) ledger_commit();
+            unsigned long long private_mb = 0, heaps_mb = 0;
+            prepare_mem(&private_mb, &heaps_mb);
             logf("vk: prepare: %.0f s, %zu of %zu steps; translation %.0f s and the driver's part %.0f s of work so far; %lld driver builds left "
-                 "out, %lld listed", std::chrono::duration<double>(stat_at - t0).count(), done.load(), total, shader_translate_ms() / 1000.0,
-                 warm_us.load() / 1e6, (long long)ledger_reused.load(), (long long)ledger_built.load());
+                 "out, %lld listed; private %llu MB, C heaps %llu MB", std::chrono::duration<double>(stat_at - t0).count(), done.load(), total,
+                 shader_translate_ms() / 1000.0, warm_us.load() / 1e6, (long long)ledger_reused.load(), (long long)ledger_built.load(),
+                 private_mb, heaps_mb);
         }
         if (next.load() >= total + threads.size()) break;
     }
@@ -9088,33 +9130,80 @@ void predict_run(void (*progress)(size_t done, size_t total), bool background, b
     // predicted ~28000 pipelines, and a first start after an update spent many minutes on them before the game's first frame (20 with
     // the CPU busy). Those not built by then are built in play when first drawn, as before the prediction worked
     static const int budget_s = getenv("RX_VK_PREDICT_S") ? atoi(getenv("RX_VK_PREDICT_S")) : 90;
-    std::atomic<bool> out_of_time{false};
+    std::atomic<bool> out_of_time{false}, out_of_memory{false};
+    // (The pipelines are made for the driver's own cache and let go; a program of 502k SPIR-V words and one of 1014k (the game's
+    // two largest) each took the driver's compiler over three minutes and, still growing at 11 GB of the process's commit, all the
+    // PC had: C++ allocations were refused at the commit limit (0 MB of commit left), the compile failed (-13) and the memory stayed
+    // taken. The others, up to 133k words, take 25 s and a few hundred MB. Over RX_VK_PREDICT_MAX_KWORDS (300: 300k words; 0: no
+    // limit) a program is left to the draw that needs it, as it was before the prediction. And the prediction stops, the rest left
+    // to play, when the system has less than RX_VK_PREDICT_RESERVE_MB (3072) of commit left)
+    static const unsigned long long max_kwords = getenv("RX_VK_PREDICT_MAX_KWORDS") ? strtoull(getenv("RX_VK_PREDICT_MAX_KWORDS"), nullptr, 10) : predictlimits::kDefaultMaxKWords;
+    static const unsigned long long reserve_mb = getenv("RX_VK_PREDICT_RESERVE_MB") ? strtoull(getenv("RX_VK_PREDICT_RESERVE_MB"), nullptr, 10) : predictlimits::kDefaultReserveMB;
+    std::atomic<size_t> too_big{0}, pipelines_too_big{0};
+    std::atomic<uint64_t> in_flight[32]{};   // (each worker's program now: the progress line names them)
+    std::atomic<uint32_t> in_note[32]{};     // (and the pipeline of it the worker builds: its index among that program's)
+    std::atomic<int64_t> in_since[32]{};     // (and since when, ms)
+    std::atomic<uint32_t> in_words[32]{};    // (and its SPIR-V's size, 1000 words)
+    std::atomic<unsigned> worker_n{0};
     const auto worker = [&] {
         ub_thread_off();   // (a background thread: see ub_thread_off)
         SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);   // (as prepare_run's: these are the driver's compiles, see DriverTurn)
         driver_cache_only = !noted;
+        const unsigned me = worker_n++ % 32;
+        std::atomic<uint64_t>& mine = in_flight[me];
         for (;;) {
+            mine = 0;
             if (prepare_stopped()) return;
             if (!background && budget_s > 0 && std::chrono::steady_clock::now() - t0 > std::chrono::seconds(budget_s)) {
                 out_of_time = true;
                 return;
             }
+            if (predictlimits::low_commit(commit_left_mb(), reserve_mb)) {
+                if (!out_of_memory.exchange(true))
+                    logf("vk: predict: %llu MB of commit left (RX_VK_PREDICT_RESERVE_MB %llu): the prediction stops here, the rest are built in play",
+                         commit_left_mb(), reserve_mb);
+                return;
+            }
             const size_t i = next++;
             if (i >= keys.size()) return;
             const auto& list = by_program[keys[i]];
+            mine = keys[i];
             program_cache_borrow(keys[i], [&](Program& p) {
                 ensure_layout(p);
                 read_in++;
+                uint64_t words = 0;
+                for (const Stage& st : p.stages) words += st.spirv_words;
+                in_words[me] = (uint32_t)(words / 1000);
+                if (predictlimits::too_big(words, max_kwords)) {
+                    too_big++;
+                    pipelines_too_big += list.size();
+                    logf("vk: predict: program %016llx left out, %llu k words of SPIR-V (RX_VK_PREDICT_MAX_KWORDS %llu): its driver compile takes "
+                         "minutes and gigabytes; a draw that needs it builds it", (unsigned long long)p.key, (unsigned long long)(words / 1000),
+                         max_kwords);
+                    return;
+                }
+                uint32_t ni = 0;
                 for (const PipeNote* n : list)
                     if (n->variant == p.variant) {
                         matched++;
+                        in_note[me] = ni++;
+                        in_since[me] = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
                         const uint64_t id = shader_key_on() ? ledger_id_pipeline(p, n->s, note_targets(*n), (VkPrimitiveTopology)n->topo) : 0;
                         if (id && ledger_has(id)) {   // (RX_VK_SHADER_KEY: the driver has this SPIR-V and state already)
                             ledger_reused++;
                             continue;
                         }
+                        const auto t_build = std::chrono::steady_clock::now();
                         if (const VkPipeline pl = build_graphics(p, n->s, note_targets(*n), (VkPrimitiveTopology)n->topo))
                             vkDestroyPipeline(dev.device, pl, nullptr), made++;
+                        const double build_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_build).count();
+                        static std::atomic<int> slow_logged{0};
+                        if (build_ms > 3000 && slow_logged.fetch_add(1, std::memory_order_relaxed) < 40) {
+                            unsigned long long private_mb = 0, heaps_mb = 0;
+                            prepare_mem(&private_mb, &heaps_mb);
+                            logf("vk: predicted pipeline of program %016llx (%llu k words of SPIR-V) took %.0f ms (private %llu MB, C heaps %llu MB)",
+                                 (unsigned long long)p.key, (unsigned long long)(words / 1000), build_ms, private_mb, heaps_mb);
+                        }
                     }
             });
             done += list.size();
@@ -9125,9 +9214,44 @@ void predict_run(void (*progress)(size_t done, size_t total), bool background, b
     // (in play: a quarter of the CPUs, two to four, below normal priority, and no time budget: with the ledger it builds only what changed)
     const unsigned workers = background ? std::clamp(cpus / 4, 2u, 4u) : std::clamp(cpus / 2, 1u, 32u);
     for (unsigned i = 0; i < workers; i++) threads.emplace_back(worker);
-    while (next.load() < keys.size() + threads.size() && !prepare_stopped() && !out_of_time.load()) {
+    auto stat_at = std::chrono::steady_clock::now();
+    // (a line every 10 s with the programs the workers have in hand and the process's memory, and at once when its commit jumps:
+    // the driver's compile of one program took gigabytes, more than the PC had, long after the time budget)
+    const auto status = [&] {
+        stat_at = std::chrono::steady_clock::now();
+        unsigned long long private_mb = 0, heaps_mb = 0;
+        prepare_mem(&private_mb, &heaps_mb);
+        char flying[32 * 48 + 1] = "";
+        int n = 0;
+        for (unsigned k = 0; k < std::min<unsigned>(worker_n.load(), 32) && n < 32 * 47; k++)
+            if (const uint64_t key = in_flight[k].load())
+                n += snprintf(flying + n, sizeof flying - n, " %016llx#%u(%uk words)@%llds", (unsigned long long)key, in_note[k].load(),
+                              in_words[k].load(),
+                              (long long)(std::chrono::duration_cast<std::chrono::milliseconds>(stat_at - t0).count() - in_since[k].load()) / 1000);
+        logf("vk: predict: %.0f s, %zu of %zu pipelines, %zu made; programs in hand:%s; private %llu MB, C heaps %llu MB",
+             std::chrono::duration<double>(stat_at - t0).count(), done.load(), predicted.size(), made.load(), flying, private_mb, heaps_mb);
+    };
+    uint64_t last_mb = 0;
+    auto last_look = std::chrono::steady_clock::now();
+    const auto watch = [&] {
+        bool jump = false;
+        if (std::chrono::steady_clock::now() - last_look > std::chrono::seconds(1)) {
+            last_look = std::chrono::steady_clock::now();
+            unsigned long long pm = 0, hm = 0;
+            prepare_mem(&pm, &hm);
+            jump = pm > last_mb + 700;
+            last_mb = pm;
+        }
+        if (jump || std::chrono::steady_clock::now() - stat_at > std::chrono::seconds(10)) status();
+    };
+    while (next.load() < keys.size() + threads.size() && !prepare_stopped() && !out_of_time.load() && !out_of_memory.load()) {
         if (progress) progress(done.load(), predicted.size());
         Sleep(100);
+        watch();
+    }
+    while (!prepare_stopped() && std::count_if(std::begin(in_flight), std::end(in_flight), [](const auto& k) { return k.load() != 0; })) {
+        Sleep(100);   // (the builds in hand are let finish: a driver's compile cannot be taken back)
+        watch();
     }
     for (std::thread& t : threads) t.join();
     if (shader_key_on()) ledger_commit();
@@ -9137,6 +9261,9 @@ void predict_run(void (*progress)(size_t done, size_t total), bool background, b
          keys.size(), matched.load(), made.load(), (long long)ledger_reused.load(),
          std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count(), workers,
          out_of_time.load() ? " (the time budget, RX_VK_PREDICT_S, ran out: the rest are built in play)" : "");
+    if (too_big.load() || out_of_memory.load())
+        logf("vk: predict: %zu programs (%zu pipelines) left out for their size, %s", too_big.load(), pipelines_too_big.load(),
+             out_of_memory.load() ? "and the prediction stopped for want of commit" : "the others as they were asked for");
 }
 
 /// (longshot #404) Intel's one-at-a-time compute builds (serial_builds_on): a dispatch's pipeline is made first without the

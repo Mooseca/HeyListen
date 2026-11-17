@@ -260,3 +260,22 @@ arm re-prepares the whole 31,985-program set (about 5 runs of 110 s before "prep
   take it on for the size, with the same stamp move, once someone wants the smaller cache; it is not a speed item.
 
 **Decision (2026-11-17, owner):** both on by default from v0.4.1: `RX_VK_MESH_NOINLINE_ABOVE` = 30000 (`=0`: off), `RX_VK_FOLD_PSEUDO` on (`=0`: off). The shader stamp moves once with the release's other translator changes.
+
+## Memory of a cold start (PREP1, 2026-11-17, PC 3050)
+
+A start with no program cache prepares every shader and then predicts pipelines for the programs no note names (predict_run, built for the
+driver's own cache and let go). On the PC 3050 (RTX 3050, 32 GB) that start held 29.5 GB of C heaps and 36-39 GB of private commit and
+refused C++ allocations at the commit limit; play began at 616 s, against 62 s with warm caches. The shader preparation itself is bounded
+(private commit 1.5 GB, 31985 programs, 125-175 s, the same with or without the driver's part): the memory is the driver's compile in the
+prediction. Two programs of the game, 93e3e999f2fb9fd8 (1014k words of SPIR-V) and cf987f56b971bdb3 (502k), each kept a worker in
+the driver for over three minutes and growing past 11 GB (the process's heaps hold the driver's compile); the time budget (90 s) cannot
+stop a build in hand, the join waited 347 s, the compile ended -13, and the heap stayed taken. Every other program, up to 133k words, took 25 s at most.
+Since then (gpu/vk/predict_limits.h): a program over RX_VK_PREDICT_MAX_KWORDS (300) thousand words is left to the draw that needs it, and the
+prediction stops when the system has less than RX_VK_PREDICT_RESERVE_MB (3072) of commit left. The progress lines say the process's private
+commit and C heaps (the preparation's every 10 s, the prediction's with the programs the workers have in hand).
+
+"0 stage libraries" on the PC 3050 against 7781 on the main PC is the slot's state, not the GPU: the count is the compute pipelines the
+driver's part warms (7781 compute variants), and the driver's part is left out when `hookshot_prepared.bin.warming` is in the folder (a
+start that was killed or crashed in the driver's part leaves it: "the last start did not finish the driver's part of the shaders: left
+out"). The graphics stage libraries are only built with RX_VK_GPL. It does not change the memory: the compute pipelines are built by the
+precompile instead (131 s, at most 3 GB).

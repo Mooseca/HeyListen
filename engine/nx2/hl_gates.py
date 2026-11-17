@@ -149,9 +149,15 @@ def movie_site(s, addr, off):
 #   float) to whole frames into x<reg>, that count made hos_frame_whole(<key>, the amount, the game's count) (host/hl_step.c):
 #   the fractions carried per counter (<key>, the counter's or its object's guest address) above a 60 cap. The cut is the
 #   function's one; where it makes the same cut more than once, the one stored to <key> right after it.
+# - HL_HEAP_HOOK(804566e0, "<hash>"): (Hookshot 1b695334, #2451) the four allocations of the material block's rebuild that the
+#   game does not check: its two CPU buffers (the heap's tryAlloc through a pointer, return addresses 0x80456910 and
+#   0x80456da4) and its two GPU-memory calls (f_80522050, 0x80456f1c and 0x80457098), each tried again in the heap's parents
+#   when it failed (host/hl_heap_retry.c). Upstream replaces those lines; here the game's own line stays, between a line
+#   before it (which saves the arguments and may refuse the call, for the test switch: "if (pre) x0 = 0; else {") and a line
+#   after it ("}" and the retry), so that taking the hook out leaves the lift as it was.
 # Each goes in only where its function's text hashes as recorded, both lines of a kind or none. The marker is the address
 # plus one, as a step hook's (one hook a function), so a tree that does not ask for it takes it out as a stale gate.
-WANT_LIFT = re.compile(r'^HL_(SOUND|SOLVER|WHOLE)_HOOK\(\s*([0-9a-f]{8})\s*,\s*"([0-9a-f]*)"((?:\s*,\s*(?:\d+|"[^"\n]*"))*)\s*\)',
+WANT_LIFT = re.compile(r'^HL_(SOUND|SOLVER|WHOLE|HEAP)_HOOK\(\s*([0-9a-f]{8})\s*,\s*"([0-9a-f]*)"((?:\s*,\s*(?:\d+|"[^"\n]*"))*)\s*\)',
                        re.M)
 CUT = "    c->x[%d]=recomp_fp_to_int(c->vreg[0][0]&UINT64_C(0xffffffff),32,32,1,3,c->fpcr,&c->fpsr);\n"
 SOUND_SLOT = "g_module_base + 0x80435000ULL + (int64_t)75927552"   # (the page of the step's pointer, whose +2192 holds it)
@@ -162,6 +168,12 @@ SOUND_LOAD = ("    c->x[8]=" + SOUND_SLOT + ";\n"
               "    { { uint64_t _v=recomp_load32(c,(c->x[8]+16ULL)); a64_vset64(c->vreg[0],_v); } }\n")
 SOLVER_STORE = "    recomp_store32(c,c->x[0] + 712,c->x[1]);\n"
 WHOLE_STORE = "    recomp_store32(c,%s,c->x[%d]);\n"
+
+
+HEAP_CPU = (0x80456910, 0x80456da4)   # (f_804566e0's tryAlloc calls, by their return addresses, and the GPU memory's)
+HEAP_GPU = (0x80456f1c, 0x80457098)
+HEAP_CPU_LINE = "{ uint64_t _t = c->x[8]; c->x[30] = %#xULL; A64_ICALL(c, _t); }\n"
+HEAP_GPU_LINE = "c->x[30] = %#xULL; f_80522050(c);\n"
 
 
 def lift_lines(kind, addr, args):
@@ -179,6 +191,17 @@ def lift_lines(kind, addr, args):
         reg, key = args
         return ["    { extern uint32_t hos_frame_whole(uint64_t, uint32_t, uint32_t); c->x[%d] = hos_frame_whole(%s, "
                 "(uint32_t)c->vreg[0][0], (uint32_t)c->x[%d]); }%s" % (reg, key, reg, mark)]
+    if kind == "heap":
+        lines = []
+        for lr in HEAP_CPU:
+            lines += ["    { extern int hos_oot_heap_pre(Ctx *A64_NOESC); extern void hos_oot_heap_post(Ctx *A64_NOESC, uint64_t); "
+                      "if (hos_oot_heap_pre(c)) c->x[0] = 0; else {" + mark,
+                      "    } hos_oot_heap_post(c, %#xULL); }" % lr + mark]
+        for lr in HEAP_GPU:
+            lines += ["    { extern int hos_oot_gpu_pre(Ctx *A64_NOESC, uint64_t); extern void hos_oot_gpu_post(Ctx *A64_NOESC, A64Fn); "
+                      "if (hos_oot_gpu_pre(c, %#xULL)) c->x[0] = 0; else {" % lr + mark,
+                      "    } hos_oot_gpu_post(c, f_80522050); }" + mark]
+        return lines
     raise ValueError(kind)
 
 
@@ -201,6 +224,16 @@ def lift_places(body, addr, kind, args):
             if body.count(anchor) == 1:
                 return [body.index(anchor) + len(cut)]
         return None
+    if kind == "heap":
+        places = []
+        for lines in ((HEAP_CPU_LINE, HEAP_CPU), (HEAP_GPU_LINE, HEAP_GPU)):
+            for lr in lines[1]:
+                text = lines[0] % lr
+                if body.count("\n" + text) != 1:
+                    return None
+                at = body.index("\n" + text) + 1
+                places += [at, at + len(text)]
+        return places
     raise ValueError(kind)
 
 
