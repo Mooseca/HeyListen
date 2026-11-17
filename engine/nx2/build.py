@@ -45,6 +45,7 @@ import logo_rgba
 import ui_fonts
 import toolchain
 import version
+import vk_pgo
 import win_manifest
 
 NX2_RT = os.path.join(kit.HERE, "rt")
@@ -870,6 +871,7 @@ def main():
             jobs.append((cxx, src, os.path.join(obj_dir, "gpu_" + name + ".o"), gflags, gdeps))
     # the Vulkan back end, a DLL of its own (RX_BACKEND=vulkan): built when the Vulkan headers are in the CPM cache
     vk_jobs = []
+    vk_pgo_link = []   # (the profile runtime in the module's link: RX_VK_PGO=gen, nx2/vk_pgo.py)
     vk_headers, spirv_headers = cpm_package("vulkanheaders"), cpm_package("spirv-headers")
     vk_prebuilt = os.environ.get("HOOKSHOT_VK_PREBUILT", "")
     if a.standalone and not a.only and vk_prebuilt:
@@ -963,11 +965,17 @@ def main():
         # (the bundled fonts, compiled in: nx2/ui_fonts.py's file of the build's own)
         vk_jobs.append((cxx, fonts_cpp, os.path.join(obj_dir, "vk_ui_fonts.o"), target() + (["-fPIC"] if LINUX else []) + ["-O0", "-g0", "-w"],
                         b""))
+        # (hookshot, after ProjectReLink) the back end's play profile, nx2/vk_pgo.py: RX_VK_PGO=gen counts the branches of the back
+        # end's own files (not Eden's recompiler, sirit, Dear ImGui or zstd); a matching <work>/hookshot_vk.profdata (or RX_VK_PGO=<file>)
+        # builds them with it. Otherwise no flag at all: the build and its object keys as they were
+        vk_pgo_flags, vk_pgo_link, vk_pgo_note = vk_pgo.choose(os.environ, kit.WORK, GPU, lambda: vk_pgo.compiler_version(cxx), not LINUX)
+        print(vk_pgo_note, flush=True)
         for src in vk_sources():
             name = os.path.relpath(src, vk).replace(os.sep, "_")[:-4]
             lib = os.path.relpath(src, vk).split(os.sep)[0] in ("eden", "sirit")
             vk_jobs.append((cxx, src, os.path.join(obj_dir, "vk_" + name + ".o"),
-                            vflags + ([shader_stamp] if os.path.basename(src) == "vk_shader.cpp" else []) +
+                            vflags + ([] if lib else vk_pgo_flags) +
+                            ([shader_stamp] if os.path.basename(src) == "vk_shader.cpp" else []) +
                             ([state_stamp] if os.path.basename(src) == "vk_draw.cpp" else []) +
                             ([stamp_def] if os.path.basename(src) == "vk_menu.cpp" else []) +
                             (ngx_flags if os.path.basename(src) == "vk_dlss.cpp" else []) +
@@ -1139,7 +1147,7 @@ def main():
         if LINUX:   # (its C++ runtime inside: the game folder runs where the AppImage's sysroot is older than the system)
             link = [toolchain.need(toolchain.find("clang++"))] + target() + [
                 "-fuse-ld=lld", "-shared", "-o", vdll, "-Wl,-Map=" + vdll + ".map", "-Wl,-Bsymbolic", "-Wl,--gc-sections",
-                "-static-libstdc++", "-static-libgcc", "@" + vrsp] + \
+                "-static-libstdc++", "-static-libgcc", "@" + vrsp] + vk_pgo_link + \
                 ([ngx_library(NGX_SDK, True)] if NGX_SDK else []) + ["-ldl", "-lpthread", "-lm"]
         else:
             link = [cc] + toolchain.native_target() + toolchain.native_link() + \
