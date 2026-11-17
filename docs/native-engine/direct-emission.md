@@ -1000,3 +1000,25 @@ as `build/s5/refshots-*` (the scripted character stands elsewhere, the runs bein
 buffers 2.0-2.1 ms a frame with the memo (3,016-3,089 draws a frame) against 2.9-3.4 ms in a base run made minutes before on the busy
 machine and 2.00 ms in the C2 run: **not a measurement of the gain**, which is still to be made in a short A/B on an idle machine (the
 fine profile's `user uniform buffers` line, castle-move x3). Default off until then.
+
+## 15. The program pick's validated-handle memo (`HL_PROG_MEMO=1`, off by default; stream HLE2)
+
+**What it takes out.** On the PC 3050 (kokiri-idle, fine profile, 3,005 draws a frame) the replay's program lookup is 3.11 ms a frame
+summed over threads (1.04 us a draw); of 5.2 M picks 3.6 M stand on the pair of the last picks (`prog_fast`), 1.6 M (31%) are "with other
+textures". Those go through `picks` (the key from the vertex inputs and colour outputs, `answer_handles` reading every answer's
+descriptor for a slot and a version, a compare with the pick's last vector) and, the vector being other, `still_valid`, which reads the
+same descriptors again and asks the types again, and the new vector is swapped in: the draw after it, with the first textures again, does
+all of it again. OoT draws one material with two or three texture sets in turn.
+
+**The memo.** `engine/gpu/vk/prog_memo.h`: each `Pick` keeps, beside its last vector, the last four vectors its variant was validated for
+(`Set`, oldest out). A vector is, for each answer, the texture slot (bit 31 says the handle was not 0) and the slot's version, the two
+things the type answer is a function of (`texture_answer`, `texture_slot_version`: every registration and release moves it). A pick whose
+vector is not the last one looks in the set; a vector not in it is validated from the vector itself (`still_valid_from`, the same compare
+as `still_valid`, no descriptor read) and added. One read of the descriptors a pick, not two. The set is cleared when the pick takes
+another variant. Left off: `RX_VK_HANDLES_LIVE`, `RX_VK_REGISTER_AT_ONCE`.
+
+**Check.** `HL_PROG_MEMO_CHECK=1` (implies the switch): every memo answer, kept or worked out, also runs the reference (`still_valid`,
+the descriptors read again) and is compared; the reference is the one used; mismatches are counted, the first twelve logged, a line every
+10 s (`hl prog memo check: N memo answers compared, M mismatches`). `engine/tests/test_prog_memo.py`: the header against a made-up world
+(texture slots whose answer is a function of slot and version, registrations moving them, a variant that changes): 6 million steps, 0
+mismatches, and the wiring of `program_for`.

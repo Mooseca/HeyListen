@@ -12,8 +12,9 @@
   not known) and the stage (the start, the shaders' preparation, play).
 - The log's redaction is the Insert menu's Bug report's (gpu/vk/vk_bug_report.cpp redact, compiled beside it: the same
   output for the same lines); a setting's value is shown only when it is a number, a size or on/off.
-- The issue link: the game-problem form (.forgejo/ISSUE_TEMPLATE/1-game-problem.yml, which has the fields it fills), at
-  most 2000 characters.
+- The issue link: GitHub's new-issue page with the report itself in its body (nobody pastes: issues #62 and #63), the most
+  useful parts first (the crash lines, the record, the changed settings, the newest log lines), url-encoded, at most 7500
+  characters, and the path the whole report is saved at; nothing private in it.
 - The wiring in the source: main() hands a helper's command line over first, the helper starts after the crash record and
   before the guest and the renderer, a quit is noted first in rx_close_asked, HOS_CRASH_TEST is not taken from
   hookshot_env.txt, the helper gets no console and no handle of the game's.
@@ -148,11 +149,13 @@ static int fixture_main(int argc, char **argv) {
         printf("%s|%s\n", cpu, os);
     } else if (!strcmp(cmd, "shown")) {
         printf("%d\n", hos_crash_value_shown(strcmp(argv[2], "-") ? argv[2] : NULL, argv[3]));
-    } else if (!strcmp(cmd, "url")) {
-        char out[4096];
+    } else if (!strcmp(cmd, "url")) {   /* title version gpu system what [track where settings report-file|- saved] */
+        char out[16384];
+        char *report = argc > 10 && strcmp(argv[10], "-") ? slurp(argv[10]) : NULL;
         hos_crash_issue_url(out, sizeof out, argv[2], argv[3], argv[4], argv[5], argv[6], argc > 7 ? argv[7] : "",
-                            argc > 8 ? argv[8] : "", argc > 9 ? argv[9] : "");
+                            argc > 8 ? argv[8] : "", argc > 9 ? argv[9] : "", report, argc > 11 ? argv[11] : "");
         printf("%s\n", out);
+        free(report);
     } else if (!strcmp(cmd, "epoch")) {
         printf("%lld\n", (long long)hos_crash_epoch(argv[2]));
     } else if (!strcmp(cmd, "atstart")) {   /* name shown-list now */
@@ -863,7 +866,7 @@ def logic_checks(exe, menu, tmp, form):
     url = run(exe, "url", "Game: HeyListen closed unexpectedly during the start", "v3.1.0 (source 1234abcd)",
               "NVIDIA GeForce RTX 3090, NVIDIA 580.95.05", "Ryzen 7 7700 (16 threads), 32 GB, Windows 11 (build 26100)",
               "HeyListen closed unexpectedly during the start. An unexpected error.").strip()
-    assert url.startswith(form + "?title=") and len(url) <= 2000, url
+    assert url.startswith(form + "?title=") and len(url) <= 7500, url
     q = parse_qs(urlsplit(url).query)
     assert q["title"] == ["Game: HeyListen closed unexpectedly during the start"]
     body = q["body"][0]
@@ -874,9 +877,124 @@ def logic_checks(exe, menu, tmp, form):
     assert "**Where in the game:** Kokiri Forest" in parse_qs(urlsplit(url).query)["body"][0]
     long_url = run(exe, "url", "T", "v1", "G", "S", "w" * 3000).strip()
     body = parse_qs(urlsplit(long_url).query)["body"][0]
-    assert len(long_url) <= 2000 and "w" * 300 in body and "w" * 301 not in body and "**Version:** v1" in body, \
+    assert len(long_url) <= 7500 and "w" * 300 in body and "w" * 301 not in body and "**Version:** v1" in body, \
         "a line is cut at 300 characters, and what does not fit is left out"
-    print("PASS: the issue link: GitHub's new-issue page, a title and a body, within 2000 characters")
+    assert "paste" not in body.lower() and "paste" not in unquote(url).lower(), "the player is asked to paste nothing"
+    assert "could not be saved" in parse_qs(urlsplit(url).query)["body"][0], "no saved file: the clipboard is named"
+    report_link_checks(exe, tmp)
+    print("PASS: the issue link: GitHub's new-issue page, a title and the report in the body, within 7500 characters")
+
+SAMPLE_REPORT = """HeyListen crash report, made by the window HeyListen shows after a crash (20261117T101112Z UTC). HeyListen sent nothing: paste this into the issue form.
+
+### What happened
+
+HeyListen closed unexpectedly while you were playing.
+What went wrong: Your PC ran out of memory.
+Crash and unclean-end records in the last day: 1.
+
+### Summary (what Report automatically sends, too)
+
+Version: v0.4.1 (source cc441762)
+Release build: Yes
+Operating system: Windows 11 (build 26300)
+Renderer: Vulkan 1.4
+Graphics card: NVIDIA GeForce RTX 4070 SUPER, NVIDIA 621.24
+CPU and RAM: Intel i5-12400 (12 threads), 32 GB
+Map: Market_Child (child)
+Settings: 40, 3 changed from the defaults
+Crash: CRASH: exception 0xc0000005 (write 0x10, guest 0x10) at hookshot+0x1a2b
+Log: its end, below
+
+### HeyListen version
+
+v0.4.1 (source cc441762)
+Channel (from the version): Release
+
+### Changes from the defaults
+
+ultrawide=1
+output_res=1920x1080
+%(more_settings)s
+### Crash record: crash-20261117T101112Z.txt
+
+```
+HeyListen crash record 1
+run_id: 0123456789abcdef0123456789abcdef
+exception: 0xc0000005
+module: hookshot+0x1a2b
+```
+
+### The end of hookshot_log.txt
+
+Its last 150 lines (the home folder written %%USERPROFILE%%, the user's name <user>):
+
+```
+%(log)s```
+
+### Not in this report
+
+Saves, game files.
+"""
+
+
+def sample_report(tmp, lines=150, settings=60, crash_at=3, name=None):
+    log = "".join(("[hos host] CRASH: exception 0xc0000005 at hookshot+0x1a2b\n" if i == crash_at else
+                   "[hos host] vk: line number %03d of the run with some words in it to make it longer\n" % i) for i in range(lines))
+    more = "".join("rx_setting_number_%02d=%d\n" % (i, i) for i in range(settings))
+    path = tmp / (name or "sample-%d-%d.txt" % (lines, settings))
+    path.write_text(SAMPLE_REPORT % {"log": log, "more_settings": more}, encoding="utf-8")
+    return path
+
+
+def report_link_checks(exe, tmp):
+    args = ["T", "v0.4.1 (source cc441762)", "NVIDIA GeForce RTX 4070 SUPER, NVIDIA 621.24", "i5 (12 threads), 32 GB; Windows 11",
+            "HeyListen closed unexpectedly. Your PC ran out of memory.", "Release", "Market_Child (child)", ""]
+    saved = "%USERPROFILE%\\HeyListen\\bug-reports\\pending\\report-20261117T101112Z.txt"
+    # a long report: cut to fit, in the order of use
+    url = run(exe, "url", *args, sample_report(tmp), saved).strip()
+    assert 6500 < len(url) <= 7500, ("the link is filled up to its cap", len(url))
+    assert re.fullmatch(r"[A-Za-z0-9\-_.~%:/?=&]+", url), "url-encoded: no raw space, newline or quote"
+    body = parse_qs(urlsplit(url).query)["body"][0]
+    assert "**Version:** v0.4.1 (source cc441762)" in body and "**GPU:** NVIDIA GeForce RTX 4070 SUPER" in body and \
+        "**System:** i5 (12 threads), 32 GB; Windows 11" in body and "**Where in the game:** Market_Child (child)" in body, body
+    assert "also saved on my PC at `" + saved + "`" in body, "the saved report's path, named"
+    assert "paste" not in body.lower() and "my clipboard" not in body, body
+    order = [body.index(x) for x in ("**Version:**", "also saved on my PC", "**Summary**", "**Crash record**",
+                                     "**Settings changed from the defaults**", "**The end of hookshot_log.txt**")]
+    assert order == sorted(order), ("the parts in the order of use", order)
+    assert "Crash: CRASH: exception 0xc0000005" in body and "Release build: Yes" in body, "the summary's crash line"
+    assert "Version: v0.4.1" not in body and "Graphics card:" not in body and "Operating system:" not in body, \
+        "what the first lines already say is not said twice"
+    assert "module: hookshot+0x1a2b" in body and "ultrawide=1" in body and "output_res=1920x1080" in body
+    assert "rx_setting_number_59" not in body, "a long settings list is cut"
+    assert "line number 149 of the run" in body, "the newest log line is kept"
+    assert "line number 000" not in body and "(older lines left out; the CRASH lines are kept)" in body, "the oldest are left out"
+    assert "CRASH: exception 0xc0000005 at hookshot+0x1a2b" in body, "a CRASH line is kept though it is old"
+    log_part = body[body.index("**The end of hookshot_log.txt**"):]
+    numbers = [int(x) for x in re.findall(r"line number (\d+) of", log_part)]
+    assert numbers == list(range(numbers[0], 150)), ("the newest lines, whole and in the log's order", numbers[:3], numbers[-3:])
+    assert log_part.count("```") == 2 and body.count("```") % 2 == 0, "every code block closed"
+    assert "### " not in body and "(the home folder written" not in body, "the report's own headings and intros are not copied"
+    # a short one: all of it, nothing left out
+    short = sample_report(tmp, lines=6, settings=2)
+    body = parse_qs(urlsplit(run(exe, "url", *args, short, saved).strip()).query)["body"][0]
+    assert "older lines left out" not in body and "rx_setting_number_01=1" in body and "line number 005 of" in body, body
+    assert "CRASH: exception" in body and body.count("line number") == 5, "all lines of a short log (one of them the CRASH line)"
+    # the cap holds for any input, a letter is never cut in two, a very long path is cut at its start
+    big = tmp / "big.txt"
+    big.write_text(SAMPLE_REPORT % {"log": "".join("[hos host] ü" * 40 + " %d\n" % i for i in range(200)),
+                                    "more_settings": "é" * 5000 + "\n"}, encoding="utf-8")
+    url = run(exe, "url", "T" * 150, "v" * 300, "g" * 300, "s" * 300, "w" * 300, "Release", "p" * 300, "", big, "/x/" + "d" * 600).strip()
+    assert len(url) <= 7500, len(url)
+    body = parse_qs(urlsplit(url).query, errors="strict")["body"][0]   # (valid UTF-8 throughout)
+    assert "`..." + "d" * 100 in body and "d" * 261 not in body, "a very long path: its end"
+    # no saved file: the clipboard is named instead
+    body = parse_qs(urlsplit(run(exe, "url", *args, short, "").strip()).query)["body"][0]
+    assert "could not be saved to a file; it is on my clipboard" in body, body
+    # no report: the lines about the crash only
+    body = parse_qs(urlsplit(run(exe, "url", *args, "-", saved).strip()).query)["body"][0]
+    assert "**Version:**" in body and "**Summary**" not in body, body
+    print("PASS: the link's body: the report's parts in order of use, the CRASH lines and newest log lines, within the cap")
 
 
 def entries(out):
@@ -1118,8 +1236,13 @@ esac
     reports = sorted((folder / "bug-reports/pending").glob("report-*.txt"))
     assert reports[-1].read_text(encoding="utf-8") == clip, "the report is written beside the records too"
     assert len(reports) == 10 and reports[0].name == "report-20200101T000002Z.txt", ("the newest ten reports kept", reports)
-    assert link.startswith(source_form() + "?title=") and len(link) <= 2000 and "vtest-1" in unquote(link)
-    assert "HeyListen%20report" not in link and "private-user" not in link
+    assert link.startswith(source_form() + "?title=") and len(link) <= 7500 and "vtest-1" in unquote(link)
+    assert "private-user" not in link and str(home) not in unquote(link), "no user name, no home folder in the link"
+    link_body = parse_qs(urlsplit(link).query)["body"][0]
+    assert "saved on my PC at `~/HeyListen report/bug-reports/pending/report-" in link_body, link_body
+    assert "**Crash record**" in link_body and "HeyListen crash record 1" in link_body and "ultrawide=1" in link_body, link_body
+    assert "Private Mic" not in link_body and "abc-secret" not in link_body and "SAVEDATA" not in link_body, link_body
+    assert "paste" not in link_body.lower(), link_body
     assert "on your clipboard" in got[5][1] and "Open the report" in got[5][1].split("\n")[-1], got[5][1]
     assert "It is saved as " + str(reports[-1]) + "." in got[5][1], "the box names the saved report's path"
     # nothing took the text: the box says so, names the file and opens it

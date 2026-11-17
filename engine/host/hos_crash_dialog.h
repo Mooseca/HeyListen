@@ -21,10 +21,10 @@
 
 #define HOS_CRASH_WATCH_ARG "--crash-watch"
 #define HOS_CRASH_SHOW_ARG "--crash-show"
-/* (GitHub's new-issue page: the repository has no bug form, so the link carries a title and a short body, hos_crash_issue_url) */
+/* (GitHub's new-issue page: the repository has no bug form, so the link carries a title and the report's body, trimmed to fit, hos_crash_issue_url) */
 #define HOS_CRASH_ISSUE_FORM "https://github.com/Sacrappy/HeyListen/issues/new"
 #define HOS_CRASH_ISSUES "https://github.com/Sacrappy/HeyListen/issues/new"
-enum { HOS_CRASH_LINK_MAX = 2000, HOS_CRASH_LOG_LINES = 200 };
+enum { HOS_CRASH_LINK_MAX = 7500, HOS_CRASH_LOG_LINES = 200 };
 
 /* ---- the helper's command line ---- */
 typedef struct HosCrashArgs {
@@ -596,48 +596,189 @@ static inline size_t hos_crash_url_part(char *out, size_t cap, const char *s) {
     out[n] = 0;
     return n;
 }
-/* GitHub's new-issue page with the title and a short body filled in (GitHub reads title= and body= from the link; the
-   repository has no bug form, only the plain issue page), each line of the body only while the whole link stays within
-   HOS_CRASH_LINK_MAX: the version first, then the GPU, the system, where in the game and what happened, then the line that
-   tells the player to paste the report. Never the report itself: the player pastes that (it is on the clipboard) */
+/* ---- the report in the link's body. Issues #62 and #63 came with an empty code block: the link asked the player to paste the
+   report from the clipboard and nobody did. The body is now built from the report text itself, the parts that matter first,
+   encoded and cut at a whole line to fit HOS_CRASH_LINK_MAX; the whole report is still on the clipboard and saved ---- */
+/* The length of the encoded form of the n bytes of s (as hos_crash_url_part writes them) */
+static inline size_t hos_crash_url_len(const char *s, size_t n) {
+    size_t e = 0;
+    for (size_t i = 0; i < n; i++) {
+        const unsigned char c = (unsigned char)s[i];
+        const int plain = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '-' || c == '_' ||
+                          c == '.' || c == '~';
+        e += plain ? 1 : 3;
+    }
+    return e;
+}
+/* The body being written: s (raw, used of cap bytes), its encoded length, and the encoded length it may not pass */
+typedef struct HosCrashBody { char *s; size_t used, cap, enc, budget; } HosCrashBody;
+static inline int hos_crash_body_add(HosCrashBody *b, const char *s, size_t n) {
+    const size_t e = hos_crash_url_len(s, n);
+    if (b->used + n + 1 > b->cap || b->enc + e > b->budget) return 0;
+    memcpy(b->s + b->used, s, n);
+    b->used += n, b->enc += e;
+    b->s[b->used] = 0;
+    return 1;
+}
+/* A section of the report ("### <prefix>..."): its text after the heading line, up to the next "### " line. 0 when there is none */
+static inline int hos_crash_section(const char *report, const char *prefix, const char **body, size_t *n) {
+    const size_t k = strlen(prefix);
+    for (const char *p = report; p && *p;) {
+        if (!strncmp(p, "### ", 4) && !strncmp(p + 4, prefix, k)) {
+            const char *start = strchr(p, '\n');
+            if (!start) return 0;
+            start++;
+            const char *end = start;
+            while (*end && strncmp(end, "### ", 4)) {
+                const char *nl = strchr(end, '\n');
+                end = nl ? nl + 1 : end + strlen(end);
+            }
+            *body = start, *n = (size_t)(end - start);
+            return 1;
+        }
+        p = strchr(p, '\n');
+        if (p) p++;
+    }
+    return 0;
+}
+enum { HOS_CRASH_BODY_LINE = 300, HOS_CRASH_BODY_LINES = 256 };
+/* The lines of a section as the link keeps them: the report's own code fences and empty lines left out, a line cut at
+   HOS_CRASH_BODY_LINE bytes (not inside a UTF-8 letter), those starting with one of skip (NULL-ended) dropped */
+static inline int hos_crash_body_lines(const char *body, size_t n, const char *const *skip, const char **at, size_t *len) {
+    int count = 0;
+    for (const char *p = body, *end = body + n; p < end && count < HOS_CRASH_BODY_LINES;) {
+        const char *nl = (const char *)memchr(p, '\n', (size_t)(end - p));
+        size_t l = nl ? (size_t)(nl - p) : (size_t)(end - p);
+        const char *next = nl ? nl + 1 : end;
+        while (l && (p[l - 1] == '\r' || p[l - 1] == ' ')) l--;
+        int keep = l && strncmp(p, "```", 3);
+        for (int i = 0; keep && skip && skip[i]; i++)
+            if (!strncmp(p, skip[i], strlen(skip[i]))) keep = 0;
+        if (keep) {
+            if (l > HOS_CRASH_BODY_LINE) {
+                l = HOS_CRASH_BODY_LINE;
+                while (l > 1 && ((unsigned char)p[l] & 0xC0) == 0x80) l--;
+            }
+            at[count] = p, len[count++] = l;
+        }
+        p = next;
+    }
+    return count;
+}
+static inline int hos_crash_has_crash(const char *s, size_t n) {
+    for (size_t i = 0; i + 5 <= n; i++)
+        if (!memcmp(s + i, "CRASH", 5)) return 1;
+    return 0;
+}
+/* One titled part in a code block: its lines from the first, while the part stays within part_max encoded characters and the
+   body within its budget; nothing is written for a part of which no line fits. newest: the part is the log's end: the CRASH
+   lines first, then the newest lines that fit, written in the log's order, after a note that older ones were left out */
+static inline void hos_crash_body_part(HosCrashBody *b, const char *title, const char *report, const char *prefix, size_t part_max,
+                                       const char *const *skip, int newest) {
+    static const char closer[] = "```\n\n", dropped[] = "(older lines left out; the CRASH lines are kept)\n";
+    const char *body, *at[HOS_CRASH_BODY_LINES];
+    size_t n, len[HOS_CRASH_BODY_LINES];
+    char picked[HOS_CRASH_BODY_LINES] = {0}, head[160];
+    if (!hos_crash_section(report, prefix, &body, &n)) return;
+    const int count = hos_crash_body_lines(body, n, skip, at, len);
+    const int hn = snprintf(head, sizeof head, "**%s**\n```\n", title);
+    if (!count || hn <= 0 || (size_t)hn >= sizeof head) return;
+    const size_t fixed = hos_crash_url_len(head, (size_t)hn) + hos_crash_url_len(closer, sizeof closer - 1);
+    size_t room = b->budget > b->enc + fixed ? b->budget - b->enc - fixed : 0;
+    if (room > part_max) room = part_max > fixed ? part_max - fixed : 0;
+    size_t used = 0;
+    int took = 0, left_out = 0;
+    if (!newest) {
+        for (int i = 0; i < count; i++) {
+            const size_t e = hos_crash_url_len(at[i], len[i]) + 3;   /* (+3: the line's end) */
+            if (used + e > room) break;
+            used += e, picked[i] = 1, took++;
+        }
+    } else {
+        const size_t note = hos_crash_url_len(dropped, sizeof dropped - 1);
+        int crash = 0;
+        for (int i = count - 1; i >= 0 && crash < 8; i--) {
+            const size_t e = hos_crash_url_len(at[i], len[i]) + 3;
+            if (!hos_crash_has_crash(at[i], len[i]) || used + e + note > room) continue;
+            used += e, picked[i] = 1, took++, crash++;
+        }
+        for (int i = count - 1; i >= 0; i--) {
+            const size_t e = hos_crash_url_len(at[i], len[i]) + 3;
+            if (picked[i]) continue;
+            if (used + e + note > room) break;
+            used += e, picked[i] = 1, took++;
+        }
+        for (int i = 0; i < count; i++) left_out |= !picked[i];
+    }
+    if (!took) return;
+    hos_crash_body_add(b, head, (size_t)hn);
+    if (left_out) hos_crash_body_add(b, dropped, sizeof dropped - 1);
+    for (int i = 0; i < count; i++) {
+        if (!picked[i]) continue;
+        hos_crash_body_add(b, at[i], len[i]);
+        hos_crash_body_add(b, "\n", 1);
+    }
+    hos_crash_body_add(b, closer, sizeof closer - 1);
+}
+/* GitHub's new-issue page with the title and the body filled in (GitHub reads title= and body= from the link; the repository
+   has no bug form, only the plain issue page), within HOS_CRASH_LINK_MAX characters. The body: the version, the GPU, the system,
+   where in the game and what happened (each line only while the link stays within its size), a line saying the whole report
+   is also saved at saved (a path with the home folder already left out; "" when it could not be saved: then it says the
+   report is on the clipboard), then the report's parts, the most useful first, each only as far as it fits: the summary's
+   renderer, settings and crash lines, the crash record, the settings changed from the defaults, then the log's end (its CRASH
+   lines, then the newest lines). report is the text report_text writes (already without the user's name, paths and values that
+   are private); NULL or "": the lines above only. Nothing is asked of the player to paste */
 static inline size_t hos_crash_issue_url(char *out, size_t cap, const char *title, const char *version, const char *gpu,
                                          const char *system, const char *what, const char *track, const char *where,
-                                         const char *settings) {
+                                         const char *settings, const char *report, const char *saved) {
     (void)track, (void)settings;
     const size_t max = cap < HOS_CRASH_LINK_MAX + 1 ? cap : HOS_CRASH_LINK_MAX + 1;
     size_t n = strlen(HOS_CRASH_ISSUE_FORM);
     if (n + 1 > max) return 0;
     memcpy(out, HOS_CRASH_ISSUE_FORM, n + 1);
-    char piece[HOS_CRASH_LINK_MAX + 1];
+    char piece[1024];
     if (title && title[0]) {
         memcpy(piece, "?title=", 7);
         const size_t v = hos_crash_url_part(piece + 7, sizeof piece - 7, title);
         if (v && n + 7 + v + 1 <= max) memcpy(out + n, piece, 7 + v + 1), n += 7 + v;
     }
-    const char *const labels[] = {"**Version:** ", "**GPU:** ", "**System:** ", "**Where in the game:** ", "**What happened:** ",
-                                  ""};
-    const char *const values[] = {version, gpu, system, where, what,
-                                  "The crash report is on my clipboard (HeyListen's crash window put it there). I paste it "
-                                  "here:\n\n```\n\n```\n"};
     const char *key = n == strlen(HOS_CRASH_ISSUE_FORM) ? "?body=" : "&body=";
     const size_t kn = strlen(key);
-    char body[2048], enc[3 * sizeof body + 1];
-    size_t used = 0, kept = 0;   /* (kept: the encoded length of the body that fits so far) */
-    body[0] = 0;
+    if (n + kn + 1 > max) return n;
+    char raw[HOS_CRASH_LINK_MAX + 1];   /* (the body before it is encoded: never longer than its encoded form) */
+    HosCrashBody b = {raw, 0, sizeof raw, 0, max - n - kn - 1};
+    raw[0] = 0;
+    const char *const labels[] = {"**Version:** ", "**GPU:** ", "**System:** ", "**Where in the game:** ", "**What happened:** "};
+    const char *const values[] = {version, gpu, system, where, what};
     for (size_t i = 0; i < sizeof values / sizeof values[0]; i++) {
-        if (!values[i] || !values[i][0]) continue;
         char line[512];
+        if (!values[i] || !values[i][0]) continue;
         const int w = snprintf(line, sizeof line, "%s%.300s\n\n", labels[i], values[i]);
-        if (w <= 0 || (size_t)w >= sizeof line || used + (size_t)w + 1 > sizeof body) continue;
-        memcpy(body + used, line, (size_t)w + 1);
-        const size_t e = hos_crash_url_part(enc, sizeof enc, body);
-        if (e && n + kn + e + 1 <= max) used += (size_t)w, kept = e;
-        else body[used] = 0;   /* (this line does not fit: the next, shorter, may) */
+        if (w > 0 && (size_t)w < sizeof line) hos_crash_body_add(&b, line, (size_t)w);   /* (this line does not fit: the next may) */
     }
-    if (kept) {
-        hos_crash_url_part(enc, sizeof enc, body);
-        memcpy(out + n, key, kn), memcpy(out + n + kn, enc, kept + 1);
-        n += kn + kept;
+    {   /* (where the whole report is: it is saved, and on the clipboard) */
+        char line[700];
+        const char *tail = saved ? saved : "";
+        const size_t tl = strlen(tail);
+        if (tl > 260) tail += tl - 260;
+        const int w = tail[0] ? snprintf(line, sizeof line, "The report from HeyListen's crash window, trimmed to fit this link, is below. "
+                                         "The whole report is also saved on my PC at `%s%s`, I can attach it if it helps.\n\n",
+                                         tail == saved ? "" : "...", tail)
+                              : snprintf(line, sizeof line, "The report from HeyListen's crash window, trimmed to fit this link, is below. "
+                                         "The whole report could not be saved to a file; it is on my clipboard.\n\n");
+        if (w > 0 && (size_t)w < sizeof line) hos_crash_body_add(&b, line, (size_t)w);
+    }
+    if (report && report[0]) {
+        static const char *const summary_skip[] = {"Version:", "Operating system:", "Graphics card:", "CPU and RAM:", "Map:", "Log:", NULL};
+        hos_crash_body_part(&b, "Summary", report, "Summary", 700, summary_skip, 0);
+        hos_crash_body_part(&b, "Crash record", report, "Crash record", 1900, NULL, 0);
+        hos_crash_body_part(&b, "Settings changed from the defaults", report, "Changes from the defaults", 1100, NULL, 0);
+        hos_crash_body_part(&b, "The end of hookshot_log.txt", report, "The end of hookshot_log.txt", HOS_CRASH_LINK_MAX, NULL, 1);
+    }
+    if (b.used) {
+        memcpy(out + n, key, kn);
+        n += kn;
+        n += hos_crash_url_part(out + n, max - n, raw);
     }
     return n;
 }
@@ -663,8 +804,8 @@ static inline size_t hos_crash_ready_text(char *out, size_t cap, int copied, int
         copied ? "The report is on your clipboard. "
         : saved ? "The report could not be put on the clipboard. Click Open the report, select all of it and copy it. "
                 : "The report could not be put on the clipboard, nor saved. ",
-        opened ? "In the new issue that opened in your browser, paste it where the page says so, say what you were doing, "
-                 "and submit it."
+        opened ? "The new issue that opened in your browser already has the main parts of it (the end of the log is cut to fit "
+                 "the link): say what you were doing and submit it. Paste or attach the whole report there too if you can."
                : "Open ",
         opened ? "" : issues,
         opened ? "" : " and paste it into a new issue.",

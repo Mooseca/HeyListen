@@ -50,6 +50,7 @@
 #include "shader_recompiler/program_header.h"
 #include "shader_recompiler/runtime_info.h"
 
+#include "prog_memo.h"   // (HL_PROG_MEMO)
 #include "vk_paths.h"
 #include "zstd.h"   // (third_party/zstd: the program cache's records are kept compressed)
 #include "vk_internal.h"
@@ -2360,7 +2361,61 @@ namespace {
 struct Pick {
     const Program* p = nullptr;
     std::vector<uint32_t> handles;   // (at its answers' descriptors: their slots and the slots' versions)
+    mkwvk::progmemo::Set valid;      // (HL_PROG_MEMO: the last vectors of `handles`' kind the variant was validated for)
 };
+// (HeyListen, HL_PROG_MEMO=1, default off; prog_memo.h) a pick whose handles differ from its last ones is answered from the vectors the
+// variant was validated for before, and a vector not among them is validated from the vector itself (one pass over the descriptors, not
+// two). HL_PROG_MEMO_CHECK=1 (implies the switch): the reference (`still_valid`, the descriptors read again) is worked out on every
+// memo answer, compared, and the reference used; the mismatches are counted, the first twelve logged, a line every 10 s.
+// Left off: RX_VK_HANDLES_LIVE, RX_VK_REGISTER_AT_ONCE (the answers are read from other state then)
+int prog_memo_mode() {
+    static const int mode = [] {
+        const char* c = getenv("HL_PROG_MEMO_CHECK");
+        const char* e = getenv("HL_PROG_MEMO");
+        const int v = c && *c && *c != '0' ? 2 : e && *e && *e != '0' ? 1 : 0;
+        if (!v) return 0;
+        if (getenv("RX_VK_HANDLES_LIVE") || getenv("RX_VK_REGISTER_AT_ONCE")) {
+            logf("hl prog memo: left off (RX_VK_HANDLES_LIVE or RX_VK_REGISTER_AT_ONCE is set)");
+            return 0;
+        }
+        logf("hl prog memo: the program picks' validated texture handles kept per pick, one pass over the descriptors%s (HL_PROG_MEMO=1)",
+             v == 2 ? ", every memo answer compared with the reference pick (HL_PROG_MEMO_CHECK=1)" : "");
+        return v;
+    }();
+    return mode;
+}
+void prog_memo_compare(bool memo, bool reference, int why) {
+    static std::atomic<uint64_t> compared{0}, bad{0}, last_log{0};
+    compared++;
+    if (memo != reference && bad++ < 12)
+        logf("hl prog memo check: MISMATCH (%s): memo says %s, the reference pick %s", why ? "vector not seen before, worked out in one pass" : "vector kept",
+             memo ? "valid" : "not valid", reference ? "valid" : "not valid");
+    const uint64_t now = (uint64_t)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+    uint64_t prev = last_log.load();
+    if (prev == 0) last_log.compare_exchange_strong(prev, now);
+    else if (now - prev >= 10000 && last_log.compare_exchange_strong(prev, now))
+        logf("hl prog memo check: %llu memo answers compared, %llu mismatches", (unsigned long long)compared.load(),
+             (unsigned long long)bad.load());
+}
+/// HL_PROG_MEMO: `answer_handles` with the slot words of prog_memo.h (and the descriptors read once)
+void answer_handles_memo(const NvnState& s, const Program& p, std::vector<uint32_t>& out) {
+    out.clear();
+    for (const Program::Answer& a : p.answers) {
+        const uint32_t w = mkwvk::progmemo::slot_word(answer_handle(s, p, a));
+        out.push_back(w);
+        out.push_back(texture_slot_version((int)(w & mkwvk::progmemo::kSlotMask)));
+    }
+}
+/// `still_valid` from the vector `answer_handles_memo` made: the same compare, the descriptors not read again
+bool still_valid_from(const Program& p, const std::vector<uint32_t>& now) {
+    size_t i = 0;
+    for (const Program::Answer& a : p.answers) {
+        const uint32_t h = mkwvk::progmemo::handle_of(now[i]);
+        i += 2;
+        if (h && canonical_answer(p, a, answer_of(h, a.image)) != canonical_answer(p, a, a.type)) return false;
+    }
+    return true;
+}
 thread_local FlatMap<uint64_t, Pick> picks;   // (each recording thread's: program_pick has its own lock; hookshot: flat, flat_map.h)
 uint64_t pick_inputs(const NvnState& s, const uint8_t color_types[8]) {
     uint64_t h = 0x9E37;
@@ -2523,10 +2578,25 @@ const Program* program_for(const NvnState& s, ProgramKind kind, const uint8_t co
     if (pk.p && pk.p->ready.load(std::memory_order_acquire) && !pk.p->failed) {
         if (pk.p->answers.empty()) return st_hit++, keep(pk.p);
         static thread_local std::vector<uint32_t> now;
-        answer_handles(s, *pk.p, now);
+        const int pm = prog_memo_mode();
+        if (pm) answer_handles_memo(s, *pk.p, now);
+        else answer_handles(s, *pk.p, now);
         if (now == pk.handles) return st_hit++, keep(pk.p);
         st_differ++;
-        if (still_valid(s, *pk.p)) {   // (other textures of the same types: the same variant)
+        if (pm) {   // (HL_PROG_MEMO: a vector this variant was validated for stands; another is validated from itself, once)
+            const bool kept = pk.valid.has(now);
+            bool ok = kept || still_valid_from(*pk.p, now);
+            if (pm == 2) {
+                const bool reference = still_valid(s, *pk.p);
+                prog_memo_compare(ok, reference, kept ? 0 : 1);
+                ok = reference;
+            }
+            if (ok) {
+                if (!kept) pk.valid.add(now);
+                pk.handles.swap(now);
+                return keep(pk.p);
+            }
+        } else if (still_valid(s, *pk.p)) {   // (other textures of the same types: the same variant)
             pk.handles.swap(now);
             return keep(pk.p);
         }
@@ -2535,9 +2605,12 @@ const Program* program_for(const NvnState& s, ProgramKind kind, const uint8_t co
     }
     const Program* picked = program_pick(s, kind, color_types);
     if (picked && picked->ready.load(std::memory_order_acquire) && !picked->failed) {
+        if (pk.p != picked) pk.valid.clear();
         pk.p = picked;
-        answer_handles(s, *picked, pk.handles);
+        if (prog_memo_mode()) answer_handles_memo(s, *picked, pk.handles);
+        else answer_handles(s, *picked, pk.handles);
     } else {
+        pk.valid.clear();
         pk.p = nullptr;
     }
     if (picks.size() > 65536) picks.clear();

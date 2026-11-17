@@ -3,8 +3,9 @@
    and Report automatically, Report manually, Open the log folder, Close. Report automatically shows the report it would post
    to the HeyListen telemetry server's /telemetry/crash and posts it with the system's curl only when the player presses Send. Report manually
    puts a redacted plain-text report on the clipboard, writes it next to the crash records
-   (bug-reports/pending/report-<UTC>.txt) and opens the issue form for game problems in the browser. Nothing is sent without
-   Send. What decides is host/hos_crash_dialog.h.
+   (bug-reports/pending/report-<UTC>.txt) and opens GitHub's new-issue page in the browser with the report's main parts in its
+   body (hos_crash_issue_url: url-encoded, within HOS_CRASH_LINK_MAX, the newest log lines last), so nothing depends on a
+   paste. Nothing is sent without Send. What decides is host/hos_crash_dialog.h.
 
    It is shown by a helper the game starts early (hos_crash_watch_start, after the crash record is set up and before the
    guest, the renderer, the sound and the input): the same executable, `HeyListen --crash-watch <pid> <run id> <game folder>
@@ -1092,8 +1093,7 @@ static int make_report(const Shown *s, Made *out) {
     char headline[160], title[200], what[400];
     hos_crash_headline(headline, sizeof headline, hos_crash_title(s->verdict), s->stage);
     snprintf(title, sizeof title, "Game: %s", headline);
-    snprintf(what, sizeof what, "%s. %s (The report from the crash window is pasted below.)", headline,
-             hos_crash_cause_text(s->cause));
+    snprintf(what, sizeof what, "%s. %s", headline, hos_crash_cause_text(s->cause));
     /* (the system as the card says it: the CPU and RAM, then the operating system, from the log's report: lines, else the
        helper's own reading) */
     char system[420];
@@ -1104,8 +1104,6 @@ static int make_report(const Shown *s, Made *out) {
                       : strstr(in.bare_version, "-rc.") ? "Release candidate" : "Release";
     char where[200];
     snprintf(where, sizeof where, "%s", f->place[0] ? f->place : s->log->found ? HOS_CRASH_TITLE_AND_INTRO : "");
-    hos_crash_issue_url(out->url, sizeof out->url, title, in.version, f->gpu[0] ? in.gpu : "", system, what, track, where,
-                        in.changed_list);
     {   /* (one separator between names: the game folder ends with one; a share's leading two kept) */
         const char *from = saved ? path : "";
         size_t o = 0;
@@ -1119,6 +1117,12 @@ static int make_report(const Shown *s, Made *out) {
 #endif
         }
         out->local[o] = 0;
+    }
+    {   /* (the saved report's path in the link without the home folder and the user's name, as the report's own lines have it) */
+        char *shown = out->local[0] ? redacted(&s->who, out->local, strlen(out->local)) : NULL;
+        hos_crash_issue_url(out->url, sizeof out->url, title, in.version, f->gpu[0] ? in.gpu : "", system, what, track, where,
+                            in.changed_list, out->text, shown ? shown : "");
+        free(shown);
     }
     return 1;
 }
