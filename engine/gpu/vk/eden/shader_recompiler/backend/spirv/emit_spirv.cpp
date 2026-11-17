@@ -6,6 +6,8 @@
 
 #include <algorithm>
 #include <span>
+#include <stdexcept>
+#include <string>
 #include <tuple>
 #include <type_traits>
 #include <utility>
@@ -117,6 +119,15 @@ void EmitInst(EmitContext& ctx, IR::Inst* inst) {
         EmitInstOf(ctx, inst);
     } catch (const NotImplementedException& e) {
         throw NotImplementedException("{} ({})", e.what(), IR::NameOf(inst->GetOpcode()));
+    } catch (const std::runtime_error& e) {   // (sirit's null Id, named by the IR op that asked for it: Hookshot 6749ba2174)
+        std::string args;
+        for (size_t i = 0; i < inst->NumArgs(); ++i) {
+            const IR::Value a{inst->Arg(i)};
+            args += a.IsImmediate() ? " imm" : a.IsEmpty() ? " empty" : a.IsIdentity() ? " identity"
+                  : (" " + std::string(IR::NameOf(a.InstRecursive()->GetOpcode())) +
+                     (a.InstRecursive()->Definition<Id>().value == 0 ? "(undefined)" : ""));
+        }
+        throw LogicError("{} ({}; args:{})", e.what(), IR::NameOf(inst->GetOpcode()), args);
     }
 }
 
@@ -133,6 +144,7 @@ Id TypeId(const EmitContext& ctx, IR::Type type) {
 
 void Traverse(EmitContext& ctx, IR::Program& program) {
     IR::Block* current_block{};
+    bool prologue_done{};
     // (EvilOOT, RX_VK_BLOCK_PROBE=1 with RX_VK_MISS_LOG=1 and RX_VK_MISS_LOG_PROG=<key>: each block's entries counted, by
     // invocation, in the miss log's words 128 + the block's index in program.blocks: IR::DumpProgram's "Block $n")
     static const bool probe_env{std::getenv("RX_VK_BLOCK_PROBE") != nullptr};
@@ -150,6 +162,7 @@ void Traverse(EmitContext& ctx, IR::Program& program) {
             }
             current_block = node.data.block;
             ctx.AddLabel(label);
+            if (!prologue_done) prologue_done = true, ctx.EmitEntryPrologue();   // (RX_VK_MESH_G3: before the first instruction)
             bool probed{!probe};
             for (IR::Inst& inst : node.data.block->Instructions()) {
                 if (!probed && inst.GetOpcode() != IR::Opcode::Phi) {   // (after the phis: they must lead the block)

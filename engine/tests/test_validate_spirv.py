@@ -54,11 +54,19 @@ def main():
         cache = os.path.join(tmp, "hookshot_programs.bin")
         with open(cache, "wb") as f:
             f.write(struct.pack("<IIQ", vs.CACHE_MAGIC, 0, 1))
-            f.write(struct.pack("<QQ", 0xA5DA9F84B72D1471, len(data)) + data)
+            stored = data
+            try:   # (the cache packs its records: this one is stored as vk_shader.cpp's record_pack does)
+                import zstandard
+                frame = zstandard.ZstdCompressor(level=1).compress(data)
+                stored = struct.pack("<I", struct.unpack_from("<I", data)[0] | vs.KIND_ZSTD) + frame
+            except ImportError:
+                pass
+            f.write(struct.pack("<QQ", 0xA5DA9F84B72D1471, len(stored)) + stored)
             other = struct.pack("<I", 0) + bytes(8)   # (an ordinary program: left out unless --all)
             f.write(struct.pack("<QQ", 0x1234, len(other)) + other)
         keys = [k for k, _, _ in vs.records(cache, lambda key, kind: bool(kind & vs.FALLBACK))]
         assert keys == [0xA5DA9F84B72D1471], keys
+        assert [d for _, _, d in vs.records(cache, lambda key, kind: key == 0xA5DA9F84B72D1471)] == [data]
 
         if vs.find_tool("spirv-val"):
             out = os.path.join(tmp, "out")

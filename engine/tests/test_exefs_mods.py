@@ -216,6 +216,24 @@ def main():
               [(m["name"], m["on"], m["patches"][0]["state"], m["patches"][0]["module"]) for m in lst] ==
               [("-b", False, "other build", None), ("a", True, "ok", "main")])
 
+    # the exefs files that are not patches: said, never silently ignored (issue 36: a mod with a subsdk7 module)
+    with tempfile.TemporaryDirectory(prefix="hookshot-exefs-mods-") as d:
+        exefs, root = world(d, {"hooks/exefs/%s.ips" % BID_HEX: ips([(0x200, b"")]), "hooks/exefs/subsdk7": b"NSO0", "hooks/exefs/main.npdm": b"x",
+                                "only/exefs/subsdk4": b"NSO0", "only/exefs/readme.txt": "hi"})
+        lst = {m["name"]: m for m in em.listing(str(root), str(exefs))}
+        check("the list: a mod with only a module is listed, with its skipped files", [x["file"] for x in lst["only"]["skipped"]] == ["readme.txt", "subsdk4"] and lst["only"]["patches"] == [])
+        check("the list: the skipped subsdk says why", "cannot work" in lst["hooks"]["skipped"][1]["reason"] and
+              lst["hooks"]["skipped"][0]["file"] == "main.npdm")
+        said = []
+        done = em.apply_mods(str(exefs), str(root), say=said.append)
+        text = "\n".join(said)
+        check("the build log: SKIPPED subsdk7 with the reason", "SKIPPED exefs/subsdk7" in text and "cannot work" in text)
+        check("the build log: the warning for a patch that comes with a module", "WARNING hooks carries a run-time code module" in text)
+        check("the build log: a mod with nothing to apply is said", "nothing of this mod can be applied" in text and "only" in text)
+        check("the build log: the patch is still applied", len(done) == 1 and "hooks/%s.ips applied to main" % BID_HEX in text)
+        off = []
+        check("the option off: the mods' exefs files are named", em.off_summary(str(root), say=off.append) == 2 and "subsdk7" in "\n".join(off))
+
     # the lift key: what is read from the exefs folder is what changes it
     with tempfile.TemporaryDirectory(prefix="hookshot-exefs-mods-") as d:
         exefs, root = world(d, {})

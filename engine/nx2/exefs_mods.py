@@ -99,6 +99,29 @@ def patch_files(mod):
     return patches, others
 
 
+RUNTIME_MODULE = ("a code module that hooks the game while it runs (it rewrites the game's instructions in memory). A recompiled game "
+                  "has no original instructions in memory to hook, so it cannot work: it is not loaded")
+
+
+def why_skipped(name):
+    """Why an exefs file of a mod that is not a patch (.ips, .pchtxt) is not used: [text]. Say it at build time, never silently"""
+    low = name.lower()
+    if low in MODULES:
+        return "%s is %s" % (name, RUNTIME_MODULE)
+    if low == "main.npdm":
+        return "main.npdm describes the module set's permissions for the console's system software: the recompiled game does not read it"
+    return "%s is not a code patch (.ips or .pchtxt), the only kind the build applies" % name
+
+
+def skipped_rows(others):
+    """[{file, reason}] of the exefs files of a mod that the build does not apply"""
+    return [{"file": n, "reason": why_skipped(n)} for n in others]
+
+
+def has_runtime_module(others):
+    return any(n.lower() in MODULES for n in others)
+
+
 # --- the formats --------------------------------------------------------------------------------------------------------
 
 def norm_bid(text):
@@ -364,7 +387,12 @@ def apply_mods(exefs, root, say=print, ranges=None):
                 say("code mods: %s is off (its name starts with - or _)" % mod["name"])
             continue
         for n in others:
-            say("code mods: %s: exefs/%s is not a patch (.ips or .pchtxt) and was left alone" % (mod["name"], n))
+            say("code mods: %s: SKIPPED exefs/%s: %s" % (mod["name"], n, why_skipped(n)))
+        if others and not patches:
+            say("code mods: %s: nothing of this mod can be applied (no .ips or .pchtxt file in its exefs folder)" % mod["name"])
+        elif has_runtime_module(others):
+            say("code mods: WARNING %s carries a run-time code module: the patches of it that are applied below may only be hooks "
+                "into that module, and then do nothing useful, or worse, in this game" % mod["name"])
         for name, path, kind in patches:
             src = "%s/%s" % (mod["name"], name)
             try:
@@ -417,6 +445,17 @@ def apply_mods(exefs, root, say=print, ranges=None):
     return applied
 
 
+def off_summary(root, say=print):
+    """When the builder's Code mods option is off: say which mods have exefs files that are therefore not used (the build log)"""
+    n = 0
+    for mod in find_mods(root):
+        patches, others = patch_files(mod)
+        if patches or others:
+            n += 1
+            say("code mods: the option is off: exefs of %s (%s) is not applied" % (mod["name"], ", ".join([p[0] for p in patches] + others)))
+    return n
+
+
 def read_state(game_folder):
     try:
         with open(os.path.join(game_folder, STATE_FILE)) as f:
@@ -437,8 +476,8 @@ def listing(root, exefs):
     mods = []
     for mod in find_mods(root):
         rows, others = inspect(mod, ids)
-        if rows:
-            mods.append({"name": mod["name"], "on": mod["on"], "patches": rows})
+        if rows or others:
+            mods.append({"name": mod["name"], "on": mod["on"], "patches": rows, "skipped": skipped_rows(others)})
     return mods
 
 

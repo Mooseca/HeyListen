@@ -13,6 +13,7 @@
 #include "../gpu/vk/vk_api.h"
 #include "../gpu/vk/oot_cheat_items.h"
 #include <math.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -419,6 +420,32 @@ __attribute__((constructor)) static void heylisten_env_defaults(void) {
         }
 }
 
+/* (what hookshot_env.txt did, kept as text: the file is read before the log is open, so the lines are logged once it is: hos_env_notes_log) */
+static char env_notes[4096];
+static size_t env_notes_n;
+static void env_note(const char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    const size_t room = sizeof env_notes - env_notes_n;
+    if (room > 2) {
+        const int w = vsnprintf(env_notes + env_notes_n, room - 1, fmt, ap);
+        if (w > 0) env_notes_n += (size_t)w < room - 2 ? (size_t)w : room - 2;
+        env_notes[env_notes_n++] = 10;
+        env_notes[env_notes_n] = 0;
+    }
+    va_end(ap);
+}
+static void hos_env_notes_log(void) {
+    for (char *l = env_notes; *l;) {
+        char *e = strchr(l, 10);
+        if (e) *e = 0;
+        hos_log("%s", l);
+        if (!e) break;
+        l = e + 1;
+    }
+    env_notes_n = 0, env_notes[0] = 0;
+}
+
 static void load_hookshot_env(void) {
     char path[MAX_PATH + 32];
     const char *other = getenv("HOS_ENV_FILE");
@@ -442,8 +469,13 @@ static void load_hookshot_env(void) {
         char *eq = strchr(s, '=');
         *eq = 0;
         if (!(other && *other) && !env_line_allowed(s, eq + 1)) {
-            fprintf(stderr, "env: hookshot_env.txt: %s left out (only the game's switches, and no paths, are taken from it)\n", s);
+            env_note("env: hookshot_env.txt: %s left out (only the game's switches, and no paths, are taken from it)", s);
             continue;
+        }
+        {   /* (the file wins over the environment: say which keys it set, and over what) */
+            const char *old = getenv(s);
+            if (old && strcmp(old, eq + 1)) env_note("env: hookshot_env.txt sets %s=%s over the environment's %s", s, eq + 1, old);
+            else env_note("env: hookshot_env.txt sets %s=%s", s, eq + 1);
         }
 #ifdef _WIN32
         *eq = '=';
@@ -1469,6 +1501,7 @@ static int game_main(int argc, char **argv) {
         hos_log("env: Mesa's submit thread %s", submit_thread_note);
     if (driver_env_said[0]) hos_log("%s", driver_env_said);   /* (decided in main: driver_env_choose) */
 #endif
+    hos_env_notes_log();
     const char *image = NULL;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--romfs") && i + 1 < argc) hos_romfs_dir = argv[++i];

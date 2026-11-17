@@ -16,15 +16,21 @@ def main():
 
     draw = (ROOT / "gpu/vk/vk_draw.cpp").read_text(encoding="utf-8")
     start, end = draw.index("struct MarkerScan {"), draw.index("double marker_stall_seconds() {")
+    ring = draw[draw.index("std::atomic<uint64_t> reach_seen[1 << 16];"):draw.index("// ---- end of the ring ----")]
+    work = draw[draw.index("/// What a marker's work is, for the report"):draw.index("const char* checkpoint_kind(char c) {")]
+    shape = draw[draw.index("struct Checkpoint {"):draw.index("Checkpoint checkpoints[1 << 16];")]
     fixture = r'''
 #include <atomic>
 #include <cassert>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
+#include <string>
 std::atomic<uint32_t> checkpoint_n{0};
 uint32_t words[2 << 16];
 volatile uint32_t* marker_words = words;
-''' + draw[start:end] + r'''
+''' + shape + "Checkpoint checkpoints[1 << 16];\nthread_local uint32_t checkpoint_last = 0;\n" + ring + work + draw[start:end] + r'''
 // (marker s reached: its top-of-pipe word; finished: its bottom-of-pipe word, all the work before it done)
 void reach(uint32_t s) { words[2 * ((s - 1) & 0xFFFF)] = s; }
 void finish(uint32_t s) { reach(s), words[2 * ((s - 1) & 0xFFFF) + 1] = s; }
@@ -72,6 +78,42 @@ int main() {
     reach(70000);
     m = marker_scan();
     assert(m.done == 0 && m.pending == 1 && m.last_done == 0);
+
+    // (when the watch first saw a marker reached: a look at 5000 ms stamps the ones reached then, and the report counts from it)
+    for (auto& x : words) x = 0;
+    checkpoint_n = 10;
+    for (uint32_t s = 1; s <= 3; s++) reach(s);
+    marker_scan(5000);
+    reach(4);
+    marker_scan(5300);                         // (4 first seen a look later)
+    marker_scan(6000);                         // (a later look does not move a time already taken)
+    assert(marker_seen_text(1, 8200) == "reached 3.2 s ago");
+    assert(marker_seen_text(4, 8200) == "reached 2.9 s ago");
+    assert(marker_seen_text(5, 8200) == "not seen reached");   // (never reached)
+    assert(marker_seen_text(1 + 65536, 8200) == "not seen reached");   // (the slot holds marker 1, not its successor)
+    assert(marker_seen_text(1, 5000 + 7) == "reached 0.0 s ago");
+    {
+        for (auto& c : reach_seen) c = 0;
+        uint32_t wrapped = 0xFFFFFF00u;
+        marker_scan(wrapped);
+        assert(marker_seen_text(1, wrapped + 2500) == "reached 2.5 s ago");   // (across the 32-bit wrap)
+    }
+
+    // (what the work is, for the report)
+    Checkpoint k{};
+    assert(checkpoint_work_text(k).empty());   // (unknown: nothing printed)
+    k.shape = 'x', k.a = 64, k.b = 2, k.c = 1;
+    assert(checkpoint_work_text(k) == ", 64 x 2 x 1 groups");
+    k.shape = 'n';
+    assert(checkpoint_work_text(k) == ", groups read from GPU memory");
+    k.shape = 'E', k.a = 36000, k.b = 3;
+    assert(checkpoint_work_text(k) == ", 36000 indices x 3 instances");
+    k.shape = 'V', k.a = 6, k.b = 1;
+    assert(checkpoint_work_text(k) == ", 6 vertices x 1 instances");
+    k.shape = 'M', k.a = 5, k.b = 1, k.c = 1;
+    assert(checkpoint_work_text(k) == ", mesh 5 x 1 x 1 groups");
+    k.shape = 'I', k.a = 12;
+    assert(checkpoint_work_text(k) == ", indirect, up to 12 records");
     puts("ok");
 }
 '''

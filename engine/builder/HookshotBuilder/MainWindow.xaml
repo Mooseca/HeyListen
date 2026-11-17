@@ -308,8 +308,8 @@
               </StackPanel>
             </Button>
           </StackPanel>
-          <Button x:Name="LaunchCodeMods" Style="{StaticResource LinkButton}" Foreground="{StaticResource InkFaint}" HorizontalAlignment="Center"
-                  Margin="0,10,0,0" Content="Code mods (exeFS)…" Click="LaunchCodeModsClick"/>
+          <Button x:Name="LaunchCodeMods" Style="{StaticResource LinkButton}" Foreground="{StaticResource InkSoft}" HorizontalAlignment="Center"
+                  Margin="0,12,0,0" Content="Mods: rebuild the game with code mods (exeFS)…" Click="LaunchCodeModsClick"/>
           <Button x:Name="LaunchFolder" Style="{StaticResource LinkButton}" Foreground="{StaticResource InkFaint}" HorizontalAlignment="Center"
                   Margin="0,22,0,0" Content="Open the game folder" Click="LaunchFolderClick"/>
           <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,10,0,0">

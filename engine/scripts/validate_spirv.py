@@ -22,6 +22,7 @@ import subprocess
 import sys
 
 CACHE_MAGIC = 0x31505348   # (gpu/vk/vk_shader.cpp kDiskMagic)
+KIND_ZSTD = 0x80000000      # (the kind word's flag on a packed record: vk_shader.cpp kKindZstd)
 FALLBACK = 4               # (a record's kind: a task or mesh program run as compute, issue 640)
 SPV_MAGIC = b"\x03\x02\x23\x07"
 STAGES = {0x1: "vertex", 0x2: "tesscontrol", 0x4: "tesseval", 0x8: "geometry", 0x10: "fragment", 0x20: "compute",
@@ -30,8 +31,9 @@ STAGES = {0x1: "vertex", 0x2: "tesscontrol", 0x4: "tesseval", 0x8: "geometry", 0
 
 def records(path, want):
     """(key, kind, bytes) of each record want(key, kind) takes, in file order. The layout is disk_init's: a 16-byte head
-    (magic, 0, stamp), then records of a u64 key, a u64 size and that many bytes, which start with the u32 kind. A record
-    cut short ends the walk, as it does there"""
+    (magic, 0, stamp), then records of a u64 key, a u64 size and that many stored bytes, which start with the u32 kind. A
+    record cut short ends the walk, as it does there. A record the cache packed has KIND_ZSTD set in that word, then one zstd
+    frame of the whole record: it is unpacked here (the zstandard module), and the kind given is the record's own"""
     with open(path, "rb") as f:
         head = f.read(16)
         if len(head) < 16 or struct.unpack_from("<I", head)[0] != CACHE_MAGIC:
@@ -46,12 +48,18 @@ def records(path, want):
             if len(kind) < 4:
                 return
             kind = struct.unpack("<I", kind)[0]
-            if want(key, kind):
+            if want(key, kind & ~KIND_ZSTD):
                 f.seek(at)
                 data = f.read(size)
                 if len(data) < size:
                     return
-                yield key, kind, data
+                if kind & KIND_ZSTD:
+                    try:
+                        import zstandard
+                    except ImportError:
+                        raise SystemExit("%s has packed records: pip install zstandard" % path)
+                    data = zstandard.ZstdDecompressor().decompress(data[4:], max_output_size=1 << 30)
+                yield key, kind & ~KIND_ZSTD, data
             f.seek(at + size)
 
 

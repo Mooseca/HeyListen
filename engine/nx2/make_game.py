@@ -1067,6 +1067,11 @@ def apply_code_mods(a, out, exefs):
     if choice is not None:
         exefs_mods.write_state(out, choice == "on")
     if not exefs_mods.read_state(out):
+        try:
+            if exefs_mods.off_summary(exefs_mods.mods_root(out), say=lambda t: print(t, flush=True)):
+                print("code mods: off: tick Code mods (exeFS) in the builder, or choose it in the launcher, to rebuild the game with them", flush=True)
+        except OSError:
+            pass
         return {}
     ranges = {}
     try:

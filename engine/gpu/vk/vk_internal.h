@@ -2,6 +2,7 @@
 #pragma once
 
 #include <cstdint>
+#include <cstdlib>
 #include <array>
 #include <atomic>
 #include <mutex>
@@ -98,6 +99,22 @@ struct Device {
     uint32_t sparse_family = UINT32_MAX;
 };
 extern Device dev;
+
+/// (hookshot 6e11217e1, #2442) Where a storage buffer binding starts: the address rounded down to this, the shaders' offsets
+/// counted from there (vk_shader.cpp make_profile / host_info, the translator's ssbo_align_mask; vk_draw.cpp's descriptor
+/// writer; vk_shader.cpp disk_stamp). At least 16 bytes, whatever the device allows: the translator reads 8- and 16-byte
+/// accesses through vector views (offset >> 3, >> 4), exact only while a binding starts on a 16-byte boundary. At AMD's (and
+/// Mesa ANV's) 4 bytes an aligned access could start at any word of the binding and the view read the vector before it: OoT's
+/// light colours shifted (green lighting, cyan sky). Found for Lichii (zortos293/Lichii#295, Fritchii 57ed438cd, from Matt
+/// Artist and sharkiix); NVIDIA's own alignment is 16 already. RX_VK_SSBO_DEVICE_ALIGN=1: the device's own, as before
+inline uint64_t storage_binding_align() {
+    static const bool device_own = [] {
+        const char* e = getenv("RX_VK_SSBO_DEVICE_ALIGN");
+        return e && e[0] && e[0] != '0';
+    }();
+    const uint64_t a = dev.props.limits.minStorageBufferOffsetAlignment;
+    return device_own || a > 16 ? a : 16;
+}
 
 /// (longshot #252) Windows Intel's compiler (igvk64, UHD and Arc) faults when two threads hand it shaders at once: an Arc A750
 /// froze the PC on four compute pipelines, and an Intel UHD read address 0x170 inside igvk64 during the first scene's compiles.

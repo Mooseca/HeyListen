@@ -29,6 +29,7 @@ def main():
     p.add_argument("--cc", default="gcc")
     a = p.parse_args()
     main_c = (ROOT / "host" / "hos_main.c").read_text(encoding="utf-8")
+    notes = main_c[main_c.index("static char env_notes["):main_c.index("static void load_hookshot_env(void) {")]
     fn = block(main_c, "static int env_line_allowed(") + "\n" + block(main_c, "static void load_hookshot_env(void) {")
 
     with tempfile.TemporaryDirectory() as tmp:
@@ -45,9 +46,19 @@ def main():
         (tmp / "test_env.txt").write_text("# a test run's own switches\nHOS_T_OTHER=1\nHOS_T_SHARED=other\n"
                                           "VK_T_LAYER=/y\n", encoding="utf-8")
         exe = str(game / "hookshot").replace("\\", "\\\\")
-        fixture = r'''#include <stdio.h>
+        fixture = r'''#include <stdarg.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+static char logged[8192];   /* (hos_log, as the game's: one line each) */
+static void hos_log(const char *fmt, ...) {
+    va_list ap;
+    size_t n = strlen(logged);
+    va_start(ap, fmt);
+    vsnprintf(logged + n, sizeof logged - n - 2, fmt, ap);
+    va_end(ap);
+    strcat(logged, "\n");
+}
 #ifdef _WIN32   /* (the test's own setenv/unsetenv: Windows has _putenv, which the game itself uses there) */
 static int setenv(const char *name, const char *value, int overwrite) {
     char s[1024];
@@ -64,7 +75,7 @@ static DWORD hos_game_path_a(char *out, DWORD size) {   /* (host/hos_paths.h: th
     snprintf(out, size, "%s", "''' + exe + r'''");
     return (DWORD)strlen(out);
 }
-''' + fn + r'''
+''' + notes + fn + r'''
 static int is(const char *name, const char *want) {
     const char *v = getenv(name);
     return want ? v && !strcmp(v, want) : !v;
@@ -73,7 +84,19 @@ static void clear(void) { unsetenv("HOS_T_BESIDE"); unsetenv("HOS_T_OTHER"); uns
 int main(int argc, char **argv) {
     (void)argc;
     unsetenv("HOS_ENV_FILE");                      /* out of the box: the file beside the game */
+    setenv("HOS_T_SHARED", "exported", 1);         /* (the exported value, which the file overrides: said in the log) */
+    setenv("RX_VK_SKIP_CODE", "2c56,ab", 1);       /* (the same value: no "over") */
     load_hookshot_env();
+    CHECK(logged[0] == 0);                         /* (the log is not open yet when the file is read: nothing logged until it is) */
+    hos_env_notes_log();
+    CHECK(strstr(logged, "env: hookshot_env.txt sets HOS_T_BESIDE=1\n"));
+    CHECK(strstr(logged, "env: hookshot_env.txt sets HOS_T_SHARED=beside over the environment's exported\n"));
+    CHECK(strstr(logged, "env: hookshot_env.txt sets RX_VK_SKIP_CODE=2c56,ab\n"));
+    CHECK(!strstr(logged, "RX_VK_SKIP_CODE=2c56,ab over"));
+    CHECK(strstr(logged, "env: hookshot_env.txt: VK_ADD_LAYER_PATH left out"));
+    CHECK(!strstr(logged, "sets VK_ADD_LAYER_PATH"));
+    hos_env_notes_log();                           /* (said once) */
+    CHECK(strstr(strstr(logged, "sets HOS_T_BESIDE=1") + 1, "sets HOS_T_BESIDE=1") == NULL);
     CHECK(is("HOS_T_BESIDE", "1") && is("HOS_T_SHARED", "beside") && is("HOS_T_OTHER", NULL));
     CHECK(is("VK_ADD_LAYER_PATH", NULL) && is("SDL_DYNAMIC_API", NULL) && is("HOS_ENV_FILE", NULL));
     CHECK(is("HOS_SAMPLE_FILE", NULL) && is("RX_VK_DUMP_DIR", NULL) && is("HOS_T_HOME", NULL));

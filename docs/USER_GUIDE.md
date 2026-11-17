@@ -141,7 +141,15 @@ Nothing is read from them when the game starts.
    (or delete it) and rebuild with the option on, or rebuild with it off.
 3. Start the game. `hookshot_log.txt` says which functions a code mod left to the translated code.
 
+A game that is already built shows only **Play** (and **Update** when a new version exists) as buttons; the way to build it again with code mods is the 
+link **Mods: rebuild the game with code mods (exeFS)...** under them. The build log says, mod by mod, which files were applied and which were not used.
+
 What to expect:
+
+- **Only `.ips` and `.pchtxt` patches are applied.** A mod that comes with a `subsdk` file (`subsdk4`, `subsdk7`, ...; made with exlaunch or Skyline) 
+  is a second program that hooks the game while it runs, by rewriting the game's instructions in memory. A translated game has no such instructions 
+  to rewrite, so these mods cannot work, and the builder lists the file as "NOT USED" with the reason. The small `.ips` patch such a mod also ships 
+  is applied, but it is usually only the hook into the subsdk, so it does nothing useful. `main.npdm` is not read either.
 
 - **A rebuild costs a lot of time**: the whole game is translated again from the patched code, then only the compiled parts
   that changed are compiled again. On the main PC (Ryzen 7 7800X3D, 8 build workers) the translation took 9 minutes and the compile and link 6 more: about 16 minutes in all; slower PCs take longer, and the builder shows its own estimate. Taking the mod out later costs the same. Without code mods nothing changes: a game

@@ -30,7 +30,7 @@ class ProgramCacheIndexTests(unittest.TestCase):
 
     def test_index_after_record(self):
         save = block(self.source, "void program_cache_save(")
-        record = save.index("fwrite(o.data(), 1, o.size(), disk_out)")
+        record = save.index("fwrite(stored.data(), 1, stored.size(), disk_out)")
         index = save.index("fwrite(e.data(), 1, e.size(), disk_idx)")
         self.assertLess(record, index, "the index entry must follow its record")
         self.assertIn("fflush(disk_idx)", save)
@@ -52,9 +52,10 @@ class ProgramCacheIndexTests(unittest.TestCase):
         self.assertNotIn("good + 16 + (int64_t)rec[1] > whole", init)
 
     def test_head_checked_on_load(self):
-        read = block(self.source, "void program_cache_read(")
+        read = block(self.source, "bool disk_read_record(")   # (every reader of a record goes through it)
         self.assertIn("_fseeki64(in, d.at - 16, SEEK_SET)", read)
         self.assertIn("head[0] != key || head[1] != d.size", read)
+        self.assertIn("disk_read_record(in, mu, key, d, data)", block(self.source, "void program_cache_read("))
 
     def test_parallel_reads(self):
         some = block(self.source, "size_t program_cache_load_some(")

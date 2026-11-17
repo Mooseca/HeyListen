@@ -7,6 +7,7 @@
 #pragma once
 
 #include <array>
+#include <functional>
 
 #include <sirit/sirit.h>
 #include "common/container/unordered_set.h"
@@ -355,6 +356,12 @@ public:
         StorageDefinitions vars{};
     };
     std::vector<GlobalTableVars> ssbo_tables;
+    /// (RX_VK_MESH_G3, task and mesh stages) code the first block runs before anything else: the global accesses' buffer ranges, worked out once
+    std::vector<std::function<void()>> entry_emitters;
+    void EmitEntryPrologue() {
+        for (auto& f : entry_emitters) f();
+        entry_emitters.clear();
+    }
     std::array<Id, 9> atomic_global_func_u32{};
     Id atomic_global_cas_func_u32{};   // (hookshot) (address, comparator, value) -> the old value
 

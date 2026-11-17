@@ -762,19 +762,33 @@ int64_t hos_now_ns(void) {
     return (int64_t)((now.QuadPart / freq.QuadPart) * 1000000000LL + (now.QuadPart % freq.QuadPart) * 1000000000LL / freq.QuadPart);
 }
 
-static void sleep_ns(int64_t ns);
-/* (virtual cores: a sleep gives the core up, SleepThread(0) offers it to a waiter as good) */
-void hos_sleep_ns(int64_t ns) {
+static void sleep_ns(int64_t ns, int guest);
+/* How sleeps under a millisecond wait: 0, all yield until their time; 1, the game's own (SleepThread) wait on the timer
+   and the host's (the frame limiter, the audio renderer) yield; 2, all wait on the timer. asked: the value of
+   HOS_SHORT_SLEEP_TIMER, NULL when it is not set; set, "" or 0 is off (all yield), anything else on (all on the timer).
+   posix: not set, Linux's default is 1, Windows' 0.
+   (hookshot a1eb46046, #2637) Linux: OoT's five idle job workers and sead::MainThread yielded 3.3-3.6 ms a frame each in
+   Hyrule Field (RTX 3090, 7900X, 24 threads), ~9 ms of CPU a frame in all; with the timer the frame's CPU fell
+   44.8 -> 35.4 ms at the same median frame (11.30 / 11.32 ms). The job workers are not on the frame's critical path
+   there, so their later wake costs nothing measured; on 4-8 thread CPUs those yields took processors the frame needs.
+   On Linux the timer is clock_nanosleep (win32_posix.c), not Windows' ~0.5 ms high-resolution timer. */
+static int short_sleep_how(const char *asked, int posix) {
+    if (asked) return asked[0] && asked[0] != '0' ? 2 : 0;
+    return posix ? 1 : 0;
+}
+/* (virtual cores: a sleep gives the core up, SleepThread(0) offers it to a waiter as good) guest: the game's own sleep */
+static void sleep_away(int64_t ns, int guest) {
     if (ns <= 0) {
         hos_vcore_yield();
         SwitchToThread();
         return;
     }
     const int away = hos_vcore_away();
-    sleep_ns(ns);
+    sleep_ns(ns, guest);
     if (away) hos_vcore_back();
 }
-static void sleep_ns(int64_t ns) {
+void hos_sleep_ns(int64_t ns) { sleep_away(ns, 0); }
+static void sleep_ns(int64_t ns, int guest) {
     /* A high-resolution waitable timer (one per thread) sleeps to within ~0.5 ms without spinning; Sleep() rounds to
        the timer resolution, so without one the last millisecond is spun (threads that sleep in short steps, the
        vibration thread for one, used 15% of a core spinning). */
@@ -801,11 +815,23 @@ static void sleep_ns(int64_t ns) {
     while (hos_now_ns() < until) sched_yield();
     return;
 #endif
-    /* Under a millisecond: yielded away until the time (the timer's ~0.5 ms granularity made TOTK's 20 us waits for
-       its job workers 25x longer, ~2000 a second on the frame's critical path). HOS_SHORT_SLEEP_TIMER=1: as before */
+    /* Under a millisecond: yielded away until the time (Windows' timer's ~0.5 ms granularity made TOTK's 20 us waits for
+       its job workers 25x longer, ~2000 a second on the frame's critical path), or the timer for the game's own sleeps
+       on Linux (short_sleep_how). HOS_SHORT_SLEEP_TIMER=0: all yield; =1: all on the timer */
     static int short_timer = -1;
-    if (short_timer < 0) short_timer = getenv("HOS_SHORT_SLEEP_TIMER") != NULL;
-    if (ns < 1000000 && !short_timer) {
+    if (short_timer < 0) {
+#if defined(_WIN32)
+        const int how = short_sleep_how(getenv("HOS_SHORT_SLEEP_TIMER"), 0);
+#else
+        const int how = short_sleep_how(getenv("HOS_SHORT_SLEEP_TIMER"), 1);
+#endif
+        static volatile LONG told;
+        if (how && !InterlockedExchange(&told, 1))
+            hos_log("sleep: %s sleeps under a millisecond wait on the timer (HOS_SHORT_SLEEP_TIMER=0: all yield)",
+                    how == 2 ? "all" : "the game's");
+        short_timer = how;
+    }
+    if (ns < 1000000 && short_timer < (guest ? 1 : 2)) {
         /* TICK-062 B4, HOS_SHORT_SLEEP_PAUSE=1: one yield, then a PAUSE loop to the deadline (SwitchToThread in a loop
            keeps calling into the kernel and bounces the SMT sibling's work) */
         static int pause_spin = -1;
@@ -949,13 +975,13 @@ void hos_sleep_logged(int64_t ns, uint64_t lr) {
     if (on < 0) on = getenv("HOS_SLEEP_LOG") != NULL;
     if (hos_jt_on) {
         HOS_JT(JT_SLEEP_B, ns, lr);
-        hos_sleep_ns(ns);
+        sleep_away(ns, 1);
         HOS_JT(JT_SLEEP_E, ns, lr);
         return;
     }
-    if (!on) { hos_sleep_ns(ns); return; }
+    if (!on) { sleep_away(ns, 1); return; }
     const int64_t t0 = hos_now_ns();
-    hos_sleep_ns(ns);
+    sleep_away(ns, 1);
     const int64_t took = hos_now_ns() - t0;
     static SRWLOCK lk = SRWLOCK_INIT;
     static struct { uint64_t lr; int64_t n, asked, slept; } tab[64];

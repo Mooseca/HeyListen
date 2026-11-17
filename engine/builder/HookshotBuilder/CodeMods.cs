@@ -25,7 +25,8 @@ static class CodeMods
         "(the build log says \"NOT gated\" for it). RomFS mods need none of this.";
 
     public sealed record Patch(string File, string Kind, string State, string? Module, int Records, int Bytes, string Note);
-    public sealed record Mod(string Name, bool On, List<Patch> Patches);
+    public sealed record Skipped(string File, string Reason);
+    public sealed record Mod(string Name, bool On, List<Patch> Patches, List<Skipped> Skipped);
 
     public static string ModsFolder(string folder) =>
         Environment.GetEnvironmentVariable("HOS_MODS") is { Length: > 0 } m ? m : Path.Combine(folder, "mods");
@@ -64,7 +65,11 @@ static class CodeMods
                     patches.Add(new Patch(q.GetProperty("file").GetString() ?? "", q.GetProperty("kind").GetString() ?? "",
                                           q.GetProperty("state").GetString() ?? "", q.GetProperty("module").GetString(),
                                           q.GetProperty("records").GetInt32(), q.GetProperty("bytes").GetInt32(), q.GetProperty("note").GetString() ?? ""));
-                mods.Add(new Mod(m.GetProperty("name").GetString() ?? "", m.GetProperty("on").GetBoolean(), patches));
+                var skipped = new List<Skipped>();
+                if (m.TryGetProperty("skipped", out var sk))
+                    foreach (var q in sk.EnumerateArray())
+                        skipped.Add(new Skipped(q.GetProperty("file").GetString() ?? "", q.GetProperty("reason").GetString() ?? ""));
+                mods.Add(new Mod(m.GetProperty("name").GetString() ?? "", m.GetProperty("on").GetBoolean(), patches, skipped));
             }
             return mods;
         }
@@ -104,13 +109,17 @@ static class CodeMods
         stack.Children.Add(Text(Risk, warn, 12.5, 12));
         var list = new StackPanel { Margin = new Thickness(0, 14, 0, 0) };
         if (mods == null) list.Children.Add(Text("The mods could not be listed (the build tools did not answer).", warn));
-        else if (mods.Count == 0) list.Children.Add(Text("No mod with code patches (.ips or .pchtxt in its exefs folder) was found."));
+        else if (mods.Count == 0) list.Children.Add(Text("No mod with exefs files (code patches .ips or .pchtxt) was found."));
         else
             foreach (var m in mods)
             {
                 list.Children.Add(Text(m.Name + (m.On ? "" : "  (off)"), ink, 14, 10, FontWeights.SemiBold));
                 foreach (var p in m.Patches)
                     list.Children.Add(Text($"{p.File}: " + State(m, p), p.State == "ok" || !m.On ? soft : warn, 12.5, 2));
+                foreach (var k in m.Skipped)
+                    list.Children.Add(Text($"{k.File}: NOT USED. " + k.Reason, warn, 12.5, 2));
+                if (m.On && m.Skipped.Any(k => k.File.StartsWith("subsdk", StringComparison.OrdinalIgnoreCase) || k.File == "sdk" || k.File == "rtld"))
+                    list.Children.Add(Text("This mod needs a run-time code module, which a recompiled game cannot run: its patches may do nothing, or not what the mod promises.", warn, 12.5, 2));
             }
         stack.Children.Add(new ScrollViewer { Content = list, MaxHeight = 280, VerticalScrollBarVisibility = ScrollBarVisibility.Auto });
         var on = IsOn(folder);

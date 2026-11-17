@@ -93,6 +93,21 @@ std::atomic<int64_t> st_cache_hits{0};
 bool shader_key_on() { return false; }   // (RX_VK_SHADER_KEY: its fingerprint is not under test here)
 uint64_t program_fingerprint(const Program&, const std::vector<std::vector<uint32_t>>&) { return 0; }
 void program_fingerprinted(uint64_t) {}   // (the ledger's list of fingerprints seen: not under test)
+// (zstd, stubbed: this test is about the modules' cleanup. Nothing packs, so every record is stored as it is.
+// tests/test_program_cache_zstd.py builds the real one)
+#include "zstd.h"
+ZSTD_CCtx* ZSTD_createCCtx(void) { return nullptr; }
+size_t ZSTD_CCtx_setParameter(ZSTD_CCtx*, ZSTD_cParameter, int) { return 0; }
+size_t ZSTD_compressBound(size_t n) { return n + 64; }
+size_t ZSTD_compress2(ZSTD_CCtx*, void*, size_t, const void*, size_t) { return (size_t)-1; }
+unsigned ZSTD_isError(size_t code) { return code == (size_t)-1; }
+ZSTD_DCtx* ZSTD_createDCtx(void) { return nullptr; }
+size_t ZSTD_freeCCtx(ZSTD_CCtx*) { return 0; }
+size_t ZSTD_freeDCtx(ZSTD_DCtx*) { return 0; }
+unsigned long long ZSTD_getFrameContentSize(const void*, size_t) { return ZSTD_CONTENTSIZE_ERROR; }
+size_t ZSTD_decompressDCtx(ZSTD_DCtx*, void*, size_t, const void*, size_t) { return (size_t)-1; }
+size_t ZSTD_DCtx_reset(ZSTD_DCtx*, ZSTD_ResetDirective) { return 0; }
+size_t ZSTD_decompressStream(ZSTD_DCtx*, ZSTD_outBuffer*, ZSTD_inBuffer*) { return (size_t)-1; }
 #include "cache_functions.inc"
 
 void save(uint64_t key, bool empty_second = false, int bad_answer = 0) {

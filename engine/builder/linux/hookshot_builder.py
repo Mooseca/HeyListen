@@ -430,6 +430,8 @@ class Builder(tk.Tk):
                     else:
                         state = "REFUSED (the build stops until it is turned off): " + p["note"]
                     lines.append("    %s: %s" % (p["file"], state))
+                for k in mod.get("skipped", []):
+                    lines.append("    %s: NOT USED. %s" % (k["file"], k["reason"]))
         except Exception as error:   # (a mods folder that cannot be read)
             lines.append("The mods could not be listed: %s" % error)
         if not lines:

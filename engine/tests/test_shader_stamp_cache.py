@@ -82,6 +82,19 @@ class ShaderStampCacheTests(unittest.TestCase):
             "third_party/zstd/lib/decompress/zstd_ddict.c": "int z8;\n",
             "third_party/zstd/lib/decompress/zstd_decompress.c": "int z9;\n",
             "third_party/zstd/lib/decompress/zstd_decompress_block.c": "int z10;\n",
+            "third_party/zstd/lib/compress/fse_compress.c": "int zc0;\n",
+            "third_party/zstd/lib/compress/hist.c": "int zc1;\n",
+            "third_party/zstd/lib/compress/huf_compress.c": "int zc2;\n",
+            "third_party/zstd/lib/compress/zstd_compress.c": "int zc3;\n",
+            "third_party/zstd/lib/compress/zstd_compress_literals.c": "int zc4;\n",
+            "third_party/zstd/lib/compress/zstd_compress_sequences.c": "int zc5;\n",
+            "third_party/zstd/lib/compress/zstd_compress_superblock.c": "int zc6;\n",
+            "third_party/zstd/lib/compress/zstd_double_fast.c": "int zc7;\n",
+            "third_party/zstd/lib/compress/zstd_fast.c": "int zc8;\n",
+            "third_party/zstd/lib/compress/zstd_lazy.c": "int zc9;\n",
+            "third_party/zstd/lib/compress/zstd_ldm.c": "int zc10;\n",
+            "third_party/zstd/lib/compress/zstd_opt.c": "int zc11;\n",
+            "third_party/zstd/lib/compress/zstd_preSplit.c": "int zc12;\n",
         }
         for name, text in self.files.items():
             path = self.root / name

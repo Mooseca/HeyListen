@@ -18,6 +18,11 @@ SANITIZE = False
 SOURCE = ROOT / 'gpu/vk/vk_shader.cpp'
 
 
+def line(text, marker):
+    start = text.index(marker)
+    return text[start:text.index('\n', start)]
+
+
 def block(text, marker):
     start = text.index(marker)
     end = text.index('{', start) + 1
@@ -43,6 +48,11 @@ class CacheModuleCleanupTests(unittest.TestCase):
         structs += '\n' + block(source, 'struct DiskRecord {') + ';'
         functions = '\n'.join(block(source, marker) for marker in (
             'VkShaderModule make_module(', 'uint64_t answers_hash(', 'bool answers_fit(', 'void idx_put('))
+        # (the records' packing: kKindZstd and what record_pack and record_unpack use. zstd is stubbed in the test: it packs nothing)
+        functions += '\n' + line(source, 'constexpr uint32_t kKindZstd')
+        functions += '\n' + block(source, 'bool pack_on(') + '\n' + block(source, 'struct ZstdThread {') + ';'
+        functions += '\n' + block(source, 'ZstdThread& zstd_thread(') + '\n' + line(source, 'std::atomic<int64_t> st_pack_raw')
+        functions += '\n' + block(source, 'void record_pack(') + '\n' + block(source, 'bool record_unpack(')
         serialization = source[source.index('void put_bytes('):source.index('void program_cache_save(')]
         functions += '\n' + serialization + block(source, 'void program_cache_save(')
         functions += '\n' + block(source, 'void program_cache_read(')
@@ -53,12 +63,12 @@ class CacheModuleCleanupTests(unittest.TestCase):
         test_source = ROOT / 'tests/program_cache_cleanup_test.cpp'
         if Path(compiler).stem.lower() == 'cl':
             command = [compiler, '/nologo', '/std:c++20', '/EHsc', '/W4', '/WX', '/D_CRT_SECURE_NO_WARNINGS',
-                       '/I' + str(directory), str(test_source), '/Fe:' + str(cls.executable)]
+                       '/I' + str(directory), '/I' + str(ROOT / 'third_party/zstd/lib'), str(test_source), '/Fe:' + str(cls.executable)]
             if SANITIZE:
                 command += ['/fsanitize=address', '/Zi']
         else:
             command = [compiler, '-std=c++20', '-O1', '-g', '-Wall', '-Wextra', '-Werror',
-                       '-I' + str(directory), str(test_source), '-o', str(cls.executable)]
+                       '-I' + str(directory), '-I' + str(ROOT / 'third_party/zstd/lib'), str(test_source), '-o', str(cls.executable)]
             if SANITIZE:
                 command += ['-fsanitize=address,undefined', '-fno-sanitize-recover=all', '-fno-omit-frame-pointer']
         result = subprocess.run(command, cwd=directory, capture_output=True, text=True)

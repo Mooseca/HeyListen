@@ -833,7 +833,7 @@ def main():
               host_deps + (zstd_deps if os.path.basename(s) == "hl_stream.c" else b"")) for s in host_srcs]
     if host_srcs:
         zflags_exe = target() + CPU + ["-O2", "-g0", "-DNDEBUG", "-Wno-everything", "-DZSTD_DISABLE_ASM",
-                                       "-DZSTD_LEGACY_SUPPORT=0", "-DZSTD_MULTITHREAD=0"]
+                                       "-DZSTD_LEGACY_SUPPORT=0"]
         for f in ZSTD_DECODER:
             jobs.append((cc, os.path.join(ZSTD, *f.split("/")), os.path.join(obj_dir, "zstd_" + os.path.basename(f)[:-2] + ".o"),
                          zflags_exe, zstd_deps))
@@ -946,12 +946,18 @@ def main():
                             os.path.join(obj_dir, "vk_imgui_" + os.path.basename(f)[:-4] + ".o"), vflags + imgui_flags, imgui_deps))
         # (zstd's decoder, third_party/zstd, plain C)
         zflags = target() + CPU + (["-fPIC"] if LINUX else []) + ["-O2", "-g0", "-DNDEBUG", "-Wno-everything", "-fvisibility=hidden",
-                                                                 "-DZSTD_DISABLE_ASM", "-DZSTD_LEGACY_SUPPORT=0", "-DZSTD_MULTITHREAD=0"]
-        zdeps = b"".join(open(os.path.join(d, f), "rb").read() for d in (zstd, os.path.join(zstd, "common"), os.path.join(zstd, "decompress"))
+                                                                 "-DZSTD_DISABLE_ASM", "-DZSTD_LEGACY_SUPPORT=0"]
+        zdeps = b"".join(open(os.path.join(d, f), "rb").read() for d in (zstd, os.path.join(zstd, "common"), os.path.join(zstd, "decompress"),
+                                                                      os.path.join(zstd, "compress"))
                          for f in sorted(os.listdir(d)) if f.endswith(".h"))
         for f in ("common/debug.c", "common/entropy_common.c", "common/error_private.c", "common/fse_decompress.c", "common/xxhash.c",
                   "common/zstd_common.c", "decompress/huf_decompress.c", "decompress/zstd_ddict.c", "decompress/zstd_decompress.c",
-                  "decompress/zstd_decompress_block.c"):
+                  "decompress/zstd_decompress_block.c",
+                  # (and the compressor, for the program cache's records: vk_shader.cpp; level 1 and up, no threads)
+                  "compress/fse_compress.c", "compress/hist.c", "compress/huf_compress.c", "compress/zstd_compress.c",
+                  "compress/zstd_compress_literals.c", "compress/zstd_compress_sequences.c", "compress/zstd_compress_superblock.c",
+                  "compress/zstd_double_fast.c", "compress/zstd_fast.c", "compress/zstd_lazy.c", "compress/zstd_ldm.c",
+                  "compress/zstd_opt.c", "compress/zstd_preSplit.c"):
             vk_jobs.append((cc, os.path.join(zstd, *f.split("/")), os.path.join(obj_dir, "vk_zstd_" + os.path.basename(f)[:-2] + ".o"),
                             zflags, zdeps))
         # (the bundled fonts, compiled in: nx2/ui_fonts.py's file of the build's own)
@@ -966,6 +972,7 @@ def main():
                             ([stamp_def] if os.path.basename(src) == "vk_menu.cpp" else []) +
                             (ngx_flags if os.path.basename(src) == "vk_dlss.cpp" else []) +
                             (imgui_flags if os.path.basename(src) in imgui_users else []) +
+                            (["-I" + zstd] if os.path.basename(src) == "vk_shader.cpp" else []) +
                             (fsr_flags if os.path.basename(src) == "vk_fsr4.cpp" else []),
                             vk_lib_deps if lib else vdeps + (logo_text if os.path.basename(src) == "vk_imgui.cpp" else b"") +
                             (imgui_deps if os.path.basename(src) in imgui_users else b"")))

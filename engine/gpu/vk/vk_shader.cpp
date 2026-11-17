@@ -12,6 +12,7 @@
 #ifndef _WIN32
 #include <fcntl.h>
 #include <sys/file.h>
+#include <unistd.h>
 #endif
 #include <io.h>
 #include <algorithm>
@@ -50,9 +51,11 @@
 #include "shader_recompiler/runtime_info.h"
 
 #include "vk_paths.h"
+#include "zstd.h"   // (third_party/zstd: the program cache's records are kept compressed)
 #include "vk_internal.h"
 #include "vk_jobs.h"
 #include "vk_draw.h"
+#include "flat_map.h"
 
 // (EvilOOT, RX_VK_PTR_DIAG) the pointer pass's counts for this thread's translations
 // (global_memory_to_storage_buffer_pass.cpp, declared by hand so no Eden header changes)
@@ -115,6 +118,10 @@ struct Code {
     std::vector<uint8_t> c1;
     uint32_t local[3]{};
     uint32_t shared_memory = 0;   // compute: bytes from the NVN2 control section (+0x64; klimovich008's PR 91)
+    // compute: local memory, bytes a thread, from the control section (+0x68; +0x50 is the same times 32, a warp's). It was never
+    // read: a compute program that spills (LDL/STL) had no local array, and the SPIR-V back end aborted the game at its first local
+    // access, in the start-up's preparation once such programs lowered (#427's port). Ported from Hookshot a0838250 / f58c6c0e
+    uint32_t local_memory = 0;
     uint32_t texture_bound = ~0u;   // the bank native TEX instructions name (~0: none; TEXS take the stage's own)
     bool isbe = false;              // an NVN2 task (stage 6) or mesh (stage 7) program: it writes the internal stage buffer
     // (task / mesh: control section +0x58 threads 15:0, payload bytes 31:16; +0x60 max primitives 15:0, max vertices
@@ -317,6 +324,16 @@ Code parse_code(const uint8_t* ctl, const std::vector<uint8_t>& area) {
     if (!graphics) {
         std::memcpy(c.local, ctl + 0x58, 12);
         std::memcpy(&c.shared_memory, ctl + 0x64, 4);
+        std::memcpy(&c.local_memory, ctl + 0x68, 4);
+        uint32_t warp_local = 0;   // (+0x50: the same times 32, a warp's; a size that does not match it is not trusted)
+        std::memcpy(&warp_local, ctl + 0x50, 4);
+        if (c.local_memory && (uint64_t{c.local_memory} * 32 != warp_local || c.local_memory > (64u << 10))) {
+            static std::atomic<int> told{0};
+            if (told++ < 8)
+                logf("vk: compute program %016llx: local memory %#x a thread, %#x a warp: not used", (unsigned long long)c.key,
+                     c.local_memory, warp_local);
+            c.local_memory = 0;
+        }
     }
     c.ok = true;
     return c;
@@ -410,6 +427,8 @@ public:
         if (st != Shader::Stage::Compute) {
             std::memcpy(&sph, reinterpret_cast<const uint8_t*>(nvn.code.data()), sizeof sph);
             local_memory = static_cast<uint32_t>(sph.LocalMemorySize()) + sph.common3.shader_local_memory_crs_size;
+        } else {
+            local_memory = nvn.local_memory;   // (its control section's: a compute program has no header)
         }
         is_proprietary_driver = true;
     }
@@ -552,7 +571,7 @@ Shader::Profile make_profile() {
     p.lower_left_origin_mode = false;
     p.need_declared_frag_colors = false;
     p.max_subgroup_size = 32;
-    p.min_ssbo_alignment = dev.props.limits.minStorageBufferOffsetAlignment;
+    p.min_ssbo_alignment = storage_binding_align();   // (at least 16: vk_internal.h)
     return p;
 }
 
@@ -566,7 +585,7 @@ Shader::HostTranslateInfo host_info() {
     h.needs_demote_reorder = false;
     h.support_snorm_render_buffer = true;
     h.support_viewport_index_layer = true;
-    h.min_ssbo_alignment = dev.props.limits.minStorageBufferOffsetAlignment;
+    h.min_ssbo_alignment = storage_binding_align();
     h.support_geometry_shader_passthrough = false;
     h.support_conditional_barrier = true;   // (barriers in loops kept: see the WebGPU renderer's 4f5e3e6)
     return h;
@@ -1059,6 +1078,98 @@ void idx_put(std::vector<uint8_t>& o, uint64_t key, uint64_t size, uint32_t kind
     std::memcpy(e, &key, 8), std::memcpy(e + 8, &size, 8), std::memcpy(e + 16, &kind, 4);
     o.insert(o.end(), e, e + kIdxEntry);
 }
+// ---- (hookshot) Compressed records. A record is what program_cache_save built (put_head ..., its first four bytes the kind). The
+// file keeps it as it is (an old file's, and any a record zstd cannot make smaller) or packed: the stored bytes are then the kind
+// with kKindZstd set, then one zstd frame (level 1, with its content size and checksum) of the whole record, kind included. The
+// size in the record's head, and the index's, is the stored size; the flag is in the kind the index keeps, so a reader knows from
+// the index, and from the bytes themselves, which it has. An old file stays readable record by record, and is packed once
+// (disk_compact). RX_VK_PROGRAM_CACHE_RAW=1: nothing is written packed, and an old file is left as it is ----
+constexpr uint32_t kKindZstd = 0x80000000u;
+constexpr uint32_t kCompactMin = 32u << 20;   // (raw bytes in the file from which it is packed at the start: less is not worth the wait)
+
+bool pack_on() {
+    static const bool on = !getenv("RX_VK_PROGRAM_CACHE_RAW");
+    return on;
+}
+struct ZstdThread {   // (one context of each a thread: the precompile reads on up to 16, the translation writes on its own)
+    ZSTD_DCtx* d = nullptr;
+    ZSTD_CCtx* c = nullptr;
+    ~ZstdThread() {
+        if (d) ZSTD_freeDCtx(d);
+        if (c) ZSTD_freeCCtx(c);
+    }
+};
+ZstdThread& zstd_thread() {
+    static thread_local ZstdThread z;
+    return z;
+}
+std::atomic<int64_t> st_pack_raw{0}, st_pack_stored{0}, st_pack_n{0};
+
+/// The record's stored bytes (to): n bytes of the record as translation made it, packed when that makes it smaller, else as they are
+void record_pack(const uint8_t* raw, size_t n, std::vector<uint8_t>& to) {
+    if (n >= 4 && pack_on()) {
+        ZstdThread& z = zstd_thread();
+        if (!z.c) {
+            z.c = ZSTD_createCCtx();
+            if (z.c) ZSTD_CCtx_setParameter(z.c, ZSTD_c_compressionLevel, 1), ZSTD_CCtx_setParameter(z.c, ZSTD_c_checksumFlag, 1);
+        }
+        if (z.c) {
+            const size_t bound = ZSTD_compressBound(n);
+            to.resize(4 + bound);
+            const size_t c = ZSTD_compress2(z.c, to.data() + 4, bound, raw, n);
+            if (!ZSTD_isError(c) && 4 + c < n) {
+                uint32_t kind;
+                std::memcpy(&kind, raw, 4);
+                kind |= kKindZstd;
+                std::memcpy(to.data(), &kind, 4);
+                to.resize(4 + c);
+                return;
+            }
+        }
+    }
+    to.assign(raw, raw + n);
+}
+/// The record (to) from its n stored bytes: all of it, or its first limit bytes when limit is not 0 (the answers come first, and
+/// a packed record's frame is cut off at them as it is read). False: not a record this reads whole
+bool record_unpack(const uint8_t* st, size_t n, std::vector<uint8_t>& to, size_t limit) {
+    if (n < 4) return false;
+    uint32_t kind;
+    std::memcpy(&kind, st, 4);
+    if (!(kind & kKindZstd)) {
+        to.assign(st, st + (limit && limit < n ? limit : n));
+        return true;
+    }
+    ZSTD_DCtx*& d = zstd_thread().d;
+    if (!d && !(d = ZSTD_createDCtx())) return false;
+    const uint8_t* frame = st + 4;
+    const size_t frame_n = n - 4;
+    const unsigned long long raw = ZSTD_getFrameContentSize(frame, frame_n);
+    if (raw == ZSTD_CONTENTSIZE_UNKNOWN || raw == ZSTD_CONTENTSIZE_ERROR || raw < 4 || raw > (1ull << 30)) return false;
+    if (!limit || limit >= raw) {
+        to.resize((size_t)raw);
+        const size_t got = ZSTD_decompressDCtx(d, to.data(), (size_t)raw, frame, frame_n);
+        if (ZSTD_isError(got) || got != raw) return false;
+    } else {
+        ZSTD_DCtx_reset(d, ZSTD_reset_session_only);
+        to.resize(limit);
+        ZSTD_inBuffer in{frame, frame_n, 0};
+        ZSTD_outBuffer out{to.data(), limit, 0};
+        while (out.pos < limit) {
+            const size_t left = ZSTD_decompressStream(d, &out, &in);
+            if (ZSTD_isError(left)) {
+                ZSTD_DCtx_reset(d, ZSTD_reset_session_only);
+                return false;
+            }
+            if (!left || (in.pos == in.size && out.pos < limit)) break;
+        }
+        ZSTD_DCtx_reset(d, ZSTD_reset_session_only);
+        to.resize(out.pos);
+        if (to.size() < 4) return false;
+    }
+    uint32_t first;
+    std::memcpy(&first, to.data(), 4);
+    return first == (kind & ~kKindZstd);   // (the frame is the record the kind word names)
+}
 /// (disk_mu held, or at the start) the index made again whole, for these records in the file's order, and left open to add to
 void idx_write(const std::string& path, uint64_t stamp, const std::vector<std::pair<uint64_t, DiskRecord>>& order) {
     if (disk_idx) fclose(disk_idx), disk_idx = nullptr;
@@ -1122,10 +1233,110 @@ uint64_t disk_stamp() {
         const uint32_t float_add = 1;
         add(&float_add, sizeof float_add);
     }
+    // (hookshot #2442: and where the translation starts a storage binding, when that is not the device's own alignment (AMD's and
+    // ANV's 4 raised to 16, vk_internal.h): offsets are counted from there, so a cache made at 4 is no use at 16. Added only then,
+    // so NVIDIA's stamp, and RX_VK_SSBO_DEVICE_ALIGN=1's, are what they were)
+    if (storage_binding_align() != dev.props.limits.minStorageBufferOffsetAlignment) {
+        const uint32_t salign = (uint32_t)storage_binding_align();
+        add(&salign, sizeof salign);
+    }
     for (char** e = _environ; e && *e; e++)
         for (const char* pre : {"RX_VK_OOT", "RX_VK_MMA", "RX_VK_NATIVE", "RX_VK_NAN", "RX_VK_TASK_CAP", "RX_VK_NETWORK", "RX_VK_GP", "RX_VK_FOLLOW", "RX_VK_NO_FOLLOW", "RX_VK_NO_F16", "RX_VK_SHARED", "RX_VK_MESH", "RX_VK_NO_INVARIANT", "RX_VK_NO_NAN_GUARD", "RX_VK_MARKERS", "EDEN_"})
             if (!strncmp(*e, pre, strlen(pre))) add(*e, strlen(*e));
     return h;
+}
+
+/// (at the start, the file's lock held, nothing open on it) An old file's records packed, once: the same records in the same order
+/// in hookshot_programs.bin.new, which then takes the file's place (the index, made for the old, goes first, so a stop between the two
+/// leaves no index, which is made again from the file, and never one of the other file). Any failure leaves the file as it was.
+/// order: every record (key, where its payload starts, stored size, kind), made again for the new file; good: the file's size then
+bool disk_compact(const std::string& path, const std::string& idx_path, uint64_t stamp,
+                  std::vector<std::pair<uint64_t, DiskRecord>>& order, int64_t& good) {
+    size_t raw_n = 0;
+    uint64_t raw_bytes = 0;
+    for (const auto& [key, d] : order)
+        if (!(d.kind & kKindZstd)) raw_n++, raw_bytes += d.size;
+    if (!pack_on() || raw_bytes < kCompactMin || getenv("RX_VK_NO_PROGRAM_COMPACT")) return false;
+    logf("vk: program cache: %zu records (%lld MB) are not packed: packing them once, the file stays as it is until that is done",
+         raw_n, (long long)(raw_bytes >> 20));
+    const auto t0 = std::chrono::steady_clock::now();
+    const std::string tmp = path + ".new";
+    FILE* in = fopen(path.c_str(), "rb");
+    FILE* out = fopen(tmp.c_str(), "wb");
+    bool ok = in && out;
+    std::vector<std::pair<uint64_t, DiskRecord>> packed;
+    packed.reserve(order.size());
+    int64_t at = 16;
+    uint64_t packed_bytes = 0;   // (what the records that were raw take now)
+    if (ok) {
+        const uint32_t h[2] = {kDiskMagic, 0};
+        ok = fwrite(h, 4, 2, out) == 2 && fwrite(&stamp, 8, 1, out) == 1;
+    }
+    const unsigned cpus = std::max(1u, std::min(16u, std::thread::hardware_concurrency()));
+    for (size_t i = 0; ok && i < order.size();) {
+        size_t j = i;
+        for (uint64_t bytes = 0; j < order.size() && bytes < (64u << 20); j++) bytes += order[j].second.size;
+        std::vector<std::vector<uint8_t>> raw(j - i), stored(j - i);   // (the records i..j, as read and as they will be kept)
+        for (size_t k = i; ok && k < j; k++) {
+            const auto& [key, d] = order[k];
+            uint64_t head[2]{};
+            raw[k - i].resize(d.size);
+            ok = _fseeki64(in, d.at - 16, SEEK_SET) == 0 && fread(head, 8, 2, in) == 2 && head[0] == key && head[1] == d.size &&
+                 fread(raw[k - i].data(), 1, d.size, in) == d.size;
+        }
+        if (!ok) break;
+        std::atomic<size_t> next{0};
+        const auto work = [&] {
+            for (size_t k; (k = next++) < raw.size();) {
+                if (raw[k].size() >= 4 && !(*(const uint32_t*)raw[k].data() & kKindZstd)) record_pack(raw[k].data(), raw[k].size(), stored[k]);
+                else stored[k] = std::move(raw[k]);
+            }
+        };
+        std::vector<std::thread> threads;
+        for (unsigned t = 1; t < std::min<size_t>(cpus, raw.size()); t++) threads.emplace_back(work);
+        work();
+        for (std::thread& t : threads) t.join();
+        for (size_t k = i; ok && k < j; k++) {
+            const std::vector<uint8_t>& st = stored[k - i];
+            const uint64_t head[2] = {order[k].first, st.size()};
+            uint32_t kind = 0;
+            if (st.size() >= 4) std::memcpy(&kind, st.data(), 4);
+            ok = st.size() >= 4 && fwrite(head, 8, 2, out) == 2 && fwrite(st.data(), 1, st.size(), out) == st.size();
+            if (!(order[k].second.kind & kKindZstd)) packed_bytes += st.size();
+            packed.push_back({order[k].first, {at + 16, st.size(), kind}});
+            at += 16 + (int64_t)st.size();
+        }
+        i = j;
+    }
+    if (in) fclose(in);
+    if (out) {
+        ok = ok && fflush(out) == 0 &&
+#ifdef _WIN32
+             _commit(_fileno(out)) == 0;
+#else
+             fsync(fileno(out)) == 0;
+#endif
+        ok = (fclose(out) == 0) && ok;
+    }
+    if (ok) {
+        remove(idx_path.c_str());
+#ifdef _WIN32
+        ok = MoveFileExA(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
+#else
+        ok = rename(tmp.c_str(), path.c_str()) == 0;
+#endif
+    }
+    if (!ok) {
+        remove(tmp.c_str());
+        logf("vk: program cache: packing failed (disk full or the file changed): the file is left as it was");
+        return false;
+    }
+    logf("vk: program cache: packed %zu records, %lld MB -> %lld MB (file %lld MB -> %lld MB), %.1f s", raw_n, (long long)(raw_bytes >> 20),
+         (long long)(packed_bytes >> 20),
+         (long long)(good >> 20), (long long)(at >> 20), std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count());
+    order = std::move(packed);
+    good = at;
+    return true;
 }
 
 void disk_init() {
@@ -1243,6 +1454,11 @@ void disk_init() {
             }
             fclose(f);
         }
+        if (good && !order.empty() && disk_compact(path, idx_path, stamp, order, good)) {
+            whole = good, idx_whole = false;
+            disk_records.clear();
+            for (const auto& [key, d] : order) disk_records[key].push_back(d);
+        }
         if (good) {
             if (good != whole) {   // (a record cut short: without it)
                 if (FILE* f = fopen(path.c_str(), "r+b")) _chsize_s(_fileno(f), good), fclose(f);
@@ -1266,6 +1482,15 @@ void disk_init() {
         disk_path = path;
         disk_on = disk_out != nullptr && disk_in != nullptr;
         logf("vk: program cache %s: %zu program keys kept, %lld KB", path.c_str(), disk_records.size(), (long long)(good >> 10));
+        {   // (what the file holds: how many records, how many of them packed, and the bytes each kind takes in the file)
+            size_t n = 0, packed = 0;
+            uint64_t packed_bytes = 0, raw_bytes = 0;
+            for (const auto& kv : disk_records)
+                for (const DiskRecord& d : kv.second)
+                    n++, (d.kind & kKindZstd) ? (packed++, packed_bytes += d.size) : (raw_bytes += d.size);
+            logf("vk: program cache: %zu records, %zu of them packed (%lld MB stored), %zu as they were made (%lld MB)", n, packed,
+                 (long long)(packed_bytes >> 20), n - packed, (long long)(raw_bytes >> 20));
+        }
     });
 }
 
@@ -1425,6 +1650,38 @@ void get_info(Reader& r, Shader::Info& i) {
     for (auto& h : i.handle_programs) r.list(h);
 }
 
+/// The record d of key as translation made it (to), from the file in (under mu when given): all of it, or its first limit bytes when
+/// limit is not 0. Its head in the file is checked against the index's word, and a packed record is unpacked here, on the caller's
+/// thread and outside the lock. False: no such record there (said, the first few times: translated again)
+bool disk_read_record(FILE* in, std::mutex* mu, uint64_t key, const DiskRecord& d, std::vector<uint8_t>& to, size_t limit = 0) {
+    std::vector<uint8_t> stored(d.size);
+    uint64_t head[2]{};
+    bool read;
+    {
+        std::unique_lock<std::mutex> lk;
+        if (mu) lk = std::unique_lock<std::mutex>(*mu);
+        read = _fseeki64(in, d.at - 16, SEEK_SET) == 0 && fread(head, 8, 2, in) == 2 &&
+               (stored.empty() || fread(stored.data(), 1, stored.size(), in) == stored.size());
+    }
+    if (!read) return false;
+    static std::atomic<int> logged{0};
+    if (head[0] != key || head[1] != d.size) {
+        if (logged++ < 20)
+            logf("vk: program cache: no record of program %016llx at %lld as the index said: translated again", (unsigned long long)key,
+                 (long long)d.at);
+        return false;
+    }
+    if (stored.size() >= 4 && !(*(const uint32_t*)stored.data() & kKindZstd) && !limit) {   // (not packed: as read)
+        to = std::move(stored);
+        return true;
+    }
+    if (record_unpack(stored.data(), stored.size(), to, limit)) return true;
+    if (logged++ < 20)
+        logf("vk: program cache: the record of program %016llx at %lld does not unpack: translated again", (unsigned long long)key,
+             (long long)d.at);
+    return false;
+}
+
 void program_cache_save(Program& p, const std::vector<std::vector<uint32_t>>& spirv) {
     if (shader_key_on()) p.fp = program_fingerprint(p, spirv), program_fingerprinted(p.fp);
     disk_init();
@@ -1441,44 +1698,41 @@ void program_cache_save(Program& p, const std::vector<std::vector<uint32_t>>& sp
         put_list(o, st.c1);
         put_info(o, st.info);
     }
-    const uint64_t head[2] = {p.key, o.size()};
+    std::vector<uint8_t> stored;   // (packed here, outside the lock)
+    record_pack(o.data(), o.size(), stored);
+    uint32_t kind;
+    std::memcpy(&kind, stored.data(), 4);
+    if (kind & kKindZstd) {
+        st_pack_raw += (int64_t)o.size(), st_pack_stored += (int64_t)stored.size();
+        const int64_t n = ++st_pack_n;
+        if (!(n % 2000))
+            logf("vk: program cache: %lld records written packed, %lld MB -> %lld MB", (long long)n,
+                 (long long)(st_pack_raw.load() >> 20), (long long)(st_pack_stored.load() >> 20));
+    }
+    const uint64_t head[2] = {p.key, stored.size()};
     std::lock_guard lk(disk_mu);
     _fseeki64(disk_out, 0, SEEK_END);
     const int64_t at = _ftelli64(disk_out);
     fwrite(head, 8, 2, disk_out);
-    fwrite(o.data(), 1, o.size(), disk_out);
+    fwrite(stored.data(), 1, stored.size(), disk_out);
     fflush(disk_out);
     if (disk_idx) {   // (after the record: an index ahead of the file would name a record it does not have)
         std::vector<uint8_t> e;
-        idx_put(e, p.key, o.size(), *(const uint32_t*)o.data());
+        idx_put(e, p.key, stored.size(), kind);
         fwrite(e.data(), 1, e.size(), disk_idx);
         fflush(disk_idx);
     }
     // (the precompile's: nothing holds them but the file, and the game starts on them at once)
-    if (disk_listing) disk_records[p.key].push_back({at + 16, o.size(), (uint32_t)((p.compute ? 1 : 0) | (p.mesh ? 2 : 0) | (p.fallback ? 4 : 0))});
+    if (disk_listing) disk_records[p.key].push_back({at + 16, stored.size(), kind});
 }
 
 /// The kept variants of key read from the file (in: a handle on it, used under mu when given) and made ready, to variants
 void program_cache_read(FILE* in, std::mutex* mu, uint64_t key, const std::vector<DiskRecord>& recs,
                         std::vector<std::unique_ptr<Program>>& variants) {
     for (const DiskRecord& d : recs) {
-        std::vector<uint8_t> data(16 + d.size);   // (with its head, the key and size: the index's word is checked against the file's)
-        {
-            std::unique_lock<std::mutex> lk;
-            if (mu) lk = std::unique_lock<std::mutex>(*mu);
-            _fseeki64(in, d.at - 16, SEEK_SET);
-            if (fread(data.data(), 1, data.size(), in) != data.size()) continue;
-        }
-        uint64_t head[2];
-        std::memcpy(head, data.data(), 16);
-        if (head[0] != key || head[1] != d.size) {
-            static std::atomic<int> logged{0};
-            if (logged++ < 20)
-                logf("vk: program cache: no record of program %016llx at %lld as the index said: translated again", (unsigned long long)key,
-                     (long long)d.at);
-            continue;
-        }
-        Reader r{data.data() + 16, data.data() + data.size()};
+        std::vector<uint8_t> data;
+        if (!disk_read_record(in, mu, key, d, data)) continue;   // (the head checked against the index's word, a packed record unpacked)
+        Reader r{data.data(), data.data() + data.size()};
         auto p = std::make_unique<Program>();
         p->key = key;
         get_head(r, *p);
@@ -2024,7 +2278,7 @@ struct Pick {
     const Program* p = nullptr;
     std::vector<uint32_t> handles;   // (at its answers' descriptors: their slots and the slots' versions)
 };
-thread_local std::unordered_map<uint64_t, Pick> picks;   // (each recording thread's: program_pick has its own lock)
+thread_local FlatMap<uint64_t, Pick> picks;   // (each recording thread's: program_pick has its own lock; hookshot: flat, flat_map.h)
 uint64_t pick_inputs(const NvnState& s, const uint8_t color_types[8]) {
     uint64_t h = 0x9E37;
     for (int i = 0; i < 16; i++) h = h * 1099511628211ull ^ (uint64_t)s.vattr[i];
@@ -2167,6 +2421,9 @@ const Program* program_for(const NvnState& s, ProgramKind kind, const uint8_t co
         }
     }
     const uint64_t key = (compute ? 0x5EED : pick_inputs(s, color_types)) * 1099511628211ull ^ s.prog.serial;
+    // (hookshot: held across program_pick below and written through after it, though an insert into the FlatMap picks would move it
+    // (flat_map.h): nothing in between inserts into this thread's picks. program_pick takes shader_mu, which is not recursive,
+    // so it cannot reach program_for again; a callback from it into the draw path would have to look pk up anew)
     Pick& pk = picks[key];
     auto keep = [&](const Program* p) {
         if (!p || !p->ready.load(std::memory_order_acquire) || p->failed) return p;
@@ -2360,12 +2617,8 @@ void program_cache_each(const std::function<void(const KeptProgram&)>& fn) {
     std::sort(all.begin(), all.end(), [](const auto& a, const auto& b) { return a.second.at < b.second.at; });   // (file order)
     KeptProgram k;
     for (const auto& [key, d] : all) {
-        std::vector<uint8_t> data(d.size);
-        {
-            std::lock_guard lk(disk_mu);
-            _fseeki64(disk_in, d.at, SEEK_SET);
-            if (fread(data.data(), 1, d.size, disk_in) != d.size) continue;
-        }
+        std::vector<uint8_t> data;
+        if (!disk_read_record(disk_in, &disk_mu, key, d, data)) continue;
         Reader r{data.data(), data.data() + data.size()};
         Program p;
         p.key = key;
@@ -2601,18 +2854,20 @@ SeedVariants seed_compute(size_t i, size_t cap, const std::function<void(Program
     // still asked for, as a kept base says nothing of them)
     std::unordered_set<uint64_t> variants;
     {
-        std::lock_guard lk(disk_mu);
-        if (auto it = disk_records.find(cs->key); it != disk_records.end())
-            for (const DiskRecord& d : it->second) {
-                std::vector<uint8_t> data(d.size);
-                _fseeki64(disk_in, d.at, SEEK_SET);
-                if (fread(data.data(), 1, d.size, disk_in) != d.size) continue;
-                Reader rd{data.data(), data.data() + data.size()};
-                Program q;
-                rd.get<uint32_t>();
-                rd.list(q.answers);
-                if (!rd.bad) variants.insert(answers_hash(q));
-            }
+        std::vector<DiskRecord> kept;
+        {
+            std::lock_guard lk(disk_mu);
+            if (auto it = disk_records.find(cs->key); it != disk_records.end()) kept = it->second;
+        }
+        for (const DiskRecord& d : kept) {
+            std::vector<uint8_t> data;
+            if (!disk_read_record(disk_in, &disk_mu, cs->key, d, data, 1 << 16)) continue;   // (the answers come first)
+            Reader rd{data.data(), data.data() + data.size()};
+            Program q;
+            rd.get<uint32_t>();
+            rd.list(q.answers);
+            if (!rd.bad) variants.insert(answers_hash(q));
+        }
     }
     loaded_variants(cs->key, &variants);
     const size_t had = variants.size();
@@ -2789,13 +3044,16 @@ bool program_variant_kept(uint64_t key, uint64_t variant) {
     std::unordered_set<uint64_t> have;
     loaded_variants(key, &have);
     if (have.count(variant)) return true;
-    std::lock_guard lk(disk_mu);
-    const auto it = disk_records.find(key);
-    if (it == disk_records.end() || !disk_in) return false;
-    for (const DiskRecord& d : it->second) {
-        std::vector<uint8_t> data(std::min<size_t>(d.size, 1 << 16));   // (the answers come first)
-        _fseeki64(disk_in, d.at, SEEK_SET);
-        if (fread(data.data(), 1, data.size(), disk_in) != data.size()) continue;
+    std::vector<DiskRecord> kept;
+    {
+        std::lock_guard lk(disk_mu);
+        const auto it = disk_records.find(key);
+        if (it == disk_records.end() || !disk_in) return false;
+        kept = it->second;
+    }
+    for (const DiskRecord& d : kept) {
+        std::vector<uint8_t> data;
+        if (!disk_read_record(disk_in, &disk_mu, key, d, data, 1 << 16)) continue;   // (the answers come first)
         Reader rd{data.data(), data.data() + data.size()};
         Program q;
         rd.get<uint32_t>();
