@@ -137,6 +137,102 @@ def movie_site(s, addr, off):
     return span[0] + body.index(add) + len(add)
 
 
+# Lift hooks: the ports of upstream Hookshot's fixes for the game's systems that count updates instead of time above a 60
+# cap (upstream edits the lifted text in nx2/oot_patches.py; the lifted work folder is shared here, so each is lines put
+# in after an anchor the function's text has once, its body and hash unchanged). A kind a macro in host/hl_*.c:
+# - HL_SOUND_HOOK(80435300, "<hash>"): the sound manager's job. At its head: return at once while hos_oot_sound_gate
+#   (host/hl_high_fps.c) says so (the job at 60 Hz above a 60 cap); after its load of the game step: that step through
+#   hos_oot_sound_step (a whole one while the gate holds the job to whole steps).
+# - HL_SOLVER_HOOK(838ceb80, "<hash>"): after the cut of frame step x the solver's steps a 60 fps frame + 0.001, stored to
+#   the solver's +712: the count through hos_oot_solver_steps (rounded up while the step is under 1).
+# - HL_WHOLE_HOOK(80a87e50, "<hash>", <reg>, "<key>"): after the function's cut of an amount of the frame step (vreg 0's
+#   float) to whole frames into x<reg>, that count made hos_frame_whole(<key>, the amount, the game's count) (host/hl_step.c):
+#   the fractions carried per counter (<key>, the counter's or its object's guest address) above a 60 cap. The cut is the
+#   function's one; where it makes the same cut more than once, the one stored to <key> right after it.
+# Each goes in only where its function's text hashes as recorded, both lines of a kind or none. The marker is the address
+# plus one, as a step hook's (one hook a function), so a tree that does not ask for it takes it out as a stale gate.
+WANT_LIFT = re.compile(r'^HL_(SOUND|SOLVER|WHOLE)_HOOK\(\s*([0-9a-f]{8})\s*,\s*"([0-9a-f]*)"((?:\s*,\s*(?:\d+|"[^"\n]*"))*)\s*\)',
+                       re.M)
+CUT = "    c->x[%d]=recomp_fp_to_int(c->vreg[0][0]&UINT64_C(0xffffffff),32,32,1,3,c->fpcr,&c->fpsr);\n"
+SOUND_SLOT = "g_module_base + 0x80435000ULL + (int64_t)75927552"   # (the page of the step's pointer, whose +2192 holds it)
+SOUND_LOAD = ("    c->x[8]=" + SOUND_SLOT + ";\n"
+              "    { uint64_t _r = ((uint64_t)0 | ((c->x[0]) << 0)); c->x[19] = _r; }\n"
+              "    c->x[8]=recomp_load64(c,c->x[8] + 2192);\n"
+              "    c->x[8]=recomp_load64(c,c->x[8] + 0);\n"
+              "    { { uint64_t _v=recomp_load32(c,(c->x[8]+16ULL)); a64_vset64(c->vreg[0],_v); } }\n")
+SOLVER_STORE = "    recomp_store32(c,c->x[0] + 712,c->x[1]);\n"
+WHOLE_STORE = "    recomp_store32(c,%s,c->x[%d]);\n"
+
+
+def lift_lines(kind, addr, args):
+    """the lines a lift hook puts in, in the order of their places"""
+    mark = "   /* hl gate %s */\n" % step_id(addr)
+    if kind == "sound":
+        return ["    { extern int hos_oot_sound_gate(Ctx *A64_NOESC, uint32_t, uint64_t); "
+                "if (!hos_oot_sound_gate(c, (uint32_t)c->x[2], " + SOUND_SLOT + " + 2192)) return; }" + mark,
+                "    { extern uint32_t hos_oot_sound_step(uint32_t); "
+                "a64_vset64(c->vreg[0], hos_oot_sound_step((uint32_t)c->vreg[0][0])); }" + mark]
+    if kind == "solver":
+        return ["    { extern uint32_t hos_oot_solver_steps(uint32_t, uint32_t, uint32_t); c->x[1] = "
+                "hos_oot_solver_steps((uint32_t)c->x[1], (uint32_t)c->vreg[0][0], (uint32_t)c->vreg[1][0]); }" + mark]
+    if kind == "whole":
+        reg, key = args
+        return ["    { extern uint32_t hos_frame_whole(uint64_t, uint32_t, uint32_t); c->x[%d] = hos_frame_whole(%s, "
+                "(uint32_t)c->vreg[0][0], (uint32_t)c->x[%d]); }%s" % (reg, key, reg, mark)]
+    raise ValueError(kind)
+
+
+def lift_places(body, addr, kind, args):
+    """the offsets in f_<addr>'s body (without its hook) where the lines of lift_lines go, or None when an anchor is not
+    there once"""
+    if kind == "sound":
+        if body.count(SOUND_LOAD) != 1:
+            return None
+        return [len(HEAD % addr), body.index(SOUND_LOAD) + len(SOUND_LOAD)]
+    if kind == "solver":
+        anchor = CUT % 1 + SOLVER_STORE
+        if body.count(anchor) != 1:
+            return None
+        return [body.index(anchor) + len(CUT % 1)]
+    if kind == "whole":
+        reg, key = args
+        cut = CUT % reg
+        for anchor in (cut, cut + WHOLE_STORE % (key, reg)):
+            if body.count(anchor) == 1:
+                return [body.index(anchor) + len(cut)]
+        return None
+    raise ValueError(kind)
+
+
+def wanted_lifts(host=HOST):
+    """{address: (hash, kind, args)} of every lift hook (HL_SOUND_HOOK, HL_SOLVER_HOOK, HL_WHOLE_HOOK) in host/hl_*.c"""
+    out = {}
+    for path in sorted(glob.glob(os.path.join(host, "hl_*.c"))):
+        with open(path, encoding="utf-8", errors="replace") as f:
+            for kind, addr, h, rest in WANT_LIFT.findall(f.read()):
+                args = tuple(int(a) if a.isdigit() else a.strip('"')
+                             for a in re.findall(r'\d+|"[^"\n]*"', rest))
+                out[addr] = (h, kind.lower(), args)
+    return out
+
+
+def apply_lift(s, addr, kind, args):
+    """s with f_<addr>'s lift hook in (made again from the lift's text: a hook of an older form is replaced), or None when
+    its anchors are not there"""
+    span = body_of(s, addr)
+    if span is None:
+        return None
+    mark = "/* hl gate %s */" % step_id(addr)
+    lines = s[span[0]:span[1]].split("\n")
+    body = "\n".join(line for i, line in enumerate(lines) if i == len(lines) - 1 or not line.endswith(mark))
+    places = lift_places(body, addr, kind, args)
+    if places is None:
+        return None
+    for at, line in sorted(zip(places, lift_lines(kind, addr, args)), reverse=True):
+        body = body[:at] + line + body[at:]
+    return s[:span[0]] + body + s[span[1]:]
+
+
 def wanted(host=HOST):
     """{address: hash} of every HL_GATE in host/hl_*.c"""
     out = {}
@@ -168,14 +264,16 @@ def text_hash(s, addr):
     return hashlib.sha1(body.encode("utf-8")).hexdigest()[:16]
 
 
-def apply_text(s, want, steps=None, movies=None):
+def apply_text(s, want, steps=None, movies=None, lifts=None):
     """(new text, {address: status}) for one file: gates of `want` whose function is here put in, others' taken out; the
     step hooks of `steps` ({address: (vreg, probe)}, all of them found in the lift: apply) put in, others' taken out; the
-    movie hooks of `movies` ({address: offset}, each found with its hash: apply) the same"""
+    movie hooks of `movies` ({address: offset}, each found with its hash: apply) and the lift hooks of `lifts` ({address:
+    (kind, args)}, the same) too"""
     status = {}
     steps = steps or {}
     movies = movies or {}
-    keep = set(want) | {step_id(a) for a in steps} | {step_id(a) for a in movies}
+    lifts = lifts or {}
+    keep = set(want) | {step_id(a) for a in steps} | {step_id(a) for a in movies} | {step_id(a) for a in lifts}
     # (stale gates out first)
     def stale(m):
         if m.group(1) in keep:
@@ -203,6 +301,12 @@ def apply_text(s, want, steps=None, movies=None):
             continue
         s = s[:at] + line + s[at:]
         status["movie " + addr] = "hooked"
+    for addr, (kind, args) in lifts.items():
+        out = apply_lift(s, addr, kind, args)
+        if out is None:
+            continue
+        status["%s %s" % (kind, addr)] = "hooked already" if out == s else "hooked"
+        s = out
     for addr, h in want.items():
         span = body_of(s, addr)
         if span is None:
@@ -238,17 +342,20 @@ def apply(gen, host=HOST, quiet=False, skip=None):
     want = wanted(host)
     asked = wanted_steps(host)
     movies_asked = wanted_movies(host)
-    for addr in sorted(a for a in set(want) | set(asked) | set(movies_asked) if a in skip):
+    lifts_asked = wanted_lifts(host)
+    for addr in sorted(a for a in set(want) | set(asked) | set(movies_asked) | set(lifts_asked) if a in skip):
         print("hl_gates: f_%s NOT gated: an exeFS mod patches it (mods/%s)" % (addr, skip[addr]))
     if any(a in skip for a in asked):
         asked = {}
     want = {a: h for a, h in want.items() if a not in skip}
     movies_asked = {a: v for a, v in movies_asked.items() if a not in skip}
+    lifts_asked = {a: v for a, v in lifts_asked.items() if a not in skip}
     state_path = os.path.join(gen, "hl_gates.state")
     # (FORM: the gates' lines as this script writes them; a new form makes a gen folder stamped by the old one read again)
     state = FORM + "\n" + "\n".join("%s %s" % kv for kv in sorted(want.items())) + "\n" + \
         "\n".join("step %s %s" % (a, v) for a, v in sorted(asked.items())) + \
         "".join("\nmovie %s %s" % (a, v) for a, v in sorted(movies_asked.items())) + \
+        "".join("\nlift %s %s" % (a, v) for a, v in sorted(lifts_asked.items())) + \
         "\n".join("skip %s %s" % kv for kv in sorted(skip.items()))
     files = sorted(glob.glob(os.path.join(gen, "code_*.c")))
     stamp = state + "\n" + "\n".join("%s %d %d" % (os.path.basename(p), os.path.getsize(p), os.stat(p).st_mtime_ns) for p in files)
@@ -272,16 +379,18 @@ def apply(gen, host=HOST, quiet=False, skip=None):
         else:
             print("hl_gates: WARNING: the step hooks' divides found at %d of %d (%s): none hooked" %
                   (len(seen), len(asked), " ".join(sorted(set(asked) - seen))))
-    movies_hooked = set()
+    movies_hooked, lifts_hooked = set(), set()
     for path in files:
         with open(path, encoding="utf-8", newline="") as f:
             s = f.read()
-        # (a movie hook goes in only where its function's text hashes as recorded; elsewhere a stale one is taken out)
+        # (a movie or lift hook goes in only where its function's text hashes as recorded; elsewhere a stale one is taken out)
         movies = {a: off for a, (h, off) in movies_asked.items() if body_of(s, a) is not None and text_hash(s, a) == h}
-        if not want and not steps and not movies and "/* hl gate " not in s:
+        lifts = {a: (k, v) for a, (h, k, v) in lifts_asked.items() if body_of(s, a) is not None and text_hash(s, a) == h}
+        if not want and not steps and not movies and not lifts and "/* hl gate " not in s:
             continue
-        out, status = apply_text(s, want, steps, movies)
+        out, status = apply_text(s, want, steps, movies, lifts)
         movies_hooked |= {a for a in movies if movie_line(a) in out}
+        lifts_hooked |= {a for a, (k, v) in lifts.items() if status.get("%s %s" % (k, a), "").startswith("hooked")}
         for addr, st in status.items():
             found[addr] = st
             if not quiet or st.startswith("NOT gated"):   # (a gate left out is always said: a code mod changed that function's text)
@@ -294,6 +403,9 @@ def apply(gen, host=HOST, quiet=False, skip=None):
             print("hl_gates: WARNING: f_%s is not in the lifted code: not gated" % addr)
     for addr in sorted(set(movies_asked) - movies_hooked):
         print("hl_gates: WARNING: f_%s's movie count not found with its recorded hash: not hooked" % addr)
+    for addr in sorted(set(lifts_asked) - lifts_hooked):
+        print("hl_gates: WARNING: f_%s (%s hook) not found with its recorded hash and anchors: not hooked" %
+              (addr, lifts_asked[addr][1]))
     files = sorted(glob.glob(os.path.join(gen, "code_*.c")))
     stamp = state + "\n" + "\n".join("%s %d %d" % (os.path.basename(p), os.path.getsize(p), os.stat(p).st_mtime_ns) for p in files)
     with open(state_path, "w", encoding="utf-8") as f:

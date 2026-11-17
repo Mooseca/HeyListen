@@ -198,3 +198,31 @@ the clock: at a cap of 120 the opening story movie went black at half its length
 hook (`HL_MOVIE_HOOK` in `host/hl_step.c`, marker `hl gate 83b7c711`), makes the step `hos_movie_frames(player)`: the
 frame's published seconds in 60ths, the rest carried to that player's next update, 1 when nothing is published
 (`HOS_FPS_MOVIE=0`: 1 always).
+
+**The sound job and the solver's steps (after upstream Hookshot 8fcc8c22b and 9df055f23).** Two places need whole 60 fps
+frames, where the step is now the frame's own time. The sound manager's job (`0x80435300`, phase in `w2`) hands the step to
+the sound engine, whose timers and ramps count updates of at least one whole step: fed 0.5 at 120 fps, sounds were not
+released at area changes until the voice budget was full and sounds, then the music, stopped. Above a 60 cap the job runs
+at 60 Hz (a remainder of steps, a whole one handed over when it runs, its other phases following phase 0's choice, the
+remainder kept over steps of 1 or more). The physics solver's step count (`(int)(step x steps a 60 fps frame + 0.001)` into
+the solver's `+712`, at `0x838ceb80` and `0x838cfc10`) is rounded up instead while the step is under 1, at least 1 and never
+under the game's, so a moving platform keeps Link. These are lift hooks (`HL_SOUND_HOOK`, `HL_SOLVER_HOOK` in
+`host/hl_high_fps.c`, the logic in `host/oot_high_fps.h`): lines `nx2/hl_gates.py` puts after anchors in each function's text
+when it hashes as recorded, markers `hl gate 80435301`, `838ceb81`, `838cfc11`. At a cap of 60 both give the game's own
+values. `HOS_FPS_SOUND=0`, `HOS_FPS_SOLVER=0`: the game's (HeyListen's switches); `HOS_FPS_LOG=1`: what they do every 600
+calls.
+
+**Counters cut to whole frames (after upstream Hookshot f915af93).** Some of the game's counters add the frame step, or an
+amount of it, cut to a whole number: 1 a frame at 60, 0 every frame under a step of 1, so the counter stands still above a
+60 cap. A whole hook (`HL_WHOLE_HOOK` in `host/hl_step.c`: the function, its hash, the register the cut goes into, the
+counter's or its object's guest address) is a line after that cut making the count `hos_frame_whole(key, amount, count)`:
+the amount added to that counter's own remainder and its whole frames handed out (`host/frame_whole.h`) while the frame's
+seconds are published, the game's count exactly otherwise (`HOS_FPS_WHOLE=0`: always the game's; HeyListen's switch). The
+sites, each added once it was seen to misbehave in game:
+
+| Function | What counts | Remainder kept for | Above a 60 cap without it |
+|---|---|---|---|
+| `0x80a87e50` | the pick-up indicator's shown count (`+864`) moves toward the wallet's by `(int)(step x max(distance / 50, 1))` (upstream #2006) | `x19 + 864` | the indicator above Link's head never fades |
+| `0x803edf70` | the time of day adds `(int)(2 x step)` game seconds (`+60`) a frame to the seconds of the day (upstream #2093); the function's second such cut, in the branch that sets the time from another source, stays the game's | `x19 + 60` | the day runs slow below 120 fps (83% at 100) and stops above it, the sun swinging over a frozen hour |
+| `0x800672e0` | the water renderer runs its ripple simulation `(int)step x substeps` (`+76` of the pass) times a frame (upstream #2409, found for Lichii and Fritchii) | `x21`, the water object (64 remainders: a scene's surfaces each take one) | the rings Link and actors make in water stand still |
+| `0x80652cb0` | the floor web's simulation steps, the elapsed time over 1/60 cut, then clamped to 0..3 (upstream #2929) | `x19 + 2296`, the web object (before the clamp, which stays) | the Deku Tree's floor web does not react when Link jumps on it |

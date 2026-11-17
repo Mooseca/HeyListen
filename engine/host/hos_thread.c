@@ -13,6 +13,17 @@
 #define CREATE_WAITABLE_TIMER_HIGH_RESOLUTION 0x00000002
 #endif
 #include <emmintrin.h>
+#if defined(__linux__) && !defined(__EMSCRIPTEN__)
+#include <dirent.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <link.h>
+#include <pthread.h>
+#include <string.h>
+#include <sys/syscall.h>
+#include <sys/uio.h>
+#include <unistd.h>
+#endif
 #ifdef __EMSCRIPTEN__
 #include <sched.h>
 #include <stdatomic.h>
@@ -36,6 +47,7 @@ struct HosThread {
     int vc_held, vc_last, vc_queued;
     volatile int vc_kick;
     int64_t vc_since, vc_took;   /* (when it began to wait for a core; when it took the one it holds) */
+    int vc_tid;   /* (Linux: the host thread that last asked for a core as this thread, for vc_where) */
     int bg_kind; int64_t bg_since;   /* (HeyListen, sprint 5: HOS_BG_THROTTLE, hos_vcore_checkpoint) */
     /* (HOS_CORE_COUNT, TICK-062 A10) calls that ask for the core number (HLE, svc 0x10), waits for a virtual core and their time */
     int64_t cc_hle, cc_svc, cc_vcw, cc_vcw_ns;
@@ -1387,10 +1399,140 @@ static int64_t vc_env_ns(const char *name, int64_t us) {
     const char *e = getenv(name);
     return (e ? atoll(e) : us) * 1000;
 }
+#if defined(__linux__) && !defined(__EMSCRIPTEN__)
+/* (Linux) vc_where without stopping the thread (no SuspendThread here, and a signal would cut its wait short): the kernel
+   says what it is blocked in, /proc/self/task/<tid>/syscall ("<number> <6 args> <sp> <pc>", "running" when it is not in
+   one) and stat's state, and its stack from that sp is read with process_vm_readv (a word past the stack's end fails, it
+   does not fault) for return addresses: a word inside an object's code whose bytes before it are a call. The first ones
+   are the host functions it waits in, written <module>+<offset from its load base> as the crash and prof lines are
+   (hookshot.map / hookshot_vk.so.map name them; nx2/samap.py). A stale word that looks like a return address can be
+   among them: the leaf frames come first and are the ones to trust. */
+typedef struct { uintptr_t lo, hi, base; char name[40]; } VcCode;
+static VcCode vc_code[48];
+static int vc_ncode;
+static pthread_once_t vc_code_once = PTHREAD_ONCE_INIT;
+static int vc_code_cb(struct dl_phdr_info *info, size_t size, void *p) {
+    (void)size, (void)p;
+    const char *n = info->dlpi_name && info->dlpi_name[0] ? info->dlpi_name : program_invocation_short_name;
+    const char *b = strrchr(n, '/');
+    uintptr_t base = UINTPTR_MAX;
+    for (int i = 0; i < info->dlpi_phnum; i++)
+        if (info->dlpi_phdr[i].p_type == PT_LOAD && info->dlpi_addr + info->dlpi_phdr[i].p_vaddr < base)
+            base = info->dlpi_addr + (info->dlpi_phdr[i].p_vaddr & ~(uintptr_t)0xfff);
+    for (int i = 0; i < info->dlpi_phnum && vc_ncode < 48; i++) {
+        const ElfW(Phdr) *ph = &info->dlpi_phdr[i];
+        if (ph->p_type != PT_LOAD || !(ph->p_flags & PF_X) || !(ph->p_flags & PF_R)) continue;
+        VcCode *c = &vc_code[vc_ncode++];
+        c->lo = info->dlpi_addr + ph->p_vaddr, c->hi = c->lo + ph->p_memsz, c->base = base;
+        snprintf(c->name, sizeof c->name, "%s", b ? b + 1 : n);
+    }
+    return 0;
+}
+static void vc_code_init(void) { dl_iterate_phdr(vc_code_cb, NULL); }
+static const VcCode *vc_code_of(uintptr_t a) {
+    for (int i = 0; i < vc_ncode; i++)
+        if (a - vc_code[i].lo < vc_code[i].hi - vc_code[i].lo) return &vc_code[i];
+    return NULL;
+}
+/* the bytes before a are an x86-64 call: e8 rel32, or ff /2 (register, [reg], [reg+disp8/32], [rip+disp32], with a SIB) */
+static int vc_after_call(uintptr_t a, const VcCode *c) {
+    if (a - c->lo < 8) return 0;
+    const uint8_t *p = (const uint8_t *)a;
+    if (p[-5] == 0xe8) return 1;
+    for (int len = 2; len <= 7; len++) {
+        if (p[-len] != 0xff) continue;
+        const uint8_t m = p[-len + 1];
+        if ((m >> 3 & 7) != 2) continue;
+        const int mod = m >> 6, rm = m & 7, sib = mod != 3 && rm == 4;
+        const int disp = mod == 1 ? 1 : mod == 2 ? 4 : mod == 0 && rm == 5 ? 4 : 0;
+        if (2 + sib + disp == len) return 1;
+    }
+    return 0;
+}
+static int vc_read_file(const char *path, char *buf, size_t cap) {
+    const int fd = open(path, O_RDONLY | O_CLOEXEC);
+    if (fd < 0) return 0;
+    const ssize_t n = read(fd, buf, cap - 1);
+    close(fd);
+    buf[n > 0 ? n : 0] = 0;
+    return n > 0 ? (int)n : 0;
+}
+static void vc_where_linux(int tid, char *out, size_t cap) {
+    if (tid <= 0 || cap < 64) return;
+    pthread_once(&vc_code_once, vc_code_init);
+    char path[64], st[512], sc[256];
+    snprintf(path, sizeof path, "/proc/self/task/%d/stat", tid);
+    if (!vc_read_file(path, st, sizeof st)) return;
+    const char *rp = strrchr(st, ')');
+    char state = '?';
+    long long nice = 0;
+    if (rp) sscanf(rp + 1, " %c %*d %*d %*d %*d %*d %*u %*u %*u %*u %*u %*u %*u %*d %*d %*d %lld", &state, &nice);
+    char how[24] = "";   /* (a lowered thread: OptimizeChangeBanc's nice 19 waits behind every other runnable one) */
+    if (nice) snprintf(how, sizeof how, ", nice %lld", nice);
+    snprintf(path, sizeof path, "/proc/self/task/%d/syscall", tid);
+    vc_read_file(path, sc, sizeof sc);
+    long long nr = -2;
+    unsigned long long a[6] = {0}, sp = 0, pc = 0;
+    const int got = sscanf(sc, "%lld %llx %llx %llx %llx %llx %llx %llx %llx", &nr, &a[0], &a[1], &a[2], &a[3], &a[4], &a[5],
+                           &sp, &pc);
+    size_t len = 0;
+    if (got == 9)
+        len = (size_t)snprintf(out, cap, " at [%c%s, syscall %lld (%#llx, %#llx, %#llx)]", state, how, nr, a[0], a[1], a[2]);
+    else if (got == 3)   /* ("-1 <sp> <pc>": blocked, not in a syscall) */
+        sp = a[0], pc = a[1], len = (size_t)snprintf(out, cap, " at [%c%s, no syscall]", state, how);
+    else {
+        snprintf(out, cap, " at [%c%s, %s]", state, how, strncmp(sc, "running", 7) ? "?" : "running");
+        return;
+    }
+    const VcCode *pcc = vc_code_of((uintptr_t)pc);
+    if (pcc && len < cap)
+        len += (size_t)snprintf(out + len, cap - len, " %s+%#llx", pcc->name, (unsigned long long)(pc - pcc->base));
+    /* the stack from sp, up to 32 KB or 8 return addresses */
+    uint64_t words[512];
+    int found = 0;
+    for (uintptr_t at = (uintptr_t)sp & ~(uintptr_t)7, end = at + 32768; at < end && found < 8 && len < cap - 48;) {
+        const size_t n = (end - at < sizeof words) ? end - at : sizeof words;
+        struct iovec l = {words, n}, r = {(void *)at, n};
+        const ssize_t g = process_vm_readv(getpid(), &l, 1, &r, 1, 0);
+        if (g <= 0) break;
+        for (size_t i = 0; i < (size_t)g / 8 && found < 8 && len < cap - 48; i++) {
+            const VcCode *c = vc_code_of((uintptr_t)words[i]);
+            if (!c || !vc_after_call((uintptr_t)words[i], c)) continue;
+            len += (size_t)snprintf(out + len, cap - len, " < %s+%#llx", c->name, (unsigned long long)(words[i] - c->base));
+            found++;
+        }
+        at += (size_t)g;
+        if ((size_t)g < n) break;
+    }
+}
+/* HOS_VCORE_WHERE=all (diagnostic): at each of the first 12 escapes, where every thread of the process is, a line each:
+   the one a holder waits for (a lock's owner, the thread that would signal it) holds no core and is not in the escape line */
+static void vc_where_all(void) {
+    static int on = -1, left = 12;
+    if (on < 0) on = getenv("HOS_VCORE_WHERE") && !strcmp(getenv("HOS_VCORE_WHERE"), "all");
+    if (!on || left <= 0) return;
+    left--;
+    DIR *d = opendir("/proc/self/task");
+    if (!d) return;
+    struct dirent *e;
+    while ((e = readdir(d))) {
+        const int tid = atoi(e->d_name);
+        if (tid <= 0) continue;
+        char path[64], comm[32] = "", at[400] = "";
+        snprintf(path, sizeof path, "/proc/self/task/%d/comm", tid);
+        vc_read_file(path, comm, sizeof comm);
+        comm[strcspn(comm, "\n")] = 0;
+        vc_where_linux(tid, at, sizeof at);
+        hos_log("vcores:   task %d %s%s", tid, comm, at);
+    }
+    closedir(d);
+}
+#endif
 /* Where a core's holder is now, for the escape line: " at <module>+<offset>" of its host thread's instruction pointer
    (HeyListen.exe's link map names the lifted function, f_<guest address>, or the host function around it), sampled with
    the thread stopped for the one GetThreadContext call. Nothing is called while it is stopped: a lock it holds (the heap's,
-   the loader's) cannot be waited for here */
+   the loader's) cannot be waited for here. (Linux: vc_where_linux, once vc_lock is let go: vc_acquire) */
+#ifndef __linux__
 static void vc_where(HosThread *h, char *out, size_t cap) {
     out[0] = 0;
 #if defined(_WIN32) && !defined(__EMSCRIPTEN__)
@@ -1412,6 +1554,7 @@ static void vc_where(HosThread *h, char *out, size_t cap) {
     (void)h, (void)cap;
 #endif
 }
+#endif
 static void vc_acquire(HosThread *t) {
     static int64_t esc_better = -1, esc_eq, slice;
     if (esc_better < 0) {
@@ -1419,6 +1562,11 @@ static void vc_acquire(HosThread *t) {
         esc_better = vc_env_ns("HOS_VCORE_ESCAPE_US", 250000);
         slice = vc_env_ns("HOS_VCORE_SLICE_US", 2000);
     }
+#ifdef __linux__
+    static _Thread_local int my_tid;
+    if (!my_tid) my_tid = (int)syscall(SYS_gettid);
+    t->vc_tid = my_tid;
+#endif
     AcquireSRWLockExclusive(&vc_lock);
     vc_st.takes++;
     int c = vc_free_for(t);
@@ -1436,6 +1584,10 @@ static void vc_acquire(HosThread *t) {
                (uintptr_t)h);
     }
     const int64_t t0 = hos_now_ns();
+#ifdef __linux__
+    struct { int core, tid; char name[48]; } wheres[16];   /* (an escape's long holders, for the lines after it) */
+    int nwhere = 0, where_all = 0;
+#endif
     t->vc_since = t0;
     t->vc_queued = 1;
     if (vc_nq < 1024) vc_queue[vc_nq++] = t;
@@ -1480,16 +1632,33 @@ static void vc_acquire(HosThread *t) {
                 char who[480] = "";
                 int len = 0;
                 const int64_t now = hos_now_ns();
+#ifdef __linux__
+                /* (Linux: where a holder waits is a longer story, the kernel's word on its wait and a few host frames: a
+                   line of its own after this one, "vcores: core <k> holder <name> at ...", read once vc_lock is let go:
+                   the /proc reads take a while, and every thread that takes or gives a core waits for vc_lock) */
+                nwhere = 0;
+#endif
                 for (int k = 0; k < vc_cores() && len < 360; k++)
                     if (m >> k & 1) {
                         HosThread *h = vc_owner[k];
                         char at[96] = "";
+#ifdef __linux__
+                        if (h && now - h->vc_took > esc_eq / 2 && nwhere < 16) {
+                            wheres[nwhere].core = k, wheres[nwhere].tid = h->vc_tid;
+                            snprintf(wheres[nwhere].name, sizeof wheres[0].name, "%s", h->name);
+                            nwhere++;
+                        }
+#else
                         if (h && now - h->vc_took > esc_eq / 2) vc_where(h, at, sizeof at);
+#endif
                         len += snprintf(who + len, sizeof who - len, " core %d: %s (%d)%s, held %.0f ms%s;", k,
                                         h ? h->name : "-", h ? h->priority : 0, h && h->vc_kick ? " asked" : "",
                                         h ? (now - h->vc_took) / 1e6 : 0.0, at);
                     }
                 hos_log("vcores: %s (priority %d) ran without a core after %.1f ms:%s", t->name, t->priority, waited / 1e6, who);
+#ifdef __linux__
+                where_all = 1;
+#endif
             }
             break;
         }
@@ -1501,6 +1670,14 @@ static void vc_acquire(HosThread *t) {
     t->cc_vcw++, t->cc_vcw_ns += waited;
     vc_stats_locked(hos_now_ns());
     ReleaseSRWLockExclusive(&vc_lock);
+#ifdef __linux__
+    for (int k = 0; k < nwhere; k++) {
+        char at[400] = "";
+        vc_where_linux(wheres[k].tid, at, sizeof at);
+        hos_log("vcores: core %d holder %s%s", wheres[k].core, wheres[k].name, at);
+    }
+    if (where_all) vc_where_all();
+#endif
     HOS_JT(JT_VC_WAIT_E, 0, 0);
 }
 static void vc_release(HosThread *t) {

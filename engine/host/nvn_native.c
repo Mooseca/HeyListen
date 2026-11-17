@@ -1187,6 +1187,11 @@ static void held_init(void) {
 static void held_flush_why(int why) {
     held_init();
     if (!nheld) return;
+    /* (the virtual core given up before flush_cs is taken and taken back after it is let go: flush_cs is held through a
+       replay (the held submits' thread's, another guest thread's), up to hundreds of ms while a zone loads, and a thread
+       that waits for a core while it holds flush_cs, or holds a core while it waits for it, stalls the threads on the
+       other side until the 250-ms escape: the Presentation Thread at area loads. Nothing under flush_cs runs guest code) */
+    const int away = hos_vcore_away();
     EnterCriticalSection(&flush_cs);
     static held_submit local[256];
     LONG n;
@@ -1198,7 +1203,6 @@ static void held_flush_why(int why) {
     LeaveCriticalSection(&held_cs);
     if (n) {
         const int64_t t0 = hos_now_ns();
-        const int away = hos_vcore_away();
         for (LONG i = 0; i < n; i++) {
             if (local[i].pages || local[i].copy) {   /* (HOS_NVN_HOLD_CHECK: what changed since the submit) */
                 int64_t again = 0, differ = 0;
@@ -1214,7 +1218,6 @@ static void held_flush_why(int why) {
             HOS_JT(JT_MARK, 2, (uint64_t)i);
             st_hold_wait_ns += t0 - local[i].t;
         }
-        if (away) hos_vcore_back();
         st_hold_replay_ns += hos_now_ns() - t0;
         st_hold_submits += n, st_hold_by[why < HF_N ? why : HF_OTHER]++;
         if (++st_hold_flushes % 600 == 0) {
@@ -1233,6 +1236,7 @@ static void held_flush_why(int why) {
         }
     }
     LeaveCriticalSection(&flush_cs);
+    if (away) hos_vcore_back();
 }
 static void held_flush(void) { held_flush_why(HF_OTHER); }
 static uint64_t held_count(void) { return (uint64_t)nheld; }
@@ -2800,15 +2804,16 @@ NV(nvnQueueSubmitCommands) {
     if (!hold_on || mine) {
         /* (the replay runs here, on this thread, for ~9 ms a frame (vk_replay.cpp submit_q, RX_VK_ASYNC off): the virtual
            core is given up for it, as Present and AcquireTexture do, so the game's other threads run on it meanwhile.
-           Nothing in the replay runs guest code or needs the core) */
+           Nothing in the replay runs guest code or needs the core. Given up before flush_cs is taken and taken back after
+           it is let go, as held_flush_why does) */
+        const int away = hos_vcore_away();
         if (mine) EnterCriticalSection(&flush_cs);   /* (the held ones first, and nothing between them and this one) */
         if (mine && nheld) held_flush_why(HF_SUBMIT);
-        const int away = hos_vcore_away();
         HOS_JT(JT_MARK, 1, q->submits);   /* (TICK-054: the submit's capture and replay, on this thread; tools/bench/frameline.py) */
         rx_nvn_submit_q(h, n, (uint64_t)(uintptr_t)q);
         HOS_JT(JT_MARK, 2, q->submits);
-        if (away) hos_vcore_back();
         if (mine) LeaveCriticalSection(&flush_cs);
+        if (away) hos_vcore_back();
         return;
     }
     if (nheld >= (LONG)(sizeof held / sizeof *held) - 1) held_flush_why(HF_OTHER);   /* (full: what is held goes now) */

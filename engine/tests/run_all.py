@@ -99,9 +99,15 @@ ARGS = {
     "tests/test_lower_register_markers.py": ["--cxx", "clang++"],
     "tests/test_text_speed.py": ["--cc", "gcc"],
     "tests/test_movie_frame_count.py": ["--cc", "gcc"],
+    "tests/test_high_fps_fixes.py": ["--cc", "gcc"],
+    "tests/test_frame_whole.py": ["--cc", "gcc"],
+    "tests/test_web_floor_steps.py": ["--cc", "gcc"],
+    "tests/test_vcore_held_flush.py": ["--cxx", "{cxx}"],
     "tests/test_audio_in.py": ["--cc", "gcc", "--cxx", "g++"],
     "tests/test_upscale_fallback.py": ["--cxx", "g++"],
+    "tests/test_vcore_fs_write.py": ["--cxx", "{cxx}"],
     "tests/test_reserved_core.py": ["--cxx", "g++"],
+    "tests/test_vcore_multiwait_scan.py": ["--cxx", "{cxx}"],
     "tests/test_log_qpc.py": ["--cxx", "g++"],
     "tests/test_cold_heaps_listed.py": ["--cxx", "g++"],
     "tests/test_pcache_play_save.py": ["--cxx", "g++"],
@@ -173,6 +179,7 @@ ARGS = {
     "tests/test_evict_reason.py": ["--cxx", "{cxx}"],
     "tests/test_tl_time_domain.py": ["--cxx", "{cxx}", "--headers", "{vulkan_headers}"],
     "tests/test_jt_mark_export.py": ["--cxx", "{cxx}"],
+    "tests/test_vcore_texels.py": ["--cxx", "{cxx}"],
     "tests/test_vcore_video_acquire.py": ["--cxx", "{cxx}"],
 }
 

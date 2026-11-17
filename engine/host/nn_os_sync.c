@@ -251,8 +251,18 @@ static Obj *obj(uint64_t key, int kind) {
     return o;
 }
 
+static Obj *obj_quiet(uint64_t key, int kind);
 static Obj *obj_any(uint64_t key, int kind) {
     hos_vcore_checkpoint();   /* (virtual cores: every nn::os call, where a better waiter takes the core) */
+    return obj_quiet(key, kind);
+}
+/* obj_any without the checkpoint, for a lookup made while a host lock is held (WaitAny's scan, under mw_lock): the
+   checkpoint can give the core up and wait for one again (vc_yield), and a thread waiting for a core while it holds a
+   lock stalls every thread that holds a core and wants that lock, until the 250-ms escape. (HeyListen: WaitAny's scan
+   did, under mw_lock: every event_signal, message queue and WaitAny of the cores' holders then waited for mw_lock: the
+   frames of 250 ms.) The host's signals (hos_event_signal, hos_system_event_signal) keep theirs: called by guest threads
+   through the HLE, without them Kokiri ran 3-4% slower (a better waiter got its core later) */
+static Obj *obj_quiet(uint64_t key, int kind) {
     /* (hookshot: 128 still missed: obj_lookup was the busiest leaf in dense Kokiri, 3.2% of all samples, 4.3% of the instants when one
        thread alone ran; each actor has its own mutexes) */
     static _Thread_local struct { uint64_t key; Obj *o; } cache[1024];
@@ -1173,15 +1183,16 @@ static void holder(Ctx *c, int what) {
     h->event = ARG(1);
     h->sem_max = what;   /* the kind of object watched (Obj fields reused: a holder has no semaphore) */
 }
-/* Ready now? Consumes an auto-clear event's signal, as the kernel does when a wait is satisfied by it. */
+/* Ready now? Consumes an auto-clear event's signal, as the kernel does when a wait is satisfied by it. Called under
+   mw_lock: lookups without the checkpoint (obj_quiet) */
 static int holder_ready(Obj *h) {
     switch (h->sem_max) {
-    case H_EVENT: return event_wait(obj(h->event, K_EVENT), 0, 1);
-    case H_TIMER: { Obj *t = obj(h->event, K_TIMER); return t->due_ns && hos_now_ns() >= t->due_ns; }
+    case H_EVENT: return event_wait(obj_quiet(h->event, K_EVENT), 0, 1);
+    case H_TIMER: { Obj *t = obj_quiet(h->event, K_TIMER); return t->due_ns && hos_now_ns() >= t->due_ns; }
     case H_THREAD: return 0;   /* thread exit is not tracked as an object yet */
-    case H_SEMA: { Obj *s = obj(h->event, K_SEMA); return s->sem > 0; }
-    case H_QUEUE_NOT_EMPTY: { Obj *q = obj(h->event, K_QUEUE); return q->qlen > 0; }
-    case H_QUEUE_NOT_FULL: { Obj *q = obj(h->event, K_QUEUE); return q->qlen < q->qcap; }
+    case H_SEMA: { Obj *s = obj_quiet(h->event, K_SEMA); return s->sem > 0; }
+    case H_QUEUE_NOT_EMPTY: { Obj *q = obj_quiet(h->event, K_QUEUE); return q->qlen > 0; }
+    case H_QUEUE_NOT_FULL: { Obj *q = obj_quiet(h->event, K_QUEUE); return q->qlen < q->qcap; }
     default: return 0;         /* native handles: never, without a kernel behind them */
     }
 }
@@ -1241,7 +1252,7 @@ static uint64_t wait_any(uint64_t multiwait, int64_t timeout_ns) {
         for (int i = 0; i < mw->nlinks && !found; i++) {
             if (holder_ready(mw->links[i])) found = mw->links[i]->key;
             else if (mw->links[i]->sem_max == H_TIMER) {
-                const int64_t due = obj(mw->links[i]->event, K_TIMER)->due_ns;
+                const int64_t due = obj_quiet(mw->links[i]->event, K_TIMER)->due_ns;
                 if (due && due < wake) wake = due;
             }
         }
