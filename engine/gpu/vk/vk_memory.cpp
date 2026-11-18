@@ -1797,6 +1797,7 @@ bool memory_read_as_submitted(uint64_t gpu, void* dst, uint64_t n) {
     {
         std::lock_guard lk(pools_mu);
         bool late_read = false;
+        auto overlay = [&](const uint64_t guest, uint8_t* const dst, const uint64_t n) {   // (the capture's pages over [guest, guest + n) of guest memory, into dst)
         for (uint64_t page = guest >> kPageShift; page < (guest + n + 4095) >> kPageShift; page++) {
             const CapEntry e = cap_entry(page);
             if (!e.gen || e.gen != page_gen(page)) continue;
@@ -1833,7 +1834,25 @@ bool memory_read_as_submitted(uint64_t gpu, void* dst, uint64_t n) {
             std::memcpy((uint8_t*)dst + (a - guest), (const uint8_t*)b->second.map + (uint64_t)e.slot * 4096 + (a - (page << kPageShift)), z - a);
             from++;
         }
-        if (page0 == page1 && !late_read && from == 0) {   // (in no capture: guest memory stands for its next words too)
+        };
+        // (longshot 7daafa7a, #1553, d87dd600; RX_VK_READ_MAPPED=0: as before) A read of a virtual GPU address (1 TB and up: a
+        // sparse mapping) across a page boundary takes the page after the first from wherever that page maps, not from the
+        // guest page after the first one: neighbours in a virtual range can be unrelated physical pages, and the capture's copy
+        // of the wrong one was laid over the live bytes the read had already made
+        static const bool mapped_on = !getenv("RX_VK_READ_MAPPED") || atoi(getenv("RX_VK_READ_MAPPED")) != 0;
+        const bool segmented = mapped_on && gpu >= (1ull << 40) && n > 4096 - (gpu & 4095);
+        if (segmented) {
+            const uint64_t limit = host->guest_size();
+            for (uint64_t at = 0; at < n;) {
+                const uint64_t bytes = std::min<uint64_t>(n - at, 4096 - ((gpu + at) & 4095));
+                const uint64_t physical = at ? host->gpu_guest(gpu + at) : guest;
+                if (physical && physical < limit && bytes <= limit - physical) overlay(physical, (uint8_t*)dst + at, bytes);
+                at += bytes;
+            }
+        } else {
+            overlay(guest, (uint8_t*)dst, n);
+        }
+        if (!segmented && page0 == page1 && !late_read && from == 0) {   // (in no capture: guest memory stands for its next words too)
             SubmittedPage& submitted_page = submitted_page_for(page0);
             submitted_page.page = page0;
             submitted_page.pgen = page_gen(page0);
@@ -1850,8 +1869,9 @@ bool memory_read_as_submitted(uint64_t gpu, void* dst, uint64_t n) {
 uint64_t memory_capture_view() { return cap_view_gen.load(std::memory_order_acquire); }
 uint32_t memory_page_stamp(uint64_t gpu) {
     const uint64_t guest = gpu < (1ull << 40) ? gpu : host->gpu_guest(gpu);
-    if (!guest) return 0;
-    return page_gen(guest >> kPageShift);
+    const uint64_t page = guest >> kPageShift;
+    if (!guest || page >= kPages || guest >= host->guest_size()) return 0;   // (longshot 7daafa7a, #1553: not past the generation table)
+    return page_gen(page);
 }
 
 bool memory_has_shadow(uint64_t guest, uint64_t n) {
