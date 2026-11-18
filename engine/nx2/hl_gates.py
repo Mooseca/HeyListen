@@ -148,7 +148,9 @@ def movie_site(s, addr, off):
 # - HL_WHOLE_HOOK(80a87e50, "<hash>", <reg>, "<key>"): after the function's cut of an amount of the frame step (vreg 0's
 #   float) to whole frames into x<reg>, that count made hos_frame_whole(<key>, the amount, the game's count) (host/hl_step.c):
 #   the fractions carried per counter (<key>, the counter's or its object's guest address) above a 60 cap. The cut is the
-#   function's one; where it makes the same cut more than once, the one stored to <key> right after it.
+#   function's one; where it makes the same cut more than once, the one stored to <key> right after it. A third argument
+#   "u" is for an unsigned cut (the conversion's flag 0: a counter the game keeps unsigned), "u<N>" for the unsigned cut that
+#   the addition to x<N> follows (a function with another unsigned cut followed by another register's addition).
 # - HL_HEAP_HOOK(804566e0, "<hash>"): (Hookshot 1b695334, #2451) the four allocations of the material block's rebuild that the
 #   game does not check: its two CPU buffers (the heap's tryAlloc through a pointer, return addresses 0x80456910 and
 #   0x80456da4) and its two GPU-memory calls (f_80522050, 0x80456f1c and 0x80457098), each tried again in the heap's parents
@@ -168,6 +170,9 @@ SOUND_LOAD = ("    c->x[8]=" + SOUND_SLOT + ";\n"
               "    { { uint64_t _v=recomp_load32(c,(c->x[8]+16ULL)); a64_vset64(c->vreg[0],_v); } }\n")
 SOLVER_STORE = "    recomp_store32(c,c->x[0] + 712,c->x[1]);\n"
 WHOLE_STORE = "    recomp_store32(c,%s,c->x[%d]);\n"
+# (the unsigned cut's addition of the elapsed counter: "u<N>" anchors on the cut followed by the addition to x<N>)
+WHOLE_ADD = ("    { uint64_t _a=c->x[%d],_b=((uint64_t)(uint32_t)(((uint32_t)(c->x[8])) << 0)),_r=_a+_b; _r&=0xFFFFFFFFULL; "
+             "c->x[8]=_r; }\n")
 
 
 HEAP_CPU = (0x80456910, 0x80456da4)   # (f_804566e0's tryAlloc calls, by their return addresses, and the GPU memory's)
@@ -188,7 +193,7 @@ def lift_lines(kind, addr, args):
         return ["    { extern uint32_t hos_oot_solver_steps(uint32_t, uint32_t, uint32_t); c->x[1] = "
                 "hos_oot_solver_steps((uint32_t)c->x[1], (uint32_t)c->vreg[0][0], (uint32_t)c->vreg[1][0]); }" + mark]
     if kind == "whole":
-        reg, key = args
+        reg, key = args[:2]
         return ["    { extern uint32_t hos_frame_whole(uint64_t, uint32_t, uint32_t); c->x[%d] = hos_frame_whole(%s, "
                 "(uint32_t)c->vreg[0][0], (uint32_t)c->x[%d]); }%s" % (reg, key, reg, mark)]
     if kind == "heap":
@@ -218,8 +223,14 @@ def lift_places(body, addr, kind, args):
             return None
         return [body.index(anchor) + len(CUT % 1)]
     if kind == "whole":
-        reg, key = args
+        reg, key = args[:2]
         cut = CUT % reg
+        mode = args[2] if len(args) > 2 else ""
+        if mode:
+            cut = cut.replace(",32,32,1,3,", ",32,32,0,3,")
+            if mode[1:]:
+                anchor = cut + WHOLE_ADD % int(mode[1:])
+                return [body.index(anchor) + len(cut)] if body.count(anchor) == 1 else None
         for anchor in (cut, cut + WHOLE_STORE % (key, reg)):
             if body.count(anchor) == 1:
                 return [body.index(anchor) + len(cut)]

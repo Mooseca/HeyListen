@@ -55,10 +55,11 @@ void hl_answer(uint64_t guest, A64Fn fn, HlOn on, const char *what);
     __attribute__((constructor)) static void hl_heap_decl_##addr(void) { hl_gate_declared(0x##addr##ULL); } \
     extern const int hl_heap_hook_##addr
 
-/* HL_WHOLE_HOOK(80a87e50, "<hash>", <reg>, "<key>"); a lift hook (nx2/hl_gates.py) after the function's cut of an amount of
+/* HL_WHOLE_HOOK(80a87e50, "<hash>", <reg>, "<key>"[, "u" | "u<N>"]); a lift hook (nx2/hl_gates.py) after the function's cut of an amount of
    the frame step to whole frames into x<reg>, making the count hos_frame_whole(<key>, amount, count) (host/hl_step.c): the
-   fractions carried per counter above a 60 cap. Nothing in C. */
-#define HL_WHOLE_HOOK(addr, hash, reg, key) \
+   fractions carried per counter above a 60 cap ("u": the cut is unsigned; "u<N>": the unsigned cut that the addition to
+   x<N> follows). Nothing in C. */
+#define HL_WHOLE_HOOK(addr, hash, reg, key, ...) \
     __attribute__((constructor)) static void hl_whole_decl_##addr(void) { hl_gate_declared(0x##addr##ULL); } \
     extern const int hl_whole_hook_##addr
 

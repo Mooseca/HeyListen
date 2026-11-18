@@ -101,11 +101,21 @@ uint32_t hos_movie_frames(uint64_t player) {
      by Frizti (Frizti/Fritchii d389685a4, 063dbb741), then to Hookshot by hckrman101.
    - f_80652cb0, the Deku Tree's floor web (after upstream db0dd7140, #2929): it cuts the elapsed time divided by 1/60 to
      whole simulation steps, then clamps them to 0..3. Cut to 0, the web did not react when Link jumped on it above 60 fps.
-     Its remainder is kept per web object (x19 + 2296), before the clamp, which stays: a long pause leaves no backlog. */
+     Its remainder is kept per web object (x19 + 2296), before the clamp, which stays: a long pause leaves no backlog.
+   - f_832b32b0, Scarecrow's Song playback, f_832b6840, the eight-note recording (mode 10) and f_832b2690, its completion
+     (after upstream Hookshot 2d8044fb, Longshot 08771847, #2906, #2828, Longshot #87 and #294): the elapsed frames (+0x265fc)
+     advance the saved note delays, are reset between the notes and gaps and are saved as their lengths, and the eighth note's
+     length is written when it ends. Cut to 0 above 60 fps, playback waited on its first note, and a recording lost its
+     rhythm (the notes' lengths 0). The three share the one counter, so one remainder (the cuts are unsigned, the third
+     argument of the hook; f_832b6840 has a second unsigned cut, that of the other recording mode (13), left as it is, so
+     its hook is the one before the addition to x10: "u10"). A song whose rhythm was lost is not restored: record it again. */
 HL_WHOLE_HOOK(80a87e50, "7464f66dbdfb2fd2", 12, "c->x[19] + 864");
 HL_WHOLE_HOOK(803edf70, "29ce7b235d0d6bfd", 8, "c->x[19] + 60");
 HL_WHOLE_HOOK(800672e0, "feef3d08fe1f642d", 9, "c->x[21]");
 HL_WHOLE_HOOK(80652cb0, "9593be89631328d3", 22, "c->x[19] + 2296");
+HL_WHOLE_HOOK(832b32b0, "5b78765ca27d412c", 8, "c->x[19] + 0x265fc", "u");
+HL_WHOLE_HOOK(832b6840, "51843fdaa0ed4e2d", 8, "c->x[9]", "u10");
+HL_WHOLE_HOOK(832b2690, "25068bf751cb70b1", 8, "c->x[19] + 0x265fc", "u");
 
 uint32_t hos_frame_whole(uint64_t at, uint32_t amount_bits, uint32_t game) {
     static FrameWhole state;   /* (these two under the lock: the game's update threads) */

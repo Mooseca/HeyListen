@@ -217,7 +217,7 @@ def hook_text():
         os.remove(host / "hl_w.c")
         hl_gates.apply(str(gen), str(host), quiet=True)
         check(code.read_text(encoding="utf-8") == LIFTED, "none asked: the hooks stay")
-    asked = {a: v for a, (h, k, v) in hl_gates.wanted_lifts().items() if k == "whole"}
+    asked = {a: v for a, (h, k, v) in hl_gates.wanted_lifts().items() if k == "whole" and len(v) == 2}   # (the unsigned cuts: tests/test_scarecrow_timing.py)
     check(asked == {a: (reg, key) for a, (reg, key, _) in SITES.items()},
           "host/hl_step.c asks for other whole sites than this test knows: %s" % sorted(asked))
     return s

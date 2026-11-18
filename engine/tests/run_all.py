@@ -113,6 +113,7 @@ ARGS = {
     "tests/test_high_fps_fixes.py": ["--cc", "gcc"],
     "tests/test_frame_whole.py": ["--cc", "gcc"],
     "tests/test_web_floor_steps.py": ["--cc", "gcc"],
+    "tests/test_scarecrow_timing.py": ["--cc", "gcc"],
     "tests/test_vcore_held_flush.py": ["--cxx", "{cxx}"],
     "tests/test_audio_in.py": ["--cc", "gcc", "--cxx", "g++"],
     "tests/test_upscale_fallback.py": ["--cxx", "g++"],
@@ -204,6 +205,7 @@ MODULES = {
 # Checks that cannot run in CI, with why, by OS. Each still runs with --no-skip (or by name).
 SKIP = {
     "tests/test_udmabuf_limit_unreadable.py": ({"windows"}, "the Linux guest window's start-up check (POSIX file descriptors)"),
+    "tests/test_no_dmabuf_window.py": ({"windows"}, "the Linux guest window's start-up check"),
     "tests/test_precompile_compute_guard.py": ({"linux"}, "Windows structured exceptions"),
     "tests/test_shader_module_guard.py": ({"linux"}, "Windows structured exceptions"),
     "tests/test_log_batch.py": ({"linux"}, "the Windows log writer: SRW locks and threads"),

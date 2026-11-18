@@ -193,7 +193,14 @@ static int reserve_guest(void) {
                 hos_log("mem: guest memory stays host-pointer imports for the GPU (slow submissions on AMD): "
                         "/dev/udmabuf cannot be opened");
         }
-        if (e ? atoi(e) != 0 : usable) {
+        /* RX_VK_NO_DMABUF (set: the renderer makes no dma-bufs, gpu/vk/vk_memory.cpp import_dma_buf): anonymous memory, so
+           its pools can be the host-pointer imports that switch asks for. Over the memfd they were no imports at all, every
+           pool copied: 2-5 fps for ~15 s after the save loaded on an RX 9070 XT, and a teleport waited out that long
+           arrival. HOS_GUEST_MEMFD=1: the memfd all the same */
+        const int no_dmabuf = getenv("RX_VK_NO_DMABUF") != NULL;
+        if (usable && no_dmabuf && !e)
+            hos_log("mem: RX_VK_NO_DMABUF: the guest window is anonymous memory, for host-pointer imports");
+        if (e ? atoi(e) != 0 : usable && !no_dmabuf) {
             const int fd = (int)syscall(SYS_memfd_create, "hookshot-guest", 1u /* MFD_CLOEXEC */ | 2u /* MFD_ALLOW_SEALING */);
             if (fd >= 0 && ftruncate(fd, (off_t)GUEST_SPACE) == 0) {
                 fcntl(fd, 1033 /* F_ADD_SEALS */, 0x0002 /* F_SEAL_SHRINK */ | 0x0004 /* F_SEAL_GROW */);
