@@ -1328,27 +1328,46 @@ std::vector<std::pair<uint64_t, uint64_t>> ranges_clip(const std::vector<std::pa
     }
     return out;
 }
+// (longshot 7daafa7a, #1553, 6156d57b) RX_VK_CAP_RANGES_REUSE=0: every refresh bumps the range lists' version and keeps the
+// pools' first-seen table, as before. By default the version (cap_ranges_ver: each consumer rebuilds its union of the three
+// range lists when it moves, under cap_ranges_mu, on the submitting threads) moves only when a list changed, the first-seen
+// table is kept only when RX_VK_CAPTURE_EAGER can expire a pool by it, and without RX_VK_CAP_ONLY_GPU (whose list the periodic
+// rebuild also reconciles with the live pools) and without expiry the periodic rebuild is not made: the lists change only
+// with the mappings' generation
+bool cap_ranges_reuse() {
+    static const bool v = !getenv("RX_VK_CAP_RANGES_REUSE") || atoi(getenv("RX_VK_CAP_RANGES_REUSE")) != 0;
+    return v;
+}
 void refresh_pool_ranges_locked() {   // (cap_ranges_mu held)
     if (!capture_pool_max() && !cap_only_gpu()) return;
     const uint32_t g = host->maps_generation();
-    if (g == pool_cap_gen && captures_made - pool_cap_built < 64) return;   // (and every 64: the old ones out)
+    const bool reuse = cap_ranges_reuse();
+    const uint64_t expiry = eager_captures();
+    static bool built_once = false;
+    const bool periodic = !reuse || expiry || cap_only_gpu();
+    if (g == pool_cap_gen && (!reuse || built_once) && (!periodic || captures_made - pool_cap_built < 64)) return;   // (and every 64: the old ones out)
+    built_once = true;
     pool_cap_gen = g, pool_cap_built = captures_made;
     static std::vector<std::array<uint64_t, 2>> list(8192);
     const int n = host->gpu_pools(reinterpret_cast<uint64_t(*)[2]>(list.data()), (int)list.size());
     std::vector<std::pair<uint64_t, uint64_t>> v, every;
     std::unordered_map<uint64_t, uint64_t, PoolStartHash> seen;
-    seen.reserve((size_t)std::max(n, 0));
+    const bool track = !reuse || expiry;
+    if (track) seen.reserve((size_t)std::max(n, 0));
+    v.reserve((size_t)std::max(n, 0));
     for (int i = 0; i < n; i++) {
         if (list[i][1] && list[i][0] < (1ull << 40))
             every.push_back({list[i][0] & ~4095ull, (list[i][0] + list[i][1] + 4095) & ~4095ull});
         if (!list[i][1] || list[i][1] > capture_pool_max() || list[i][0] >= (1ull << 40)) continue;
-        auto it = pool_first_seen.find(list[i][0]);
-        const uint64_t first = it != pool_first_seen.end() ? it->second : captures_made;
-        seen[list[i][0]] = first;
-        if (!eager_captures() || captures_made - first < eager_captures())
-            v.push_back({list[i][0] & ~4095ull, (list[i][0] + list[i][1] + 4095) & ~4095ull});
+        if (track) {
+            auto it = pool_first_seen.find(list[i][0]);
+            const uint64_t first = it != pool_first_seen.end() ? it->second : captures_made;
+            seen[list[i][0]] = first;
+            if (expiry && captures_made - first >= expiry) continue;
+        }
+        v.push_back({list[i][0] & ~4095ull, (list[i][0] + list[i][1] + 4095) & ~4095ull});
     }
-    pool_first_seen.swap(seen);
+    if (track) pool_first_seen.swap(seen);
     {   // (RX_VK_CAP_ONLY_GPU: the host's live pools, which hos_gpu_pools' mapping list can lose: see cap_pool_born)
         using LivePools = int (*)(uint64_t (*)[2], int);
         static const LivePools live = (LivePools)(void*)GetProcAddress(GetModuleHandleA(nullptr), "hos_gpu_live_pools");
@@ -1359,15 +1378,22 @@ void refresh_pool_ranges_locked() {   // (cap_ranges_mu held)
                 if (lp[i][1] > lp[i][0] && lp[i][0] < (1ull << 40)) every.push_back({lp[i][0] & ~4095ull, (lp[i][1] + 4095) & ~4095ull});
         }
     }
-    all_pool_ranges = ranges_merged(std::move(every));
-    cap_ranges_ver++;
+    bool changed = !reuse;
+    {
+        auto all = ranges_merged(std::move(every));
+        if (all != all_pool_ranges) all_pool_ranges = std::move(all), changed = true;
+    }
     std::sort(v.begin(), v.end());
     std::vector<std::pair<uint64_t, uint64_t>> m;
     for (const auto& r : v) {
         if (!m.empty() && r.first <= m.back().second) m.back().second = std::max(m.back().second, r.second);
         else m.push_back(r);
     }
-    pool_cap_ranges.swap(m);
+    if (!reuse || m != pool_cap_ranges) {
+        pool_cap_ranges.swap(m);
+        changed = true;
+    }
+    if (changed) cap_ranges_ver++;
 }
 bool capture_on() {
     static const bool on = [] {
