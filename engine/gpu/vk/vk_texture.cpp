@@ -567,7 +567,17 @@ Staging staging(uint64_t n, uint64_t align = 256) {
 // ---- the GPU ASTC decoder (Eden's) ----
 struct AstcPush {
     uint32_t block_dims[2], layer_stride, block_size, x_shift, block_height, block_height_mask, native_tiling;
+    uint32_t blocks_x, blocks_y;   // (the mip's size in blocks: the decoder's threads past it return)
 };
+/// (longshot 7daafa7a, #1553) The decoder's dispatch is rounded up to its 8x8 groups, and the shared BC scratch it writes (bc_scratch_view)
+/// is much larger than the mip: a thread past the mip's blocks read ASTC bytes past the mip's own, or past the buffer's end (a read the
+/// driver may fault on), and wrote a texel of the scratch outside the mip. The shader (host_shaders/astc_decoder.comp, headers regenerated
+/// with glslang from the Longshot source) returns for a thread past blocks_x x blocks_y, and reads zero past the buffer's end.
+/// RX_VK_ASTC_BLOCKS=0: the limit is everything, so no thread returns early, as before (the read past the buffer's end stays clamped)
+uint32_t astc_blocks_limit(uint32_t blocks) {
+    static const bool on = !getenv("RX_VK_ASTC_BLOCKS") || atoi(getenv("RX_VK_ASTC_BLOCKS")) != 0;
+    return on ? blocks : UINT32_MAX;
+}
 VkDescriptorSetLayout astc_set = VK_NULL_HANDLE;
 VkPipelineLayout astc_layout = VK_NULL_HANDLE;
 VkPipeline astc_pipe = VK_NULL_HANDLE;
@@ -1379,11 +1389,19 @@ bool upload_astc_gpu(Texture& tex, uint64_t total, const Ranges* dirty) {
     uint64_t valid = 0;
     for (size_t k = 0; k < layers.size(); k++) {
         const uint64_t at = (uint64_t)layers[k] * layer_size + tail0;
-        if (at >= total) continue;
+        // (longshot 7daafa7a, #1553; RX_VK_ASTC_ZERO_FILL=0: left as it is) The staging memory is reused: what lies beyond the
+        // storage's end (a layer wholly past it, or the rest of the last one) is decoded all the same, and was whatever an earlier
+        // upload had left there. Now zero
+        static const bool zero_fill = !getenv("RX_VK_ASTC_ZERO_FILL") || atoi(getenv("RX_VK_ASTC_ZERO_FILL")) != 0;
+        if (at >= total) {
+            if (zero_fill) std::memset(s.data + k * tail, 0, tail);
+            continue;
+        }
         const uint64_t n = std::min(tail, total - at);
         const uint8_t* src = guest_bytes(tex.gpu + at, n, scratch);
         if (check_alpha && !alpha) alpha = astc_bytes_alpha(src, n, &valid) != 0;
         std::memcpy(s.data + k * tail, src, n);
+        if (zero_fill && n < tail) std::memset(s.data + k * tail + n, 0, tail - n);
     }
     const uint64_t staged = tail * layers.size();
     st_bytes += (int64_t)staged;
@@ -1440,7 +1458,7 @@ bool upload_astc_gpu(Texture& tex, uint64_t total, const Ranges* dirty) {
             AstcPush pc{};
             pc.block_dims[0] = (uint32_t)tex.block_w, pc.block_dims[1] = (uint32_t)tex.block_h;
             pc.layer_stride = (uint32_t)tail;
-            const uint32_t gobs_x = (g.tw * 16 + 63) >> 6;
+            const uint32_t gobs_x = (g.tw * 16 + 63) >> 6; pc.blocks_x = astc_blocks_limit(g.tw), pc.blocks_y = astc_blocks_limit(g.th);
             pc.x_shift = 9 + g.tile_h + g.tile_d;
             pc.block_size = gobs_x << pc.x_shift;
             pc.block_height = g.tile_h;
@@ -1485,7 +1503,7 @@ bool upload_astc_gpu(Texture& tex, uint64_t total, const Ranges* dirty) {
         AstcPush pc{};
         pc.block_dims[0] = (uint32_t)tex.block_w, pc.block_dims[1] = (uint32_t)tex.block_h;
         pc.layer_stride = (uint32_t)tail;
-        const uint32_t gobs_x = (g.tw * 16 + 63) >> 6;
+        const uint32_t gobs_x = (g.tw * 16 + 63) >> 6; pc.blocks_x = astc_blocks_limit(g.tw), pc.blocks_y = astc_blocks_limit(g.th);
         pc.x_shift = 9 + g.tile_h + g.tile_d;
         pc.block_size = gobs_x << pc.x_shift;
         pc.block_height = g.tile_h;
@@ -1525,7 +1543,7 @@ std::vector<AstcPiece> astc_pieces(const Texture& tex, const std::vector<uint32_
         AstcPush& pc = pc0.pc;
         pc.block_dims[0] = (uint32_t)tex.block_w, pc.block_dims[1] = (uint32_t)tex.block_h;
         pc.layer_stride = (uint32_t)tail;
-        const uint32_t gobs_x = (g.tw * 16 + 63) >> 6;
+        const uint32_t gobs_x = (g.tw * 16 + 63) >> 6; pc.blocks_x = astc_blocks_limit(g.tw), pc.blocks_y = astc_blocks_limit(g.th);
         pc.x_shift = 9 + g.tile_h + g.tile_d;
         pc.block_size = gobs_x << pc.x_shift;
         pc.block_height = g.tile_h;
