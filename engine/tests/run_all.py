@@ -112,6 +112,7 @@ ARGS = {
     "tests/test_recording_log_handoff.py": ["--cc", "clang"],
     "tests/test_stream_decode_away.py": ["--cc", "clang"],
     "tests/test_capture_pool_refresh.py": ["--cxx", "{cxx}"],
+    "tests/test_capture_get_fallback.py": ["--cxx", "{cxx}"],
     "tests/test_posix_cv_wake.py": ["--cc", "cc"],
     "tests/test_parallel_rb_refresh.py": ["--cxx", "{cxx}"],
     "tests/test_prof_sampling.py": ["--cxx", "{cxx}"],
