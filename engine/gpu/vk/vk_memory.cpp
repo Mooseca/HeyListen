@@ -4190,7 +4190,14 @@ Pool* pool_lookup(uint64_t guest, uint64_t size) {
         // write-back: the instances of a frame before or older, objects popping in and out, one-frame flashes.)
         uint64_t lo = 0, hi = 0;
         std::vector<uint64_t> overlapped;
+        // (longshot 7daafa7a, #1553, 02db5963 and b2a33789; RX_VK_IMPORT_NEIGHBOUR=0: as before) plan answers whether a live
+        // import was reached by the span's padding alone: it lies wholly outside what this binding needs. A larger span
+        // anticipates later bindings; when only that padding reaches a live import, the neighbour is kept and the range
+        // planned is the chunks this binding needs. A real crossing still merges the imports and inherits what the GPU
+        // wrote into them. If the driver refuses the range first tried, the other one (narrow or spanned) is tried
+        static const bool neighbour_on = !getenv("RX_VK_IMPORT_NEIGHBOUR") || atoi(getenv("RX_VK_IMPORT_NEIGHBOUR")) != 0;
         auto plan = [&](bool spanned) {   // (the range, the imported pools it takes in; spanned: span_game_pools's chunks too)
+            bool touches_neighbour = false;
             lo = want_lo, hi = std::max(want_hi, imp != imported.end() ? imp->second.hi : 0);
             if (spanned && chunk) span_game_pools(lo, hi, chunk);
             if (chunk) clip_noaccess(lo, hi, range.lo, range.hi);   // (HOS_NOACCESS_RAM)
@@ -4207,6 +4214,7 @@ Pool* pool_lookup(uint64_t guest, uint64_t size) {
                         if (import_reach::beyond(live_reach, it->second.lo, lo)) break;   // (none further down reaches lo)
                         continue;
                     }
+                    if (neighbour_on && spanned && (it->second.hi <= want_lo || it->second.lo >= want_hi)) touches_neighbour = true;
                     overlapped.push_back(it->first);
                     if (it->second.lo < lo) lo = it->second.lo, grew = true;
                     if (it->second.hi > hi) hi = it->second.hi, grew = true;
@@ -4220,16 +4228,19 @@ Pool* pool_lookup(uint64_t guest, uint64_t size) {
                 lo = want_lo, hi = std::max(want_hi, imp != imported.end() ? imp->second.hi : 0);
                 overlapped.clear();
                 if (imp != imported.end()) overlapped.push_back(imp->first);
+                touches_neighbour = false;
             }
+            return touches_neighbour;
         };
-        plan(true);
-        const uint64_t spanned_lo = lo, spanned_hi = hi;
+        const bool prefer_narrow = plan(true);
+        if (prefer_narrow) plan(false);
+        const uint64_t first_lo = lo, first_hi = hi;
         Pool p;
         bool ok = false;
         for (int pass = 0; pass < 2 && !ok; pass++) {
-            if (pass) {   // (a spanned import that failed: the range without the span, as imported before)
-                plan(false);
-                if (lo == spanned_lo && hi == spanned_hi) break;
+            if (pass) {   // (an import that failed: the other range: without the span as before, or the spanned one when the narrow one failed)
+                plan(prefer_narrow);
+                if (lo == first_lo && hi == first_hi) break;
             }
             const auto t0 = std::chrono::steady_clock::now();
             if (pool_mirror_on()) {   // (a table entry with no import: its mirror is made at the binding, filled through staging)
