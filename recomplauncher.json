@@ -3,6 +3,14 @@
   "format": 1,
   "name": "HeyListen",
   "repo": "Sacrappy/HeyListen",
+  "requires": [
+    "start",
+    "start.linux",
+    "setup",
+    "settings.ini",
+    "settings.choices",
+    "settings.groups"
+  ],
   "game": {
     "kind": "iso_or_folder",
     "label": "Your copy of The Legend of Zelda: Ocarina of Time for Nintendo Switch 2, version 131072 (build e0f3ccfa): the .nup file, or the folder that holds its romfs and exefs.",
