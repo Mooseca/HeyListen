@@ -1755,10 +1755,23 @@ static void release_copies(uint64_t lo, uint64_t hi) {
    or calling a recording waited behind it */
 #define SWEEP_EVERY 1024u
 #define SWEEP_SLICE 2688u   /* (65536 / 2688 * 1024: every bucket once in ~25,000 recordings) */
-static void sweep_overwritten_copies(void) {   /* (copy_lock held) */
+/* (longshot 7daafa7a, #1553, ff5809e8) The recording diagnostics' lines are written after copy_lock is let go, and with
+   the thread's virtual core given up: stderr can block for hundreds of milliseconds, and every other recorder (and the
+   guest threads pinned to this thread's core, an audio thread waited 321 ms for it) waited behind the line. The sweep
+   returns what it let go, for EndRecording to say. HOS_REC_LOG_AWAY=0: written under the lock, holding the core, as before */
+static int rec_log_away(void) {
+    static int v = -1;
+    int on = __atomic_load_n(&v, __ATOMIC_RELAXED);
+    if (on < 0) {
+        const char *e = getenv("HOS_REC_LOG_AWAY");
+        __atomic_store_n(&v, on = !(e && e[0] == '0' && !e[1]), __ATOMIC_RELAXED);
+    }
+    return on;
+}
+static size_t sweep_overwritten_copies(void) {   /* (copy_lock held) */
     static int off = -1;
     if (off < 0) off = getenv("HOS_NVN_NO_SWEEP") != NULL;
-    if (off || !rec_buckets) return;
+    if (off || !rec_buckets) return 0;
     free_dead_copies();
     const uint64_t after = rx_nvn_pushed() + held_count();
     size_t swept = 0;
@@ -1795,7 +1808,13 @@ static void sweep_overwritten_copies(void) {   /* (copy_lock held) */
         }
     }
     static int logged;
-    if (swept && logged++ < 12) hos_log("nvn: %zu copies of recordings whose control memory was reused let go (%zu live)", swept, ncopies);
+    if (!rec_log_away()) {
+        if (swept && logged++ < 12) hos_log("nvn: %zu copies of recordings whose control memory was reused let go (%zu live)", swept, ncopies);
+        return 0;
+    }
+    if (!swept || logged == 12) return 0;
+    logged++;
+    return swept;
 }
 NV(nvnCommandBufferAddControlMemory) {
     nvn_cmd *o = CB(P(0));
@@ -1928,12 +1947,27 @@ NV(nvnCommandBufferEndRecording) {
     ncopies++;
     live_handle_add((uint64_t)(uintptr_t)copy);
     static uint64_t made;
-    if (++made % SWEEP_EVERY == 0) sweep_overwritten_copies();
-    if (made % 50000 == 0)
+    const uint64_t recording = ++made;
+    const size_t swept = recording % SWEEP_EVERY == 0 ? sweep_overwritten_copies() : 0;
+    const int report = recording % 50000 == 0;
+    const size_t live_copies = (report || swept) ? ncopies : 0;
+    if (report && !rec_log_away())
         hos_log("nvn: %llu recordings made, %zu live copies (%.1f MB), %zu texture copies; %lld command buffers' segments "
-                "(%.1f MB)", (unsigned long long)made, ncopies, copy_bytes / 1048576.0, npins, (long long)seg_count,
+                "(%.1f MB)", (unsigned long long)recording, ncopies, copy_bytes / 1048576.0, npins, (long long)seg_count,
                 seg_bytes / 1048576.0);
     ReleaseSRWLockExclusive(&copy_lock);
+    if ((report || swept) && rec_log_away()) {
+        const int away = hos_vcore_away();
+        if (swept)
+            hos_log("nvn: %zu copies of recordings whose control memory was reused let go (%zu live)", swept, live_copies);
+        if (report)
+            hos_log("nvn: %llu recordings made, %zu live copies (%.1f MB), %zu texture copies; %lld command buffers' segments "
+                    "(%.1f MB)", (unsigned long long)recording, live_copies,
+                    (double)__atomic_load_n(&copy_bytes, __ATOMIC_RELAXED) / 1048576.0, __atomic_load_n(&npins, __ATOMIC_RELAXED),
+                    (long long)__atomic_load_n(&seg_count, __ATOMIC_RELAXED),
+                    (double)__atomic_load_n(&seg_bytes, __ATOMIC_RELAXED) / 1048576.0);
+        if (away) hos_vcore_back();
+    }
     if (watch_draw_cmd && watch_draw_cmd == (void *)o && nwatch_handles < 16) {
         watch_handles[nwatch_handles++] = (uint64_t)(uintptr_t)copy;
         watch_draw_cmd = NULL;
