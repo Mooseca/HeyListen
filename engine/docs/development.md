@@ -244,6 +244,26 @@ case-sensitive, and an unknown one is ignored.
 | `HOS_VCORE_STARVE_US=<microseconds>` | A game thread that has waited this long for a virtual core (default 1000000, 1 s; 0: never) goes before every other waiter at the next release of a core it may use, and asks the holder to give the core up at its next checkpoint whatever the holder's priority, so a wait that better threads keep winning ends in a grant, not in the escape after 2 s (`HOS_VCORE_ESCAPE_US`, `HOS_VCORE_ESCAPE_EQ_US`). The `vcores:` line every 5 s counts these grants (`starved grants`) |
 | `HOS_OS_YIELD=1` | `nn::os::YieldThread` (and `SleepThread(0)`) hands the game's virtual core to a waiting game thread, as the console's yield does, and by default no longer also calls `SwitchToThread` (`host/hos_thread.c`): OoT yields after every job and actor callback, and on few cores the kernel time handing the processor over and taking it back came out of the frame (Longshot d10b62b3, #1663: 2.1 % and 1.7 % shorter frames on 4 cores, no difference on 16). `=1` brings the processor's yield back, as before. Longshot's numbers are theirs; HeyListen's A/B is in the port's report |
 
+### Taken from Longshot #1553 (HumanBean, 7daafa7a), each on by default and each switched off with `=0`
+
+| Switch | What `=0` gives back |
+|---|---|
+| `HOS_EVENT_FAST` | Events (nn::os Event, LightEvent, SystemEvent) signalled, waited on and cleared under their lock, every signal waking every sleeper. By default readiness is one atomic word: a signal takes the lock only when a sleeper registered, one sleeper is woken alone and several are all woken (a woken sleeper takes a virtual core first, and the host's one pick may be pinned to a busy core), a wait that finds the event ready and WaitAny's scan take no lock |
+| `HOS_MW_BUCKETS` | Every change of an object with a WaitAny waiting takes `mw_lock`. By default 256 per-bucket counts of the watched objects answer "nobody watches this" without it |
+| `HOS_VC_YIELD_FAST` | A yield takes the virtual-core lock every time, and twice when it gives the core up. By default a thread with nobody queued and no kick pending returns at once, and a yield that gives the core up releases it in the same lock hold |
+| `HOS_CV_WAKE_SKIP` | (Linux) every condition-variable wake calls the futex. By default one with no registered sleeper does not |
+| `HOS_REC_LOG_AWAY` | `nvnCommandBufferEndRecording`'s periodic log lines written under the recording table's lock, holding the guest core. By default after the lock is let go and with the core given up (a blocked stderr stalled other recorders and the threads pinned to that core for hundreds of ms) |
+| `HL_STREAM_AWAY` | The native stream decode keeps the thread's virtual core for libzstd. By default a whole-file decode of 128 KiB or more (output or input) gives it up for the call |
+| `RX_VK_CAP_RANGES_REUSE` | Every refresh of the capture's pool ranges (each 64 captures and each mapping generation) moves their version, which every consumer rebuilds its union for. By default only a change does, and the first-seen table is kept only with `RX_VK_CAPTURE_EAGER` |
+| `RX_VK_CAP_GET_FALLBACK` | A capture buffer is allocated with the free-list lock held, and a refused one fails the capture. By default the lock is let go for the driver's allocation (the replay's retirements give spares back meanwhile) and a refused buffer takes any spare that fits, then its exact size |
+| `RX_VK_READ_MAPPED` | A replay read of a virtual GPU address (1 TB and up) across a page boundary looks the capture up from the first page onward in guest memory. By default each page's own physical page |
+| `RX_VK_IMPORT_NEIGHBOUR` | A live import that only the speculative import span reaches is merged into the new one and imported again. By default it stays, the binding's own chunks are imported, and a refused range is retried with the other one (narrow or spanned) |
+| `RX_VK_ASTC_BLOCKS` | The ASTC decoder's threads past the mip's block count do not return early (the shader also reads zero past its buffer's end, and that stays). By default they return, as they must when the BC scratch is larger than the mip |
+| `RX_VK_ASTC_ZERO_FILL` | The ASTC staging past the storage's end is left as an earlier upload had it. By default it is zero |
+| `RX_VK_PASS_SAMPLE_MASK` | Each pass keeps a list of every texture its draws sampled and searches it per sampled texture per draw. By default a mask of the targets sampled |
+| `RX_VK_MAP_CHECK` | A buffer made for a caller that asked for its mapping and given none is returned (and leaked by callers that took that for failure). By default it is destroyed and the call fails |
+| `RX_VK_WRITE_HISTORY` | The map of GPU buffer writes (it drops its lowest-addressed range past 65,536, counts any write since a draw as replacing a drawn texture's pixels, and notes a write seen before the upload that took it succeeded). By default `gpu_write_history.h`: bounded with a conservative floor, ordered by submission and segment, published when the GPU completes the submission |
+
 ### Building
 
 | Switch | What it does |
