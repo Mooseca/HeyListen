@@ -2364,7 +2364,8 @@ struct Pick {
     std::vector<uint32_t> handles;   // (at its answers' descriptors: their slots and the slots' versions)
     mkwvk::progmemo::Set valid;      // (HL_PROG_MEMO: the last vectors of `handles`' kind the variant was validated for)
 };
-// (HeyListen, HL_PROG_MEMO=1, default off; prog_memo.h) a pick whose handles differ from its last ones is answered from the vectors the
+// (HeyListen, HL_PROG_MEMO, on by default since 2026-11-18: main-PC castle-move A/B within noise, 80.9 vs 79.4 fps, program lookup
+// ~1.74 vs ~1.68 ms; HL_PROG_MEMO=0 turns it off; prog_memo.h) a pick whose handles differ from its last ones is answered from the vectors the
 // variant was validated for before, and a vector not among them is validated from the vector itself (one pass over the descriptors, not
 // two). HL_PROG_MEMO_CHECK=1 (implies the switch): the reference (`still_valid`, the descriptors read again) is worked out on every
 // memo answer, compared, and the reference used; the mismatches are counted, the first twelve logged, a line every 10 s.
@@ -2373,7 +2374,7 @@ int prog_memo_mode() {
     static const int mode = [] {
         const char* c = getenv("HL_PROG_MEMO_CHECK");
         const char* e = getenv("HL_PROG_MEMO");
-        const int v = c && *c && *c != '0' ? 2 : e && *e && *e != '0' ? 1 : 0;
+        const int v = c && *c && *c != '0' ? 2 : !e || (*e && *e != '0') ? 1 : 0;
         if (!v) return 0;
         if (getenv("RX_VK_HANDLES_LIVE") || getenv("RX_VK_REGISTER_AT_ONCE")) {
             logf("hl prog memo: left off (RX_VK_HANDLES_LIVE or RX_VK_REGISTER_AT_ONCE is set)");

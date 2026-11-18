@@ -892,3 +892,141 @@ contact solver's vtable only (no direct caller).
 
 Not yet: the friction and rolling rows' arithmetic, the paths by P's flags, what the output stream receives, the
 records' size rule, the histogram of paths in the game. No native code for it.
+
+## 11. Where the physics time is now, by leaf (stream N4, static re-aggregation; no run)
+
+Source: the three sampled castle-move runs of `hot-functions.md` (`build/hotfn/r1..r3.recs.json`), taken on a build
+**before** U1, U2, U3 and the affine and sphere kernels were native, so those leaves (`0x81746440` 5.3%, `0x81a040bc`,
+`0x8174bb00`, `0x80168130`) are already gone from the real profile. The 5,678 samples are the chain-flagged samples
+whose stack holds a physics root (narrow phase `0x8191ee00`, solver `0x819b8e20`, BuildJacobians `0x819aeae8`, world step
+`0x803749e0`, point queries `0x82bcfae0`, cloth `0x8016b320`); shares below are of those samples, as innermost `f_`
+(self). The chain flag counts every thread's work inside a chain window, so the six-wide narrow phase is
+over-represented against its effect on the chain (only the last instance to finish counts, `critical-jobs.md`).
+
+| self rank | leaf | insns | share | kind | notes |
+|---:|---|---:|---:|---|---|
+| 1 | `0x8173b340` (EPA, penetration depth; children `0x8173a830`, `0x8173ae00`, `0x81738fa0`, `0x8173a5c0`) | 800 | 10.5% | doubles and floats, 3 indirect calls | no fused op (add/mul/sub 32 and 64 only): bit-exactness is plain IEEE |
+| 2 | `0x81779980` (contact Jacobian set-up for new manifolds, 2 callers `0x8177b020`, `0x8177f720`) | 1,413 | 6.9% | floats and doubles, 2 indirect calls, one callee `0x81707300` | no fused op |
+| 3 | `0x81730760` (GSK iteration) | 2,040 | 5.8% | 4-wide float, 6 indirect calls | no fused op; 10 callers |
+| 4 | `0x81746440` (U1) | 124 | 5.3% | already native | |
+| 5 | `0x81c86720` (cloth link constraints) | 401 | 3.6% | uses the reciprocal square root estimate | cloth, off the narrow phase |
+| 6-7 | `0x81b8c000`, `0x81b5a3c0` (cloth collide and solve) | 17,427 / 4,803 | 3.4%, 3.3% | | |
+| 8 | `0x817472e0` (support point of a 1 to 4 vertex convex: jump table on the count, a direction in x1, 16-byte result in x2) | 186 | 3.1% | 4-wide float with FMIN/FMAX and compare-select; no calls | smallest, self-contained leaf of the top ten |
+| 9 | `0x8003dac0` (phive, fma32 105) | 3,026 | 2.9% | fused | |
+| 10-11 | `0x819783e0`, `0x817036a0` | 1,042 / 111 | 2.4%, 2.3% | `0x817036a0` is doubles only, no calls, 4 callers | second smallest leaf |
+| 12 | `0x8176c980` (GSK driver) | 3,386 | 2.0% | | |
+| 13-14 | `0x81855f40`, `0x817da900` | 252 / 498 | 1.7%, 1.5% | | |
+
+Per root, the samples are: narrow phase 3,100, cloth 1,398, world step 479, BuildJacobians 280, point queries 224,
+solver 197 (the solver is one thread, the narrow phase six: the samples measure CPU, not chain time; the solver's
+chain share stays the largest serial one, section 5).
+
+Reading of it: after the five native units the next compute leaves by measured cost are the penetration-depth routine
+`0x8173b340`, the contact set-up `0x81779980` and the GSK iteration `0x81730760`, none with a fused instruction (so the
+exactness machinery of `Exact.h` covers them without the binary64 detour), and, much cheaper to write, the support
+function `0x817472e0` and the doubles-only `0x817036a0`. Both big three run inside the six-wide narrow phase, so their
+effect on the chain is below their share; the solver's own `solveJacobians` (section 10) and `subIntegrateLastStep`
+(section 9) stay the serial ones. A fresh sampled profile of a build with U1 to U3 native was not taken in this
+session (the machine was reserved for a release check): the table is re-aggregated from the old samples and must be
+redone with `build/hotfn/drive.py` before the order is relied on.
+
+## 12. Two narrow-phase leaves, native and unchecked (stream N4; written without the game running)
+
+Written from the image's instructions (`0x817472e0`: 186, `0x817036a0`: 111), tested without the game
+(`engine/native/tests/support_test.cpp`: a brute-force argmax over sets of 1 to 40 vertices, ties, the give-ups, the
+relative placement against the identity and a plain formula, the C surface). **Not yet compared with the translation in
+the game**: both units are `validated` 0, off by default, and have never been run in the game or built into it; they
+come on only after `HL_MATH_CHECK=1` shows zero mismatches in the three scenes and a heavy one.
+
+**Support point `0x817472e0`** (unit `support`, reached through a pointer: `HL_ANSWER`; `hl/math/Support.h`). x0 = a
+vertex set header (a relative 32-bit offset, 0 meaning none, then the count n), x1 = a direction (float4: x, y, z used),
+x2 = a 16-byte output. Vertices are 12 bytes (x y z). It jumps on n & 3 through a four-byte table: 1 vertex (n = 1 mod 4),
+2 (n = 2 mod 4: the other two lanes padded with a module constant, a large negative, and the lane indices), exactly 3
+(n = 3: three dot products, the lane at the maximum found by a compare mask and a 8-byte table giving the index: the
+highest lane at the maximum), or the first four (n = 0 mod 4, and any n = 3 mod 4 but 3). Each case fills four lane
+maxima and four lane indices; then rounds of four vertices each from the vertex `start` (1, 2 or 3) by fours while the
+count allows: dots are `(x dx + y dy) + z dz`, each product rounded; a lane takes the new vertex only when strictly
+greater; the rounds read up to three vertices past the end (Havok's padding). The end picks per pair the first of a tie
+(lane 0 against 1, lane 2 against 3), then the pair with the greater maximum, ties to the first pair. The output is the
+chosen vertex's 12 bytes and, in the fourth word, its index or-ed with 0x3f000000. The tables are read from guest memory
+at each call by the OS layer (jump bytes `0x83eb4560`, mask table `0x83eb09b0`, the padding float at +0x30 of the block
+the pointer at `0x84ca4680` holds, the step and lane indices at +0x40 and +0x50 of the block the pointer at `0x84cb8120`
+holds), so the native code assumes none of them. Declines: n < 1, no array, an unknown jump byte, and any dot-product
+operand or result outside the exactness rules (a vertex the rounds read past the end that is not an ordinary float
+included). Callers: through a pointer only (no direct caller in the lifted code).
+
+**Relative placement `0x817036a0`** (unit `relxf`, direct callers `0x819855f8` (2), `0x8197943c`, `0x8197be18`,
+`0x819836c0`: `HL_GATE`, hash `b55701fae919e72f`). x1 = transform a, x2 = transform b (precise transforms of 76 bytes:
+three float4 rows, high translation at +48, low at +64 and +72), x0 = an 80-byte result: the rows `out_r = c2 b_rz + (c0
+b_rx + c1 b_ry)` per lane with c0, c1, c2 the columns of a's rows (the fourth lanes of the columns are the second and last
+float of a's third row), then the translation `((b high + b low) - (a high + a low))` in binary64, rotated by a's rows
+(`z + (x + y)` per row, in binary64), stored as a float high part (x, y, z, z) and the float low part (what the float left,
+three floats), and a zero word at +76. Reads all before it writes. Declines on any used input or result outside the rules
+(inputs that nothing reads are not looked at).
+
+Switches: unit names `support` and `relxf` in `HL_MATH_UNITS` (`HL_MATH_CHECK=1` to compare; the check compares the
+function's whole output, 16 and 80 bytes: `Unit.out_len`). Gates: the hash above is of the lifted text on this PC; the gate
+goes in only when the hash matches, and another tree's build takes it out again (the lift's work folder is shared),
+which is the existing rule of `nx2/hl_gates.py`.
+
+## 13. Contact Jacobian set-up `0x81779980` (stream N4: first reading, partial)
+
+Read from the image's instructions (1,413; the first 300 and the structure of the rest: calls, branches, loops, the FP
+census). Not a complete specification: what is established, and what a complete one still needs.
+
+**Where it sits.** Two callers: `0x8177b020` (the direct path the narrow phase takes for new manifolds, through
+`0x81902240` -> `0x81782ca8`) and `0x8177f720`. `0x8177b020` (153 instructions) is the record writer's wrapper: it takes
+the thread's Jacobian stream block (`*(args +0)`, a block whose first 16-bit word is the used byte count, records start
+32 bytes after the block's start plus that count; when fewer than `0xfe0 - size` bytes remain it calls the block
+allocator `0x816ef7bc` in a loop), computes the record's size from the manifold (`0x40 + 0x20 * points`, `0xc0` in the
+other case, plus bits for friction rows, plus a byte from a table at `*0x84cc0818` indexed by a flag byte it builds),
+builds the record's flag byte (`w26`: from body flag masks at the world object's `+0xbb0` and `+0xcc0`, the pair's `+0x99`
+bits, `+0x94 == 2`, a world setting at `+0x758` +0x18), and calls `0x81779980` with: w0 = bit 0 "the second body's
+manifold word at +0x58 is zero" (the two-body form), x1 = the first object (its `+0x58` float, a friction or restitution
+scale), x2 = the pair's body data (offsets used: `+0x40..+0x6f` the two bodies' positions in double and float parts, `+0x94`
+a byte (2 = a special pair), `+0x99`, `+0x9a`, `+0xa0` a pointer copied to the record's `+0x20`, `+0xd8` a float, `+0xe8`
+filter bits, `+0xf0` a 16-bit mask, `+0xf8` the world, `+0x10a` a byte), x3 = the manifold (`+0x10..+0x3f` the transform
+and the two bodies' double translations, `+0x40..+0x5f` four float pairs of translation, `+0x60`, `+0x80` the two bodies'
+inertia rows, `+0xd0` a float tested against `0x5f7f0000` (a huge-value test), `+0xd4` a byte, `+0xf0` a mask, `+0x108` a
+byte), x4 = a float4 of per-axis scales, w5 = a byte from the caller's stack, and on the stack the record's pointer, its
+size and four flag bytes. After the call the wrapper adds a small count to the stream's counter (`+0x10`) and the record's
+size to the block's used count.
+
+**What it writes**: the record of `physics-loops.md` section 10's header table: +0 the 16-bit flags word (built from
+bits: a huge-value test of `+0xd0`, the pair masks `0x3f` of `+0xf0`, `0x1000` from the stack flag, bit 10 from `+0x94 !=
+0`, bit 11 from `+0x108`, bit 13 and `0x80` from a "second body moves" test whose operands are a dot of the relative
+position with a row and its square), +2 a flag byte of the deferred lists (from the caller's flags and `+0x9a`), +3 a
+byte, +4 the point count (`+0x58` of the first object), +5 and +6 bytes (+6 from the two-body form), +7 the manifold's
+`+0xd4`, +8 and +12 the two bodies' ids (their `+0x58` words), +16 a float4 (the normal, with its w lane a factor), +0x20 a
+pointer, +0x28 and +0x2c the two bodies' velocity slots (a body whose slot is `0x7fffffff` gives 0), +0x30, +0x32, +0x34 and
++0x38 sixteen-bit values: the high halves of four floats (the position quantised by dropping the low 16 bits: `shrn #16`),
+then from +0x40 the points, 32 bytes each (two float4: the point's two angular Jacobians, with the right-hand side and the
+effective mass in the w lanes), and the friction rows after them. The deferred lists (flag byte +2 bits 0 to 3) are
+appended through the tables at `*0x84cc1a78 .. 0x84cc1a90`: zeros or copies of the manifold's `+0xd0..+0x10f` words into
+the slots the tables name, in the record, for each point count up to 0x20.
+
+**What it is made of**: no fused operation, no reciprocal or reciprocal-square-root estimate, 4 divisions, 1 square
+root, 4 FMIN and 5 FMAX, one FCVTZS (float4 scaled by a table at `*0x84ca4680 + 0x350` and added to a base vector at
+`*0x84cb8120`... the quantisation of the offset), one SCVTF (the point count), 3 table lookups (TBL: lane shuffles with a
+constant at `0x83e41000 + 0x1a0`), 2 bit-selects. Doubles are used for the translations (the bodies' double parts summed
+and differenced, then narrowed), floats for the rest: the exactness rules of `Exact.h` cover every operation kind present
+(this function needs no `fma` and no estimate). One direct call (`0x81707300`, with two negated pairs of doubles: a small
+numeric helper, 124 instructions' worth not read), and **one indirect call**: a loop over the world's list of contact
+modifiers (the count at the world object's `+0x998`, 16-byte entries of a mask and an object, filtered by the pair's filter
+bits `+0xe8`), each called through its vtable slot `+0x68` with eight arguments (the record among them). That call is the
+function's one callback into actor and phive code: a native version has to decline whenever the list holds an entry whose
+mask meets the pair's bits (or run the translated function whole), because the modifier may write the record the native
+code is building.
+
+**Loops** (back edges): the point copy at `0x8177a188` (16 bytes a step), the sum of the points' inertia terms
+`0x8177a200..a250` (four float4 a round, then singly: a sum of `count - 1` rows in order: the order of the sum is part of
+the result), a per-point loop `0x8177a2e0..a304` and `0x8177a9f0..aa98` (the deferred-list zeroing, up to `0x20`
+points), the modifier loop `0x8177ade0..ae28` and a last per-point loop `0x8177af40..af70`.
+
+**Not yet read** (a native version needs them): `0x8177a260 .. 0x8177a9b8` (the per-point arithmetic itself: about 600
+instructions), `0x8177ab70 .. 0x8177ac04` (the two-body branch and the call's set-up), `0x8177ae4c .. 0x8177af84` (the tail:
+the clamp of the stored right-hand sides, the `0x100` flag on a huge value) and the helper `0x81707300`. Estimate for the
+unit: 6 to 8 days with its check (a plan-then-apply form like U3's: the native side computes the 64 + 32 n bytes of the
+record and the list entries it appends; the OS layer writes or compares them; declined whenever the modifier list matches).
+The wrapper `0x8177b020` could be taken whole instead (153 instructions, one allocator call), which avoids reproducing its
+size rule twice.
