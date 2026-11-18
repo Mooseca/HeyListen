@@ -40,7 +40,8 @@ def menu_rows():
     ini_key = menu.split("const char* ini_key(const Row& r) {", 1)[1].split("\n}", 1)[0]
     renamed = {  # (rows whose key is not their name)
         "Output resolution": "output_res", "Render resolution": "resolution", "Window scaling filter": "upscaling", "Upscaler": "dlss",
-        "Send performance statistics": "send_performance_stats", "Send crash reports automatically": "send_crash_reports"}
+        "Send performance statistics": "send_performance_stats", "Send crash reports automatically": "send_crash_reports",
+        "Check for updates": "update_check"}
     for key in re.findall(r'return "([a-z_0-9]+)";', ini_key):
         assert key in renamed.values(), key   # (a new special case: add it above)
     rows = {}
@@ -124,11 +125,32 @@ class RecompLauncherJsonTests(unittest.TestCase):
         self.assertIn(make_game.BUILD_ID, game["label"])
         self.assertEqual(game["kind"], "iso_or_folder")   # (the .nup, or its romfs and exefs: make_game.py --game takes both)
 
-    def test_start_is_the_game_itself(self):
+    def test_start_plays_through_the_builder(self):
+        # (like Longshot's: the program that starts the game is the builder's own, so updates are looked for before each launch.
+        # Windows: the setup program in the zip, which looks for a newer release and starts the game; Linux: the AppImage's AppRun)
         start = self.doc["start"]
-        self.assertEqual(start["program"], ["HeyListen/bin/HeyListen.exe", "HeyListen/bin/hookshot"])
-        # (make_game.py puts the game there: the Windows launcher layout, bin/ beside image.bin, and the Linux one)
+        self.assertEqual(start["program"], ["HeyListenBuilder-Setup.exe", "HeyListen.AppImage"])
+        out = self.doc["prepare"]["args"][self.doc["prepare"]["args"].index("--out") + 1]
+        self.assertEqual(start["args"], ["--play", out])   # (the folder prepare builds into is the one it plays)
+        # (no env: the setup tells the game not to ask again once it asked itself, and on Linux the game's own offer is the question)
+        self.assertNotIn("env", start)
+        # (the launcher features list was not the cause of the developer page's 0 of 6 features: it is not declared)
+        self.assertNotIn("requires", self.doc)
+        # (make_game.py puts the game where the setup and AppRun look: the Windows launcher layout, bin/ beside image.bin, and the Linux one)
         self.assertTrue("HeyListen.exe" in make_game.BESIDE or "hookshot" in make_game.BESIDE)   # (BESIDE is the host platform's)
+
+    def test_the_setup_program_takes_play(self):
+        setup = (ENGINE / "builder" / "setup" / "setup.c").read_text(encoding="utf-8")
+        self.assertIn('L"--play"', setup)
+        self.assertIn('#include "../../host/hos_update_ver.h"', setup)   # (the same version order and update_check line as the game's offer)
+        play = setup[setup.index("static int play_folder("):setup.index("int WINAPI wWinMain(")]
+        self.assertIn("ver_newer(look.tag, have)", play)                 # (a newer release: asked about, never installed here)
+        self.assertIn("ini_update_off(ini)", play)                       # (the player's Never ask again, or the Settings row)
+        self.assertIn('_wputenv_s(L"HOOKSHOT_NO_UPDATE_CHECK", L"1")', play)   # (asked here: the game does not ask again)
+        self.assertIn("WaitForSingleObject(t, 4500)", play)              # (never held back by the network)
+        self.assertLess(play.index("WaitForSingleObject(t, 4500)"), play.index("CreateProcessW"))
+        # (no network: no question, the game starts; a folder that is not there or not built: an error and exit 1, no start)
+        self.assertGreaterEqual(play.count("play_error("), 4)
 
     def test_prepare_takes_arguments_make_game_has(self):
         prepare = self.doc["prepare"]
@@ -273,7 +295,8 @@ class RecompLauncherJsonTests(unittest.TestCase):
                 return name, (release / "parts" / name).stat().st_size
 
             app, app_size = part("HeyListenBuilder-app-aaaaaaaaaaaa.zip", {
-                "HookshotBuilder/HeyListenBuilder.exe": b"MZ", "HookshotBuilder/tools/nx2/make_game.py": b"#",
+                "HookshotBuilder/HeyListenBuilder.exe": b"MZ", "HookshotBuilder/HeyListenBuilder-Setup.exe": b"MZ",
+                "HookshotBuilder/tools/nx2/make_game.py": b"#",
                 "HookshotBuilder/tools/version.txt": b"v0.4.1\n"})
             py, py_size = part("HookshotBuilder-python-bbbbbbbbbbbb.zip", {"HookshotBuilder/tools/python/python.exe": b"MZ"})
             llvm, llvm_size = part("llvm-mingw.zip", {"llvm-mingw-20261104-ucrt-x86_64/bin/clang.exe": b"MZ"})
@@ -286,12 +309,13 @@ class RecompLauncherJsonTests(unittest.TestCase):
             names = zipper.make_zip(str(release), "v0.4.1", str(out), fetch=lambda *a: self.fail("a part was downloaded"))
             with zipfile.ZipFile(out) as z:
                 self.assertEqual(sorted(z.namelist()), sorted([
-                    "recomplauncher.json", "HeyListenBuilder.exe", "tools/nx2/make_game.py", "tools/version.txt",
+                    "recomplauncher.json", "HeyListenBuilder.exe", "HeyListenBuilder-Setup.exe", "tools/nx2/make_game.py", "tools/version.txt",
                     "tools/python/python.exe", "tools/llvm-mingw/bin/clang.exe"]))
                 self.assertEqual(z.read("recomplauncher.json"), MANIFEST.read_bytes())
             self.assertEqual(sorted(names), sorted(zipfile.ZipFile(out).namelist()))
             # (the program the launcher starts, and the one it prepares with, are at the top, where the file says)
             self.assertIn(self.doc["prepare"]["program"][0], names)
+            self.assertIn(self.doc["start"]["program"][0], names)
 
 
 if __name__ == "__main__":

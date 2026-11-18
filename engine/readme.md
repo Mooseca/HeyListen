@@ -204,7 +204,8 @@ use and cause stalls when the card runs out of headroom. To undo it, remove that
 
 ## In-game menu
 
-By default, press <kbd>Insert</kbd> or <kbd>F1</kbd> in game. On a controller, press Home or Select and Start together.
+By default, press <kbd>Insert</kbd> or <kbd>F1</kbd> in game. On a controller, press Home, the touchpad click (DualSense, DualShock 4) or Select and Start together, or set your own
+button, or two together, in **Controls → Open menu**.
 The same keys close it, and so does <kbd>Esc</kbd>. Use **Controls → Menu shortcut** to leave either keyboard shortcut
 free for another overlay. The menu has four tabs, Graphics, Gameplay, Controls and Debug:
 <kbd>Q</kbd> and <kbd>E</kbd> (or <kbd>Tab</kbd> and <kbd>Shift</kbd>+<kbd>Tab</kbd>) switch between them, LB and RB on
@@ -368,7 +369,10 @@ key_a=69,13
 
 `pad_<button>` is a gamepad input by position: 0 bottom face button, 1 right, 2 left, 3 top, 4 Select or Back, 5 Home,
 6 Start, 7 and 8 the stick presses, 9 and 10 the shoulder buttons, 11 to 14 the D-pad (up, down, left, right), 15 and
-16 the triggers, -1 none. `key_<button>` is one or two
+16 the triggers, -1 none. (The touchpad click, like Home, is for the menu: it opens and closes it and cannot be bound.)
+`pad_menu=<a>,<b>` is the Controls page's **Open menu**: one of those inputs, or two held together (`<b>` -1 or left out for
+one), that open and close the menu beside Home, Select and Start, the touchpad click and the keys; -1,-1 (the default) is none.
+The input or both inputs of a combination are taken out of what the game gets while they are held. `key_<button>` is one or two
 [Windows key codes](https://learn.microsoft.com/windows/win32/inputdev/virtual-key-codes) in decimal (69 is
 <kbd>E</kbd>, 13 <kbd>Enter</kbd>), 0 none; the mouse's buttons are 1 (left), 2 (right), 4 (middle), 5 and 6 (side
 buttons), and count while the mouse is captured. The buttons are `a` `b` `x` `y` `l` `r` `zl` `zr` `plus` `minus` `ls`

@@ -44,7 +44,11 @@ start prepares again. The builder keeps its build files in `%LOCALAPPDATA%\HeyLi
 
 Press **Play**, or use the *HeyListen* shortcut on the desktop or in the Start menu. The game folder's `HeyListen.exe` starts it too
 (the game itself is `bin\HeyListen.exe`, which is what Task Manager shows). **Insert** opens the in-game menu
-(graphics, controls, frame rate, cheats). Frame generation is off by default.
+(graphics, controls, frame rate, cheats); on a controller, press Home, the touchpad click (DualSense, DualShock 4) or
+Select and Start together. The same press closes it. If none of those suits your pad, bind your own on the Controls page:
+the **Open menu** row takes one gamepad button, or two pressed together (L3 + R3, Share + Options). It is not set by default, and
+the ways above keep working. A combination held does not reach the game. When a controller is opened the game's log
+(`hookshot_log.txt`) says what it is and which buttons open the menu. Frame generation is off by default.
 
 ## Install with RecompLauncher
 
@@ -68,7 +72,8 @@ not replace the builder: it runs it for you, with no window.
    in-game menu (Insert or F1) saves. Your saves are in the game folder's `user\save` (Windows) or
    `~/.local/share/heylisten/save` (Linux), and the launcher backs them up.
 
-The game is made in the `HeyListen` folder inside the folder RecompLauncher installed HeyListen in. To build it again (after
+The game is made in the `HeyListen` folder inside the folder RecompLauncher installed HeyListen in (the install folder is
+RecompLauncher's own setting: HeyListen's profile cannot choose it; ask for it in the launcher). To build it again (after
 an update that says so, or with the other options ticked), change your copy on the setup screen or reinstall; the builder's
 own window works on the same folder if you start it yourself. The first start prepares the game's shaders, as it does after a
 build made with the builder.
@@ -199,7 +204,30 @@ What to expect:
 When a new HeyListen release is out, the builder says so when it opens (it asks GitHub for
 `Sacrappy/HeyListen`'s latest release; nothing is sent about you). **Update** downloads only the parts that changed and builds
 your game folder again from the game files the folder keeps: you do not need the `.nup` again, and your saves stay.
-The in-game update offer is off unless you turn it on (`HOOKSHOT_UPDATE_CHECK=1` in the game folder's `hookshot_env.txt`).
+
+**When you start the game yourself** (`bin\HeyListen.exe` on Windows, `bin/hookshot` on Linux), it looks for a newer release
+for a few seconds before it opens. Nothing is asked when you are offline, and the start is never held back. When a newer release
+is out, a window offers:
+
+- **update now**: HeyListen Builder updates the game folder as above (the game closes);
+- **keep my version this time**: the game starts, and you are asked again next time;
+- **skip this version**: the game starts, and you are asked again only when a later release is out;
+- **never ask again**: the game starts and stops looking. Turn it back on in the game menu: **Settings**, **Gameplay**,
+  **Check for updates**. The choice is `update_check=0` in the game folder's `hookshot_options.ini`.
+
+When RecompLauncher starts the game on Windows, its Play runs `HeyListenBuilder-Setup.exe --play`, which looks for a newer
+release first (the game itself is then told not to ask again) and, when there is one, asks in the same way: play my version, open
+the download page, or stop asking (this release only, or for good). It installs nothing: RecompLauncher is what installs a newer
+release. On Linux the AppImage's `--play` starts the game, and the game asks as above.
+
+## Button prompts
+
+The **Button prompts** row (Insert menu, Controls page) chooses which controller's icons the game shows in its texts and menus:
+Auto follows the controller you plug in, or pick Xbox, PlayStation 4, PlayStation 5, Steam Deck or Switch. A new choice shows the
+next time you start the game. The icons are drawn when the builder makes your game folder, from your own game files and
+[Kenney's](https://kenney.nl/assets/input-prompts) CC0 Input Prompts, into the `prompts` folder there; they are not downloaded or
+copied from anywhere, so a folder from another build is not needed. No `prompts` folder in your game folder (a game built by a release up to 0.4.2,
+whose builder could not draw them): update to a newer release and build again to make it; the game's log says `prompts: no prompts folder` while it is missing.
 
 ## Known issues
 

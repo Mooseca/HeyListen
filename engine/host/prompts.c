@@ -225,6 +225,9 @@ static int setup(char *dir, size_t cap, int *face) {
             ok = GetFileAttributesA(path) != INVALID_FILE_ATTRIBUTES;
         }
         if (ok) f = choose_face(d);
+        else if (d[0])   /* (the build draws prompts/ with fontTools: nx2/make_game.py; without it nothing here changes) */
+            hos_log("prompts: no prompts folder in %s: the game's own icons, whatever the Button prompts row says "
+                    "(the build makes it with fontTools and Pillow: nx2/prompt_requirements.txt)", d);
         InterlockedExchange(&setup_state, ok ? 2 : 3);
     }
     while (setup_state == 1) Sleep(1);

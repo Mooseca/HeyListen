@@ -36,6 +36,13 @@ enum { HOS_SW_A, HOS_SW_B, HOS_SW_X, HOS_SW_Y, HOS_SW_LS, HOS_SW_RS, HOS_SW_L, H
 enum { HOS_PAD_SOUTH, HOS_PAD_EAST, HOS_PAD_WEST, HOS_PAD_NORTH, HOS_PAD_BACK, HOS_PAD_GUIDE, HOS_PAD_START,
        HOS_PAD_LSTICK, HOS_PAD_RSTICK, HOS_PAD_LSHOULDER, HOS_PAD_RSHOULDER, HOS_PAD_UP, HOS_PAD_DOWN, HOS_PAD_LEFT,
        HOS_PAD_RIGHT, HOS_PAD_LTRIGGER, HOS_PAD_RTRIGGER, HOS_PAD_N };
+/* (the touchpad's click, DualSense and DualShock 4: the Insert menu's alone, like Home; one past HOS_PAD_N, so it cannot be
+   bound to a Switch button (hos_bind and the ini refuse it) and never reaches the game) */
+enum { HOS_PAD_TOUCHPAD = HOS_PAD_N };
+/* (the Controls page's "Open menu": not a Switch button but a gamepad input, or a combination of two (slot 0 and slot 1 of
+   hos_binding / hos_bind with HOS_BIND_PAD, -1 none), that opens and closes the menu beside Home, Select + Start and the
+   touchpad's click. Saved as pad_menu=<a>,<b>. A combination held does not reach the game) */
+enum { HOS_BTN_OPEN_MENU = 100 };
 enum { HOS_BIND_PAD, HOS_BIND_KEY };
 /* (hookshot) the controller faces of the button prompts (host/prompts.c): the Switch, then nx2/prompt_faces.py FACES' order;
    the Button prompts row's value is one more (0 Auto) */

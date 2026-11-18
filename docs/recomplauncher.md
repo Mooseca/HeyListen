@@ -16,13 +16,36 @@ in [USER_GUIDE.md](USER_GUIDE.md#install-with-recomplauncher).
 | On Linux | `HeyListen.AppImage --cli <the same arguments>` (`AppRun`) |
 | The Windows asset | `HeyListen-<tag>-Windows-x64.zip`: the whole builder (its Python, the compiler, the sources), `recomplauncher.json` at the top (`tools/release/make_launcher_zip.py`, called by `make_release.py`) |
 | The Linux asset | `HeyListen-<tag>-Linux-x64.AppImage`, with `recomplauncher.json` inside it, at `/recomplauncher.json` (`engine/scripts/linux/appimage.sh`) |
-| The tests | `engine/tests/test_recomplauncher_json.py`, `engine/tests/test_progress_lines.py` |
+| The tests | `engine/tests/test_recomplauncher_json.py`, `engine/tests/test_progress_lines.py`, `engine/tests/test_update_offer.py`, `engine/tests/test_update_order.py` |
 
 ## What the file says
 
-- `start`: the game itself, `HeyListen/bin/HeyListen.exe` (Windows) or `HeyListen/bin/hookshot` (Linux), in the folder
-  `prepare` made. No builder window opens when the player presses Play. `HOOKSHOT_NO_UPDATE_CHECK=1` is set: the launcher
-  updates the game, not the game's own update offer.
+- `start`: the builder's own `--play <folder>`, like Longshot's (`HeyListenBuilder-Setup.exe` on Windows, `HeyListen.AppImage` on
+  Linux, args `--play {install}/HeyListen`), so a newer release is looked for before each launch. No `env` and no `requires`
+  (the list added in 0.4.2 was not the cause of the developer page's 0 of 6 features, and was taken out).
+  - **Windows**: the setup program (`engine/builder/setup/setup.c`, `play_folder`; the zip already holds it, in `HeyListenBuilder-Setup.exe`
+    at its top, because it is part of the builder). It is the program to start, rather than the .NET `HeyListenBuilder.exe`, because it
+    is native (no window and no .NET start for a Play), it is the program the builder's own Repair and the game folder's launcher run, and
+    `--play` needs nothing the .NET app has. The `--play` command is ported from Longshot's setup (Zacharias Xenakis, "--cli and --play for
+    RecompLauncher on Windows"); Longshot's only starts the game, so the look for updates is HeyListen's own.
+    - The game folder is checked first: not there, no `bin\HeyListen.exe` (or `bin\hookshot.exe` of a folder built before the rename), or no
+      `image.bin` (the build did not finish): a clear message (a window, and `error: ...` on stderr), exit code 1, nothing started.
+    - Then the latest release is asked for (a thread, 2 s per step and 4.5 s in all). **No network**, a slow one or GitHub's API limit:
+      nothing is said and the game starts. **A newer release** than the folder's `hookshot_version.txt` (the same order as the game's
+      offer, `host/hos_update_ver.h`): a window asks whether to play the folder's version now, open the download page (the game does
+      not start), or keep the version and stop asking (this release only, or for good). It never installs: the launcher unpacked this
+      builder, and the launcher is what installs a newer release (it asks again for the setup when `prepare.version` changes).
+      Skipped releases and "never ask again" are the files the game's own offer uses (`user\hookshot_update_skip.txt`,
+      `update_check=0` in `hookshot_options.ini`), so the two agree, and the in-game Settings row **Check for updates** turns it back on.
+    - The game is started with `HOOKSHOT_NO_UPDATE_CHECK=1`: the question was asked here (or turned off), so the game does not ask a
+      second time. The launcher's own `HOOKSHOT_NO_UPDATE_CHECK=1` also turns the look off. `HOOKSHOT_SETUP_QUIET=1` is for a test
+      (no window; the question counts as "play").
+    - The setup waits for the game and returns its exit code, so the launcher knows when the session ends.
+  - **Linux**: `HeyListen.AppImage --play <folder>` (`AppRun`, `hookshot-launch`) starts `bin/hookshot` there. It no longer sets
+    `HOOKSHOT_NO_UPDATE_CHECK`: the AppImage has no window of its own to ask, so the game's own offer (`host/hos_update.c`: curl,
+    3 s at most, then zenity) does it, with the same four answers.
+  - The game's own offer is on by default for a game started without the launcher, off when the builder or the launcher started
+    it. See `docs/USER_GUIDE.md` (Updates).
 - `prepare`: `--cli --prepare --game {game} --out {install}/HeyListen`. The game folder is inside the install folder, so the
   program paths of `start` are inside the release as the launcher wants. `done` lists `HeyListen/image.bin`, so a folder
   made by the builder window in the same place counts as prepared. `timeout` is 4 hours.
@@ -96,3 +119,11 @@ copy of the game (the build takes a while), change a setting and press Play. Lev
 setup's "Getting the extras" step.
 
 To get listed: [submit](https://recomplauncher.com/submit?platform=pc) `Sacrappy/HeyListen` and say it supports levels 1 to 3.
+
+## The install folder
+
+A profile cannot let the player choose where the game is installed: the guide (recomplauncher.com/sdk-files/guide.md) defines
+`{install}` as "your game's folder", the launcher's own choice, and the schema (recomplauncher.com/schema/recomplauncher.json,
+`additionalProperties: false` at the top) has no field for an install folder; the only path fields are `prepare.done`, `config`,
+`saves`, `folders` and the `{...}` placeholders. Where HeyListen goes is the launcher's setting, so a request for choosing it belongs
+to the launcher's developer. (HeyListen's own builder window and the AppImage let the player choose the game folder.)

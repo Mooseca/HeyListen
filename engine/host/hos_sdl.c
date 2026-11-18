@@ -22,6 +22,7 @@ static struct {
     /* controllers */
     void *PadOpen, *PadClose, *PadConnected, *PadsUpdate, *PadButton, *PadAxis, *PadName, *PadRumble;
     void *PadType, *PadEffect;   /* (optional: HD rumble, host/pad_sdl.c) */
+    void *PadMapping, *PadHasButton, *SdlFree;   /* (optional: the log line of an opened pad, host/pad_sdl.c) */
     void *PadHasSensor, *PadSensorEnable, *PadSensorData;   /* (motion: optional, NULL in an SDL without them) */
     void *GetGamepads, *GetGamepadID, *Free;   /* (SDL3) */
     void *NumJoysticks, *IsGameController, *DeviceInstanceID, *GetJoystick, *JoystickInstanceID;   /* (SDL2) */
@@ -68,6 +69,9 @@ static int get_all(HMODULE m, int three) {
     /* (SDL2 2.0.12 and 2.0.16 on, SDL3 3.2 on: without them every pad keeps the motor rumble) */
     *(FARPROC *)&f.PadType = GetProcAddress(m, three ? "SDL_GetGamepadType" : "SDL_GameControllerGetType");
     *(FARPROC *)&f.PadEffect = GetProcAddress(m, three ? "SDL_SendGamepadEffect" : "SDL_GameControllerSendEffect");
+    *(FARPROC *)&f.PadMapping = GetProcAddress(m, three ? "SDL_GetGamepadMapping" : "SDL_GameControllerMapping");
+    *(FARPROC *)&f.PadHasButton = GetProcAddress(m, three ? "SDL_GamepadHasButton" : "SDL_GameControllerHasButton");   /* (SDL2 2.0.14 on) */
+    *(FARPROC *)&f.SdlFree = GetProcAddress(m, "SDL_free");
     /* (motion sensors: SDL 2.0.14 on and every SDL3; without them the pads still play, with no gyro) */
     *(FARPROC *)&f.PadHasSensor = GetProcAddress(m, three ? "SDL_GamepadHasSensor" : "SDL_GameControllerHasSensor");
     *(FARPROC *)&f.PadSensorEnable = GetProcAddress(m, three ? "SDL_SetGamepadSensorEnabled" : "SDL_GameControllerSetSensorEnabled");
@@ -612,6 +616,21 @@ int32_t hos_sdl_pad_id(void *pad) {
 void hos_sdl_pad_rumble(void *pad, uint16_t low, uint16_t high, uint32_t ms) {
     if (version == 3) CALL(_Bool (*)(void *, uint16_t, uint16_t, uint32_t), PadRumble)(pad, low, high, ms);
     else CALL(int (*)(void *, uint16_t, uint16_t, uint32_t), PadRumble)(pad, low, high, ms);
+}
+/* The pad's SDL mapping string copied into out (cap bytes; "" when the SDL cannot say) */
+void hos_sdl_pad_mapping(void *pad, char *out, size_t cap) {
+    out[0] = 0;
+    if (!f.PadMapping || !cap) return;
+    char *m = CALL(char *(*)(void *), PadMapping)(pad);
+    if (!m) return;
+    snprintf(out, cap, "%s", m);
+    if (f.SdlFree) CALL(void (*)(void *), SdlFree)(m);
+}
+/* Whether the pad has this SDL gamepad button: 1 yes, 0 no, -1 the SDL cannot say */
+int hos_sdl_pad_has_button(void *pad, int button) {
+    if (!f.PadHasButton) return -1;
+    return version == 3 ? CALL(_Bool (*)(void *, int), PadHasButton)(pad, button) != 0
+                        : CALL(int (*)(void *, int), PadHasButton)(pad, button) != 0;
 }
 int hos_sdl_pad_type(void *pad) { return f.PadType ? CALL(int (*)(void *), PadType)(pad) : 0; }
 int hos_sdl_pad_has_effect(void) { return f.PadEffect != NULL; }

@@ -2,7 +2,7 @@
 // game's style: vk_ui.h), so it costs nothing while closed and it never touches the game's picture, nor what frame interpolation
 // sees. The FPS counter and the start-up screen are drawn the same way. Insert or F1 opens and closes it by default.
 // Up and Down choose, Left and Right change, Esc closes; the game gets no keyboard input while it is open.
-// (hookshot) A gamepad's Home button, or Select and Start together, opens it too; the D-pad chooses and changes, the button
+// (hookshot) A gamepad's Home button, its touchpad's click (DualSense, DualShock 4), or Select and Start together, opens it too; the D-pad chooses and changes, the button
 // the Switch's A is bound to changes too (and opens a page), the one B is bound to goes back (vk_menu_keys.h). The game gets no gamepad input while it is open either.
 // Its Controls page binds the Switch's buttons to gamepad inputs and keys.
 // (hookshot) The mouse is free while it is open (the window lets it go: WM_APP + 8, host/display.c and
@@ -689,6 +689,10 @@ Row rows[] = {
     {TAB_GAMEPLAY, "Discord status", &opts.discord, 0, 1, 1, tx_onoff,
      "Shows \"Playing Hookshot\" and the time played in your Discord status, while Discord runs on this PC.", nullptr, false,
      true},
+    {TAB_GAMEPLAY, "Check for updates", &opts.update_check, 0, 1, 1, tx_onoff,   // (host/hos_update.c reads update_check= from the options file at the start)
+     "On (the default): at the start of a game you started yourself, a short look for a newer HeyListen release, and a window "
+     "that offers to update, keep your version or skip that version. Nothing is asked when you are offline, and when the launcher "
+     "starts the game it looks for updates itself. Applies after a restart.", nullptr, true, true},
 
     // Controls (11 rows; Motion opens the 6 TAB_MOTION rows, Controls its page with the 2 TAB_PAGE rows)
     {TAB_CONTROLS, "Controller in background", &opts.pad_background, 0, 1, 1, tx_onoff,
@@ -738,7 +742,8 @@ Row rows[] = {
      "The layout preset, the button prompts, and which gamepad button and which keys press each of the Switch's "
      "buttons."},
     {TAB_CONTROLS, "Menu shortcut", &opts.menu_shortcut, 0, 2, 1, tx_menu_shortcut,
-     "Which keyboard shortcut opens and closes this menu. Choose one key to leave the other free for an overlay.",
+     "Which keyboard shortcut opens and closes this menu. Choose one key to leave the other free for an overlay. "
+     "On a controller, Home, the touchpad click (DualSense, DualShock 4) or Select and Start together always open it.",
      nullptr, false, true},
     // Debug: the tools' switch, the tools themselves below it while they are on (cheat: menu_tick does what they do), then the
     // developer's rows
@@ -1003,6 +1008,7 @@ const char* ini_key(const Row& r) {
     if (r.value == &opts.dlss) return "dlss";   // (as opts.dlss and RX_VK_DLSS)
     if (r.value == &opts.send_perf) return "send_performance_stats";   // (host/hos_telemetry.h reads both of these)
     if (r.value == &opts.send_crash) return "send_crash_reports";
+    if (r.value == &opts.update_check) return "update_check";   // (host/hos_update.c reads it, and writes it for "Never ask again")
     static char k[32];
     size_t n = 0;
     for (const char* p = r.name; *p && n + 1 < sizeof k; p++) k[n++] = *p == ' ' ? '_' : (char)tolower(*p);
@@ -1136,6 +1142,8 @@ void save() {
             if (i < HOS_SW_N) put("pad_%s=%d\n", bind_names[i], host->binding(HOS_BIND_PAD, i, 0));
             put("key_%s=%d,%d\n", bind_names[i], host->binding(HOS_BIND_KEY, i, 0), host->binding(HOS_BIND_KEY, i, 1));
         }
+        // (the Open menu control: one or two gamepad inputs, -1 none; host/nn_hid.c binds_load reads it)
+        if (can_bind()) put("pad_menu=%d,%d\n", host->binding(HOS_BIND_PAD, HOS_BTN_OPEN_MENU, 0), host->binding(HOS_BIND_PAD, HOS_BTN_OPEN_MENU, 1));
     }
     hos_atomic_write(ini_path().c_str(), out.data(), out.size());
 }
@@ -1192,9 +1200,16 @@ const Control controls[] = {{HOS_SW_A, "A"}, {HOS_SW_B, "B"}, {HOS_SW_X, "X"}, {
                             {HOS_KEY_MOVE_DOWN, "Move back"}, {HOS_KEY_MOVE_LEFT, "Move left"},
                             {HOS_KEY_MOVE_RIGHT, "Move right"}, {HOS_KEY_CAM_UP, "Camera up"},
                             {HOS_KEY_CAM_DOWN, "Camera down"}, {HOS_KEY_CAM_LEFT, "Camera left"},
-                            {HOS_KEY_CAM_RIGHT, "Camera right"}};
+                            {HOS_KEY_CAM_RIGHT, "Camera right"},
+                            {HOS_BTN_OPEN_MENU, "Open menu"}};   // (a gamepad input or two together, not a Switch button)
 constexpr int kControls = sizeof controls / sizeof controls[0];   // (then "Reset to defaults")
-bool keys_only(int i) { return i < kControls && controls[i].button >= HOS_SW_N; }   // (no gamepad input for those)
+bool menu_row(int i) { return i >= 0 && i < kControls && controls[i].button == HOS_BTN_OPEN_MENU; }   // (no keys for it)
+bool keys_only(int i) {   // (no gamepad input for those)
+    return i >= 0 && i < kControls && controls[i].button >= HOS_SW_N && controls[i].button != HOS_BTN_OPEN_MENU;
+}
+// the Open menu control's inputs by name ("Share + Options"), "Not set" while it has none (Home, Select and Start together and
+// the touchpad's click open the menu in any case)
+std::string menu_combo_text();
 // a pad input's name on the controller of the button prompts (the Button prompts row's choice; Auto: the face in use),
 // else by its place
 const char* pad_name(int p) {
@@ -1213,6 +1228,12 @@ const char* pad_name(int p) {
          "D-pad right", "L2", "R2"}};
     const int face = opts.prompts ? opts.prompts - 1 : host && host->prompt_face ? host->prompt_face() : -1;
     return p >= 0 && p < HOS_PAD_N ? t[face >= 0 && face < HOS_PROMPT_N ? face + 1 : 0][p] : "None";
+}
+std::string menu_combo_text() {
+    const int a = host ? host->binding(HOS_BIND_PAD, HOS_BTN_OPEN_MENU, 0) : -1;
+    const int b = host ? host->binding(HOS_BIND_PAD, HOS_BTN_OPEN_MENU, 1) : -1;
+    if (a < 0) return "Not set";
+    return b < 0 ? std::string(pad_name(a)) : std::string(pad_name(a)) + " + " + pad_name(b);
 }
 const char* key_name(int vk) {
     static char b[16];
@@ -1679,6 +1700,9 @@ void draw_controls(ui::Ctx& c) {
     const char* title = page_row ? page_row->name : sel_i < kControls ? controls[sel_i].name : "Reset to defaults";
     const char* help = listening ? (listening == 1 ? "Press the gamepad button to use. Esc cancels." : "Press the key to use. Esc cancels.")
                        : page_row ? page_row->help
+                       : menu_row(sel_i) ? "A gamepad button, or two pressed together (L3 + R3, Share + Options), that opens and closes "
+                                           "this menu. Home, Select and Start together, the touchpad click, Insert and F1 work too. "
+                                           "A combination held does not reach the game. Enter binds it, Delete clears it."
                                   : "Which gamepad button and which keys press each of the Switch's buttons. Enter binds the one "
                                     "selected; Delete clears it. The game's button icons follow after a restart.";
     const char* hint = page_row ? (page_row->hint ? page_row->hint(*page_row->value, -1) : nullptr)
@@ -1728,7 +1752,9 @@ void draw_controls(ui::Ctx& c) {
         hits.add(rx0, y0, pad_x, y1, menu_hit::kCtlRow, i);
         for (int col = 0; col < 2; col++) {   // (two value cells, a gap between them, each drawn as the tabs' values are)
             const float a = col ? key_x + 3 * s : pad_x, b = col ? rx1 : key_x - 3 * s;
-            std::string v = col == 0 ? (keys_only(i) ? "-" : pad_name(host->binding(HOS_BIND_PAD, ctl.button, 0))) : keys_text(ctl.button);
+            const bool dead = (col == 0 && keys_only(i)) || (col == 1 && menu_row(i));   // (no such input for this control)
+            std::string v = col == 0 ? (keys_only(i) ? "-" : menu_row(i) ? menu_combo_text() : pad_name(host->binding(HOS_BIND_PAD, ctl.button, 0)))
+                                     : menu_row(i) ? "Insert, F1" : keys_text(ctl.button);
             const bool here = sel && col == ccol;
             const ImVec2 va(a, y), vb(b, y + rh);
             if (here && listening) {   // (waiting for the new input: amber, the outline as a selected value's)
@@ -1737,12 +1763,12 @@ void draw_controls(ui::Ctx& c) {
                 c.d->AddRect(va, vb, ui::kEdge, 0, std::max(1.0f, s));
                 c.d->AddRectFilled(va + ImVec2(in, in), vb - ImVec2(in, in), ui::kListen);
                 ui::text_mid_centre(c, c.f.strong, 16.5f * s, (a + b) * 0.5f, y + rh * 0.5f, ui::kInkBright,
-                                    col == 0 ? "Press a button..." : "Press a key...");
+                                    col == 0 ? (menu_row(i) ? "Press a button, or two..." : "Press a button...") : "Press a key...");
                 ui::glow(c, va, vb);
             } else {
-                choice_cell(c, va, vb, v, here, false, false, col == 0 && keys_only(i));
+                choice_cell(c, va, vb, v, here, false, false, dead);
             }
-            if (!(col == 0 && keys_only(i))) hits.add(a, y0, b, y1, menu_hit::kCtlCell, i, 0, 0, 0, 0, col);
+            if (!dead) hits.add(a, y0, b, y1, menu_hit::kCtlCell, i, 0, 0, 0, 0, col);
         }
     }
     c.d->PopClipRect();
@@ -2281,13 +2307,19 @@ void menu_tick() {
         held[i] = down;
         if (press[i]) pad_last = false;   // (the keys: their names in the prompts)
     }
-    // (hookshot) the gamepads, by position: Home, or Select and Start together, as Insert; the D-pad as the arrows; the
+    // (hookshot) the gamepads, by position: Home, the touchpad's click, or Select and Start together, as Insert; the D-pad as the arrows; the
     // buttons the Switch's A and B are bound to as Enter and Esc, as in the game (vk_menu_keys.h; with the Nintendo layout A
     // is the right face button), not while a binding waits for its button
     static uint32_t pad_held = 0;
     const uint32_t raw = mine && host && host->pad_raw ? host->pad_raw() : 0, pad_press = raw & ~pad_held;
     const uint32_t chord = 1u << HOS_PAD_BACK | 1u << HOS_PAD_START;
-    const bool chord_now = (raw & chord) == chord && (pad_held & chord) != chord;
+    // (the Controls page's Open menu: its input or both of its two, any of the pad's; not while a binding waits for its button)
+    uint32_t combo = 0;
+    if (host && host->binding)
+        for (int k = 0; k < 2; k++)
+            if (const int b = host->binding(HOS_BIND_PAD, HOS_BTN_OPEN_MENU, k); b >= 0 && b < HOS_PAD_N) combo |= 1u << b;
+    const bool chord_now = ((raw & chord) == chord && (pad_held & chord) != chord) ||
+                           (combo && listening != 1 && (raw & combo) == combo && (pad_held & combo) != combo);
     pad_held = raw;
     if (pad_press) pad_last = auto_pad = true;   // (a controller: its buttons in the prompts, and Menu size Auto's choice)
     {   // (RX_VK_UI_PROMPTS=pad or keys: the prompts for screenshots of test runs, which have no controller and no focus)
@@ -2298,7 +2330,7 @@ void menu_tick() {
     if (host && host->binding)   // (A and B as bound now: the Controls page or the Layout preset can change them)
         menu_keys::confirm_back(host->binding(HOS_BIND_PAD, HOS_SW_A, 0), host->binding(HOS_BIND_PAD, HOS_SW_B, 0), &pad_confirm,
                                 &pad_back);
-    if (pad(HOS_PAD_GUIDE) || chord_now) press[0] = true;
+    if (pad(HOS_PAD_GUIDE) || pad(HOS_PAD_TOUCHPAD) || chord_now) press[0] = true;   // (Home, the touchpad's click, Select and Start)
     {   // holding an arrow or the D-pad repeats it: after 0.35 s, 12 a second, then 30 a second after 1.5 s held
         static int64_t held_since[5], next_repeat[5];
         const int pads[5] = {0, HOS_PAD_UP, HOS_PAD_DOWN, HOS_PAD_LEFT, HOS_PAD_RIGHT};
@@ -2406,8 +2438,28 @@ void menu_tick() {
         else if (listening) {
             if (press[5] || prof_now() > listen_end) listening = 0, changed = true;   // (Esc, or nothing for a while)
             else if (listening == 1) {
-                if (!listen_armed) listen_armed = (raw & ~(1u << HOS_PAD_GUIDE)) == 0;
-                else if (const uint32_t p = pad_press & ~(1u << HOS_PAD_GUIDE)) {
+                // (Home and the touchpad's click open and close the menu: not inputs to bind)
+                const uint32_t menu_only = 1u << HOS_PAD_GUIDE | 1u << HOS_PAD_TOUCHPAD;
+                static int first = -1;   // (Open menu: the first input pressed, waiting a moment for a second one)
+                static int64_t first_at;
+                if (!listen_armed) listen_armed = (raw & ~menu_only) == 0, first = -1;
+                else if (controls[csel - kTop].button == HOS_BTN_OPEN_MENU) {
+                    // (one input, or two pressed together: the second within 0.7 s of the first, the first still held)
+                    const uint32_t p = pad_press & ~menu_only;
+                    int second = -1;
+                    for (int bit = 0; bit < HOS_PAD_N; bit++)
+                        if ((p >> bit & 1) && bit != first) {
+                            if (first < 0) first = bit, first_at = prof_now();   // (two in one tick: the lower is the first)
+                            else if (second < 0) second = bit;
+                        }
+                    if (first >= 0 && (second >= 0 || !(raw >> first & 1) || prof_now() - first_at > 700000000LL)) {
+                        host->bind(HOS_BIND_PAD, HOS_BTN_OPEN_MENU, 0, first);
+                        host->bind(HOS_BIND_PAD, HOS_BTN_OPEN_MENU, 1, second);
+                        first = -1;
+                        listening = 0, changed = true;
+                        save();
+                    }
+                } else if (const uint32_t p = pad_press & ~menu_only) {
                     int bit = 0;
                     while (!(p >> bit & 1)) bit++;
                     host->bind(HOS_BIND_PAD, controls[csel - kTop].button, 0, bit);
@@ -2439,7 +2491,8 @@ void menu_tick() {
                 const int at = option ? hit.index : kTop + hit.index;   // (the page's row: its own rows first)
                 if (on && (moved || ptr.pressed)) {
                     if (at != csel) csel = at, changed = true;
-                    if (hit.part == menu_hit::kCtlCell && !keys_only(hit.index) && ccol != hit.side) ccol = hit.side, changed = true;
+                    if (hit.part == menu_hit::kCtlCell && !keys_only(hit.index) && !menu_row(hit.index) && ccol != hit.side)
+                        ccol = hit.side, changed = true;
                 }
                 if (ptr.pressed & HOS_MOUSE_LEFT) {
                     if (option) press[hit.side < 0 ? 3 : 4] = true;   // (a value's halves: Left and Right; the name: Right)
@@ -2458,8 +2511,9 @@ void menu_tick() {
                 set_row(r, *r.value + (press[3] ? -r.step : r.step), press[3] ? -1 : 1);
                 changed = true;
             } else if (i >= 0) {
-                if ((press[3] || press[4]) && i < kControls && !keys_only(i)) ccol ^= 1, changed = true;
+                if ((press[3] || press[4]) && i < kControls && !keys_only(i) && !menu_row(i)) ccol ^= 1, changed = true;
                 if (keys_only(i)) ccol = 1;   // (the stick's and the camera's directions: keys only)
+                if (menu_row(i)) ccol = 0;    // (Open menu: gamepad only)
                 if (press[7]) {
                     if (i == kControls) {
                         host->bind(HOS_BIND_PAD, -1, 0, 0);
@@ -2470,7 +2524,10 @@ void menu_tick() {
                     changed = true;
                 }
                 if ((press[8] || press[9]) && i < kControls) {
-                    if (ccol == 0) {
+                    if (menu_row(i)) {
+                        host->bind(HOS_BIND_PAD, HOS_BTN_OPEN_MENU, 1, -1);
+                        host->bind(HOS_BIND_PAD, HOS_BTN_OPEN_MENU, 0, -1);
+                    } else if (ccol == 0) {
                         host->bind(HOS_BIND_PAD, controls[i].button, 0, -1);
                         opts.pad_layout = detect_pad_layout();
                     }

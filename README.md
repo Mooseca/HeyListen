@@ -157,6 +157,7 @@ It stands on the work of many people. Everything below is credit due to Hookshot
 - **[mstorsjo/llvm-mingw](https://github.com/mstorsjo/llvm-mingw)**: the bundled Windows compiler (no Visual Studio needed).
 - **NVIDIA DLSS**: optional builds use NVIDIA DLSS Super Resolution (downloaded by each build, never bundled). NVIDIA and DLSS are trademarks of NVIDIA Corporation.
 - **[kinnay/zbic](https://github.com/kinnay/zbic)**, **Opus** and **SDL**: decompression, audio and controllers.
+- **[Kenney](https://kenney.nl/assets/input-prompts)** (Input Prompts, CC0): the Xbox, PlayStation and Steam Deck button icons of the Button prompts setting. The builder draws them into the game's icon font on your PC, so nothing of the game is shipped.
 - **[sostenesfreitas/ocarina-recomp](https://github.com/sostenesfreitas/ocarina-recomp)**: Hookshot's README layout, and notes that confirmed the mesh stage's control section.
 - **[MythosOfs/Orchid](https://github.com/MythosOfs/Orchid)**: the fog and exposure workaround for Ocarina of Time.
 - **Mesa (NAK)**: the reference for Ampere's instruction encoding.
