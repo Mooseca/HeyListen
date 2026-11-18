@@ -93,7 +93,7 @@ def main():
     if "flush_ub_updates(r.cmd);" not in finish:
         raise SystemExit("FAIL: finish_recording no longer writes the submission's uniform updates")
     flush = block(src, "void flush_ub_updates(VkCommandBuffer cmd) {")
-    if "for (size_t i = ub_first_of_recording; i < ub_updates.size(); i++)" not in flush:
+    if "ub_disjoint_writes(ub_updates, ub_first_of_recording, ub_updates.size()," not in flush:   # (tests/test_ub_update_order.py)
         raise SystemExit("FAIL: flush_ub_updates no longer writes from ub_first_of_recording on: check what a part's "
                          "end has to keep")
     print("source: a part's end writes the updates and moves the window only under part_flush; the last part writes "

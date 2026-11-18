@@ -583,7 +583,13 @@ Shader::Profile make_profile() {
     p.supported_spirv = 0x00010600;
     p.unified_descriptor_binding = true;
     p.support_descriptor_aliasing = true;
-    p.support_int8 = p.support_int16 = p.support_int64 = true;
+    // (8- and 16-bit integers only where the device has them: a module that declares the Int8 or Int16 capability without
+    // shaderInt8 / shaderInt16 is invalid (VUID-VkShaderModuleCreateInfo-pCode-08740), and the driver need not accept it. The
+    // validation layer named Int16 in 159 modules of the title, New Game and its first play with shaderInt16 masked. Without
+    // them the translator converts through 32 bits, as Eden does on such GPUs; disk_stamp keeps those programs apart)
+    p.support_int8 = dev.vk12.shaderInt8 != VK_FALSE;
+    p.support_int16 = dev.features.shaderInt16 != VK_FALSE;
+    p.support_int64 = true;
     p.support_uniform_and_storage_buffer_8bit = p.support_storage_buffer_8bit = true;
     p.support_uniform_and_storage_buffer_16bit = p.support_storage_buffer_16bit = true;
     p.support_vertex_instance_id = false;
@@ -1317,6 +1323,12 @@ uint64_t disk_stamp() {
     if (storage_binding_align() != dev.props.limits.minStorageBufferOffsetAlignment) {
         const uint32_t salign = (uint32_t)storage_binding_align();
         add(&salign, sizeof salign);
+    }
+    // (and 8- or 16-bit integers missing (make_profile): those programs convert through 32 bits. Added only then, so that the
+    // stamp of every GPU that has both is what it was)
+    if (!dev.vk12.shaderInt8 || !dev.features.shaderInt16) {
+        const uint32_t narrow = 0x1600u | (dev.vk12.shaderInt8 ? 0u : 1u) | (dev.features.shaderInt16 ? 0u : 2u);
+        add(&narrow, sizeof narrow);
     }
     for (char** e = _environ; e && *e; e++)
         for (const char* pre : {"RX_VK_OOT", "RX_VK_MMA", "RX_VK_NATIVE", "RX_VK_NAN", "RX_VK_TASK_CAP", "RX_VK_NETWORK", "RX_VK_GP", "RX_VK_FOLLOW", "RX_VK_NO_FOLLOW", "RX_VK_NO_F16", "RX_VK_SHARED", "RX_VK_MESH", "RX_VK_FOLD", "RX_VK_NO_INVARIANT", "RX_VK_NO_NAN_GUARD", "RX_VK_MARKERS", "EDEN_"})

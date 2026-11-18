@@ -22,7 +22,8 @@ static class HeadlessCli
         var list = args.ToList();
         // (as the window does: the build files in the builder's own folder, NVIDIA's SDK in its own, only when asked)
         if (!list.Contains("--work")) list.AddRange(new[] { "--work", Storage.Work });
-        var runner = new Runner(tools, list, null, list.Contains("--fetch-ngx-sdk") ? Storage.NgxSdk : null);
+        var runner = new Runner(tools, list, null, list.Contains("--fetch-ngx-sdk") ? Storage.NgxSdk : null,
+                                list.Contains("--fetch-fsr-runtime") ? Storage.FfxSdk : null);
         string? failure = null;
         var said = false;   // (make_game.py already said why it failed: "error: ...")
         using var done = new ManualResetEventSlim();

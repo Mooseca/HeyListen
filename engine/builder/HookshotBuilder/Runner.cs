@@ -64,6 +64,7 @@ sealed class Runner
     readonly List<string> args;
     readonly int? workers;
     readonly string? ngxSdk;
+    readonly string? ffxSdk;
     Process? process;
     string? error;
     bool cancelled;
@@ -72,16 +73,18 @@ sealed class Runner
     public event Action<string?>? Finished;
 
     /// ngxSdk: NVIDIA DLSS (the builder's tick): the folder of NVIDIA's DLSS SDK, as HOOKSHOT_NGX_SDK; null builds without it
-    public Runner(Tools tools, List<string> args, int? workers = null, string? ngxSdk = null)
+    /// ffxSdk: AMD FSR 4 (the builder's tick): the folder AMD's FSR runtime is kept in between builds, as HOOKSHOT_FFX_SDK; null leaves it to make_game.py
+    public Runner(Tools tools, List<string> args, int? workers = null, string? ngxSdk = null, string? ffxSdk = null)
     {
         this.tools = tools;
         this.args = args;
         if (workers is <= 0) throw new ArgumentOutOfRangeException(nameof(workers), "Build workers must be positive.");
         this.workers = workers;
         this.ngxSdk = ngxSdk;
+        this.ffxSdk = ffxSdk;
     }
 
-    static ProcessStartInfo Info(Tools tools, IEnumerable<string> args, int? workers = null, string? ngxSdk = null)
+    static ProcessStartInfo Info(Tools tools, IEnumerable<string> args, int? workers = null, string? ngxSdk = null, string? ffxSdk = null)
     {
         var si = new ProcessStartInfo(tools.Python)
         {
@@ -98,6 +101,9 @@ sealed class Runner
         // (NVIDIA DLSS: only when ticked. Without it, one set on the PC is not passed on either: a build is with DLSS only when asked)
         if (ngxSdk != null) si.Environment["HOOKSHOT_NGX_SDK"] = ngxSdk;
         else si.Environment.Remove("HOOKSHOT_NGX_SDK");
+        // (AMD FSR 4: the folder AMD's runtime is fetched into; nothing is fetched unless --fetch-fsr-runtime is passed)
+        if (ffxSdk != null) si.Environment["HOOKSHOT_FFX_SDK"] = ffxSdk;
+        else si.Environment.Remove("HOOKSHOT_FFX_SDK");
         // (the folder's own compiler, headers and libraries, when it has them: nothing of the PC's but Windows' own)
         var sets = new[] { ("EMSDK", "emsdk"), ("RX_CPM", "cpm"), ("WGPU_NATIVE", "wgpu-native") };
         foreach (var (name, folder) in sets)
@@ -118,7 +124,7 @@ sealed class Runner
         {
             try
             {
-                using var p = Process.Start(Info(tools, args, workers, ngxSdk))!;
+                using var p = Process.Start(Info(tools, args, workers, ngxSdk, ffxSdk))!;
                 process = p;
                 p.ErrorDataReceived += (_, e) => { if (e.Data != null) Line?.Invoke(e.Data); };
                 p.BeginErrorReadLine();

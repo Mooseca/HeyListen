@@ -697,7 +697,9 @@ public partial class MainWindow : Window
         else if (chosenNup != null) args.AddRange(new[] { "--nup", chosenNup });
         else return;
         args.AddRange(new[] { "--out", OutPath.Text, "--language", lang.Code });
-        if (FsrTick.IsChecked == true) args.Add("--fsr");   // (an --update of the folder keeps it: make_game.py's mark)
+        // (AMD FSR 4: AMD's license was accepted at the tick; the build downloads AMD's signed runtime, checks it and puts it in the
+        // game folder. An --update of the folder keeps it: make_game.py's mark, and UpdateBuild fetches again)
+        if (FsrTick.IsChecked == true) args.AddRange(FsrArgs);
         prepareNow = PrepareTick.IsChecked == true;
         args.AddRange(new[] { "--code-mods", CodeModsTick.IsChecked == true ? "on" : "off" });
         Run(tools, ShaderStep.Args(args, prepareNow), dlss: DlssTick.IsChecked == true);
@@ -711,7 +713,28 @@ public partial class MainWindow : Window
         "HeyListen never includes or shares them: never share a game folder built with them.\n\n" +
         "Do you accept NVIDIA's license?";
 
-    /// The NVIDIA DLSS tick: NVIDIA's license first, and the tick stays only when it is accepted
+    /// What the AMD FSR 4 tick passes to make_game.py (the same as recomplauncher.json's fsr4 option; FSR 4 is Windows-only, as this app)
+    static readonly string[] FsrArgs = { "--fsr", "--fetch-fsr-runtime", "--accept-amd-license" };
+
+    const string FsrLicense =
+        "AMD FSR 4 is AMD's, not HeyListen's. With it ticked, the build downloads AMD's signed FSR 4 runtime (FidelityFX SDK v2.4.0) from " +
+        "github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK, checks each file against its SHA-256 and puts it in the game folder, under " +
+        "AMD's own license, the FidelityFX SDK license:\n\n" +
+        "https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK/blob/7539ae8b6568ad29ed78a753404351daf3b5cca7/Kits/FidelityFX/docs/license.md\n\n" +
+        "Its files stay on this PC (in the builder's ffx-sdk folder, and in the game folder, with the license beside them). " +
+        "HeyListen never includes or shares them.\n\n" +
+        "Do you accept AMD's license?";
+
+    /// The AMD FSR 4 tick: AMD's license first, and the tick stays only when it is accepted
+    void FsrChanged(object sender, RoutedEventArgs e)
+    {
+        if (FsrTick.IsChecked == true &&
+            MessageBox.Show(this, FsrLicense, "AMD FSR 4", MessageBoxButton.YesNo, MessageBoxImage.Information) != MessageBoxResult.Yes)
+            FsrTick.IsChecked = false;
+        SaveSettings();
+    }
+
+    /// The code mods tick
     void CodeModsChanged(object sender, RoutedEventArgs e) => SaveSettings();
 
     /// "Which mods?" on the options page: the mods with code patches in the mods folder of the folder the game is built into
@@ -827,7 +850,7 @@ public partial class MainWindow : Window
         Tick();
         if (!args.Contains("--work")) args.AddRange(new[] { "--work", Storage.Work });   // (HeyListen: always, so make_game.py never falls back to its default, the Hookshot Builder folder)
         if (dlss && !args.Contains("--fetch-ngx-sdk")) args.AddRange(new[] { "--fetch-ngx-sdk", "--accept-nvidia-license" });
-        runner = new Runner(tools, args, workers, dlss ? Storage.NgxSdk : null);
+        runner = new Runner(tools, args, workers, dlss ? Storage.NgxSdk : null, args.Contains("--fetch-fsr-runtime") ? Storage.FfxSdk : null);
         runner.Line += l => Dispatcher.BeginInvoke(() => Line(l));
         runner.Finished += failure => Dispatcher.BeginInvoke(() => Ended(failure));
         runner.Start();
@@ -1242,6 +1265,9 @@ public partial class MainWindow : Window
         // ran ApplySettings, so the tick there is only its default)
         // (codeMods: the launcher's Code mods window chose; otherwise make_game.py keeps what the folder's last build chose)
         var args = new List<string> { "--update", folder };
+        // (a folder with AMD's FSR 4 runtime, its license accepted then: AMD's files fetched again, only what is missing)
+        if (File.Exists(System.IO.Path.Combine(folder, "LICENSE-AMD-FSR-SDK.md")))
+            args.AddRange(new[] { "--fetch-fsr-runtime", "--accept-amd-license" });
         if (codeMods != null) args.AddRange(new[] { "--code-mods", codeMods });
         Run(tools, ShaderStep.Args(args, prepareNow), keepRows: true, dlss: dlss);
     }

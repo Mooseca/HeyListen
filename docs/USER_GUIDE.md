@@ -55,7 +55,7 @@ not replace the builder: it runs it for you, with no window.
 2. On its setup screen, give it your copy of the game: the `.nup` file (program `0400486024DEC000`, update v131072, build
    `e0f3ccfa`), or the folder with its `romfs` and `exefs`. It checks that it is the right version.
 3. Tick **NVIDIA DLSS** or **AMD FSR 4** if you want them (each asks you to accept its maker's license; the files are
-   downloaded to your PC and never shared). On an NVIDIA RTX card the launcher also fetches NVIDIA's own `nvngx_dlss.dll`
+   downloaded from NVIDIA or AMD to your PC, checked, put in place for you, and never shared; nothing to copy by hand). On an NVIDIA RTX card the launcher also fetches NVIDIA's own `nvngx_dlss.dll`
    (the optional **NVIDIA DLSS runtime** item of Easy Setup, which you can switch off) into the game's `ngx` folder.
    Two more ticks are **off** unless you turn them on: **Send anonymous performance statistics** and **Send crash reports
    automatically**. They only write `send_performance_stats=1` and `send_crash_reports=1` into the game's

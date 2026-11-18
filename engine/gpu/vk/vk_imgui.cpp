@@ -39,8 +39,12 @@ ImTextureData* logo_ = nullptr;
 float logo_aspect = 1;
 int64_t presents = 0;   // (frames recorded: when a texture or a staging buffer let go can be destroyed)
 
+/// Dear ImGui's Vulkan functions, instance-level ones among them (vkGetPhysicalDeviceMemoryProperties, the surface queries): all
+/// from vkGetInstanceProcAddr, which answers for both levels. vkGetDeviceProcAddr was asked first: for an instance-level name
+/// its result is NULL only since Vulkan 1.2.193 and undefined before, an older loader or driver may hand back a function that
+/// takes the driver's own physical device where ImGui passes the loader's (the validation layer's
+/// WARNING-vkGetDeviceProcAddr-device, for 8 names). The device-level ones come through the loader's dispatch: a few calls a frame
 PFN_vkVoidFunction load(const char* name, void*) {
-    if (PFN_vkVoidFunction f = vkGetDeviceProcAddr(dev.device, name)) return f;
     return vkx::instance_proc_addr()(dev.instance, name);
 }
 
