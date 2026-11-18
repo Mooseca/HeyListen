@@ -115,6 +115,7 @@ ARGS = {
     "tests/test_capture_get_fallback.py": ["--cxx", "{cxx}"],
     "tests/test_capture_read_mapped.py": ["--cxx", "{cxx}"],
     "tests/test_pass_sample_mask.py": ["--cxx", "{cxx}"],
+    "tests/test_write_history.py": ["--cxx", "{cxx}"],
     "tests/test_posix_cv_wake.py": ["--cc", "cc"],
     "tests/test_parallel_rb_refresh.py": ["--cxx", "{cxx}"],
     "tests/test_prof_sampling.py": ["--cxx", "{cxx}"],
