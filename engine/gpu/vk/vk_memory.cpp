@@ -137,6 +137,7 @@ std::map<uint64_t, Pool>::node_type imported_take(std::map<uint64_t, Pool>::iter
 Pool* last_pool = nullptr;            // (the last pool_of hit: draws in a row bind buffers of the same pools)
 extern Pool* pool_cache[4096];
 void retire_pool(std::map<uint64_t, Pool>::iterator it);
+size_t retired_pools_count();   // (import diagnostics, RX_VK_IMPORT_DIAG)
 Pool* pool_lookup(uint64_t guest, uint64_t size);
 // (RX_VK_NO_HOST_IMPORT: a pool whose import was given back, imported again where guest memory is needed through it; below)
 enum { kAgainBind, kAgainWrite, kAgainSync, kAgainMake, kAgainRb, kAgainTexture, kAgainFree, kAgainWb, kAgainKinds };
@@ -536,6 +537,36 @@ bool import_pool(uint64_t lo, uint64_t hi, Pool& p) {
     ai.allocationSize = bytes;
     ai.memoryTypeIndex = type;
     const VkResult allocated = vkAllocateMemory(dev.device, &ai, nullptr, &p.memory);
+    if (allocated != VK_SUCCESS && getenv("RX_VK_IMPORT_DIAG")) {
+        // (diagnostics, RX_VK_IMPORT_DIAG=1, after Hookshot c4ec14b263: every refused import, with the live imports it
+        // overlaps, the live and retired counts and the pages' state as VirtualQuery gives it; the first 16 refusals are
+        // logged without it by the caller)
+        size_t live_over = 0;
+        uint64_t live_bytes = 0;
+        for (const auto& [k, q] : imported) {
+            live_bytes += q.hi - q.lo;
+            if (q.lo < hi && q.hi > lo) live_over++;
+        }
+        char regions[400];
+        int rn = 0, nreg = 0;
+        regions[0] = 0;
+        for (uint8_t* q = ptr; q < ptr + bytes && nreg < 64;) {
+            MEMORY_BASIC_INFORMATION mi{};
+            if (VirtualQuery(q, &mi, sizeof mi) != sizeof mi) break;
+            uint8_t* end = std::min((uint8_t*)mi.BaseAddress + mi.RegionSize, ptr + bytes);
+            if (end <= q) break;
+            if (nreg < 6 && rn < (int)sizeof regions - 80)
+                rn += snprintf(regions + rn, sizeof regions - rn, " [%llu KB state %#lx prot %#lx type %#lx]",
+                               (unsigned long long)((end - q) >> 10), (unsigned long)mi.State, (unsigned long)mi.Protect,
+                               (unsigned long)mi.Type);
+            nreg++;
+            q = end;
+        }
+        logf("vk: import diag: %#llx..%#llx (%llu KB, ptr %% 64K = %#llx) refused (%d); %zu live imports overlap it, %zu live "
+             "(%llu MB), %zu retired; %d regions:%s", (unsigned long long)lo, (unsigned long long)hi,
+             (unsigned long long)(bytes >> 10), (unsigned long long)((uintptr_t)ptr & 0xFFFF), (int)allocated, live_over,
+             imported.size(), (unsigned long long)(live_bytes >> 20), retired_pools_count(), nreg, regions);
+    }
     if (allocated != VK_SUCCESS) {
         import_result = allocated;
         destroy_import_buffer(p.buffer);
@@ -4627,6 +4658,7 @@ void cut_cpu_words(const Pool& p, std::vector<VkBufferCopy>& runs) {
 // (Extracted from the table, not erased: the node, and the Pool in it, stay where they were, so the mirror's lists and
 // a parallel replay thread's pool cache still point at a live one.)
 std::deque<std::map<uint64_t, Pool>::node_type> retired_pools;
+size_t retired_pools_count() { return retired_pools.size(); }
 
 bool retiring_finalized = false;   // (RX_VK_POOL_FINALIZE: the retirement is finalize_retire's, for the log)
 void retire_pool(std::map<uint64_t, Pool>::iterator it) {
@@ -5976,13 +6008,20 @@ void pool_mirror_log() {   // (pools_mu held; every 1200 mirror epochs)
 }  // namespace
 
 void retired_imports_give_back() {   // (pools_mu held)
-    // (hookshot) Kept by default on Windows: giving them back is for the Linux amdgpu submit above, and on Windows an Intel Arc
-    // B390 lost the device entering Kokiri every time with it and 1 run in 5 without (issue 17, fuxau); the AMD device losses
+    // (hookshot) Kept by default on Windows (not on NVIDIA and AMD, below): giving them back is for the Linux amdgpu submit
+    // above, and on Windows an Intel Arc B390 lost the device entering Kokiri every time with it and 1 run in 5 without (issue 17, fuxau); the AMD device losses
     // on the Ally X (309) and RX 6600 (571) came right after retired pools went back. RX_VK_KEEP_RETIRED=0 or 1 chooses
 #ifdef _WIN32
     // (not on NVIDIA: kept there, ~20 areas of play left 6.8 GB of retired pools imported on an RTX 3070 (8 GB), and the next area
     // lost the device, twice; given back, the same tour finished every area (issue 1057). The losses above were Intel's and AMD's)
-    static const bool keep = getenv("RX_VK_KEEP_RETIRED") ? getenv("RX_VK_KEEP_RETIRED")[0] != '0' : dev.props.vendorID != 0x10DE;
+    // (after Hookshot c4ec14b263, 11-17: on AMD too. Kept, the retired pools of a few area changes stayed pinned beside the
+    // live ones, 3.1 GB retired and 3.8 GB live on an RX 6600 XT (16 GB) after Kokiri, Kakariko and the Market, 7.3 GB on an
+    // RX 9070 XT; past that the driver refused every new import (VK_ERROR_INVALID_EXTERNAL_HANDLE, even a plain 16 MB chunk
+    // overlapping nothing), the terrain's index buffers could not be bound and ~1,100 draws a frame were left out: Hyrule
+    // Field's ground gone until a restart. Given back, the same trip from the Market to the field: no import refused, 157
+    // retired imports (3.7 GB) back, no device lost. Intel keeps them, as before)
+    static const bool keep = getenv("RX_VK_KEEP_RETIRED") ? getenv("RX_VK_KEEP_RETIRED")[0] != '0'
+                                                          : dev.props.vendorID != 0x10DE && dev.props.vendorID != 0x1002;
 #else
     static const bool keep = getenv("RX_VK_KEEP_RETIRED") && getenv("RX_VK_KEEP_RETIRED")[0] != '0';
 #endif
@@ -6202,7 +6241,8 @@ void mirrors_give_back(uint64_t want_bytes) {   // (pools_mu held)
 // their imports back down to RX_VK_IMPORT_LOW percent (75): only pools without a mirror, not bound for kImportIdle
 // submissions and done on the GPU. They leave the table as a retired pool does (the page table's entries 0, the caches
 // emptied) and are imported again at their next binding; their memory is freed once everything recorded until now is
-// done. On Linux, on by default only where that heap's budget is under 12 GB (where it ran out); off by default on Windows.
+// done. On Linux, on by default only where that heap's budget is under 12 GB (where it ran out); on Windows the same, on AMD
+// alone (70 / 60 there).
 // RX_VK_IMPORT_HIGH=0: off, =85: on anywhere. (Caveat: last_value counts bindings, not shaders reaching a pool through the
 // page table; a pool only reached that way would read zeros until it is bound again. Not seen in play: the pools given back
 // were long unbound.) ----
@@ -6236,15 +6276,21 @@ void imports_give_back() {   // (pools_mu held)
         for (VkDeviceMemory m : p.pieces) vkFreeMemory(dev.device, m, nullptr);   // (a pool imported as several dma-bufs)
         evicted_pools.pop_front();
     }
-    // (hookshot) Off by default on Windows, as giving retired imports back is (RX_VK_KEEP_RETIRED, retired_imports_give_back:
-    // device losses on Intel Arc and AMD right after imports went back): RX_VK_IMPORT_HIGH=85 turns it on there
+    // (hookshot) Off by default on Windows but on AMD (below), as giving retired imports back is (RX_VK_KEEP_RETIRED,
+    // retired_imports_give_back: device losses on Intel Arc and AMD right after imports went back): RX_VK_IMPORT_HIGH=85 turns
+    // it on there
     static const char* env_high = getenv("RX_VK_IMPORT_HIGH");
 #ifdef _WIN32
-    static const int high = env_high ? atoi(env_high) : 0;
+    // (after Hookshot c4ec14b263, 11-17: on AMD, past 70% down to 60% as Hookshot does on NVIDIA, with the retired imports
+    // given back above: the pinned imports of a session had no bound there, and past ~7 GB the driver refused new ones, the
+    // terrain left out. RX_VK_IMPORT_HIGH=0 and RX_VK_KEEP_RETIRED=1: as before)
+    static const bool amd = dev.props.vendorID == 0x1002;
+    static const int high = env_high ? atoi(env_high) : amd ? 70 : 0;
+    static const int low = getenv("RX_VK_IMPORT_LOW") ? std::clamp(atoi(getenv("RX_VK_IMPORT_LOW")), 10, 95) : amd ? 60 : 75;
 #else
     static const int high = env_high ? atoi(env_high) : 85;
-#endif
     static const int low = getenv("RX_VK_IMPORT_LOW") ? std::clamp(atoi(getenv("RX_VK_IMPORT_LOW")), 10, 95) : 75;
+#endif
     static uint64_t calls = 0;
     if (high <= 0 || ++calls % 16) return;   // (the driver asked every 16 submissions)
     uint64_t used = 0, budget = 0;
