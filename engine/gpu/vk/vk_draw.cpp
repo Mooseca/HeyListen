@@ -32,6 +32,7 @@
 #include <signal.h>
 
 #include "shader_recompiler/backend/spirv/emit_spirv.h"
+#include "shader_recompiler/ir_opt/psychov35.h"   // (PsychoV35's grading bank: uniform_range)
 
 #include "compat/hookshot_env.h"   // (env_value_off: the switches' one rule)
 #include "vk_paths.h"
@@ -47,6 +48,7 @@
 #include "vk_gprof.h"
 #include "vk_jobs.h"
 #include "vk_shader.h"
+#include "vk_menu.h"     // (psychov35_bank: PsychoV35's grading for its bank, uniform_range)
 #include "vk_texture.h"
 #include "vk_ledger.h"   // (RX_VK_LEDGER)
 #include "ubo_memo.h"    // (HL_UBO_MEMO)
@@ -2871,6 +2873,15 @@ VkDescriptorBufferInfo uniform_range(const NvnState& s, const Stage& st, uint32_
         FINE_N(FC_BANK_NEW_BYTES, n);
         std::memcpy(cur->mapped + at, tmp.data(), n);
         c.prog = (const Program*)1, c.at = at, c.buf = cur->stream, c.size = n, c.bytes = tmp;
+        return {cur->stream, at, n};
+    }
+    if (index == Shader::Optimization::PsychoV35::kSettingsBank) {   // the renderer's own: PsychoV35's grading, as the menu has it
+        constexpr uint64_t n = (Shader::Optimization::PsychoV35::kSettingCount * sizeof(float) + 15) & ~uint64_t{15};
+        const uint64_t at = stream_alloc(n, align);
+        if (at == UINT64_MAX) return bi;
+        float bank[n / sizeof(float)] = {};
+        psychov35_bank(bank);
+        std::memcpy(cur->mapped + at, bank, n);
         return {cur->stream, at, n};
     }
     if (index == 1) {

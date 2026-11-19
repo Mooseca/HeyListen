@@ -272,6 +272,9 @@ static float text_scale(const char *env, int menu) {
     return v == 1 ? 2.0f : v == 2 ? 4.0f : v >= 3 ? 1e6f : 1.0f;
 }
 volatile uint64_t hos_res_module = 0;   /* (f_831f3200's object, whose +0xe5c is the 3D's scale: nx2/oot_patches.py) */
+volatile int hos_scene_rgba16f = 0;   /* (HeyListen, after Longshot ddb156df: the scene buffer RGBA16F, not R11G11B10F, f_80672260:
+                                         nx2/oot_patches.py; HDR set to Native with the PsychoV35 tone mapper: the temporal upscalers
+                                         take only R11G11B10F, so Vanilla keeps it) */
 static void realtime_step(int64_t now) {
     int rx_option(int id, int otherwise);
     /* (Resolution 100% from the start: the fixed path skipped the dynamic block from the first frame, its fields stayed
@@ -283,6 +286,7 @@ static void realtime_step(int64_t now) {
         if (!looked) looked = 1, env = getenv("HOS_TEXT_SPEED");
         hos_text_scale = text_scale(env, rx_option(5, 0));
     }
+    hos_scene_rgba16f = rx_option(HL_OPT_HDR_TONEMAP, 0) != 0;
     {   /* (the Insert menu's Resolution: the fixed path's scale in 1/10000, live; HOS_RES_SCALE
            below stays over it) */
         const int scale = rx_option(3, 0);

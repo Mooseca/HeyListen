@@ -13,7 +13,15 @@ struct Options {
     int hdr = 0;          // (hookshot) HDR10 out (vk_framegen.cpp framegen_hdr): 0 off, 1 the SDR picture expanded, 2 the game's own (native) HDR, 3 the game's native HDR with the game's tone-mapping pass replaced by ours (vk_hdr_tonemap.cpp); when the display has it (the swapchain made again at once)
     int hdr_white = 200;  // HDR paper white, nits (the picture's white)
     int hdr_peak = 1000;  // HDR peak brightness, nits (its brightest highlights)
-    int hdr_saturation = 100;   // the colour's saturation with our tone mapper (hdr 3), percent: 100 as the scene has it
+    int hdr_tonemap = 0;  // (HeyListen, after Longshot ddb156df) the scene's tone mapper with Native HDR: 0 the game's (Vanilla), 1 PsychoV35,
+                          // as RenoDX's zelda-oot-oz (ir_opt/scene_tonemap_pass.h; vk_shader.cpp scene_tonemap_for)
+    // (after Longshot 79a34381) PsychoV35's grading, RenoDX's zelda-oot-oz's settings (0 to 100, 50 neutral; Exposure in percent;
+    // Midgray 0 Render, 1 Vanilla): the scene's bank each draw, so a change shows at once (psychov35_bank, ir_opt/psychov35.h)
+    int pv35_exposure = 100, pv35_highlights = 50, pv35_shadows = 50, pv35_contrast = 50, pv35_saturation = 50;
+    int pv35_tone_slope = 50, pv35_hue_clip = 50, pv35_midgray = 1, pv35_match_slope = 1, pv35_bloom = 50;
+    // PsychoV35's output, the mod's UI Brightness (nits) and Global Color Space (0 Vanilla, 1 BT.709, 2 DCI-P3): the output
+    // encoder's bank (ir_opt/output_encode_pass.h)
+    int pv35_ui_white = 203, pv35_color_space = 1;
     int fps_cap = 0;      // (hookshot) Frame rate cap: 0 60 (the console's), 90, 120, 144, 165, 240 (host/nn_vi.c reads frame_rate_cap= at the start)
     int resolution = 0;   // the 3D's (Render resolution): 0 Auto (the game's dynamic resolution), else a share of the output,
                           // 1..6 = 100%, 75%, 67%, 50%, 58%, 33%, 7 = native: 100% with DLSS's (DLAA) or FSR 4's anti-aliasing
@@ -99,6 +107,11 @@ bool menu_is_open();
 /// Unlimited; the row (HOS_FPS_LIMIT over it). -1 in Game speed Per frame: the game's steps are whole frames of 1/60 s there,
 /// so the limit does not apply (it needs Real time)
 int menu_fps_limit();
+/// (HeyListen, after Longshot ddb156df) The game's scene tone mapped by PsychoV35: HDR set to Native on an HDR display, and the Tone
+/// mapper row so
+bool scene_tonemap_on();
+/// (after Longshot 79a34381) PsychoV35's grading as the menu has it now, in ir_opt/psychov35.h's bank order (kSetting*, kSettingCount floats)
+void psychov35_bank(float* out);
 bool resolution_auto();       // (the game's dynamic resolution: Resolution Auto)
 int resolution_scale();       // (the fixed path's scale in 1/10000: the Resolution row's, as a twelfth of the output)
 void menu_option_set(int id, int value);   // (from the game's side: 7 the mouse's sensitivity, the - and = keys)
