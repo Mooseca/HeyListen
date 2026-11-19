@@ -30,12 +30,14 @@
 #include "vk_texture.h"
 
 #include "shaders/fg_copy_comp_spv.h"
+#include "shaders/fg_copy_pq_comp_spv.h"    // (HeyListen: fg_copy.comp with FG_PQ, an RGB10A2 destination)
 #include "shaders/fg_flow_comp_spv.h"
 #include "shaders/fg_luma_comp_spv.h"
 #include "shaders/fg_median_comp_spv.h"
 #include "shaders/fg_scale_comp_spv.h"
 #include "shaders/fg_scale_pq_comp_spv.h"   // (fg_scale.comp with FG_SCALE_PQ: an RGB10A2 destination)
 #include "shaders/fg_synth_comp_spv.h"
+#include "shaders/fg_synth_pq_comp_spv.h"   // (HeyListen: fg_synth.comp with FG_PQ)
 #include "shaders/hdr_encode_comp_spv.h"
 #include "vk_work.h"   // (after the others: counts the commands that do GPU work, for full_barrier)
 
@@ -83,6 +85,10 @@ struct State {
     std::atomic<bool> failed{false};   // also read by Reflex's game-thread eligibility check
     uint32_t w = 0, h = 0;
     Pipe copy, luma, flow, median, synth;
+    // (HeyListen) the copy and the blend into RGB10A2 frames, for the game's own HDR10 picture (Native HDR: pq), made at its
+    // first use; pq: the frames below are RGB10A2 (frame_format), else RGBA8
+    Pipe copy_pq, synth_pq;
+    bool pq_tried = false, pq = false;
     VkSampler nearest = VK_NULL_HANDLE, linear = VK_NULL_HANDLE;
     Img frames[2], lumas[2], flows[2];
     OutSet sets[3];   // (one shown, one waiting its place on the line, one being made: the pacer never holds the game back)
@@ -213,7 +219,7 @@ bool make_pipe(Pipe& p, const uint32_t* code, size_t bytes, std::initializer_lis
 
 // The optional interpolation is disabled after setup fails: retain none of its unused setup objects.
 void drop_setup() {
-    for (Pipe* p : {&fg.copy, &fg.luma, &fg.flow, &fg.median, &fg.synth}) drop_pipe(*p);
+    for (Pipe* p : {&fg.copy, &fg.luma, &fg.flow, &fg.median, &fg.synth, &fg.copy_pq, &fg.synth_pq}) drop_pipe(*p);
     if (fg.nearest) vkDestroySampler(dev.device, fg.nearest, nullptr);
     if (fg.linear) vkDestroySampler(dev.device, fg.linear, nullptr);
     fg.nearest = fg.linear = VK_NULL_HANDLE;
@@ -332,8 +338,29 @@ void drop_size() {
     fg.recorded = nullptr;
 }
 
-bool ensure_size(VkCommandBuffer cmd, uint32_t w, uint32_t h) {
-    if (fg.w == w && fg.h == h && fg.mult == multiplier()) return true;
+/// (HeyListen) The frames' format: pq, the game's own HDR10 picture (Native HDR), its PQ codes in RGB10A2 as the game presents
+/// them (no RGBA16F image: the same 32 bits a pixel); else RGBA8, the SDR picture's own
+VkFormat frame_format(bool pq) { return pq ? VK_FORMAT_A2B10G10R10_UNORM_PACK32 : VK_FORMAT_R8G8B8A8_UNORM; }
+
+/// (HeyListen) The 10-bit copy and blend (fg_copy.comp, fg_synth.comp with FG_PQ), once; false: the frames stay RGBA8
+bool init_pq() {
+    if (!fg.pq_tried) {
+        fg.pq_tried = true;
+        const VkDescriptorType S = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, I = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+        if (!make_pipe(fg.copy_pq, FG_COPY_PQ_COMP_SPV, sizeof FG_COPY_PQ_COMP_SPV, {S, I}, 16) ||
+            !make_pipe(fg.synth_pq, FG_SYNTH_PQ_COMP_SPV, sizeof FG_SYNTH_PQ_COMP_SPV, {S, S, S, I}, 4)) {
+            drop_pipe(fg.copy_pq), drop_pipe(fg.synth_pq);
+            logf("vk: frame interpolation: its 10-bit passes could not be made: Native HDR's frames in 8 bits");
+        }
+    }
+    return fg.copy_pq.pipe && fg.synth_pq.pipe;
+}
+
+/// The frames for a w x h present; pq (HeyListen): it is the game's PQ picture (Native HDR), the frames then RGB10A2. A change
+/// of either makes them again
+bool ensure_size(VkCommandBuffer cmd, uint32_t w, uint32_t h, bool pq) {
+    pq = pq && init_pq();
+    if (fg.w == w && fg.h == h && fg.mult == multiplier() && fg.pq == pq) return true;
     {   // (the display thread is done with the old sets first)
         std::unique_lock lk(fg.mu);
         fg.cv.wait(lk, [] { return fg.jobs.empty() && !fg.sets[0].busy && !fg.sets[1].busy && !fg.sets[2].busy; });
@@ -345,16 +372,17 @@ bool ensure_size(VkCommandBuffer cmd, uint32_t w, uint32_t h) {
     drop_size();
     const uint32_t qw = (w + 3) / 4, qh = (h + 3) / 4, cw = (qw + 3) / 4, ch = (qh + 3) / 4;
     const VkImageUsageFlags rw = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    const VkFormat format = frame_format(pq);
     bool ok = true;
     for (int i = 0; i < 2; i++) {
-        ok = ok && make_img(fg.frames[i], w, h, VK_FORMAT_R8G8B8A8_UNORM, rw | VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
+        ok = ok && make_img(fg.frames[i], w, h, format, rw | VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
         ok = ok && make_img(fg.lumas[i], qw, qh, VK_FORMAT_R16_SFLOAT, rw);
         ok = ok && make_img(fg.flows[i], cw, ch, VK_FORMAT_R16G16B16A16_SFLOAT, rw);
     }
     const int mult = multiplier();
     for (OutSet& set : fg.sets)
         for (int k = 0; k < mult; k++)
-            ok = ok && make_img(set.frame[k], w, h, VK_FORMAT_R8G8B8A8_UNORM,
+            ok = ok && make_img(set.frame[k], w, h, format,
                                 rw | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
     if (!ok) {
         fg.failed = true;
@@ -364,7 +392,8 @@ bool ensure_size(VkCommandBuffer cmd, uint32_t w, uint32_t h) {
         logf("vk: frame interpolation: its images (%ux%u) were not made: off", w, h);
         return false;
     }
-    fg.w = w, fg.h = h, fg.mult = mult;
+    if (pq != fg.pq) logf("vk: frame interpolation: its frames %s", pq ? "10-bit (RGB10A2), the game's PQ picture (Native HDR)" : "8-bit (RGBA8)");
+    fg.w = w, fg.h = h, fg.mult = mult, fg.pq = pq;
     for (int i = 0; i < 2; i++) {
         to_general(cmd, fg.frames[i].image), to_general(cmd, fg.lumas[i].image), to_general(cmd, fg.flows[i].image);
     }
@@ -701,7 +730,7 @@ int fsr3fi_frame(VkCommandBuffer cmd, OutSet& set, int cur, uint32_t uw, uint32_
     fsr3fi::Inputs in;
     in.color = fg.frames[cur].view;
     in.color_image = fg.frames[cur].image;
-    in.color_format = VK_FORMAT_R8G8B8A8_UNORM;   // (ensure_size, for fg.frames)
+    in.color_format = frame_format(fg.pq);   // (ensure_size, for fg.frames: RGB10A2 for Native HDR's PQ picture)
     in.native_pq = native_pq;
     in.max_luminance = native_pq ? (float)std::clamp(opts.hdr_peak, 400, 10000) : 1.0f;
     in.width = uw, in.height = uh;
@@ -769,7 +798,10 @@ bool framegen_record(VkCommandBuffer cmd, VkImageView src, uint32_t sw, uint32_t
     int x0 = 0, y0 = 0, w = (int)sw, h = (int)sh;
     if (crop && crop[2] > 0 && crop[3] > 0) x0 = crop[0], y0 = crop[1], w = crop[2], h = crop[3];
     w = std::min(w, (int)sw - x0), h = std::min(h, (int)sh - y0);
-    if (!src || w <= 0 || h <= 0 || !init() || !ensure_size(cmd, (uint32_t)w, (uint32_t)h)) return false;
+    const bool pq = native_pq;   // (HeyListen: the frames in 10 bits for the game's PQ picture, ensure_size)
+    if (!src || w <= 0 || h <= 0 || !init() || !ensure_size(cmd, (uint32_t)w, (uint32_t)h, pq)) return false;
+    const Pipe& copy = fg.pq ? fg.copy_pq : fg.copy;
+    const Pipe& synth = fg.pq ? fg.synth_pq : fg.synth;
     if (!fg.thread_started) {
         fg.thread_started = true;
         std::thread(display_main).detach();
@@ -799,7 +831,7 @@ bool framegen_record(VkCommandBuffer cmd, VkImageView src, uint32_t sw, uint32_t
     const uint32_t qw = (uw + 3) / 4, qh = (uh + 3) / 4, cw = (qw + 3) / 4, ch = (qh + 3) / 4;
     full_barrier(cmd);
     const int32_t pc[4] = {x0, y0, w, h};
-    pass(cmd, fg.copy, {{src, fg.nearest}, {fg.frames[cur].view, VK_NULL_HANDLE}}, uw, uh, pc, sizeof pc);
+    pass(cmd, copy, {{src, fg.nearest}, {fg.frames[cur].view, VK_NULL_HANDLE}}, uw, uh, pc, sizeof pc);
     pass(cmd, fg.luma, {{fg.frames[cur].view, fg.nearest}, {fg.lumas[cur].view, VK_NULL_HANDLE}}, qw, qh);
     set->made = 0;
     set->shown = -1;
@@ -834,7 +866,7 @@ bool framegen_record(VkCommandBuffer cmd, VkImageView src, uint32_t sw, uint32_t
                                     {fg.flows[0].view, VK_NULL_HANDLE}}, cw, ch);
                 pass(cmd, fg.median, {{fg.flows[0].view, fg.nearest}, {fg.flows[1].view, VK_NULL_HANDLE}}, cw, ch);
             }
-            pass(cmd, fg.synth, {{fg.frames[prev].view, fg.linear}, {fg.frames[cur].view, fg.linear},
+            pass(cmd, synth, {{fg.frames[prev].view, fg.linear}, {fg.frames[cur].view, fg.linear},
                                  {fg.flows[1].view, fg.nearest}, {set->frame[k].view, VK_NULL_HANDLE}},
                  uw, uh, &t[k], 4);
         }
@@ -862,7 +894,7 @@ bool framegen_record(VkCommandBuffer cmd, VkImageView src, uint32_t sw, uint32_t
         pass(cmd, fg.median, {{fg.flows[0].view, fg.nearest}, {fg.flows[1].view, VK_NULL_HANDLE}}, cw, ch);
         for (int k = 1; k < m; k++) {
             const float t = (float)k / (float)m;
-            pass(cmd, fg.synth, {{fg.frames[prev].view, fg.linear}, {fg.frames[cur].view, fg.linear},
+            pass(cmd, synth, {{fg.frames[prev].view, fg.linear}, {fg.frames[cur].view, fg.linear},
                                  {fg.flows[1].view, fg.nearest}, {set->frame[k - 1].view, VK_NULL_HANDLE}},
                  uw, uh, &t, 4);
         }
