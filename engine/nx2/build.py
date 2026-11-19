@@ -514,6 +514,11 @@ def ffmpeg_version_key():
 WRITE_TRACK = [] if os.environ.get("RX_SOFT_WRITE_WATCH") == "0" else ["-DA64_WRITE_TRACK"]
 if WRITE_TRACK and os.environ.get("A64_GRAN") == "1":   # (HeyListen, sprint 5: a write mark per 512 bytes too, nx2/rtgen.py)
     WRITE_TRACK = WRITE_TRACK + ["-DA64_GRAN"]
+# (longshot 11-18, 35a4a9fc #1617) a lifted store marks its page only where the page is one the GPU can read
+# (host/mark_bitmap.c sets a bit per GPU-mapped page, nx2/rtgen.py A64_MARK_BITMAP reads it); the host's own marks
+# (HOS_WRITTEN) keep marking every page. On by default; RX_MARK_BITMAP=0 builds the lifted game marking every page it
+# stores to, as before (the same translated C, one define less)
+MARK_BITMAP = [] if os.environ.get("RX_MARK_BITMAP", "").strip().lower() in ("0", "off", "false", "no") else ["-DA64_MARK_BITMAP"]
 
 # (hookshot) the host CPU the lifted game and the runtime are built for: x86-64-v3 (AVX2, FMA, BMI1/2, LZCNT,
 # MOVBE; Haswell and Zen 1 on). With FMA the FPX1 fast paths cover double-precision FMA (RECOMP_FPX_FMA64; it took
@@ -534,7 +539,7 @@ def flags(gen, rt64, opt, polls):
         "-I" + rt64, "-I" + gen, "-I" + os.path.join(kit.KIT, "rt"), "-I" + NX2_RT, "-Wno-everything",
         "-fno-strict-aliasing", "-mcx16", "-" + opt, "-g0", "-mllvm", "-rotation-max-header-size=0",
         "-ffunction-sections", "-mllvm", "-capture-tracking-max-uses-to-explore=5000"] + \
-        (["-DA64_POLLING"] if polls else []) + WRITE_TRACK
+        (["-DA64_POLLING"] if polls else []) + WRITE_TRACK + MARK_BITMAP
 
 
 def write_info(out):
