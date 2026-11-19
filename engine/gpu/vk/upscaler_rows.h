@@ -27,6 +27,10 @@ inline bool is_fsr4(int upscaler) { return upscaler == FSR4 || upscaler == FSR4_
 /// No upscaling network. The Render resolution row applies as with the game's own (the 3D is drawn at that share), and so does
 /// Sharpness (it works on the present, whatever made the picture)
 inline bool is_off(int upscaler) { return upscaler == OFF; }
+/// The engines that take Native PsychoV35's RGBA16F scene with RX_VK_PSYCHOV35_DLSS=1 (vk_temporal.cpp temporal_scene_format):
+/// those the frame chain gives linear light in an HDR context, DLSS / DLAA and FSR 4 / its native AA. FSR 3.1 has its own
+/// B10G11R11 inputs, and the game's network and Off need no scene
+inline bool takes_psychov35(int upscaler) { return is_dlss(upscaler) || is_fsr4(upscaler); }
 /// The 3D drawn at full size, the upscaler anti-aliasing alone (DLAA, FSR 4's native AA): the modes the chain runs for the
 /// Render resolution's native choice
 inline bool full_scale(int upscaler) { return upscaler == DLAA || upscaler == FSR4_AA; }

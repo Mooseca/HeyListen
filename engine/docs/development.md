@@ -70,9 +70,9 @@ true, and dead code elimination removes the grid walk, so every meshlet is drawn
 screen. It costs some GPU time on cards that cull quickly, so it is off unless set. The log says
 "culling off, every meshlet drawn" for each task shader it changed.
 
-`RX_VK_PSYCHOV35_DLSS=1` enables the experimental RGBA16F scene path for DLSS/DLAA with Native HDR and PsychoV35.
-The successful upscale supplies NVIDIA frame generation with depth, camera and actor motion as usual. It requires
-the native-HDR DLSS feature (`RX_VK_DLSS_HDR=0` prevents this path). FSR and TAAU are not enabled by this switch.
+`RX_VK_PSYCHOV35_DLSS=1` enables the experimental RGBA16F scene path for DLSS/DLAA and AMD FSR 4 (and its Native AA)
+with Native HDR and PsychoV35. It requires the engine's native-HDR context: DLSS's HDR feature (`RX_VK_DLSS_HDR=0`
+prevents this path) or FSR 4's HDR context (`RX_VK_FSR4_HDR=0` prevents it). FSR 3.1 and TAAU are not enabled by this switch.
 The RGBA16F output shader is regenerated with `python -I -B tests/test_psychov35_dlss.py --write --glslang glslangValidator`.
 
 ### Running a test
