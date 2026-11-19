@@ -22,6 +22,7 @@ struct Options {
     // PsychoV35's output, the mod's UI Brightness (nits) and Global Color Space (0 Vanilla, 1 BT.709, 2 DCI-P3): the output
     // encoder's bank (ir_opt/output_encode_pass.h)
     int pv35_ui_white = 203, pv35_color_space = 1;
+    int hdr_contrast = 100;   // HDR contrast in percent around mid grey, as RenoDX grades it; 100 none (vk_framegen.cpp framegen_hdr)
     int fps_cap = 0;      // (hookshot) Frame rate cap: 0 60 (the console's), 90, 120, 144, 165, 240 (host/nn_vi.c reads frame_rate_cap= at the start)
     int resolution = 0;   // the 3D's (Render resolution): 0 Auto (the game's dynamic resolution), else a share of the output,
                           // 1..6 = 100%, 75%, 67%, 50%, 58%, 33%, 7 = native: 100% with DLSS's (DLAA) or FSR 4's anti-aliasing

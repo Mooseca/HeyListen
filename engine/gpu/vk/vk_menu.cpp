@@ -826,6 +826,11 @@ Row rows[] = {
      "How bright the picture's white is with HDR on. Around 200 for a normal room; higher in a bright one.", nullptr, false, true},
     {TAB_GRAPHICS, "HDR peak brightness", &opts.hdr_peak, 400, 4000, 100, tx_nits,
      "The brightest highlights with HDR on: set it to your display's peak brightness.", nullptr, false, true},
+    {TAB_GRAPHICS, "HDR contrast", &opts.hdr_contrast, 50, 200, 5, tx_percent,
+     "The HDR picture's contrast around mid grey, as the RenoDX HDR mods grade it: above 100% deeper shadows and brighter "
+     "highlights, which ease into the peak brightness; below it flatter. With Native the game's own HDR picture is graded too, "
+     "under the peak brightness the game is told. Hidden with PsychoV35, which has its own Contrast.",
+     nullptr, false, true},
     // (HeyListen, after Longshot ddb156df: shown with HDR set to Native)
     {TAB_GRAPHICS, "HDR tone mapper", &opts.hdr_tonemap, 0, 1, 1, tx_tonemap,
      "With Native, how the game's scene meets the peak brightness. Vanilla: the game's own curve. PsychoV35: RenoDX's "
@@ -1209,6 +1214,8 @@ bool row_shown(int i) {
            (rows[i].value != &opts.framegen_by || dlss_built() || fsr3fi::capable()) &&   // (a build with DLSS, or a GPU AMD FSR 3.1's frame interpolation runs on: the row has a choice)
            // (HeyListen, after Longshot ddb156df / 79a34381: the tone mapper with Native HDR, PsychoV35's rows with it on PsychoV35)
            (v != &opts.hdr_tonemap || opts.hdr == 2) &&
+           // (HeyListen, after Longshot a0dfd28b / 79a34381: HDR contrast with HDR on, and not with PsychoV35, which has its own)
+           (v != &opts.hdr_contrast || (opts.hdr != 0 && (opts.hdr != 2 || opts.hdr_tonemap != 1))) &&
            (strncmp(rows[i].name, "PsychoV35 ", 10) || (opts.hdr == 2 && opts.hdr_tonemap == 1));
 }
 int tab_row_count(int t) {

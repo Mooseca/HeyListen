@@ -242,6 +242,7 @@ they apply at once, with no new translation.
 | | Frame generation by | Built-in / AMD FSR 3.1 (the renderer's own interpolation, and AMD FSR 3.1's at 2x where it runs), NVIDIA DLSS FG (RTX 40 and newer, with a temporal Upscaler and NVIDIA's runtime), AMD FSR 3.1 FG (shown in a build with DLSS, or where AMD FSR 3.1's frame interpolation runs; saved as `frame_generation_by`: 0, 1, 2) | Built-in / AMD FSR 3.1 |
 | | Frame generation | Off, Auto, 2x to 8x, but only what Frame generation by makes: NVIDIA DLSS FG 2x up to its runtime's most (6x on an RTX 50, 2x on an RTX 40) and no Auto, AMD FSR 3.1 FG 2x, Built-in Auto and 2x to 8x. Right under Frame generation by; changing the mode keeps the multiplier within the new mode's | Off |
 | | Frame pacing | Off, On | Off |
+| | HDR contrast | 50% to 200% around mid grey, in steps of 5, as the RenoDX HDR mods grade it (while HDR is on; with Native the game's own HDR picture too; hidden with PsychoV35, which has its own Contrast) | 100% |
 | | HDR tone mapper | Vanilla (the game's curve), PsychoV35 (RenoDX's zelda-oot-oz; with HDR set to Native. DLSS, FSR and TAAU do not take its scene yet: the game's own upscale runs) | Vanilla |
 | | PsychoV35 UI brightness | 80 to 500 nits: the menus' and HUD's white; the scene keeps the paper white (RenoDX's UI Brightness) | 203 nits |
 | | PsychoV35 color space | Vanilla (the game's own matrix), BT.709, DCI-P3 (RenoDX's Global Color Space) | BT.709 |
