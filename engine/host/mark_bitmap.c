@@ -24,6 +24,7 @@
 #ifndef A64_DIRTY_PAGES
 #define A64_DIRTY_PAGES (1ull << 27)
 #endif
+#if defined(A64_MARK_BITMAP)   /* (build.py RX_MARK_BITMAP=1: with it off none of this is built, and map_add sets no bits) */
 uint8_t a64_gpu_pages[A64_DIRTY_PAGES / 8];
 
 __attribute__((constructor)) static void gpu_pages_all(void) {
@@ -41,3 +42,4 @@ void hos_gpu_pages_set(uint64_t guest, uint64_t size) {
         __atomic_fetch_or(&a64_gpu_pages[i >> 3], (uint8_t)(1u << (i & 7)), __ATOMIC_RELEASE);
     }
 }
+#endif

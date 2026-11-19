@@ -517,9 +517,12 @@ if WRITE_TRACK and os.environ.get("A64_GRAN") == "1":   # (HeyListen, sprint 5: 
     WRITE_TRACK = WRITE_TRACK + ["-DA64_GRAN"]
 # (longshot 11-18, 35a4a9fc #1617) a lifted store marks its page only where the page is one the GPU can read
 # (host/mark_bitmap.c sets a bit per GPU-mapped page, nx2/rtgen.py A64_MARK_BITMAP reads it); the host's own marks
-# (HOS_WRITTEN) keep marking every page. On by default; RX_MARK_BITMAP=0 builds the lifted game marking every page it
-# stores to, as before (the same translated C, one define less)
-MARK_BITMAP = [] if os.environ.get("RX_MARK_BITMAP", "").strip().lower() in ("0", "off", "false", "no") else ["-DA64_MARK_BITMAP"]
+# (HOS_WRITTEN) keep marking every page. Off by default (RX_MARK_BITMAP=1 turns it on): measured on the main PC
+# (Ryzen 7 7800X3D, RTX 5070, castle-move, 3 interleaved rounds against the same build without it) 87.0 -> 85.9 fps,
+# within the runs' spread either way, and the 1% lows a little lower: our mark grouping (A64_MARK_STACK/FRAME,
+# group_marks: 155k shared marks for 689k stores) already removed the cost Longshot measured on an ungrouped build
+# (a 5600X: 40.4 -> 46.1 fps). With it off the bitmap is not built either: no 16 MB table, and map_add sets no bits
+MARK_BITMAP = ["-DA64_MARK_BITMAP"] if os.environ.get("RX_MARK_BITMAP", "").strip().lower() in ("1", "on", "true", "yes") else []
 
 # (hookshot) the host CPU the lifted game and the runtime are built for: x86-64-v3 (AVX2, FMA, BMI1/2, LZCNT,
 # MOVBE; Haswell and Zen 1 on). With FMA the FPX1 fast paths cover double-precision FMA (RECOMP_FPX_FMA64; it took
@@ -812,7 +815,7 @@ def main():
     # the runtime: ordinary C at -O2, with its own headers (any host/*.h change rebuilds all of it)
     host_fl = target() + CPU + (["-I" + POSIX, "-D_GNU_SOURCE"] if LINUX else []) + \
         ["-I" + HOST, "-I" + rt64, "-I" + gen, "-I" + os.path.join(NATIVE, "include"),
-         "-Wno-everything", "-O2", "-g0", "-mcx16", "-DA64_POLLING"] + WRITE_TRACK
+         "-Wno-everything", "-O2", "-g0", "-mcx16", "-DA64_POLLING"] + WRITE_TRACK + MARK_BITMAP
     host_deps = deps + b"".join(open(os.path.join(HOST, f), "rb").read() for f in sorted(os.listdir(HOST))
                                 if f.endswith(".h"))
     # (the native engine's C surface, hl/c: what host/hl_*.c include)

@@ -99,8 +99,8 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--cc", default="clang")
     a = p.parse_args()
-    for value, on in ((None, True), ("", True), ("1", True), ("yes", True), ("0", False), ("off", False), ("false", False),
-                      ("no", False), ("NO", False)):
+    for value, on in ((None, False), ("", False), ("0", False), ("off", False), ("false", False), ("no", False), ("NO", False),
+                      ("1", True), ("on", True), ("true", True), ("yes", True)):
         got = mark_bitmap_flag(value)
         if got != (["-DA64_MARK_BITMAP"] if on else []):
             raise SystemExit("FAIL: build.py RX_MARK_BITMAP=%r: %r" % (value, got))
@@ -117,8 +117,9 @@ def main():
         exe = tmp / "t"
         def run(defines, text, env=None):
             src.write_text(text % {"defines": defines}, encoding="utf-8")
-            subprocess.run([a.cc, "-std=gnu11", "-Wall", "-Werror", "-I", str(rt), str(src),
-                            str(ROOT / "host/mark_bitmap.c"), "-o", str(exe)], check=True)
+            flag = ["-DA64_MARK_BITMAP"] if "A64_MARK_BITMAP" in defines else []
+            subprocess.run([a.cc, "-std=gnu11", "-Wall", "-Werror", "-I", str(rt), *flag, str(src),
+                            str(ROOT / "host/mark_bitmap.c"), *flag, "-o", str(exe)], check=True)
             e = {k: v for k, v in os.environ.items() if k != "HOS_MARK_BITMAP_ALL"}
             e.update(env or {})
             r = subprocess.run([str(exe)], capture_output=True, text=True, timeout=120, env=e)
