@@ -10,7 +10,7 @@ python -I engine/scripts/list_switches.py
 
 and commit both files. A test (`engine/tests/test_switches_documented.py`) fails when a switch read in the source is missing here or the data file is out of date.
 
-1275 switches: 49 players may be told to use, 344 diagnostic, 882 developer-only; 1073 have a real explanation and 202 are marked `undocumented`.
+1278 switches: 49 players may be told to use, 344 diagnostic, 885 developer-only; 1076 have a real explanation and 202 are marked `undocumented`.
 
 ## How to set a switch
 
@@ -70,10 +70,10 @@ The entries below say what each one does, its values and default, and when it is
 | [Audio](#audio) | 14 | 5 | 9 | 0 |
 | [Input and controllers](#input-and-controllers) | 13 | 1 | 12 | 0 |
 | [Native engine (`HL_*`)](#native-engine-hl_) | 62 | 1 | 22 | 39 |
-| [Host and OS (`HOS_*` and the system's variables)](#host-and-os-hos_-and-the-systems-variables) | 117 | 8 | 0 | 109 |
+| [Host and OS (`HOS_*` and the system's variables)](#host-and-os-hos_-and-the-systems-variables) | 119 | 8 | 0 | 111 |
 | [Telemetry and crash reports](#telemetry-and-crash-reports) | 11 | 0 | 11 | 0 |
 | [Diagnostics and logging](#diagnostics-and-logging) | 277 | 0 | 277 | 0 |
-| [Build and lift time (`A64_*`, `RX_*` and `HOOKSHOT_*` the builder reads)](#build-and-lift-time-a64_-rx_-and-hookshot_-the-builder-reads) | 90 | 0 | 0 | 90 |
+| [Build and lift time (`A64_*`, `RX_*` and `HOOKSHOT_*` the builder reads)](#build-and-lift-time-a64_-rx_-and-hookshot_-the-builder-reads) | 91 | 0 | 0 | 91 |
 
 ## Renderer: upscaling, frame generation, HDR, V-Sync and presentation
 
@@ -339,7 +339,7 @@ No frame generation whatever the menu says; over the options file: its multiplie
 
 **When a player would use it:** The upscaler causes artifacts: `=0` to `2` choose the filter for one run.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2345`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2349`.
 
 ### Frame generation
 
@@ -421,7 +421,7 @@ No frame generation whatever the menu says; over the options file: its multiplie
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2342`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2346`.
 
 #### `RX_VK_FRAMEGEN_RADIUS` - developer
 
@@ -513,7 +513,7 @@ Starts in fullscreen; the Insert menu's Fullscreen row is then left alone.
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2418` and 2 more places.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2422` and 2 more places.
 
 #### `HOS_HUD_FULL_RATIO` - developer
 
@@ -563,7 +563,7 @@ Over the options file: the output resolution (0 2048x1152, 1 2560x1440, 2 3840x2
 
 **When a player would use it:** The output resolution is wrong or the game starts at a size the screen cannot show: `0` to `4` pick a resolution for one run.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2350` and 1 more place.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2354` and 1 more place.
 
 #### `HOS_PRESENT_NOWAIT` - diagnostic
 
@@ -583,7 +583,7 @@ Over the options file: the output resolution (0 2048x1152, 1 2560x1440, 2 3840x2
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1080`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1096`.
 
 #### `HOS_REALTIME_WINDOW` - diagnostic
 
@@ -673,7 +673,7 @@ The Insert menu's HDR row for one run (the ini keeps the player's choice).
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2344`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2348`.
 
 #### `RX_VK_HDR_FIND` - developer
 
@@ -723,7 +723,7 @@ No frame generation whatever the menu says; over the options file: its multiplie
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2343`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2347`.
 
 #### `RX_VK_PRESENT_QUEUE` - diagnostic
 
@@ -773,7 +773,7 @@ The menu's button prompts for a controller or the keys, whatever was used last (
 
 **When a player would use it:** Screenshots need one set of button prompts: `pad` or `keys`.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2587`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2591`.
 
 #### `SDL_VIDEODRIVER` - diagnostic
 
@@ -2735,7 +2735,7 @@ Timed Insert menu keys: `INS`, `UP`, `DOWN`, `LEFT`, `RIGHT`, `ESC`, `ENTER`, `T
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2615`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2619`.
 
 #### `RX_VK_MOVIE_BLIT` - developer
 
@@ -7233,7 +7233,7 @@ As above; the last lets every device count while the window is behind another on
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/nn_hid.c:778`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/nn_hid.c:785`.
 
 #### `HOS_INPUT_EXCLUSIVE` - diagnostic
 
@@ -7243,7 +7243,7 @@ As above; the last lets every device count while the window is behind another on
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/nn_hid.c:764`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/nn_hid.c:771`.
 
 #### `HOS_INPUT_FRAME_CLOCK` - diagnostic
 
@@ -7293,7 +7293,7 @@ As above; the last lets every device count while the window is behind another on
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/nn_hid.c:772`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/nn_hid.c:779`.
 
 ### Input diagnostics
 
@@ -7943,7 +7943,7 @@ HL_STREAM_PAGES=1: which decoded pages still hold the decoder's bytes, and the r
 
 ## Host and OS (`HOS_*` and the system's variables)
 
-117 switches of the Horizon OS layer, the window and the system.
+119 switches of the Horizon OS layer, the window and the system.
 
 ### Frame rate and timing
 
@@ -7955,7 +7955,7 @@ The Frame rate limit for the run, over the row and Unlimited: the rate presented
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2357` and 1 more place.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2361` and 1 more place.
 
 #### `HOS_FPS_MAX` - developer
 
@@ -8047,7 +8047,7 @@ TICK-062 A10, HOS_CORE_COUNT=1 (diagnostic, no behaviour change): per guest thre
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:987`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1003`.
 
 #### `HOS_CV_SIGNAL_FAST` - developer
 
@@ -8147,7 +8147,7 @@ HOS_POLL_SLEEP_NS=<ns> (experiment): a guest sleep of up to 100 us lasts at most
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1030`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1046`.
 
 #### `HOS_PRIO` - developer
 
@@ -8187,7 +8187,7 @@ The game's sleeps under a millisecond (SleepThread): `0` all short sleeps yield 
 
 **When a player would use it:** Short sleeps cost CPU time: `=1` waits on the timer instead of yielding.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:884` and 1 more place.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:900` and 1 more place.
 
 #### `HOS_SPIN_ALWAYS` - developer
 
@@ -8227,7 +8227,7 @@ No virtual cores; the cores the game sees (6); no core kept for the replay (one 
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1362`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1378`.
 
 #### `HOS_VCORE_ESCAPE_EQ_US` - developer
 
@@ -8237,7 +8237,7 @@ A waiter better than a holder asks it to give the core up (vc_kick), which it do
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1621`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1637`.
 
 #### `HOS_VCORE_ESCAPE_US` - developer
 
@@ -8247,7 +8247,7 @@ A waiter better than a holder asks it to give the core up (vc_kick), which it do
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1622`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1638`.
 
 #### `HOS_VCORE_SLICE_US` - developer
 
@@ -8257,7 +8257,7 @@ The worst holder worse than t on a core t may use gives it up at its next checkp
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1623`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1639`.
 
 #### `HOS_VCORE_STARVE_US` - developer
 
@@ -8267,7 +8267,7 @@ A game thread that has waited this long for a virtual core (default 1000000, 1 s
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1624`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1640`.
 
 #### `HOS_VCORE_WHERE` - developer
 
@@ -8277,7 +8277,7 @@ HOS_VCORE_WHERE=all (diagnostic): at each of the first 12 escapes, where every t
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1572`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1588`.
 
 #### `HOS_WEB_SPIN_SLEEP` - developer
 
@@ -8287,7 +8287,7 @@ The web has no high-resolution timer, and its clock is a call into JavaScript: s
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:864`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:880`.
 
 #### `MESA_VK_ENABLE_SUBMIT_THREAD` - developer
 
@@ -8563,7 +8563,7 @@ The API is synchronous and single-stream: mf_av1_decode takes one temporal unit 
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1817`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1833`.
 
 #### `HOS_COND_RECORD` - developer
 
@@ -8603,7 +8603,7 @@ Over the options file: Resolution 100% (non-zero: Auto), Game speed Per frame (1
 
 **When a player would use it:** The dynamic resolution makes the picture soft: `=0` holds 100% for one run.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2349`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2353`.
 
 #### `HOS_FIXED_TIME` - developer
 
@@ -8714,6 +8714,16 @@ HOS_LONG_WAITS=1 (diagnostic): an untimed wait still blocked after 5 s is logged
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
 **Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/nn_os_sync.c:788`.
+
+#### `HOS_MARK_BITMAP_ALL` - developer
+
+Every page's bit in the mark bitmap set: every lifted store marks its page, as without the bitmap, plus the bitmap's test (Longshot's 35a4a9fc, #1617: the control of an A/B). Only in a build made with `RX_MARK_BITMAP=1` (the bitmap is off by default, see Building). There the lifted game marks only the pages the GPU can read, tested in `host/mark_bitmap.c` against the bits `host/nvdrv.c` sets when a mapping is made; the host's own writes (`HOS_WRITTEN`) mark every page either way. `tests/test_mark_bitmap.py`.
+
+**Values:** text (`1` named). **Default:** unset.
+
+**When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
+
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/mark_bitmap.c:31`.
 
 #### `HOS_MEMINFO_OLD` - developer
 
@@ -8883,7 +8893,7 @@ To enable the debug tools, turn **Debug tools** on in the menu's Debug tab (or a
 
 **When a player would use it:** The Debug tab's tools should show without turning them on in the menu.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2278`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2282`.
 
 #### `HOS_OOT_PROTECT_HEARTS` - developer
 
@@ -8893,7 +8903,7 @@ To enable the debug tools, turn **Debug tools** on in the menu's Debug tab (or a
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2281` and 1 more place.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2285` and 1 more place.
 
 #### `HOS_OOT_TELEPORT_EVENT` - developer
 
@@ -8914,6 +8924,16 @@ undocumented: host/hos_main.c:999 (in `oot_teleport()`) reads it as a text value
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
 **Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_main.c:999`.
+
+#### `HOS_OS_YIELD` - developer
+
+`Nn::os::YieldThread` (and `SleepThread(0)`) hands the game's virtual core to a waiting game thread, as the console's yield does, and by default no longer also calls `SwitchToThread` (`host/hos_thread.c`): OoT yields after every job and actor callback, and on few cores the kernel time handing the processor over and taking it back came out of the frame (Longshot d10b62b3, #1663: 2.1 % and 1.7 % shorter frames on 4 cores, no difference on 16). `=1` brings the processor's yield back, as before. Longshot's numbers are theirs; HeyListen's A/B is in the port's report.
+
+**Values:** text (`1` named). **Default:** unset.
+
+**When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
+
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:850`.
 
 #### `HOS_PGO` - developer
 
@@ -8973,7 +8993,7 @@ Over the options file: Resolution 100% (non-zero: Auto), Game speed Per frame (1
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2348`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2352`.
 
 #### `HOS_RESTART_OF` - developer
 
@@ -9033,7 +9053,7 @@ Over the options file: Resolution 100% (non-zero: Auto), Game speed Per frame (1
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1180`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1196`.
 
 #### `HOS_VI_DOUBLE` - developer
 
@@ -9497,7 +9517,7 @@ HOS_SLEEP_LOG=1 (diagnostic): guest sleeps by caller (LR) every 5 s: count, aske
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1035` and 1 more place.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1051` and 1 more place.
 
 #### `HOS_SPEED_LOG` - diagnostic
 
@@ -9527,7 +9547,7 @@ HOS_TICK_LOG=1 (diagnostic): who reads the clock, by caller (LR), every 5 s.
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1166`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1182`.
 
 #### `HOS_TLS_TRACE` - diagnostic
 
@@ -9557,7 +9577,7 @@ HOS_VCORE_LOG=1 (diagnostic): with the "vcores:" line, each thread that waited f
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1434`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1450`.
 
 #### `HOS_VIDEO_LOG` - diagnostic
 
@@ -12027,7 +12047,7 @@ The Khronos validation layer.
 
 ## Build and lift time (`A64_*`, `RX_*` and `HOOKSHOT_*` the builder reads)
 
-90 switches read by the builder or the lifter, in their environment.
+91 switches read by the builder or the lifter, in their environment.
 
 ### Lift (A64_*)
 
@@ -12083,13 +12103,13 @@ undocumented: third_party/a64-kit/lift/a64_block.py:56 reads it as a number: `re
 
 #### `A64_GRAN` - developer
 
-RX_SOFT_WRITE_WATCH=0: Windows' write watch (a full rebuild) WRITE_TRACK = [] if os.environ.get("RX_SOFT_WRITE_WATCH") == "0" else ["-DA64_WRITE_TRACK"] if WRITE_TRACK and os.environ.get("A64_GRAN") == "1": # (HeyListen, sprint 5: a write mark per 512 bytes too, nx2/rtgen.py) WRITE_TRACK = WRITE_TRACK + ["-DA64_GRAN"] # (hookshot) the host CPU the lifted game and the runtime are built for: x86-64-v3 (AVX2, FMA, BMI1/2, LZCNT, # MOVBE; Haswell and Zen 1 on). With FMA the FPX1 fast paths cover double-precision FMA (RECOMP_FPX_FMA64; it took # the exact software body on baseline x86-64) and the bit counts are single instructions.
+RX_SOFT_WRITE_WATCH=0: Windows' write watch (a full rebuild) WRITE_TRACK = [] if os.environ.get("RX_SOFT_WRITE_WATCH") == "0" else ["-DA64_WRITE_TRACK"] if WRITE_TRACK and os.environ.get("A64_GRAN") == "1": # (HeyListen, sprint 5: a write mark per 512 bytes too, nx2/rtgen.py) WRITE_TRACK = WRITE_TRACK + ["-DA64_GRAN"] # (longshot 11-18, 35a4a9fc #1617) a lifted store marks its page only where the page is one the GPU can read # (host/mark_bitmap.c sets a bit per GPU-mapped page, nx2/rtgen.py A64_MARK_BITMAP reads it); the host's own marks # (HOS_WRITTEN) keep marking every page. Off by default (RX_MARK_BITMAP=1 turns it on): measured on the main PC # (Ryzen 7 7800X3D, RTX 5070, castle-move, 3 interleaved rounds against the same build without it) 87.0 -> 85.9 fps, # within the runs' spread either way, and the 1% lows a little lower: our mark grouping (A64_MARK_STACK/FRAME, # group_marks: ...
 
-**Values:** on or off (0, false, off, no and empty are off); the description names `0`. **Default:** off (unset).
+**Values:** on or off (0, false, off, no and empty are off); the description names `0`, `1`. **Default:** off (unset).
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/build.py:541`.
+**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/build.py:542`.
 
 #### `A64_HOT_CHUNK` - developer
 
@@ -12281,7 +12301,7 @@ The free memory is read again as compiles start and end, so a game or browser op
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/build.py:498`.
+**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/build.py:499`.
 
 #### `HOOKSHOT_FFX_SDK` - developer
 
@@ -12301,7 +12321,7 @@ The free memory is read again as compiles start and end, so a game or browser op
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/build.py:250` and 1 more place.
+**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/build.py:251` and 1 more place.
 
 #### `HOOKSHOT_JOBS` - developer
 
@@ -12355,13 +12375,13 @@ undocumented: builder/linux/linux_update.py:504 reads it as a text value: `overr
 
 #### `HOOKSHOT_MEM_GATE` - developer
 
-undocumented: nx2/build.py:1041 reads it as an on/off switch: `GATE = None if os.environ.get("HOOKSHOT_MEM_GATE") == "0" else MemoryGate()`. No comment in the source says what it changes.
+undocumented: nx2/build.py:1049 reads it as an on/off switch: `GATE = None if os.environ.get("HOOKSHOT_MEM_GATE") == "0" else MemoryGate()`. No comment in the source says what it changes.
 
 **Values:** on or off (0, false, off, no and empty are off). **Default:** off (unset).
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/build.py:1041`.
+**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/build.py:1049`.
 
 #### `HOOKSHOT_MEM_RESERVE_GB` - developer
 
@@ -12371,7 +12391,7 @@ A compile starts when the memory free, less what the compilers running may still
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/build.py:450`.
+**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/build.py:451`.
 
 #### `HOOKSHOT_MINGW` - developer
 
@@ -12495,13 +12515,13 @@ undocumented: scripts/changelog.py:71 reads it as a text value: `value = value o
 
 #### `HOOKSHOT_SDL2` - developer
 
-undocumented: nx2/build.py:1120 reads it as a text value: `sdl = os.environ.get("HOOKSHOT_SDL2", "") # (libSDL2-2.0.so.0 beside it, when the AppImage brings one)`. No comment in the source says what it changes.
+undocumented: nx2/build.py:1128 reads it as a text value: `sdl = os.environ.get("HOOKSHOT_SDL2", "") # (libSDL2-2.0.so.0 beside it, when the AppImage brings one)`. No comment in the source says what it changes.
 
 **Values:** text. **Default:** .
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/build.py:1120`.
+**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/build.py:1128`.
 
 #### `HOOKSHOT_SETUP_BASE` - developer
 
@@ -12535,13 +12555,13 @@ The question is asked here, so the game is told not to ask again (HOOKSHOT_NO_UP
 
 #### `HOOKSHOT_SYSROOT` - developer
 
-undocumented: nx2/build.py:66 reads it as a text value: `SYSROOT = os.environ.get("HOOKSHOT_SYSROOT", "")`. No comment in the source says what it changes.
+undocumented: nx2/build.py:67 reads it as a text value: `SYSROOT = os.environ.get("HOOKSHOT_SYSROOT", "")`. No comment in the source says what it changes.
 
 **Values:** text. **Default:** .
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/build.py:66` and 2 more places.
+**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/build.py:67` and 2 more places.
 
 #### `HOOKSHOT_TEST_SHORTCUTS` - developer
 
@@ -12555,13 +12575,13 @@ undocumented: builder/py/hookshot_builder/window.py:855 reads it as an on/off sw
 
 #### `HOOKSHOT_TIMES` - developer
 
-undocumented: nx2/build.py:1043 reads it as a text value: `counted, expected, pending = os.environ.get("HOOKSHOT_TIMES"), {}, []`. No comment in the source says what it changes.
+undocumented: nx2/build.py:1051 reads it as a text value: `counted, expected, pending = os.environ.get("HOOKSHOT_TIMES"), {}, []`. No comment in the source says what it changes.
 
 **Values:** text. **Default:** unset.
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/build.py:1043` and 1 more place.
+**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/build.py:1051` and 1 more place.
 
 #### `HOOKSHOT_TOOLS` - developer
 
@@ -12595,13 +12615,13 @@ undocumented: nx2/test_version.py:35 reads it as a text value: `os.environ["HOOK
 
 #### `HOOKSHOT_VK_PREBUILT` - developer
 
-undocumented: nx2/build.py:904 reads it as a text value: `vk_prebuilt = os.environ.get("HOOKSHOT_VK_PREBUILT", "")`. No comment in the source says what it changes.
+undocumented: nx2/build.py:916 reads it as a text value: `vk_prebuilt = os.environ.get("HOOKSHOT_VK_PREBUILT", "")`. No comment in the source says what it changes.
 
 **Values:** text. **Default:** .
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/build.py:904` and 2 more places.
+**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/build.py:916` and 2 more places.
 
 ### Build behaviour and paths
 
@@ -12753,27 +12773,27 @@ The CPM cache (Vulkan and SPIR-V headers, VMA, FFmpeg) and wgpu-native.
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/build.py:280`.
+**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/build.py:281`.
 
 #### `RX_HOT_FLAGS` - developer
 
-undocumented: nx2/build.py:809 reads it as a text value: `hot_fl = hot_fl + os.environ.get("RX_HOT_FLAGS", "").split()`. No comment in the source says what it changes.
+undocumented: nx2/build.py:818 reads it as a text value: `hot_fl = hot_fl + os.environ.get("RX_HOT_FLAGS", "").split()`. No comment in the source says what it changes.
 
 **Values:** text. **Default:** .
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/build.py:809`.
+**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/build.py:818`.
 
 #### `RX_HOT_OPT` - developer
 
-undocumented: nx2/build.py:806 reads it as a text value: `hot_fl = [("-" + os.environ.get("RX_HOT_OPT", "O2")) if f == "-" + a.opt else f for f in fl]`. No comment in the source says what it changes.
+undocumented: nx2/build.py:815 reads it as a text value: `hot_fl = [("-" + os.environ.get("RX_HOT_OPT", "O2")) if f == "-" + a.opt else f for f in fl]`. No comment in the source says what it changes.
 
 **Values:** text (`1` named). **Default:** O2.
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/build.py:806`.
+**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/build.py:815`.
 
 #### `RX_JOBS` - developer
 
@@ -12803,17 +12823,27 @@ The CPU level to build for (default this PC's: `x86-64-v3`, else `x86-64-v2`, el
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/build.py:552` and 1 more place.
+**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/build.py:561` and 1 more place.
 
-#### `RX_NO_ORDER` - developer
+#### `RX_MARK_BITMAP` - developer
 
-undocumented: nx2/build.py:160 reads it as an on/off switch: `if not os.path.exists(p) or os.environ.get("RX_NO_ORDER"):`. No comment in the source says what it changes.
+The lifted game's stores mark only pages the GPU can read (a bit per page, `host/mark_bitmap.c`, `nx2/rtgen.py`; Longshot 35a4a9fc, #1617). Off by default: measured on the main PC (Ryzen 7 7800X3D, RTX 5070, castle-move, 3 interleaved rounds against the same build without it) 87.0 -> 85.9 fps, inside the runs' spread either way and the 1% lows a little lower, because our mark grouping already removed the cost (Longshot's +11% was on an ungrouped build). Unset or `0` (also `off`, `false`, `no`): every lifted store marks its page, and none of the bitmap is built; the host's own writes mark every page either way.
 
 **Values:** on or off (0, false, off, no and empty are off). **Default:** off (unset).
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/build.py:160`.
+**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/build.py:551`.
+
+#### `RX_NO_ORDER` - developer
+
+undocumented: nx2/build.py:161 reads it as an on/off switch: `if not os.path.exists(p) or os.environ.get("RX_NO_ORDER"):`. No comment in the source says what it changes.
+
+**Values:** on or off (0, false, off, no and empty are off). **Default:** off (unset).
+
+**When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
+
+**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/build.py:161`.
 
 #### `RX_PGO` - developer
 
@@ -12823,7 +12853,7 @@ The hot code counting its branches for a profile, or built with one (`make_game.
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/build.py:57` and 1 more place.
+**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/build.py:58` and 1 more place.
 
 #### `RX_RELEASE` - developer
 
@@ -12833,17 +12863,17 @@ A release build (`make_game.py` sets it): no console window, the shaders prepare
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/build.py:939` and 1 more place.
+**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/build.py:947` and 1 more place.
 
 #### `RX_SOFT_WRITE_WATCH` - developer
 
-RX_SOFT_WRITE_WATCH=0: Windows' write watch (a full rebuild) WRITE_TRACK = [] if os.environ.get("RX_SOFT_WRITE_WATCH") == "0" else ["-DA64_WRITE_TRACK"] if WRITE_TRACK and os.environ.get("A64_GRAN") == "1": # (HeyListen, sprint 5: a write mark per 512 bytes too, nx2/rtgen.py) WRITE_TRACK = WRITE_TRACK + ["-DA64_GRAN"] # (hookshot) the host CPU the lifted game and the runtime are built for: x86-64-v3 (AVX2, FMA, BMI1/2, LZCNT, # MOVBE; Haswell and Zen 1 on). With FMA the FPX1 fast paths cover double-precision FMA (RECOMP_FPX_FMA64; it took # the exact software body on baseline x86-64) and the bit counts are single instructions.
+RX_SOFT_WRITE_WATCH=0: Windows' write watch (a full rebuild) WRITE_TRACK = [] if os.environ.get("RX_SOFT_WRITE_WATCH") == "0" else ["-DA64_WRITE_TRACK"] if WRITE_TRACK and os.environ.get("A64_GRAN") == "1": # (HeyListen, sprint 5: a write mark per 512 bytes too, nx2/rtgen.py) WRITE_TRACK = WRITE_TRACK + ["-DA64_GRAN"] # (longshot 11-18, 35a4a9fc #1617) a lifted store marks its page only where the page is one the GPU can read # (host/mark_bitmap.c sets a bit per GPU-mapped page, nx2/rtgen.py A64_MARK_BITMAP reads it); the host's own marks # (HOS_WRITTEN) keep marking every page. Off by default (RX_MARK_BITMAP=1 turns it on): measured on the main PC # (Ryzen 7 7800X3D, RTX 5070, castle-move, 3 interleaved rounds against the same build without it) 87.0 -> 85.9 fps, # within the runs' spread either way, and the 1% lows a little lower: our mark grouping (A64_MARK_STACK/FRAME, # group_marks: ...
 
-**Values:** on or off (0, false, off, no and empty are off); the description names `0`. **Default:** off (unset).
+**Values:** on or off (0, false, off, no and empty are off); the description names `0`, `1`. **Default:** off (unset).
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/build.py:540`.
+**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/build.py:541`.
 
 #### `RX_TARGET` - developer
 
@@ -12863,7 +12893,7 @@ Only the Vulkan back end, with no lift.
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/build.py:760` and 2 more places.
+**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/build.py:769` and 2 more places.
 
 #### `RX_VK_PGO` - developer
 
@@ -12913,7 +12943,7 @@ The CPM cache (Vulkan and SPIR-V headers, VMA, FFmpeg) and wgpu-native.
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/build.py:190`.
+**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/build.py:191`.
 
 #### `XDG_CACHE_HOME` - developer
 

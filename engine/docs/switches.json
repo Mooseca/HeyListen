@@ -2,7 +2,7 @@
  "schema": 1,
  "generated_by": "engine/scripts/list_switches.py",
  "scope": "C, C++ and headers under engine/ (engine/tests and vendored trees other than a64-kit excluded) and the Python the builder, the lifter and the scripts run: getenv, std::getenv, _wgetenv, the code's own env helpers and table-driven reads, and os.environ.",
- "count": 1275,
+ "count": 1278,
  "switches": [
   {
    "name": "A64_DEVIRT",
@@ -117,13 +117,13 @@
    "files": [
     {
      "path": "nx2/build.py",
-     "line": 541
+     "line": 542
     }
    ],
    "default": "off (unset)",
-   "values": "on or off (0, false, off, no and empty are off); the description names `0`",
-   "explanation": "RX_SOFT_WRITE_WATCH=0: Windows' write watch (a full rebuild) WRITE_TRACK = [] if os.environ.get(\"RX_SOFT_WRITE_WATCH\") == \"0\" else [\"-DA64_WRITE_TRACK\"] if WRITE_TRACK and os.environ.get(\"A64_GRAN\") == \"1\": # (HeyListen, sprint 5: a write mark per 512 bytes too, nx2/rtgen.py) WRITE_TRACK = WRITE_TRACK + [\"-DA64_GRAN\"] # (hookshot) the host CPU the lifted game and the runtime are built for: x86-64-v3 (AVX2, FMA, BMI1/2, LZCNT, # MOVBE; Haswell and Zen 1 on). With FMA the FPX1 fast paths cover double-precision FMA (RECOMP_FPX_FMA64; it took # the exact software body on baseline x86-64) and the bit counts are single instructions.",
-   "comment": "RX_SOFT_WRITE_WATCH=0: Windows' write watch (a full rebuild) WRITE_TRACK = [] if os.environ.get(\"RX_SOFT_WRITE_WATCH\") == \"0\" else [\"-DA64_WRITE_TRACK\"] if WRITE_TRACK and os.environ.get(\"A64_GRAN\") == \"1\": # (HeyListen, sprint 5: a write mark per 512 bytes too, nx2/rtgen.py) WRITE_TRACK = WRITE_TRACK + [\"-DA64_GRAN\"] # (hookshot) the host CPU the lifted game and the runtime are built for: x86-64-v3 (AVX2, FMA, BMI1/2, LZCNT, # MOVBE; Haswell and Zen 1 on). With FMA the FPX1 fast paths cover double-precision FMA (RECOMP_FPX_FMA64; it took # the exact software body on baseline x86-64) and the bit counts are single instructions.",
+   "values": "on or off (0, false, off, no and empty are off); the description names `0`, `1`",
+   "explanation": "RX_SOFT_WRITE_WATCH=0: Windows' write watch (a full rebuild) WRITE_TRACK = [] if os.environ.get(\"RX_SOFT_WRITE_WATCH\") == \"0\" else [\"-DA64_WRITE_TRACK\"] if WRITE_TRACK and os.environ.get(\"A64_GRAN\") == \"1\": # (HeyListen, sprint 5: a write mark per 512 bytes too, nx2/rtgen.py) WRITE_TRACK = WRITE_TRACK + [\"-DA64_GRAN\"] # (longshot 11-18, 35a4a9fc #1617) a lifted store marks its page only where the page is one the GPU can read # (host/mark_bitmap.c sets a bit per GPU-mapped page, nx2/rtgen.py A64_MARK_BITMAP reads it); the host's own marks # (HOS_WRITTEN) keep marking every page. Off by default (RX_MARK_BITMAP=1 turns it on): measured on the main PC # (Ryzen 7 7800X3D, RTX 5070, castle-move, 3 interleaved rounds against the same build without it) 87.0 -> 85.9 fps, # within the runs' spread either way, and the 1% lows a little lower: our mark grouping (A64_MARK_STACK/FRAME, # group_marks: ...",
+   "comment": "RX_SOFT_WRITE_WATCH=0: Windows' write watch (a full rebuild) WRITE_TRACK = [] if os.environ.get(\"RX_SOFT_WRITE_WATCH\") == \"0\" else [\"-DA64_WRITE_TRACK\"] if WRITE_TRACK and os.environ.get(\"A64_GRAN\") == \"1\": # (HeyListen, sprint 5: a write mark per 512 bytes too, nx2/rtgen.py) WRITE_TRACK = WRITE_TRACK + [\"-DA64_GRAN\"] # (longshot 11-18, 35a4a9fc #1617) a lifted store marks its page only where the page is one the GPU can read # (host/mark_bitmap.c sets a bit per GPU-mapped page, nx2/rtgen.py A64_MARK_BITMAP reads it); the host's own marks # (HOS_WRITTEN) keep marking every page. Off by default (RX_MARK_BITMAP=1 turns it on): measured on the main PC # (Ryzen 7 7800X3D, RTX 5070, castle-move, 3 interleaved rounds against the same build without it) 87.0 -> 85.9 fps, # within the runs' spread either way, and the 1% lows a little lower: our mark grouping (A64_MARK_STACK/FRAME, # group_marks: ...",
    "documented_in": null,
    "source": "comment at nx2/build.py",
    "documented": true,
@@ -2467,7 +2467,7 @@
    "files": [
     {
      "path": "nx2/build.py",
-     "line": 498
+     "line": 499
     }
    ],
    "default": "unset",
@@ -2509,7 +2509,7 @@
    "files": [
     {
      "path": "nx2/build.py",
-     "line": 250
+     "line": 251
     },
     {
      "path": "nx2/make_game.py",
@@ -2667,12 +2667,12 @@
    "files": [
     {
      "path": "nx2/build.py",
-     "line": 1041
+     "line": 1049
     }
    ],
    "default": "off (unset)",
    "values": "on or off (0, false, off, no and empty are off)",
-   "explanation": "undocumented: nx2/build.py:1041 reads it as an on/off switch: `GATE = None if os.environ.get(\"HOOKSHOT_MEM_GATE\") == \"0\" else MemoryGate()`. No comment in the source says what it changes.",
+   "explanation": "undocumented: nx2/build.py:1049 reads it as an on/off switch: `GATE = None if os.environ.get(\"HOOKSHOT_MEM_GATE\") == \"0\" else MemoryGate()`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -2688,7 +2688,7 @@
    "files": [
     {
      "path": "nx2/build.py",
-     "line": 450
+     "line": 451
     }
    ],
    "default": "unset",
@@ -2775,7 +2775,7 @@
     },
     {
      "path": "nx2/build.py",
-     "line": 244
+     "line": 245
     },
     {
      "path": "nx2/make_game.py",
@@ -3029,12 +3029,12 @@
    "files": [
     {
      "path": "nx2/build.py",
-     "line": 1120
+     "line": 1128
     }
    ],
    "default": "",
    "values": "text",
-   "explanation": "undocumented: nx2/build.py:1120 reads it as a text value: `sdl = os.environ.get(\"HOOKSHOT_SDL2\", \"\") # (libSDL2-2.0.so.0 beside it, when the AppImage brings one)`. No comment in the source says what it changes.",
+   "explanation": "undocumented: nx2/build.py:1128 reads it as a text value: `sdl = os.environ.get(\"HOOKSHOT_SDL2\", \"\") # (libSDL2-2.0.so.0 beside it, when the AppImage brings one)`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -3125,7 +3125,7 @@
    "files": [
     {
      "path": "nx2/build.py",
-     "line": 66
+     "line": 67
     },
     {
      "path": "nx2/make_game.py",
@@ -3138,7 +3138,7 @@
    ],
    "default": "",
    "values": "text",
-   "explanation": "undocumented: nx2/build.py:66 reads it as a text value: `SYSROOT = os.environ.get(\"HOOKSHOT_SYSROOT\", \"\")`. No comment in the source says what it changes.",
+   "explanation": "undocumented: nx2/build.py:67 reads it as a text value: `SYSROOT = os.environ.get(\"HOOKSHOT_SYSROOT\", \"\")`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -3179,7 +3179,7 @@
    "files": [
     {
      "path": "nx2/build.py",
-     "line": 1043
+     "line": 1051
     },
     {
      "path": "nx2/make_game.py",
@@ -3188,7 +3188,7 @@
    ],
    "default": "unset",
    "values": "text",
-   "explanation": "undocumented: nx2/build.py:1043 reads it as a text value: `counted, expected, pending = os.environ.get(\"HOOKSHOT_TIMES\"), {}, []`. No comment in the source says what it changes.",
+   "explanation": "undocumented: nx2/build.py:1051 reads it as a text value: `counted, expected, pending = os.environ.get(\"HOOKSHOT_TIMES\"), {}, []`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -3299,7 +3299,7 @@
    "files": [
     {
      "path": "nx2/build.py",
-     "line": 904
+     "line": 916
     },
     {
      "path": "nx2/make_game.py",
@@ -3312,7 +3312,7 @@
    ],
    "default": "",
    "values": "text",
-   "explanation": "undocumented: nx2/build.py:904 reads it as a text value: `vk_prebuilt = os.environ.get(\"HOOKSHOT_VK_PREBUILT\", \"\")`. No comment in the source says what it changes.",
+   "explanation": "undocumented: nx2/build.py:916 reads it as a text value: `vk_prebuilt = os.environ.get(\"HOOKSHOT_VK_PREBUILT\", \"\")`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -3706,7 +3706,7 @@
    "files": [
     {
      "path": "host/hos_thread.c",
-     "line": 1817
+     "line": 1833
     }
    ],
    "default": "unset",
@@ -3769,7 +3769,7 @@
    "files": [
     {
      "path": "host/hos_thread.c",
-     "line": 987
+     "line": 1003
     }
    ],
    "default": "off (unset)",
@@ -3966,7 +3966,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2349
+     "line": 2353
     }
    ],
    "default": "0 (unset)",
@@ -4050,7 +4050,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2357
+     "line": 2361
     },
     {
      "path": "host/nn_vi.c",
@@ -4104,7 +4104,7 @@
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2357
+     "line": 2361
     },
     {
      "path": "host/nn_vi.c",
@@ -4360,7 +4360,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2418
+     "line": 2422
     },
     {
      "path": "host/display.c",
@@ -4852,7 +4852,7 @@
    "files": [
     {
      "path": "host/nn_hid.c",
-     "line": 778
+     "line": 785
     }
    ],
    "default": "unset",
@@ -4873,7 +4873,7 @@
    "files": [
     {
      "path": "host/nn_hid.c",
-     "line": 764
+     "line": 771
     }
    ],
    "default": "off (unset)",
@@ -4978,7 +4978,7 @@
    "files": [
     {
      "path": "host/nn_hid.c",
-     "line": 772
+     "line": 779
     }
    ],
    "default": "off (unset)",
@@ -5361,6 +5361,27 @@
    "use": null
   },
   {
+   "name": "HOS_MARK_BITMAP_ALL",
+   "area": "host",
+   "group": "System and services",
+   "audience": "developer",
+   "files": [
+    {
+     "path": "host/mark_bitmap.c",
+     "line": 31
+    }
+   ],
+   "default": "unset",
+   "values": "text (`1` named)",
+   "explanation": "Every page's bit in the mark bitmap set: every lifted store marks its page, as without the bitmap, plus the bitmap's test (Longshot's 35a4a9fc, #1617: the control of an A/B). Only in a build made with `RX_MARK_BITMAP=1` (the bitmap is off by default, see Building). There the lifted game marks only the pages the GPU can read, tested in `host/mark_bitmap.c` against the bits `host/nvdrv.c` sets when a mapping is made; the host's own writes (`HOS_WRITTEN`) mark every page either way. `tests/test_mark_bitmap.py`.",
+   "comment": "Here map_add's guest range is the memory behind every mapping, whatever its GPU address, so every mapping's guest pages are set: a page the GPU can reach through any mapping must be a page that marks, or the renderer would read it stale. 16 MB of zeroed static data for the 512 GB window, of which only the heap's part is ever touched (~210 KB). HOS_MARK_BITMAP_ALL=1 sets every bit at the start: every store marks, as without the bitmap, plus the test's cost (the control of an A/B, and the way to check a picture against the bitmap's). (A64_DIRTY_PAGES: the window's page count, nx2/rtgen.py).",
+   "documented_in": "development.md",
+   "source": "development.md",
+   "documented": true,
+   "set_via": "In `hookshot_env.txt`, or in the environment.",
+   "use": null
+  },
+  {
    "name": "HOS_MEMINFO_OLD",
    "area": "host",
    "group": "System and services",
@@ -5636,7 +5657,7 @@
     },
     {
      "path": "host/nn_hid.c",
-     "line": 803
+     "line": 810
     }
    ],
    "default": "unset",
@@ -6450,7 +6471,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2278
+     "line": 2282
     }
    ],
    "default": "unset",
@@ -6471,7 +6492,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2281
+     "line": 2285
     },
     {
      "path": "host/hos_main.c",
@@ -6531,6 +6552,27 @@
    "use": null
   },
   {
+   "name": "HOS_OS_YIELD",
+   "area": "host",
+   "group": "System and services",
+   "audience": "developer",
+   "files": [
+    {
+     "path": "host/hos_thread.c",
+     "line": 850
+    }
+   ],
+   "default": "unset",
+   "values": "text (`1` named)",
+   "explanation": "`Nn::os::YieldThread` (and `SleepThread(0)`) hands the game's virtual core to a waiting game thread, as the console's yield does, and by default no longer also calls `SwitchToThread` (`host/hos_thread.c`): OoT yields after every job and actor callback, and on few cores the kernel time handing the processor over and taking it back came out of the frame (Longshot d10b62b3, #1663: 2.1 % and 1.7 % shorter frames on 4 cores, no difference on 16). `=1` brings the processor's yield back, as before. Longshot's numbers are theirs; HeyListen's A/B is in the port's report.",
+   "comment": "(Longshot 11-18, #1663) A yield gives up the virtual core only, not the processor too (HOS_OS_YIELD=1: SwitchToThread as well, as before). OoT's job system yields after every job and every actor callback. On a PC of 4 cores in Castle Town's market the job threads' CPU time was about their running time plus their time inside SwitchToThread (the six BaseProc executors 107 % of a core measured, 45.5 % of it running, 51.6 % in SwitchToThread): kernel time handing the processor to another thread and taking it back, about 0.75 of the four processors over the job threads. On 4 cores their frames were 2.1 % and 1.7 % shorter without it; on 16 cores no difference. hos_vcore_yield already hands the virtual core to a waiting game thread of better or equal priority, which is what the game's yield asks for, and the OS still moves threads between processors at the end of their time slices.",
+   "documented_in": "development.md",
+   "source": "development.md",
+   "documented": true,
+   "set_via": "In `hookshot_env.txt`, or in the environment.",
+   "use": null
+  },
+  {
    "name": "HOS_OUTPUT_RES",
    "area": "renderer",
    "group": "HDR, V-Sync and presentation",
@@ -6538,7 +6580,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2350
+     "line": 2354
     },
     {
      "path": "host/nn_applet.c",
@@ -6676,7 +6718,7 @@
    "files": [
     {
      "path": "host/hos_thread.c",
-     "line": 1030
+     "line": 1046
     }
    ],
    "default": "unset",
@@ -6928,7 +6970,7 @@
    "files": [
     {
      "path": "host/hos_thread.c",
-     "line": 1080
+     "line": 1096
     }
    ],
    "default": "off (unset)",
@@ -7087,7 +7129,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2348
+     "line": 2352
     }
    ],
    "default": "0 (unset)",
@@ -7447,7 +7489,7 @@
     },
     {
      "path": "host/hos_thread.c",
-     "line": 898
+     "line": 914
     }
    ],
    "default": "unset",
@@ -7468,11 +7510,11 @@
    "files": [
     {
      "path": "host/hos_thread.c",
-     "line": 884
+     "line": 900
     },
     {
      "path": "host/hos_thread.c",
-     "line": 886
+     "line": 902
     }
    ],
    "default": "off (unset)",
@@ -7514,11 +7556,11 @@
    "files": [
     {
      "path": "host/hos_thread.c",
-     "line": 1035
+     "line": 1051
     },
     {
      "path": "host/hos_thread.c",
-     "line": 1107
+     "line": 1123
     }
    ],
    "default": "off (unset)",
@@ -7807,7 +7849,7 @@
    "files": [
     {
      "path": "host/hos_thread.c",
-     "line": 1180
+     "line": 1196
     }
    ],
    "default": "off (unset)",
@@ -7828,7 +7870,7 @@
    "files": [
     {
      "path": "host/hos_thread.c",
-     "line": 1166
+     "line": 1182
     }
    ],
    "default": "off (unset)",
@@ -7891,7 +7933,7 @@
    "files": [
     {
      "path": "host/hos_thread.c",
-     "line": 1362
+     "line": 1378
     }
    ],
    "default": "unset",
@@ -7912,7 +7954,7 @@
    "files": [
     {
      "path": "host/hos_thread.c",
-     "line": 1621
+     "line": 1637
     }
    ],
    "default": "unset",
@@ -7933,7 +7975,7 @@
    "files": [
     {
      "path": "host/hos_thread.c",
-     "line": 1622
+     "line": 1638
     }
    ],
    "default": "unset",
@@ -7954,7 +7996,7 @@
    "files": [
     {
      "path": "host/hos_thread.c",
-     "line": 1434
+     "line": 1450
     }
    ],
    "default": "off (unset)",
@@ -7975,7 +8017,7 @@
    "files": [
     {
      "path": "host/hos_thread.c",
-     "line": 1623
+     "line": 1639
     }
    ],
    "default": "unset",
@@ -7996,7 +8038,7 @@
    "files": [
     {
      "path": "host/hos_thread.c",
-     "line": 1624
+     "line": 1640
     }
    ],
    "default": "unset",
@@ -8017,7 +8059,7 @@
    "files": [
     {
      "path": "host/hos_thread.c",
-     "line": 1572
+     "line": 1588
     }
    ],
    "default": "off (unset)",
@@ -8315,7 +8357,7 @@
    "files": [
     {
      "path": "host/hos_thread.c",
-     "line": 864
+     "line": 880
     }
    ],
    "default": "off (unset)",
@@ -9207,7 +9249,7 @@
    "files": [
     {
      "path": "nx2/build.py",
-     "line": 280
+     "line": 281
     }
    ],
    "default": "unset",
@@ -10631,12 +10673,12 @@
    "files": [
     {
      "path": "nx2/build.py",
-     "line": 809
+     "line": 818
     }
    ],
    "default": "",
    "values": "text",
-   "explanation": "undocumented: nx2/build.py:809 reads it as a text value: `hot_fl = hot_fl + os.environ.get(\"RX_HOT_FLAGS\", \"\").split()`. No comment in the source says what it changes.",
+   "explanation": "undocumented: nx2/build.py:818 reads it as a text value: `hot_fl = hot_fl + os.environ.get(\"RX_HOT_FLAGS\", \"\").split()`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -10652,12 +10694,12 @@
    "files": [
     {
      "path": "nx2/build.py",
-     "line": 806
+     "line": 815
     }
    ],
    "default": "O2",
    "values": "text (`1` named)",
-   "explanation": "undocumented: nx2/build.py:806 reads it as a text value: `hot_fl = [(\"-\" + os.environ.get(\"RX_HOT_OPT\", \"O2\")) if f == \"-\" + a.opt else f for f in fl]`. No comment in the source says what it changes.",
+   "explanation": "undocumented: nx2/build.py:815 reads it as a text value: `hot_fl = [(\"-\" + os.environ.get(\"RX_HOT_OPT\", \"O2\")) if f == \"-\" + a.opt else f for f in fl]`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -10974,7 +11016,7 @@
    "files": [
     {
      "path": "nx2/build.py",
-     "line": 552
+     "line": 561
     },
     {
      "path": "nx2/make_game.py",
@@ -10985,6 +11027,27 @@
    "values": "text",
    "explanation": "The CPU level to build for (default this PC's: `x86-64-v3`, else `x86-64-v2`, else `x86-64`).",
    "comment": "RX_MARCH=x86-64: the old baseline # (issue 363: a Xeon E5-2667 v2 (Ivy Bridge, no AVX2) built the game and then stopped at its first AVX2 instruction, # 0xc000001d. The game is built on the PC it runs on: a CPU without x86-64-v3's features gets x86-64-v2, or x86-64) from host_cpu import host_march # (make_game.py asks it too: the AppImage's renderer) MARCH = os.environ.get(\"RX_MARCH\") or host_march() if MARCH != \"x86-64-v3\": print(\"build: this CPU has no AVX2: the game is built for %s (a little slower)\" % MARCH, flush=True) CPU = [\"-march=\" + MARCH, \"-ffp-contract=off\"] def flags(gen, rt64, opt, polls): return target() + CPU + [ \"-I\" + rt64, \"-I\" + gen, \"-I\" + os.path.join(kit.KIT, \"rt\"), \"-I\" + NX2_RT, \"-Wno-everything\", \"-fno-strict-aliasing\", \"-mcx16\", \"-\" + opt, \"-g0\", \"-mllvm\", \"-rotation-max-header-size=0\", \"-ffunction-sections\", \"-mllvm\", ...",
+   "documented_in": "development.md",
+   "source": "development.md",
+   "documented": true,
+   "set_via": "In the build's environment (the builder or the command line), before the build runs.",
+   "use": null
+  },
+  {
+   "name": "RX_MARK_BITMAP",
+   "area": "build",
+   "group": "Build behaviour and paths",
+   "audience": "developer",
+   "files": [
+    {
+     "path": "nx2/build.py",
+     "line": 551
+    }
+   ],
+   "default": "off (unset)",
+   "values": "on or off (0, false, off, no and empty are off)",
+   "explanation": "The lifted game's stores mark only pages the GPU can read (a bit per page, `host/mark_bitmap.c`, `nx2/rtgen.py`; Longshot 35a4a9fc, #1617). Off by default: measured on the main PC (Ryzen 7 7800X3D, RTX 5070, castle-move, 3 interleaved rounds against the same build without it) 87.0 -> 85.9 fps, inside the runs' spread either way and the 1% lows a little lower, because our mark grouping already removed the cost (Longshot's +11% was on an ungrouped build). Unset or `0` (also `off`, `false`, `no`): every lifted store marks its page, and none of the bitmap is built; the host's own writes mark every page either way.",
+   "comment": "Off by default (RX_MARK_BITMAP=1 turns it on): measured on the main PC # (Ryzen 7 7800X3D, RTX 5070, castle-move, 3 interleaved rounds against the same build without it) 87.0 -> 85.9 fps, # within the runs' spread either way, and the 1% lows a little lower: our mark grouping (A64_MARK_STACK/FRAME, # group_marks: 155k shared marks for 689k stores) already removed the cost Longshot measured on an ungrouped build # (a 5600X: 40.4 -> 46.1 fps). With it off the bitmap is not built either: no 16 MB table, and map_add sets no bits MARK_BITMAP = [\"-DA64_MARK_BITMAP\"] if os.environ.get(\"RX_MARK_BITMAP\", \"\").strip().lower() in (\"1\", \"on\", \"true\", \"yes\") else [] # (hookshot) the host CPU the lifted game and the runtime are built for: x86-64-v3 (AVX2, FMA, BMI1/2, LZCNT, # MOVBE; Haswell and Zen 1 on).",
    "documented_in": "development.md",
    "source": "development.md",
    "documented": true,
@@ -11510,12 +11573,12 @@
    "files": [
     {
      "path": "nx2/build.py",
-     "line": 160
+     "line": 161
     }
    ],
    "default": "off (unset)",
    "values": "on or off (0, false, off, no and empty are off)",
-   "explanation": "undocumented: nx2/build.py:160 reads it as an on/off switch: `if not os.path.exists(p) or os.environ.get(\"RX_NO_ORDER\"):`. No comment in the source says what it changes.",
+   "explanation": "undocumented: nx2/build.py:161 reads it as an on/off switch: `if not os.path.exists(p) or os.environ.get(\"RX_NO_ORDER\"):`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -12420,7 +12483,7 @@
    "files": [
     {
      "path": "nx2/build.py",
-     "line": 57
+     "line": 58
     },
     {
      "path": "nx2/make_game.py",
@@ -12810,11 +12873,11 @@
    "files": [
     {
      "path": "nx2/build.py",
-     "line": 939
+     "line": 947
     },
     {
      "path": "nx2/build.py",
-     "line": 1132
+     "line": 1140
     }
    ],
    "default": "off (unset)",
@@ -13242,13 +13305,13 @@
    "files": [
     {
      "path": "nx2/build.py",
-     "line": 540
+     "line": 541
     }
    ],
    "default": "off (unset)",
-   "values": "on or off (0, false, off, no and empty are off); the description names `0`",
-   "explanation": "RX_SOFT_WRITE_WATCH=0: Windows' write watch (a full rebuild) WRITE_TRACK = [] if os.environ.get(\"RX_SOFT_WRITE_WATCH\") == \"0\" else [\"-DA64_WRITE_TRACK\"] if WRITE_TRACK and os.environ.get(\"A64_GRAN\") == \"1\": # (HeyListen, sprint 5: a write mark per 512 bytes too, nx2/rtgen.py) WRITE_TRACK = WRITE_TRACK + [\"-DA64_GRAN\"] # (hookshot) the host CPU the lifted game and the runtime are built for: x86-64-v3 (AVX2, FMA, BMI1/2, LZCNT, # MOVBE; Haswell and Zen 1 on). With FMA the FPX1 fast paths cover double-precision FMA (RECOMP_FPX_FMA64; it took # the exact software body on baseline x86-64) and the bit counts are single instructions.",
-   "comment": "RX_SOFT_WRITE_WATCH=0: Windows' write watch (a full rebuild) WRITE_TRACK = [] if os.environ.get(\"RX_SOFT_WRITE_WATCH\") == \"0\" else [\"-DA64_WRITE_TRACK\"] if WRITE_TRACK and os.environ.get(\"A64_GRAN\") == \"1\": # (HeyListen, sprint 5: a write mark per 512 bytes too, nx2/rtgen.py) WRITE_TRACK = WRITE_TRACK + [\"-DA64_GRAN\"] # (hookshot) the host CPU the lifted game and the runtime are built for: x86-64-v3 (AVX2, FMA, BMI1/2, LZCNT, # MOVBE; Haswell and Zen 1 on). With FMA the FPX1 fast paths cover double-precision FMA (RECOMP_FPX_FMA64; it took # the exact software body on baseline x86-64) and the bit counts are single instructions.",
+   "values": "on or off (0, false, off, no and empty are off); the description names `0`, `1`",
+   "explanation": "RX_SOFT_WRITE_WATCH=0: Windows' write watch (a full rebuild) WRITE_TRACK = [] if os.environ.get(\"RX_SOFT_WRITE_WATCH\") == \"0\" else [\"-DA64_WRITE_TRACK\"] if WRITE_TRACK and os.environ.get(\"A64_GRAN\") == \"1\": # (HeyListen, sprint 5: a write mark per 512 bytes too, nx2/rtgen.py) WRITE_TRACK = WRITE_TRACK + [\"-DA64_GRAN\"] # (longshot 11-18, 35a4a9fc #1617) a lifted store marks its page only where the page is one the GPU can read # (host/mark_bitmap.c sets a bit per GPU-mapped page, nx2/rtgen.py A64_MARK_BITMAP reads it); the host's own marks # (HOS_WRITTEN) keep marking every page. Off by default (RX_MARK_BITMAP=1 turns it on): measured on the main PC # (Ryzen 7 7800X3D, RTX 5070, castle-move, 3 interleaved rounds against the same build without it) 87.0 -> 85.9 fps, # within the runs' spread either way, and the 1% lows a little lower: our mark grouping (A64_MARK_STACK/FRAME, # group_marks: ...",
+   "comment": "RX_SOFT_WRITE_WATCH=0: Windows' write watch (a full rebuild) WRITE_TRACK = [] if os.environ.get(\"RX_SOFT_WRITE_WATCH\") == \"0\" else [\"-DA64_WRITE_TRACK\"] if WRITE_TRACK and os.environ.get(\"A64_GRAN\") == \"1\": # (HeyListen, sprint 5: a write mark per 512 bytes too, nx2/rtgen.py) WRITE_TRACK = WRITE_TRACK + [\"-DA64_GRAN\"] # (longshot 11-18, 35a4a9fc #1617) a lifted store marks its page only where the page is one the GPU can read # (host/mark_bitmap.c sets a bit per GPU-mapped page, nx2/rtgen.py A64_MARK_BITMAP reads it); the host's own marks # (HOS_WRITTEN) keep marking every page. Off by default (RX_MARK_BITMAP=1 turns it on): measured on the main PC # (Ryzen 7 7800X3D, RTX 5070, castle-move, 3 interleaved rounds against the same build without it) 87.0 -> 85.9 fps, # within the runs' spread either way, and the 1% lows a little lower: our mark grouping (A64_MARK_STACK/FRAME, # group_marks: ...",
    "documented_in": null,
    "source": "comment at nx2/build.py",
    "documented": true,
@@ -17308,11 +17371,11 @@
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 445
+     "line": 446
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 475
+     "line": 476
     }
    ],
    "default": "off (unset)",
@@ -17794,7 +17857,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2342
+     "line": 2346
     }
    ],
    "default": "0 (unset)",
@@ -18536,7 +18599,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2344
+     "line": 2348
     }
    ],
    "default": "0 (unset)",
@@ -18779,11 +18842,11 @@
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 445
+     "line": 446
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 475
+     "line": 476
     }
    ],
    "default": "off (unset)",
@@ -20267,7 +20330,7 @@
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2336
+     "line": 2340
     }
    ],
    "default": "2",
@@ -20330,7 +20393,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2615
+     "line": 2619
     }
    ],
    "default": "unset",
@@ -22420,15 +22483,15 @@
    "files": [
     {
      "path": "nx2/build.py",
-     "line": 760
+     "line": 769
     },
     {
      "path": "nx2/build.py",
-     "line": 797
+     "line": 806
     },
     {
      "path": "nx2/build.py",
-     "line": 1027
+     "line": 1035
     }
    ],
    "default": "off (unset)",
@@ -22512,7 +22575,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2343
+     "line": 2347
     }
    ],
    "default": "0 (unset)",
@@ -26645,7 +26708,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2587
+     "line": 2591
     }
    ],
    "default": "unset",
@@ -26813,7 +26876,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2345
+     "line": 2349
     }
    ],
    "default": "0 (unset)",
@@ -28060,7 +28123,7 @@
    "files": [
     {
      "path": "nx2/build.py",
-     "line": 190
+     "line": 191
     }
    ],
    "default": "os.path.join(os.path.expanduser(\"~",
