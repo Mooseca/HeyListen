@@ -1006,10 +1006,10 @@ BOOL MoveFileExA(LPCSTR from, LPCSTR to, DWORD flags) {
     return rename(a, b) == 0 ? TRUE : fail_errno();
 }
 BOOL MoveFileA(LPCSTR from, LPCSTR to) { return MoveFileExA(from, to, 0); }
-BOOL CreateHardLinkA(LPCSTR link, LPCSTR target, void *attr) {   /* (logs/hookshot.log, a hard link to hookshot_log.txt: host/hos_run_logs.h) */
+BOOL CreateHardLinkA(LPCSTR new_name, LPCSTR target, void *attr) {   /* (logs/hookshot.log, a hard link to hookshot_log.txt: host/hos_run_logs.h; the parameter is not "link", which hides link(2)) */
     (void)attr;
     char a[PATH_MAX], b[PATH_MAX];
-    slashes(a, sizeof a, link);
+    slashes(a, sizeof a, new_name);
     slashes(b, sizeof b, target);
     return link(b, a) == 0 ? TRUE : fail_errno();
 }
