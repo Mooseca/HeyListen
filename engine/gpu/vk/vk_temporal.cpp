@@ -155,7 +155,7 @@ struct Image {
 
 struct Camera {
     float current[16]{};      // (its view-projection)
-    float projection[16]{};   // (its projection, jittered: FSR 3.1's depth constants, and DLSS Frame Generation's camera, vk_dlss.cpp dlss_fg_inputs)
+    float projection[16]{};   // (its projection, jittered: FSR 3.1's depth constants on the chain; HeyListen has no DLSS Frame Generation)
     float jitter[2]{};        // (the projection's offset of the picture's centre, in clip space: nx2/oot_jitter.py)
     float near_z = 0, far_z = 0, fov_y = 0;   // (its projection's, 0 when it is not a plain perspective one)
     uint32_t width = 0, height = 0;
