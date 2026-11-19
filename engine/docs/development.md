@@ -219,6 +219,12 @@ case-sensitive, and an unknown one is ignored.
 | `RX_VK_ONLY=1` | Only the Vulkan back end, with no lift |
 | `OOT_WORK`, `OOT_DUMP`, `OOT_EXEFS`, `OOT_ROMFS` | The work folder and the dump's folders, over `work/dump.txt` |
 
+The shader caches' stamp (`nx2/translator_files.py`, compiled in as `HOOKSHOT_SHADER_STAMP`): every file under
+`gpu/vk/{eden,sirit,compat}`, then `vk_shader.cpp`, `vk_bank.cpp` and `vk_state.h`. `vk_api.h` is not in it (Longshot
+26a2eab0, #370): the translator reads nothing from it but the host calls whose answers the stamp already holds, so a
+menu, input or audio row there no longer drops every player's translated programs (the *state* stamp, the pipeline
+notes' layout, still holds it). Changing the list changes the stamp once, and every player prepares the shaders again.
+
 ### Crash reports and performance statistics
 
 Both are opt-in and off by default; the addresses and the rows are in [performance statistics](../../docs/performance-statistics.md)
