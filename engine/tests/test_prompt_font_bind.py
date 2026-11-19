@@ -26,8 +26,16 @@ BIND = {0: 0, 1: 10}
 # (and their keys: A on E, B on the mouse's left button in the second slot (the first clear), X on a key the font has no icon for;
 # the rest none)
 KEYS = {0: (0x45, 0), 1: (0, 0x01), 2: (0x07, 0)}
-KEY_ICONS = (0x45, 0x01)   # (the keys with an icon in the test's cmap)
+KEY_ICONS = (0x45, 0x01, 0x49)   # (the keys with an icon in the test's cmap)
 KEYBOARD = len(prompt_faces.FACES) + 1   # (HOS_PROMPT_KEYBOARD)
+# (the movement keys the test tries, each way's two slots: up, down, left, right)
+MOVES = [
+    ("the defaults", [(0x57, 0), (0x53, 0), (0x41, 0), (0x44, 0)]),
+    ("up on I", [(0x49, 0), (0x53, 0), (0x41, 0), (0x44, 0)]),
+    ("up on I in the second slot", [(0, 0x49), (0x53, 0), (0x41, 0), (0x44, 0)]),
+    ("up on a key without an icon", [(0x07, 0), (0x53, 0), (0x41, 0), (0x44, 0)]),
+    ("up unbound", [(0, 0), (0x53, 0), (0x41, 0), (0x44, 0)]),
+]
 
 
 def first_key(b):
@@ -111,8 +119,10 @@ def main():
     harness = "\n".join([
         "#include <stdio.h>", "#include <stdlib.h>", "#include <string.h>", '#include "gpu/vk/vk_api.h"',
         *defines(src, ["PAD_BASE", "KEY_BASE", "STICK_KEYS", "STICK_GAME"]),
+        "static int move_keys[4][2];",
         "static int hos_binding(int set, int button, int slot) {",
         "    if (set == HOS_BIND_KEY) {",
+        "        if (button >= HOS_KEY_MOVE_UP && button < HOS_KEY_MOVE_UP + 4) return move_keys[button - HOS_KEY_MOVE_UP][slot];",
         *("        if (button == %d) return slot ? %d : %d;" % (b, k[1], k[0]) for b, k in KEYS.items()),
         "        return 0;",
         "    }",
@@ -122,7 +132,10 @@ def main():
         re.search(r"static const uint16_t switch_code\[HOS_SW_N\] = \{[^}]*\};", src).group(0),
         re.search(r"static const unsigned char switch_pad\[HOS_SW_N\] = \{[^}]*\};", src).group(0),
         re.search(r"static const uint16_t stick_code\[15\] = \{[^}]*\};", src).group(0),
+        re.search(r"static const unsigned char stick_ways\[7\] = \{[^}]*\};", src).group(0),
+        re.search(r"static const unsigned char move_default\[4\] = \{[^}]*\};", src).group(0),
         block(src, "static int first_key("),
+        block(src, "static unsigned stick_shows("),
         re.search(r"static unsigned rd16\(.*", src).group(0),
         re.search(r"static void wr16\(.*", src).group(0),
         block(src, "static unsigned cmap4_glyph("),
@@ -130,24 +143,29 @@ def main():
         block(src, "static int cmap4_bind("),
         "int main(int argc, char **argv) {",
         "    (void)switch_pad;",
+        "    for (int m = 0; m < 4; m++) move_keys[m][0] = (int)strtol(argv[3 + 2 * m], NULL, 0),",
+        "                                      move_keys[m][1] = (int)strtol(argv[4 + 2 * m], NULL, 0);",
         "    FILE *f = fopen(argv[1], \"rb\");",
         "    static unsigned char st[65536];",
         "    const size_t n = fread(st, 1, sizeof st, f);",
         "    fclose(f);",
         "    printf(\"%d\\n\", cmap4_bind(st, n, atoi(argv[2])));",
-        "    for (int i = 3; i < argc; i++) printf(\"%u\\n\", cmap4_glyph(st, n, (unsigned)strtoul(argv[i], NULL, 0)));",
+        "    for (int i = 11; i < argc; i++) printf(\"%u\\n\", cmap4_glyph(st, n, (unsigned)strtoul(argv[i], NULL, 0)));",
         "    return 0;",
         "}", ""])
     with tempfile.TemporaryDirectory() as tmp:
         c, exe = Path(tmp) / "bind.c", Path(tmp) / "bind"
         c.write_text(harness, encoding="utf-8")
         subprocess.run([a.cc, "-std=c11", "-Wall", "-Wextra", "-Werror", "-I", str(ROOT), str(c), "-o", str(exe)], check=True)
-        outs = []
-        for f in range(nfaces):
-            bin_ = Path(tmp) / ("cmap4-%d.bin" % f)
-            bin_.write_bytes(subs[f])
-            outs.append(subprocess.run([str(exe), str(bin_), str(f)] + [str(x) for x in codes], check=True, capture_output=True,
-                                       text=True).stdout.split())
+
+        def run(face, moves):
+            bin_ = Path(tmp) / ("cmap4-%d.bin" % face)
+            bin_.write_bytes(subs[face])
+            args = [str(exe), str(bin_), str(face)] + [str(k) for pair in moves for k in pair] + [str(x) for x in codes]
+            return subprocess.run(args, check=True, capture_output=True, text=True).stdout.split()
+
+        outs = [run(f, MOVES[0][1]) for f in range(nfaces)]
+        moved = [(name, moves, run(KEYBOARD, moves)) for name, moves in MOVES]
     nsw = len(prompt_assets.SWITCH)
     for f, out in enumerate(outs):
         done, got = int(out[0]), [int(x) for x in out[1:]]
@@ -163,8 +181,27 @@ def main():
             want = (1200 if f == KEYBOARD else 1300) + i
             check(got[nsw + len(prompt_assets.PADS) + i] == want,
                   "face %d: stick icon %d: glyph %d, not %d" % (f, i, got[nsw + len(prompt_assets.PADS) + i], want))
+    # (the movement keys: each stick icon as nx2/prompt_keys.py's table and host/prompts.c stick_shows say)
+    check([e.strip() for e in re.search(r"stick_ways\[7\] = \{([^}]*)\}", src).group(1).split(",")] ==
+          [str(sum(1 << m for m, w in enumerate("udlr") if w in ways)) for _, _, ways in prompt_keys.STICKS[:7]],
+          "host/prompts.c stick_ways is not nx2/prompt_keys.py STICKS' ways")
+    check([e.strip() for e in re.search(r"move_default\[4\] = \{([^}]*)\}", src).group(1).split(",")] ==
+          ["0x%02X" % prompt_keys.MOVE[w] for w in "udlr"], "host/prompts.c move_default is not nx2/prompt_keys.py MOVE")
+    for name, moves, out in moved:
+        got = [int(x) for x in out[1 + nsw + len(prompt_assets.PADS):]]
+        for i in range(len(stick_codes)):
+            ways = prompt_keys.STICKS[i][2]
+            want = 1200 + i   # (the build's picture: the keys that move as they are, or the mouse for the camera)
+            for m, w in enumerate("udlr") if prompt_keys.STICKS[i][1] == "move" else ():
+                key = moves[m][0] or moves[m][1]
+                if w in ways and key != prompt_keys.MOVE[w]:
+                    want = 900 + key if len(ways) == 1 and key in KEY_ICONS else 1300 + i
+                    break
+            check(got[i] == want, "keyboard face, movement keys %s: stick icon %d (%s): glyph %d, not %d" %
+                  (name, i, prompt_keys.STICKS[i][2], got[i], want))
     print("ok: on each of %d faces, %d of %d Switch buttons pointed at their pad icons (the keyboard face: the first key bound to "
-          "it), the rest and the pad icons kept; %d stick icons" % (nfaces, len(BIND), nsw, len(stick_codes)))
+          "it), the rest and the pad icons kept; %d stick icons, and the movement keys in %d sets" %
+          (nfaces, len(BIND), nsw, len(stick_codes), len(MOVES)))
 
 
 if __name__ == "__main__":

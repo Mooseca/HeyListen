@@ -7,8 +7,9 @@
    The face: hookshot_options.ini's button_prompts (the menu's Button prompts row): 0 Auto, from the first controller's name
    (SDL; with none, and none through XInput either, the keyboard's), else 1 Switch, 2 Xbox, 3 PlayStation 4, 4 PlayStation 5,
    5 Steam Deck, 6 Keyboard. The keyboard face (nx2/prompt_keys.py) points each Switch button at the icon of the first key
-   bound to it, the sticks at the keys that move (WASD) and the mouse that turns the camera, and keeps the Switch's textures
-   and the Talk ring's places. The game reads the font once, at its start: a new face or new controls show at the next start.
+   bound to it, the sticks at the keys that move (the Controls page's: stick_shows) and the mouse that turns the camera, and
+   keeps the Switch's textures and the Talk ring's places. The game reads the font once, at its start: a new face or new
+   controls show at the next start.
 
    The font as built: an OpenType font behind an 8-byte header, XORed per little-endian word with the key the header's magic
    (0x18029a7f) gives. Its cmap has one icon per pad input at U+F700 + HOS_PAD_*, and each Switch button's code point in a
@@ -156,6 +157,24 @@ static int first_key(int b) {
     return k > 0 && k <= 0xFF ? k : 0;
 }
 
+/* the ways each of L's icons means (a bit each, in HOS_KEY_MOVE_*'s order: up, down, left, right), and the keys the build drew
+   on the icons of more than one way (nx2/prompt_keys.py MOVE: host/nn_hid.c's default movement keys) */
+static const unsigned char stick_ways[7] = {2, 1, 12, 8, 4, 3, 15};
+static const unsigned char move_default[4] = {0x57, 0x53, 0x41, 0x44};
+
+/* the code whose icon the keyboard face shows for stick icon i (stick_code's order) with these movement keys (move: the first
+   key of up, down, left, right, 0 none). R's: the mouse's, as built. L's: the keys drawn on it at the build (W A S D) while
+   its ways are on those keys. On others, one way shows its key's icon; several ways, or a way on no key, the game's own stick
+   icon, since the font has no picture of other keys together */
+static unsigned stick_shows(int i, const int *move) {
+    if (i >= 7) return STICK_KEYS + (unsigned)i;
+    const unsigned ways = stick_ways[i];
+    for (int m = 0; m < 4; m++)
+        if ((ways >> m & 1) && move[m] != move_default[m])
+            return ways == 1u << m && move[m] ? KEY_BASE + (unsigned)move[m] : STICK_GAME + (unsigned)i;
+    return STICK_KEYS + (unsigned)i;
+}
+
 /* each Switch button's segment pointed at its pad input's icon; how many (the keyboard face: at the icon of the first key bound
    to it, and the sticks at the keys that move and the mouse) */
 static int cmap4_bind(uint8_t *st, size_t n, int face) {
@@ -176,8 +195,11 @@ static int cmap4_bind(uint8_t *st, size_t n, int face) {
         if (gid && cmap4_point(st, segs, switch_code[b], gid) && !keys)   /* (on the keyboard face, a pad icon is no key) */
             done++;
     }
+    int move[4];
+    for (int m = 0; m < 4; m++) move[m] = keys ? first_key(HOS_KEY_MOVE_UP + m) : 0;
     for (int i = 0; i < 15; i++) {   /* (a font built without the keyboard face has none of these: nothing changes) */
-        const unsigned gid = cmap4_glyph(st, n, (keys ? STICK_KEYS : STICK_GAME) + (unsigned)i);
+        unsigned gid = keys ? cmap4_glyph(st, n, stick_shows(i, move)) : 0;
+        if (!gid) gid = cmap4_glyph(st, n, STICK_GAME + (unsigned)i);
         if (gid) cmap4_point(st, segs, stick_code[i], gid);
     }
     return done;
