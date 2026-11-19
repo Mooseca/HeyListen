@@ -842,7 +842,10 @@ def main():
                           for f in sorted(os.listdir(os.path.join(NATIVE, "include", "hl", "c"))) if f.endswith(".h"))
     if LINUX:
         host_deps += b"".join(open(os.path.join(POSIX, f), "rb").read() for f in sorted(os.listdir(POSIX)) if f.endswith(".h"))
-        host_deps += open(os.path.join(GPU, "vk", "vk_api.h"), "rb").read()
+    # (heylisten: on Windows too: host/rx_backend.c passes MKWVK_API_VERSION to the back end, and a cached object from before a
+    # change of it (a stale one, with the old version) made the Vulkan back end refuse to start. vk_api.h is one of the shader
+    # stamp files: a change of it is a change of every host object that reads the API)
+    host_deps += open(os.path.join(GPU, "vk", "vk_api.h"), "rb").read()
     host_deps += open(os.path.join(GPU, "vk", "dlss_math.h"), "rb").read()   # (host/rx_backend.c's DLSS jitter)
     host_deps += ffmpeg_version_key()
     # (HeyListen) zstd's decoder (third_party/zstd, plain C) in the game's executable too: host/hl_stream.c decodes the
