@@ -10,6 +10,7 @@ HeyListen is licensed GPL-3.0-or-later (see `LICENSE`). It incorporates the foll
 | ZBIC / zstd (Atmosphere-NX single-file zstd) for unpacking only | `engine/third_party/zbic/` | see `LICENSE` there | `PROVENANCE.md` |
 | SDL2 | `engine/third_party/sdl2/` | zlib | `LICENSE.txt` |
 | Kenney Input Prompts 1.5 (kenney.nl), the Xbox, PlayStation and Steam Deck button fonts the builder draws the Button prompts from | `engine/third_party/kenney_input/` | CC0 | `License.txt`, `PROVENANCE.md` |
+| Kenney Input Prompts 1.5 Keyboard & Mouse (kenney.nl), the keys the builder draws the Keyboard Button prompts' key icons from (the word keys and the mice are drawn) | `engine/third_party/kenney_input_keyboard/` | CC0 | `License.txt`, `PROVENANCE.md` |
 | stb_truetype | `engine/third_party/stb/` | public domain or MIT | `PROVENANCE.md` |
 | Eden shader recompiler and related code, sirit, Dear ImGui, suyu decoders | `engine/gpu/vk/eden`, `engine/gpu/vk/sirit`, `engine/gpu/vk/imgui`, `engine/gpu/third_party/suyu` | GPL-3.0 (Eden), GPL-2.0-or-later (suyu), BSD-3-Clause (sirit), MIT (ImGui) | license files in the respective folders |
 | AMD FidelityFX SDK v2.4.0, the FSR API headers only (AMD's signed runtime is never bundled: the player's own, beside the game) | `engine/third_party/fidelityfx/` | MIT | `LICENSE.md`, `README.md` |

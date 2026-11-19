@@ -233,7 +233,10 @@ release. On Linux the AppImage's `--play` starts the game, and the game asks as 
 ## Button prompts
 
 The **Button prompts** row (Insert menu, Controls page) chooses which controller's icons the game shows in its texts and menus:
-Auto follows the controller you plug in, or pick Xbox, PlayStation 4, PlayStation 5, Steam Deck or Switch. A new choice shows the
+Auto follows the controller you plug in, and is the **Keyboard**'s when none is connected (through SDL or XInput); or pick Xbox,
+PlayStation 4, PlayStation 5, Steam Deck, Switch or Keyboard. Keyboard shows the key or mouse button your controls put each action
+on (the first of its two keys), WASD for the left stick's ways (or the movement keys you bound) and the mouse for the camera; the
+ocarina's notes and the pause menu's controller picture keep the Switch's buttons. A new choice shows the
 next time you start the game. The icons are drawn when the builder makes your game folder, from your own game files and
 [Kenney's](https://kenney.nl/assets/input-prompts) CC0 Input Prompts, into the `prompts` folder there; they are not downloaded or
 copied from anywhere, so a folder from another build is not needed. No `prompts` folder in your game folder (a game built by a release up to 0.4.2,
