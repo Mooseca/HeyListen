@@ -335,6 +335,10 @@ choices and starts the game again, so progress since your last save is lost.
   creeps. `HOS_MOTION_DEBUG=1` (in `hookshot_env.txt`) logs what the game gets twice a second.
 - **Layout preset:** Nintendo has A on the right face button, Xbox / PC and Swap Face put A on the bottom one. Changing
   a button yourself sets it to Custom.
+- **Button prompts** (on the Controls page): the button icons in the game's texts, hints and menus. Auto shows the first
+  controller's; with no controller connected (through SDL or XInput), the keyboard's. Keyboard shows the key or mouse button
+  your controls put each action on (the first of its two), and WASD and the mouse for the sticks; the ocarina's notes and the
+  pause menu's controller keep the Switch's buttons.
 
 ### Controls
 
