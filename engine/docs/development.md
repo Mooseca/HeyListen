@@ -70,10 +70,22 @@ true, and dead code elimination removes the grid walk, so every meshlet is drawn
 screen. It costs some GPU time on cards that cull quickly, so it is off unless set. The log says
 "culling off, every meshlet drawn" for each task shader it changed.
 
-`RX_VK_PSYCHOV35_DLSS=1` enables the experimental RGBA16F scene path for DLSS/DLAA and AMD FSR 4 (and its Native AA)
-with Native HDR and PsychoV35. It requires the engine's native-HDR context: DLSS's HDR feature (`RX_VK_DLSS_HDR=0`
-prevents this path) or FSR 4's HDR context (`RX_VK_FSR4_HDR=0` prevents it). FSR 3.1 and TAAU are not enabled by this switch.
+Native HDR PsychoV35 takes the RGBA16F scene path by default (HeyListen, after Longshot b80a68f1, #608) with DLSS/DLAA, AMD
+FSR 4 (and its Native AA) and FSR 3.1, which goes on the temporal chain while PsychoV35 is on (`RX_VK_FSR3_CHAIN`).
+`RX_VK_PSYCHOV35_DLSS=0` turns that route off for troubleshooting; unset, empty or nonzero leaves it on. It is read once per
+run. It needs the engine's native-HDR context: DLSS's HDR feature (`RX_VK_DLSS_HDR=0` prevents this path), FSR 4's HDR context
+(`RX_VK_FSR4_HDR=0` prevents it), or FSR 3.1's HDR-capable passes. Without PsychoV35, FSR 3.1 keeps its own inputs and colour path.
 The RGBA16F output shader is regenerated with `python -I -B tests/test_psychov35_dlss.py --write --glslang glslangValidator`.
+
+Upscaler Off takes PsychoV35's RGBA16F scene whatever that switch says: the typed upscale's RGBA16F shader (`off_stand_in`,
+`shaders/taau_upscale.comp` with `TAAU_RGBA16F`) draws the network's input into its output, decoding its perceptual colour once,
+with no temporal anti-aliasing. The gameplay TAAU replacement (where the game's network cannot run) takes it the same way, with
+its history in RGBA16F; `RX_VK_TAAU_KEYS=fd029a317a9a4b94` runs that replacement on a GPU that runs the network, to test it.
+
+For FSR 3.1 frame generation (Frame generation 2x, `RX_VK_FSR_FG=1`), PsychoV35's RGBA16F scene feeds its own depth and motion
+inputs too (unless `RX_VK_PSYCHOV35_DLSS=0`); this does not turn on FSR 3.1 upscaling. The captured present's encoding (the game's
+PQ under Native HDR, else sRGB) and the HDR peak go to both AMD interpolation and optical flow, and a change of either resets
+their history.
 
 ### Running a test
 

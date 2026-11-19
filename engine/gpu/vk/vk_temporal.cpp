@@ -25,7 +25,7 @@
 //    network's output.
 // Anything unexpected (no camera this frame, other sizes, the engine not there or failing) leaves the network to run, the
 // reason in the log when it changes.
-// RX_VK_PSYCHOV35_DLSS=1 also takes Native PsychoV35's RGBA16F input/output with DLSS/DLAA and AMD FSR 4 / its native AA
+// Unless RX_VK_PSYCHOV35_DLSS=0, also takes Native PsychoV35's RGBA16F input/output with the supported HDR engines
 // (upscaler_rows.h takes_psychov35: the engines given linear light in an HDR context). The network's perceptual
 // encoding is unchanged: the HDR prep still squares it to linear, and a typed RGBA16F output pass writes it back as is.
 //
@@ -395,7 +395,7 @@ bool make_pipelines() {
     return true;
 }
 
-// Made only when the opt-in RGBA16F route actually draws; no extra pipeline on the default path.
+// Made only when the compatible RGBA16F route actually draws; no extra pipeline for SDR or Vanilla.
 bool make_rgba_output() {
     State& s = st();
     if (s.out_rgba) return true;
@@ -690,8 +690,9 @@ void temporal_later(std::function<void()> f) { later(std::move(f)); }
 
 bool temporal_scene_format(VkFormat format) {
     if (format == VK_FORMAT_B10G11R11_UFLOAT_PACK32) return true;
-    static const bool enabled = env_switch("RX_VK_PSYCHOV35_DLSS") == 1;
-    return enabled && format == VK_FORMAT_R16G16B16A16_SFLOAT && scene_tonemap_on() && ur::takes_psychov35(temporal_mode());
+    static const bool enabled = ur::psychov35_compatibility(env_switch("RX_VK_PSYCHOV35_DLSS"));
+    return format == VK_FORMAT_R16G16B16A16_SFLOAT && scene_tonemap_on() &&
+           (upscaler_off() || (enabled && ur::takes_psychov35(temporal_mode())));
 }
 
 bool temporal_colour_pair(VkFormat input, VkFormat output) {
@@ -951,11 +952,13 @@ bool temporal_upscale(VkCommandBuffer cmd, uint64_t key, bool known, Texture* in
     if (ready == 0) return fail(why ? why : "not this frame");
     if (psycho && (!engine.e->hdr || !engine.e->hdr()))
         return fail(ur::is_fsr4(mode) ? "PsychoV35 waits for the native HDR FSR 4 context"
+                    : mode == ur::FSR3 ? "PsychoV35 waits for the native HDR FSR 3.1 path"
                                        : "PsychoV35 waits for the native HDR DLSS feature");
     const bool rgba = psycho && in->format == VK_FORMAT_R16G16B16A16_SFLOAT && out->format == VK_FORMAT_R16G16B16A16_SFLOAT;
     if (s.psycho_last != psycho || s.history_input != in->format) {
         if (psycho || s.psycho_last || s.history_input == VK_FORMAT_R16G16B16A16_SFLOAT)
-            logf("vk: PsychoV35 %s: %s route; scene format %u, network input %u, output %u", ur::is_fsr4(mode) ? "FSR 4" : "DLSS",
+            logf("vk: PsychoV35 %s: %s route; scene format %u, network input %u, output %u",
+                 ur::is_fsr4(mode) ? "FSR 4" : mode == ur::FSR3 ? "FSR 3.1" : "DLSS",
                  rgba ? "RGBA16F linear" : "packed", (unsigned)cam.scene_format, (unsigned)in->format, (unsigned)out->format);
         s.psycho_last = psycho;
         s.history_input = in->format;

@@ -61,6 +61,7 @@
 #include "shaders/clear_u_frag_spv.h"
 #include "shaders/clear_vert_spv.h"
 #include "shaders/taau_upscale_comp_spv.h"
+#include "shaders/taau_upscale_rgba_comp_spv.h"
 #include "shaders/movie_upscale_comp_spv.h"
 #include "shader_recompiler/backend/spirv/mma_layout.h"
 #include "precompile_save.h"   // (the pipeline cache written before the title after a long precompile)
@@ -8278,6 +8279,37 @@ bool upscale_stub(VkCommandBuffer cmd, const NvnState& s, uint64_t key) {
     }
     // The generic failed-network path can receive RGB9E5 bits in a shared R11 image.
     // Match the observed base-level 2D case only; other fallbacks keep their existing blit.
+    const bool gameplay_taau = key == 0xfd029a317a9a4b94ull;
+    if (gameplay_taau && scene_tonemap_on() &&
+        (src->format == VK_FORMAT_R16G16B16A16_SFLOAT || dst->format == VK_FORMAT_R16G16B16A16_SFLOAT)) {
+        if (src->format != VK_FORMAT_R16G16B16A16_SFLOAT || dst->format != VK_FORMAT_R16G16B16A16_SFLOAT ||
+            in.d.format != NVN_FORMAT_RGB9E5F || out.d.format != NVN_FORMAT_R11G11B10F ||
+            !(fd.optimalTilingFeatures & VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT) ||
+            src->type != VK_IMAGE_TYPE_2D || dst->type != VK_IMAGE_TYPE_2D || src->depth != 1 || dst->depth != 1 ||
+            src->layers != 1 || dst->layers != 1 || src->levels != 1 || dst->levels != 1 || src->skip || dst->skip ||
+            in.d.swizzle_r != NVN_TEXTURE_SWIZZLE_R || in.d.swizzle_g != NVN_TEXTURE_SWIZZLE_G ||
+            in.d.swizzle_b != NVN_TEXTURE_SWIZZLE_B) return false;
+        nvn_tex selected_in{}, selected_out{};
+        nvn_view iv{}, ov{};
+        bool ihv = false, ohv = false;
+        if (texture_of((int)(in_h & 0xFFFFF), &selected_in, &iv, &ihv) &&
+            texture_of((int)(out_h & 0xFFFFF), &selected_out, &ov, &ohv) && !ihv && !ohv &&
+            selected_in.serial == in.serial && selected_out.serial == out.serial) {
+            VkFormat input_format = VK_FORMAT_UNDEFINED, output_format = VK_FORMAT_UNDEFINED;
+            const VkImageView input_view = texture_view(src, &in, nullptr, VK_IMAGE_VIEW_TYPE_2D, ViewUse::Sample,
+                                                         &input_format, VK_FORMAT_R16G16B16A16_SFLOAT);
+            const VkImageView output_view = texture_view(dst, &out, nullptr, VK_IMAGE_VIEW_TYPE_2D, ViewUse::Storage,
+                                                          &output_format, VK_FORMAT_R16G16B16A16_SFLOAT);
+            if (input_view && output_view && input_format == VK_FORMAT_R16G16B16A16_SFLOAT &&
+                output_format == VK_FORMAT_R16G16B16A16_SFLOAT &&
+                typed_upscale(cmd, input_view, output_view, dst, 0, key, "PsychoV35 TAAU fallback", true)) {
+                full_barrier(cmd);
+                texture_written(dst);
+                return true;
+            }
+        }
+        return false; // Do not blit perceptually encoded PsychoV35 input into a linear output.
+    }
     // (the gameplay networks too, when they are left out (no f16 shaders, vk_shader.cpp): their input is the scene's RGB9E5 bits
     // in a B10G11R11 image, and the blit below read them as B10G11R11, full-screen yellow and magenta noise with RX_VK_NO_F16.
     // Through the typed upscale as the TAAU network's stand-in (taau_stand_in), its edges smoothed in the shader)
@@ -8358,10 +8390,21 @@ bool taau_key(uint64_t key) {
 static bool typed_upscale(VkCommandBuffer cmd, VkImageView input_view, VkImageView output_view,
                           Texture* out, uint32_t level, uint64_t key, const char* keys, bool temporal) {
     if (!dev.push_descriptor || !vkCmdPushDescriptorSetKHR || !input_view || !output_view || !out) return false;
-    static VkPipeline pipe = VK_NULL_HANDLE;
-    static VkPipelineLayout layout = VK_NULL_HANDLE;
-    static VkSampler linear = VK_NULL_HANDLE;
-    static bool tried = false;
+    const bool rgba = out->format == VK_FORMAT_R16G16B16A16_SFLOAT;
+    // (RGBA16F: Native PsychoV35's scene, the TAAU network's stand-in and the Upscaler's Off: HeyListen, after Longshot b80a68f1)
+    if (out->format != VK_FORMAT_B10G11R11_UFLOAT_PACK32 && !(rgba && scene_tonemap_on())) return false;
+    struct Pipeline {
+        VkPipeline pipe = VK_NULL_HANDLE;
+        VkPipelineLayout layout = VK_NULL_HANDLE;
+        VkSampler linear = VK_NULL_HANDLE;
+        bool tried = false;
+    };
+    static Pipeline pipelines[2];
+    Pipeline& pipeline = pipelines[rgba ? 1 : 0];
+    auto& pipe = pipeline.pipe;
+    auto& layout = pipeline.layout;
+    auto& linear = pipeline.linear;
+    auto& tried = pipeline.tried;
     if (!tried) {
         tried = true;
         VkDescriptorSetLayoutBinding b[3] = {{0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr},
@@ -8377,7 +8420,8 @@ static bool typed_upscale(VkCommandBuffer cmd, VkImageView input_view, VkImageVi
         pi.setLayoutCount = 1, pi.pSetLayouts = &set, pi.pushConstantRangeCount = 1, pi.pPushConstantRanges = &pr;
         vkCreatePipelineLayout(dev.device, &pi, nullptr, &layout);
         VkShaderModuleCreateInfo mi{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
-        mi.codeSize = sizeof TAAU_UPSCALE_COMP_SPV, mi.pCode = TAAU_UPSCALE_COMP_SPV;
+        mi.codeSize = rgba ? sizeof TAAU_UPSCALE_RGBA_COMP_SPV : sizeof TAAU_UPSCALE_COMP_SPV;
+        mi.pCode = rgba ? TAAU_UPSCALE_RGBA_COMP_SPV : TAAU_UPSCALE_COMP_SPV;
         VkShaderModule m{};
         IntelDriverGate gate;
         if (guarded_shader_module(&mi, &m) != VK_SUCCESS) m = VK_NULL_HANDLE;
@@ -8391,7 +8435,7 @@ static bool typed_upscale(VkCommandBuffer cmd, VkImageView input_view, VkImageVi
         si.addressModeU = si.addressModeV = si.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
         si.maxLod = 0.25f;
         vkCreateSampler(dev.device, &si, nullptr, &linear);
-        logf("vk: typed upscale helper %s%s", keys,
+        logf("vk: typed upscale helper %s, %s output%s", keys, rgba ? "RGBA16F" : "packed",
              pipe ? "" : ": its pipeline was not made");
     }
     if (!pipe) return false;
@@ -8403,6 +8447,7 @@ static bool typed_upscale(VkCommandBuffer cmd, VkImageView input_view, VkImageVi
         VmaAllocation memory = nullptr;
         VkImageView view = VK_NULL_HANDLE;
         uint32_t width = 0, height = 0;
+        VkFormat format = VK_FORMAT_UNDEFINED;
         uint64_t frame = 0;
     };
     static History histories[2];
@@ -8427,12 +8472,12 @@ static bool typed_upscale(VkCommandBuffer cmd, VkImageView input_view, VkImageVi
         destroy_image(old_hist[i].image, old_hist[i].mem);
         old_hist.erase(old_hist.begin() + (ptrdiff_t)i);
     }
-    if (hist_w != size[0] || hist_h != size[1]) {
+    if (hist_w != size[0] || hist_h != size[1] || history.format != out->format) {
         // (the one before is kept for the while: work in flight may still use it)
         if (hist && !leak) old_hist.push_back({hist, hist_mem, hist_view, texture_frame_no()});
         hist = VK_NULL_HANDLE, hist_view = VK_NULL_HANDLE;
         VkImageCreateInfo ic{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
-        ic.imageType = VK_IMAGE_TYPE_2D, ic.format = VK_FORMAT_B10G11R11_UFLOAT_PACK32;
+        ic.imageType = VK_IMAGE_TYPE_2D, ic.format = out->format;
         ic.extent = {size[0], size[1], 1}, ic.mipLevels = 1, ic.arrayLayers = 1, ic.samples = VK_SAMPLE_COUNT_1_BIT;
         ic.tiling = VK_IMAGE_TILING_OPTIMAL, ic.usage = VK_IMAGE_USAGE_STORAGE_BIT;
         if (!create_image(ic, hist, hist_mem)) { hist = VK_NULL_HANDLE; return false; }
@@ -8450,7 +8495,7 @@ static bool typed_upscale(VkCommandBuffer cmd, VkImageView input_view, VkImageVi
         VkDependencyInfo di{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
         di.imageMemoryBarrierCount = 1, di.pImageMemoryBarriers = &ib;
         vkCmdPipelineBarrier2(cmd, &di);
-        hist_w = size[0], hist_h = size[1], hist_frame = 0;
+        hist_w = size[0], hist_h = size[1], history.format = out->format, hist_frame = 0;
     }
     // (bounded when the history is last frame's or so: a pause of the TAAU, a menu, starts again unbounded)
     const uint64_t now_frame = texture_frame_no();
@@ -8499,7 +8544,12 @@ bool fsr3_stand_in(VkCommandBuffer cmd, const NvnState& s, const Program& p) {
     uint32_t level = 0;
     const uint32_t out_handle = handle_of(s, st, od, 0);
     if (out_handle) texture_view_of(out_handle, VK_IMAGE_VIEW_TYPE_2D, ViewUse::Storage, image_format(od.format), &out, &level);
-    return fsr3_upscale(cmd, p.key, gameplay_network(p.key), in, dw().imgs[0].imageView, out, dw().imgs[ntex].imageView, level);
+    VkImageView input_view = dw().imgs[0].imageView, output_view = dw().imgs[ntex].imageView;
+    if (in && out && fsr3_inputs::colour_pair(in->format, out->format) && out->format == VK_FORMAT_R16G16B16A16_SFLOAT) {
+        input_view = texture_view_of(in_handle, VK_IMAGE_VIEW_TYPE_2D, ViewUse::Sample, VK_FORMAT_R16G16B16A16_SFLOAT);
+        output_view = texture_view_of(out_handle, VK_IMAGE_VIEW_TYPE_2D, ViewUse::Storage, VK_FORMAT_R16G16B16A16_SFLOAT);
+    }
+    return fsr3_upscale(cmd, p.key, gameplay_network(p.key), in, input_view, out, output_view, level);
 }
 /// (hookshot) A temporal upscaler (NVIDIA DLSS, AMD FSR 4: vk_temporal.cpp) in place of the gameplay upscale network, when
 /// one is on and its inputs are as expected: the network's input as it samples it, its output's storage view
@@ -8545,7 +8595,8 @@ static bool temporal_rejected_network(VkCommandBuffer cmd, uint64_t key, Texture
     end_pass(cmd);
     VkFormat in_format = VK_FORMAT_UNDEFINED, out_format = VK_FORMAT_UNDEFINED;
     const VkImageView in_view = texture_view(src, in, nullptr, VK_IMAGE_VIEW_TYPE_2D, ViewUse::Sample, &in_format);
-    const bool rgba_pair = temporal_colour_pair(src->format, dst->format) && dst->format == VK_FORMAT_R16G16B16A16_SFLOAT;
+    const bool rgba_pair = (temporal_colour_pair(src->format, dst->format) || fsr3_inputs::colour_pair(src->format, dst->format)) &&
+                           dst->format == VK_FORMAT_R16G16B16A16_SFLOAT;
     const VkImageView out_view = texture_view(dst, out, nullptr, VK_IMAGE_VIEW_TYPE_2D, ViewUse::Storage, &out_format,
                                               rgba_pair ? VK_FORMAT_R16G16B16A16_SFLOAT : VK_FORMAT_B10G11R11_UFLOAT_PACK32);
     // (the gameplay networks' own formats: their input is the square root of the scene colour, which the fixed shares' networks
@@ -8553,7 +8604,8 @@ static bool temporal_rejected_network(VkCommandBuffer cmd, uint64_t key, Texture
     // both are what the temporal upscaler's prep pass takes. The movies' (RGBA8) are not the scene)
     const bool packed_pair = out_format == VK_FORMAT_B10G11R11_UFLOAT_PACK32 &&
                              (in_format == VK_FORMAT_B10G11R11_UFLOAT_PACK32 || in_format == VK_FORMAT_E5B9G9R9_UFLOAT_PACK32);
-    if (!in_view || !out_view || (!packed_pair && !temporal_colour_pair(in_format, out_format)))
+    if (!in_view || !out_view || (!packed_pair && !temporal_colour_pair(in_format, out_format) &&
+                                !fsr3_inputs::colour_pair(in_format, out_format)))
         return false;
     const bool done = temporal_upscale(cmd, key, false, src, in_view, dst, out_view, 0);
     last_dyn_valid = false, last_desc_valid = false, last_vb_valid = false, last_pipeline = VK_NULL_HANDLE;
@@ -8591,14 +8643,25 @@ static bool off_stand_in(VkCommandBuffer cmd, const NvnState& s, const Program& 
     Texture* out = nullptr;
     uint32_t level = 0;
     texture_view_of(out_handle, VK_IMAGE_VIEW_TYPE_2D, ViewUse::Storage, image_format(od.format), &out, &level);
-    if (!out || out->format != VK_FORMAT_B10G11R11_UFLOAT_PACK32) return false;
-    if (!known) {   // (another network of the upscale's shape: only the scene into the picture, the rest runs)
+    if (!out) return false;
+    // (Native PsychoV35: its RGBA16F scene into the RGBA16F picture, the typed upscale's RGBA16F shader, which decodes the
+    // network input's perceptual colour as the packed one does; never a pair of the two formats. After Longshot b80a68f1)
+    const bool rgba = out->format == VK_FORMAT_R16G16B16A16_SFLOAT && scene_tonemap_on();
+    if (out->format != VK_FORMAT_B10G11R11_UFLOAT_PACK32 && !rgba) return false;
+    const uint32_t in_handle = handle_of(s, st, st.info.texture_descriptors[0], 0);
+    if (!known || rgba) {   // (another network of the upscale's shape: only the scene into the picture, the rest runs)
         Texture* in = nullptr;
-        const uint32_t in_handle = handle_of(s, st, st.info.texture_descriptors[0], 0);
         if (in_handle) texture_view_of(in_handle, VK_IMAGE_VIEW_TYPE_2D, ViewUse::Sample, VK_FORMAT_UNDEFINED, &in);
-        if (!in || in->format != VK_FORMAT_B10G11R11_UFLOAT_PACK32 || (out->width >> level) <= in->width) return false;
+        if (!in || in->format != out->format) return false;
+        if (!known && (out->width >> level) <= in->width) return false;
     }
-    if (!typed_upscale(cmd, dw().imgs[0].imageView, dw().imgs[ntex].imageView, out, level, p.key, "Upscaler Off", false))
+    VkImageView input_view = dw().imgs[0].imageView, output_view = dw().imgs[ntex].imageView;
+    if (rgba) {
+        input_view = texture_view_of(in_handle, VK_IMAGE_VIEW_TYPE_2D, ViewUse::Sample, VK_FORMAT_R16G16B16A16_SFLOAT);
+        output_view = texture_view_of(out_handle, VK_IMAGE_VIEW_TYPE_2D, ViewUse::Storage, VK_FORMAT_R16G16B16A16_SFLOAT);
+        if (!input_view || !output_view) return false;
+    }
+    if (!typed_upscale(cmd, input_view, output_view, out, level, p.key, "Upscaler Off", false))
         return false;
     static std::mutex mu;
     static std::unordered_set<uint64_t> seen;
@@ -8621,9 +8684,22 @@ bool taau_stand_in(VkCommandBuffer cmd, const NvnState& s, const Program& p) {
     const uint32_t handle = handle_of(s, st, od, 0);
     if (!handle) return false;
     texture_view_of(handle, VK_IMAGE_VIEW_TYPE_2D, ViewUse::Storage, image_format(od.format), &out, &level);
-    if (!out || out->format != VK_FORMAT_B10G11R11_UFLOAT_PACK32) return false;
+    if (!out) return false;
+    VkImageView input_view = dw().imgs[0].imageView, output_view = dw().imgs[ntex].imageView;
+    if (out->format == VK_FORMAT_R16G16B16A16_SFLOAT && scene_tonemap_on()) {
+        const uint32_t input_handle = handle_of(s, st, st.info.texture_descriptors[0], 0);
+        Texture* input = nullptr;
+        if (!input_handle) return false;
+        texture_view_of(input_handle, VK_IMAGE_VIEW_TYPE_2D, ViewUse::Sample, VK_FORMAT_UNDEFINED, &input);
+        if (!input || input->format != VK_FORMAT_R16G16B16A16_SFLOAT) return false;
+        input_view = texture_view_of(input_handle, VK_IMAGE_VIEW_TYPE_2D, ViewUse::Sample, VK_FORMAT_R16G16B16A16_SFLOAT);
+        output_view = texture_view_of(handle, VK_IMAGE_VIEW_TYPE_2D, ViewUse::Storage, VK_FORMAT_R16G16B16A16_SFLOAT);
+        if (!input_view || !output_view) return false;
+    } else if (out->format != VK_FORMAT_B10G11R11_UFLOAT_PACK32) {
+        return false;
+    }
     const char* keys = getenv("RX_VK_TAAU_KEYS") ? getenv("RX_VK_TAAU_KEYS") : "fd029a317a9a4b94";
-    return typed_upscale(cmd, dw().imgs[0].imageView, dw().imgs[ntex].imageView, out, level, p.key, keys, true);
+    return typed_upscale(cmd, input_view, output_view, out, level, p.key, keys, true);
 }
 
 // ---- (TICK-038) resources: the pipelines the game binds (RX_VK_RES_LOG=1), and compute programs' shader modules let go ----

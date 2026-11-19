@@ -24,8 +24,9 @@ int framegen_now();
 /// refresh over 30, 2 to 4: how many are made depends on the game's rate)
 int framegen_engine(int* mult, bool* automatic);
 /// Records the frame's processing into the present's recording (src: the window texture's view, sw x sh, the crop
-/// x, y, w, h); false when interpolation cannot run (the present goes to the window as without it)
-bool framegen_record(VkCommandBuffer cmd, VkImageView src, uint32_t sw, uint32_t sh, const int crop[4]);
+/// x, y, w, h; native_pq: the encoding of that captured present, the game's PQ (Native HDR)); false when interpolation cannot run
+/// (the present goes to the window as without it)
+bool framegen_record(VkCommandBuffer cmd, VkImageView src, uint32_t sw, uint32_t sh, const int crop[4], bool native_pq);
 /// The first frame the last framegen_record made (null when it made none), w x h, GENERAL
 VkImage framegen_made_image(uint32_t* w, uint32_t* h);
 /// After that recording's submit (value): the display thread shows its frames

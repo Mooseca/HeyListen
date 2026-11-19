@@ -689,7 +689,7 @@ VkImage framegen_made_image(uint32_t* w, uint32_t* h) {
 /// present, a reset, anything not made), which leaves the set to the interpolation below. sequence: framegen_record's count
 /// of its presents (one it did not hand over, a gap among them, makes the next one a reset: vk_fsr3fi.h Inputs::sequence)
 int fsr3fi_frame(VkCommandBuffer cmd, OutSet& set, int cur, uint32_t uw, uint32_t uh, uint64_t sequence,
-                 const fsr3_inputs::Frame* taken) {
+                 const fsr3_inputs::Frame* taken, bool native_pq) {
     // (every 600 presents asked: how many FSR made, and how many it left to the interpolation below and why)
     static uint64_t asked = 0, made = 0, no_inputs = 0;
     if (++asked % 600 == 0)
@@ -702,6 +702,8 @@ int fsr3fi_frame(VkCommandBuffer cmd, OutSet& set, int cur, uint32_t uw, uint32_
     in.color = fg.frames[cur].view;
     in.color_image = fg.frames[cur].image;
     in.color_format = VK_FORMAT_R8G8B8A8_UNORM;   // (ensure_size, for fg.frames)
+    in.native_pq = native_pq;
+    in.max_luminance = native_pq ? (float)std::clamp(opts.hdr_peak, 400, 10000) : 1.0f;
     in.width = uw, in.height = uh;
     in.depth = f.depth, in.motion = f.motion;
     in.render_width = f.width, in.render_height = f.height;
@@ -763,7 +765,7 @@ int dlssg_frames(VkCommandBuffer cmd, OutSet& set, int cur, uint32_t uw, uint32_
     return n;
 }
 
-bool framegen_record(VkCommandBuffer cmd, VkImageView src, uint32_t sw, uint32_t sh, const int crop[4]) {
+bool framegen_record(VkCommandBuffer cmd, VkImageView src, uint32_t sw, uint32_t sh, const int crop[4], bool native_pq) {
     int x0 = 0, y0 = 0, w = (int)sw, h = (int)sh;
     if (crop && crop[2] > 0 && crop[3] > 0) x0 = crop[0], y0 = crop[1], w = crop[2], h = crop[3];
     w = std::min(w, (int)sw - x0), h = std::min(h, (int)sh - y0);
@@ -853,7 +855,7 @@ bool framegen_record(VkCommandBuffer cmd, VkImageView src, uint32_t sw, uint32_t
     const bool have_inputs = blend && m >= 2 && (dlssg || fsr_fi) && fsr3_inputs::take(inputs);
     if (!dlssg) dlss_fg_idle();   // (the row left at the renderer's own: its feature and memory given back)
     if (blend && m >= 2 && dlssg) set->made = dlssg_frames(cmd, *set, cur, uw, uh, m - 1, sequence, have_inputs ? &inputs : nullptr);
-    if (set->made == 0 && blend && fsr_fi) set->made = fsr3fi_frame(cmd, *set, cur, uw, uh, sequence, have_inputs ? &inputs : nullptr);
+    if (set->made == 0 && blend && fsr_fi) set->made = fsr3fi_frame(cmd, *set, cur, uw, uh, sequence, have_inputs ? &inputs : nullptr, native_pq);
     if (set->made == 0 && blend && m > 1) {
         pass(cmd, fg.flow, {{fg.lumas[prev].view, fg.nearest}, {fg.lumas[cur].view, fg.nearest},
                             {fg.flows[0].view, VK_NULL_HANDLE}}, cw, ch);
