@@ -266,6 +266,8 @@ void hos_log(const char *fmt, ...) {
 void hos_log_flush(void) {}
 /* (host/options_path.c: the run's settings file; none here, so the helper reads the game folder's, as a helper given none) */
 const char *hos_options_file(void) { return ""; }
+/* (host/hos_main.c: the crash record's lifted_code; the host's, not the helper's) */
+const char *hos_lift_key(void) { return "testlift01"; }
 static void note(const char *kind, const char *text) {
     const char *out = getenv("CRASH_TEST_OUT");
     FILE *f = out ? fopen(out, "ab") : NULL;
@@ -1039,7 +1041,8 @@ def behaviour(cc, tmp):
     exe = tmp / "driver"
     (tmp / "driver.c").write_text(DRIVER, encoding="utf-8")
     # (-x c before each file: g++ takes a single -x c for the first file only, and compiles the rest as C++)
-    sources = [tmp / "driver.c", ROOT / "host/hos_crash_dialog.c", ROOT / "host/hos_crash_record.c", ROOT / "host/hos_report_run.c"]
+    sources = [tmp / "driver.c", ROOT / "host/hos_crash_dialog.c", ROOT / "host/hos_crash_record.c", ROOT / "host/hos_crash_names.c",
+               ROOT / "host/hos_report_run.c"]
     subprocess.run([cc, "-std=gnu11", "-O1", "-Wall", "-Wextra", "-DHOS_CRASH_DIALOG_TEST", "-I", str(ROOT / "host"),
                     *(x for f in sources for x in ("-x", "c", str(f))), "-o", str(exe), "-pthread", "-ldl"], check=True, timeout=180)
     home = tmp / "home" / "private-user"
@@ -1161,7 +1164,9 @@ esac
         calls = (folder / "curl-calls.txt").read_text(encoding="utf-8").splitlines()
         assert calls == ["https://d.example/telemetry/crash"], "posted once, to the stamp's address: %s" % calls
         report = json.loads((folder / "sent.json").read_text(encoding="utf-8"))
-        assert sorted(report) == ["cpu", "crash", "gpu", "log_tail", "map", "options", "os", "release", "renderer", "version"]
+        assert sorted(report) == ["cpu", "crash", "gpu", "log_tail", "map", "options", "os", "release", "renderer", "signature",
+                                   "version"]
+        assert report["signature"] == "hookshot+0x1a2b", report
         assert (report["version"], report["release"], report["os"], report["map"]) == ("vtest-1", False, "Arch Linux", "Kokiri Forest")
         assert report["crash"] == ["CRASH: exception 0xc0000005 (read 0x8, guest 0x8) at hookshot+0x1a2b",
                                    "CRASH: host backtrace: hookshot+0x1a2b libc.so.6+0x10",

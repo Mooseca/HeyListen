@@ -1344,6 +1344,7 @@ static int build_report(const Shown *s, Buf *json, Buf *shown, const char **why)
     put_field(json, ",\n  ", "map", place, HOS_CRASH_MAX_MAP, s, devices, nd);
     put(json, ",\n  \"crash\": [");
     for (int i = 0; i < crash.n; i++) put_field(json, i ? ",\n    " : "\n    ", NULL, crash.at[i], HOS_CRASH_LINE_LIMIT, s, devices, nd);
+    put(json, crash.n ? "\n  ]" : "]");
     if (signature[0]) {
         char *j = (char *)malloc(strlen(signature) * 2 + 8);
         if (j) hos_crash_json(j, strlen(signature) * 2 + 8, signature), putf(json, ",\n  \"signature\": %s", j);

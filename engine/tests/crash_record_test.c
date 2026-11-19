@@ -216,10 +216,11 @@ int main(int argc, char **argv) {
     if (!strcmp(mode, "module-offsets")) {
         const uintptr_t pcs[] = {(uintptr_t)authored_context, (uintptr_t)malloc};
         for (unsigned i = 0; i < sizeof pcs / sizeof pcs[0]; ++i) {
-            Dl_info info; char name[160]; uint64_t offset = 0;
+            Dl_info info; char name[160]; uint64_t offset = 0; uintptr_t base = 0;
             assert(dladdr((const void *)pcs[i], &info));
-            assert(module_at(pcs[i], name, sizeof name, &offset));
+            assert(module_at(pcs[i], name, sizeof name, &offset, &base));
             assert(offset == pcs[i] - (uintptr_t)info.dli_fbase);
+            assert(base == (uintptr_t)info.dli_fbase);
         }
         /* Executable virtual offsets differ from file offsets by one page.
            Same basename/different path and a second instance must not alias. */
@@ -235,13 +236,14 @@ int main(int argc, char **argv) {
         File file = open_file(path, 1, 0); assert(file != NO_FILE);
         assert(write_file(file, maps, sizeof maps - 1));
         const int original = maps_fd; maps_fd = file;
-        char name[160]; uint64_t offset = 0;
+        char name[160]; uint64_t offset = 0; uintptr_t base = 0;
         poison_alloc = 1;
-        assert(module_at(0x102020, name, sizeof name, &offset) && offset == 0x2020 && !strcmp(name, "libgap.so"));
-        assert(module_at(0x202020, name, sizeof name, &offset) && offset == 0x2020);
-        assert(module_at(0x403020, name, sizeof name, &offset) && offset == 0x3020);
-        assert(!module_at(0x302020, name, sizeof name, &offset)); /* no offset-zero mapping: unknown, not a guessed base */
-        assert(!module_at(0x100020, name, sizeof name, &offset)); /* not executable */
+        assert(module_at(0x102020, name, sizeof name, &offset, &base) && offset == 0x2020 && base == 0x100000 &&
+               !strcmp(name, "libgap.so"));
+        assert(module_at(0x202020, name, sizeof name, &offset, &base) && offset == 0x2020 && base == 0x200000);
+        assert(module_at(0x403020, name, sizeof name, &offset, &base) && offset == 0x3020 && base == 0x400000);
+        assert(!module_at(0x302020, name, sizeof name, &offset, &base)); /* no offset-zero mapping: unknown, not a guessed base */
+        assert(!module_at(0x100020, name, sizeof name, &offset, &base)); /* not executable */
         poison_alloc = 0;
         maps_fd = original; close_file(file);
         hos_crash_clean_end(); return 0;
