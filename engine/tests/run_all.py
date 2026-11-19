@@ -51,6 +51,7 @@ ARGS = {
     "tests/test_scene_tonemap_pass.py": ["--cxx", "{cxx}"],
     "tests/test_output_encode_pass.py": ["--cxx", "{cxx}"],
     "tests/test_scene_format.py": ["--cc", "gcc"],
+    "tests/test_psychov35_dlss.py": ["--cxx", "{cxx}"],
     "tests/test_replay_copies.py": ["--cxx", "{cxx}"],
     "tests/test_png_publication.py": ["--cxx", "{cxx}"],
     "tests/test_framelog_sink.py": ["--cxx", "{cxx}", "--headers", "{vulkan_headers}"],

@@ -25,6 +25,9 @@ bool temporal_env_chosen();
 /// dispatches draw the plain upscale of the 3D (vk_draw.cpp off_stand_in). temporal_mode() is GAME then, so DLSS's and FSR 4's
 /// state is let go as on any switch to the game's own (temporal_idle)
 bool upscaler_off();
+/// (HeyListen, after Longshot 0edc1377 / fcf5c370) RGBA16F is a scene only under Native PsychoV35 with the engines that take it
+bool temporal_scene_format(VkFormat format);
+bool temporal_colour_pair(VkFormat input, VkFormat output);
 bool temporal_wanted();       // (temporal_mode() != GAME)
 /// DLAA or FSR's native anti-aliasing: the 3D drawn at full scale, whatever the Render resolution row says
 bool temporal_full_scale();
