@@ -197,6 +197,7 @@ case-sensitive, and an unknown one is ignored.
 | `RX_VK_ASYNC=1` | The replay on a thread of its own instead of the game's submitting thread |
 | `HOS_VCORES=0`, `HOS_CORES=<1..8>`, `HOS_RESERVE_CORE=0` | No virtual cores; the cores the game sees (6); no core kept for the replay (one is, with 8 or more logical processors) |
 | `HOS_VCORE_STARVE_US=<microseconds>` | A game thread that has waited this long for a virtual core (default 1000000, 1 s; 0: never) goes before every other waiter at the next release of a core it may use, and asks the holder to give the core up at its next checkpoint whatever the holder's priority, so a wait that better threads keep winning ends in a grant, not in the escape after 2 s (`HOS_VCORE_ESCAPE_US`, `HOS_VCORE_ESCAPE_EQ_US`). The `vcores:` line every 5 s counts these grants (`starved grants`) |
+| `HOS_OS_YIELD=1` | `nn::os::YieldThread` (and `SleepThread(0)`) hands the game's virtual core to a waiting game thread, as the console's yield does, and by default no longer also calls `SwitchToThread` (`host/hos_thread.c`): OoT yields after every job and actor callback, and on few cores the kernel time handing the processor over and taking it back came out of the frame (Longshot d10b62b3, #1663: 2.1 % and 1.7 % shorter frames on 4 cores, no difference on 16). `=1` brings the processor's yield back, as before. Longshot's numbers are theirs; HeyListen's A/B is in the port's report |
 
 ### Building
 
