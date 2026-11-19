@@ -75,9 +75,11 @@ int main() {
     {
         std::vector<Pass> more = kMarket;
         more.insert(more.begin() + 9, Pass{'R', kHalfCopy});
-        CHECK("one reader more: nowhere", play(more, t, f) == -1);
+        // ((HeyListen) matched by its program: it runs before the bloom there too, and the place kept: keep())
+        CHECK("one reader more: still before the bloom", play(more, t, f) == 14);
+        CHECK("kept", pb::keep(f, t) == t);
         const pb::Trigger m = pb::learn(f);
-        CHECK("learned there", m.valid && m.key == kBloom && m.place == 5);
+        CHECK("it would teach the new place", m.valid && m.key == kBloom && m.place == 5);
         CHECK("then before the bloom", play(more, m, f) == 14);
     }
     // ---- no reader after the last scene draw (a menu over the scene, no bloom): nothing learned ----
@@ -96,6 +98,42 @@ int main() {
         CHECK("fires", g.sampler(kBloom, at0));
         CHECK("then not again", !g.sampler(kBloom, at0) && !g.sampler(kBloom, at0));
         CHECK("ran at 0", g.ran && g.ran_at == 0);
+    }
+    // ---- (HeyListen) the place kept: keep() ----
+    {
+        // HeyListen's frame: draws into the scene after the bloom's first read and after the tone map's (from its log)
+        static const std::vector<Pass> kHeyListen = {
+            {'D', 0}, {'R', kQuarterCopy}, {'D', 0}, {'R', kHalfCopy}, {'D', 0}, {'R', kHalfCopy}, {'D', 0},
+            {'R', kQuarter2}, {'D', 0}, {'R', kBloom}, {'D', 0}, {'R', kMapping}, {'D', 0},
+        };
+        CHECK("HeyListen's frame teaches nothing", play(kHeyListen, {}, f) == -1 && !pb::learn(f).valid);
+        CHECK("...and keeps nothing", !pb::keep(f, {}).valid);
+        CHECK("with the place: before the bloom", play(kHeyListen, t, f) == 9);
+        CHECK("late", f.late);
+        CHECK("late: the place kept", pb::keep(f, t) == t);
+        for (int i = 0; i < 100; i++) {   // (frame after frame: no change, no flicker)
+            CHECK("every frame before the bloom", play(kHeyListen, t, f) == 9);
+            CHECK("kept", pb::keep(f, t) == t);
+        }
+        // a frame without the bloom (a menu over the scene): nowhere, the place kept for after it
+        const std::vector<Pass> menu = {{'D', 0}, {'R', kQuarterCopy}, {'D', 0}};
+        CHECK("a menu: nowhere", play(menu, t, f) == -1);
+        CHECK("a menu: kept", pb::keep(f, t) == t);
+        // the tone map's read learned first (a frame drawing into the scene up to it): an earlier place learned replaces it
+        const pb::Trigger mapping{kMapping, 5, true};
+        CHECK("at the tone map", play(kMarket, mapping, f) == 14);
+        CHECK("not late", !f.late);
+        CHECK("the bloom's place taught: taken", pb::keep(f, mapping) == t);
+        // where it ran before the bloom, the tone map's place a frame teaches does not move it later
+        pb::Frame g;
+        g.scene_draw(), (void)g.sampler(kQuarterCopy, t);   // (a frame: the bloom's read missing, the tone map after a draw)
+        g.scene_draw(), (void)g.sampler(kMapping, t);
+        CHECK("not fired", !g.ran);
+        CHECK("another area's place: taken", pb::keep(g, t).key == kMapping);
+        pb::Frame h;
+        h.scene_draw(), (void)h.sampler(kBloom, t);
+        h.scene_draw(), (void)h.sampler(kMapping, t);
+        CHECK("fired, then late", h.ran && h.late && pb::keep(h, t) == t);
     }
     // ---- more readers than the list holds: the place past it is not learned, one inside it is ----
     {

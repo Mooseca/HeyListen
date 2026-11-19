@@ -973,13 +973,10 @@ bool pre_fail(const char* why) {
 /// (after Longshot a7621bd7) At the frame's end (its gameplay upscale): the place of the next frame's DLAA before the bloom
 /// (pre_bloom.h learn), logged when it changes (the first 20 times, then every 600th)
 void pre_learn(State& s) {
-    const pre_bloom::Trigger t = pre_bloom::learn(s.pre);
+    const pre_bloom::Trigger t = pre_bloom::keep(s.pre, s.pre_trigger);   // ((HeyListen) the place kept: pre_bloom.h)
     static uint64_t changes = 0;
     if (!(t == s.pre_trigger) && (changes++ < 20 || changes % 600 == 0)) {
-        if (s.pre.late)
-            logf("vk: NVIDIA DLAA: the scene was drawn into after it ran before the bloom (frame %llu): the next frame runs it "
-                 "at the game's upscale", (unsigned long long)texture_frame_no());
-        else if (t.valid)
+        if (t.valid)
             logf("vk: NVIDIA DLAA: the first pass to read the scene after its last draw is program %016llx, the scene's "
                  "reader %u of %u (in play, the bloom's first): DLAA runs before it",
                  (unsigned long long)t.key, t.place + 1, s.pre.samplers);
@@ -987,6 +984,11 @@ void pre_learn(State& s) {
             logf("vk: NVIDIA DLAA: no pass read the scene after its last draw this frame (%u readers): DLAA runs at the game's "
                  "upscale", s.pre.samplers);
     }
+    static uint64_t kept_late = 0;   // ((HeyListen) the place kept over a draw into the scene after DLAA: pre_bloom.h keep())
+    if (s.pre.late && s.pre_trigger.valid && (kept_late++ < 5 || kept_late % 3600 == 0))
+        logf("vk: NVIDIA DLAA: the scene was drawn into after it ran before the bloom (frame %llu, %llu times so far): those "
+             "draws are not anti-aliased, and the next frame runs it at the same place", (unsigned long long)texture_frame_no(),
+             (unsigned long long)kept_late);
     s.pre_trigger = t;
 }
 

@@ -18,6 +18,13 @@
 // the sampler with that place and program. A frame whose passes differ (the first one, another area, a menu over the scene)
 // meets no such sampler: its DLAA runs at the gameplay upscale as before, and it teaches the next frame. A draw into the scene
 // after DLAA ran (late) teaches nothing: the next frame runs DLAA at the gameplay upscale and teaches the one after.
+//
+// (HeyListen) A learned place is kept (keep()): matched by its program wherever it comes in the list, and left only for an
+// earlier one a frame teaches. HeyListen's frames draw into the scene after its bloom starts reading it (40 to 75 draws, and
+// 15 to 25 after the tone map's read; a sword swing's trail among them), so most of them teach nothing, and a reader now and
+// then falls on the other side of the frame's end, moving the bloom's place. Re-learned every frame as above, DLAA ran before
+// the bloom in 1 to 3% of the frames and at the gameplay upscale in the rest, its history restarting at each change: the
+// picture flickered (on every sword swing). Those late draws are drawn after DLAA, as in Longshot's frames that have them.
 #pragma once
 
 #include <cstdint>
@@ -53,7 +60,7 @@ struct Frame {
         const uint32_t at = samplers;
         if (at < kSamplers) keys[at] = key;
         samplers = at + 1;
-        if (ran || !t.valid || at != t.place || key != t.key) return false;
+        if (ran || !t.valid || key != t.key) return false;   // ((HeyListen) its program, at whatever place: keep())
         ran = true, ran_at = at;
         return true;
     }
@@ -65,6 +72,17 @@ inline Trigger learn(const Frame& f) {
     Trigger t;
     if (f.late || f.before_last >= f.samplers || f.before_last >= kSamplers) return t;
     t.key = f.keys[f.before_last], t.place = f.before_last, t.valid = true;
+    return t;
+}
+
+/// (HeyListen) At the frame's end: the next frame's trigger, the current one kept. A frame that teaches nothing (a late draw,
+/// no reader after the last draw into the scene: a menu, a sword swing) keeps it; one where it did not fire (another area's
+/// passes) takes what it teaches; one where it fired changes it only for an earlier reader that frame teaches (closer to the
+/// last draw into the scene: the bloom's first draw rather than the tone map's)
+inline Trigger keep(const Frame& f, const Trigger& current) {
+    const Trigger t = learn(f);
+    if (!t.valid) return current;
+    if (current.valid && f.ran && t.place >= f.ran_at) return current;
     return t;
 }
 
