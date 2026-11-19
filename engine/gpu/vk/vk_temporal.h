@@ -5,6 +5,7 @@
 // (NVIDIA DLSS: vk_dlss.cpp; AMD FSR 4: vk_fsr4.cpp) only turns those inputs into the picture.
 #pragma once
 
+#include <vector>
 #include <cstdint>
 #include <functional>
 
@@ -57,6 +58,21 @@ struct SkinnedDraw {
     uint64_t program = 0;
 };
 void temporal_note_skinned_draw(const SkinnedDraw& k);
+
+/// (HeyListen, after Longshot a7621bd7 / 5e33d3b7 / 83b161e3) NVIDIA DLAA before the game's bloom and tone map (pre_bloom.h
+/// has where and why): with DLAA and the Graphics tab's DLAA before the bloom row on only (RX_VK_DLSS_PRE_BLOOM over it); off,
+/// DLAA stays at the gameplay upscale. A draw of program key that samples what its descriptors list (sampled: vk_draw.cpp
+/// gfx_sampled) and draws into colors (n of them): the frame's passes for the learning, and at the learned one DLAA on the
+/// scene's linear colour, its picture written back into the scene before that draw reads it (outside a pass: the open one is
+/// ended first). The gameplay upscale then copies its input (temporal_upscale). Without DLAA or for a draw that neither reads
+/// nor writes the scene it costs two atomic loads and a look through the lists. True: it recorded commands of its own (the
+/// pass ended, DLAA's passes and its actor motion's draws, whether DLAA then drew or not): the pipeline, viewport, vertex
+/// streams and descriptors bound are not the draw's any more (vk_draw.cpp: bound().reset())
+bool temporal_pre_bloom(VkCommandBuffer cmd, uint64_t key, const std::vector<const Texture*>& sampled, Texture* const* colors,
+                        int n);
+/// (after Longshot a7621bd7) The engine takes the scene's linear colour before the tone map (temporal_pre_bloom wanted now,
+/// for this mode): DLSS makes its feature for HDR colour then, with its own exposure (vk_dlss.cpp prepare)
+bool temporal_hdr_input();
 
 /// A gameplay upscale's dispatch (program `key`; vk_draw.cpp's temporal_stand_in finds them: the 4/3 network fd029a317a9a4b94
 /// at the game's usual 3/4, the same-size pass 9dc98871eb7fc101 at full size, and one network of its own for each other

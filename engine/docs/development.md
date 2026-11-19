@@ -70,6 +70,15 @@ true, and dead code elimination removes the grid walk, so every meshlet is drawn
 screen. It costs some GPU time on cards that cull quickly, so it is off unless set. The log says
 "culling off, every meshlet drawn" for each task shader it changed.
 
+NVIDIA DLAA before the game's bloom and tone map (HeyListen, after Longshot a7621bd7, 5e33d3b7, 83b161e3): the Graphics
+tab's DLAA before the bloom row (off by default; `RX_VK_DLSS_PRE_BLOOM=1` / `0` over it for one run) runs DLAA on the scene's
+linear colour at the first draw that reads the scene after its last draw into it (the bloom's first, learned from the frame
+before: `gpu/vk/pre_bloom.h`), with an HDR DLSS feature, and writes its picture back into the scene; the gameplay upscale
+then only copies its input. A frame with no learned place, or one that does not match, runs DLAA at the gameplay upscale as
+before, the reason in the log (`vk: NVIDIA DLAA: not before the bloom this frame`). DLAA only (DLSS's other modes draw the
+scene smaller than the output), and not with the parallel replay (`RX_VK_PARALLEL=2` and more). With PsychoV35, its RGBA16F
+scene is taken the same way, linear. `RX_VK_DLSS_HDR=0` keeps it at the gameplay upscale (it needs the HDR feature).
+
 Native HDR PsychoV35 takes the RGBA16F scene path by default (HeyListen, after Longshot b80a68f1, #608) with DLSS/DLAA, AMD
 FSR 4 (and its Native AA) and FSR 3.1, which goes on the temporal chain while PsychoV35 is on (`RX_VK_FSR3_CHAIN`).
 `RX_VK_PSYCHOV35_DLSS=0` turns that route off for troubleshooting; unset, empty or nonzero leaves it on. It is read once per

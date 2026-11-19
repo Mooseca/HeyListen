@@ -52,6 +52,7 @@ ARGS = {
     "tests/test_output_encode_pass.py": ["--cxx", "{cxx}"],
     "tests/test_scene_format.py": ["--cc", "gcc"],
     "tests/test_psychov35_dlss.py": ["--cxx", "{cxx}"],
+    "tests/test_dlss_pre_bloom.py": ["--cxx", "{cxx}"],
     "tests/test_psychov35_default.py": ["--cxx", "{cxx}"],
     "tests/test_psychov35_fsr3.py": ["--cxx", "{cxx}"],
     "tests/test_psychov35_fsr3_fg.py": ["--cxx", "{cxx}"],

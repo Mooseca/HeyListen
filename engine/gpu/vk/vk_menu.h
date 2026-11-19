@@ -36,6 +36,8 @@ struct Options {
                           // native), 6 Off. upscaler_rows.h; vk_temporal.cpp. Saved as dlss
     int dlss_model = 0;   // DLSS's network for every mode, by its preset: 0 DLSS 4 (K), 1 DLSS 4.5 (M), 2 DLSS 4.5 (L), 3 NVIDIA's default, 4 DLSS 3 (CNN, E) (upscaler_rows.h
                           // model_preset; vk_dlss.cpp). First run on an NVIDIA GPU: menu_first_run_model. RX_VK_DLSS_PRESET over it
+    int dlss_pre_bloom = 0;   // (HeyListen, after Longshot 83b161e3) DLAA before the bloom: 0 off (DLAA after the game's bloom
+                              // and tone map), 1 on (vk_temporal.cpp pre_bloom_wanted; DLAA only). RX_VK_DLSS_PRE_BLOOM over it
     int sharpness = 0;    // 0 to 100
     int fps_limit = 0;    // the rate presented, the game's frames and the made ones (Real time only): 0 60, 1 90, 2 120, 3 144, 4 165, 5 240, 6 Unlimited
                           // (framegen_rows.h; host/nn_vi.c; HOS_FPS_LIMIT)

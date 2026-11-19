@@ -7645,9 +7645,15 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
     texture_watch_prog(p.key);
     if (!same_desc) gfx_sampled() = draw_sampled();
     hdr_find(s, p, at);   // (RX_VK_HDR_FIND)
-    if (!d.mesh && hdr_tonemap_wanted() && hdr_tonemap_key(p.key) && hdr_tonemap_draw(cmd, s, p, at)) {   // (heylisten: the HDR row's tone mapper)
-        st_draws++;
-        return;
+    // (HeyListen, after Longshot a7621bd7 / 83b161e3) NVIDIA DLAA before the game's bloom and tone map: the frame's draws into
+    // the scene and those that read it, and at the bloom's first draw DLAA on the scene, before this draw reads it
+    // (vk_temporal.cpp, pre_bloom.h). Its passes and its actor motion's draws bound a pipeline, a viewport, vertex streams and
+    // descriptors of their own: this draw sets all of its again, as after the network's stand-in (temporal_stand_in). Kept, a
+    // draw of the scene's size took the actor motion's upright viewport for the game's upside-down one (Longshot #1672)
+    const bool pre_recorded = temporal_pre_bloom(cmd, p.key, gfx_sampled(), at.color, at.n);
+    if (pre_recorded) {
+        last_dyn_valid = false, last_vb_valid = false, last_pipeline = VK_NULL_HANDLE;
+        vertex_set.on = false, last_ib.on = false;
     }
     static const bool barrier_every = getenv("RX_VK_BARRIER_EVERY_DRAW") != nullptr;   // (an experiment: a pass each)
     if (barrier_every) end_pass(cmd);
@@ -7745,7 +7751,7 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
         if (res_log_on()) res_note_pipeline_use(pl);   // (TICK-038)
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pl), last_pipeline = pl;
     }
-    if (!same_desc) {
+    if (!same_desc || pre_recorded) {   // (after DLAA's commands its pushes are gone: temporal_pre_bloom)
         FINE_SCOPE(FT_BINDDESC);
         if (!bind_descriptors(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, p)) SKIP_HERE();
         last_desc_valid = true, last_desc_prog = &p, last_desc_bind = s.bind_gen, last_desc_reg = reg_gen;

@@ -145,9 +145,9 @@ def main():
     if "fsr3_engine()" not in function(temporal, "Engine& engine_of("):
         raise SystemExit("engine_of has no slot for FSR 3.1's engine")
     # The chain's depth is reversed for FSR 3.1 (the prep's bit 3, from fsr_flip): the frame says so, for whatever else reads it
-    upscale = function(temporal, "bool temporal_upscale(")
+    upscale = function(temporal, "bool draw_engine(")   # (the engine's evaluation, after Longshot a7621bd7)
     if "(fsr_flip ? 8 : 0)" not in upscale or "f.depth_reversed = fsr_flip;" not in upscale:
-        raise SystemExit("temporal_upscale reverses the depth without saying so in the frame (TemporalFrame::depth_reversed)")
+        raise SystemExit("draw_engine reverses the depth without saying so in the frame (TemporalFrame::depth_reversed)")
     # (HeyListen has no DLSS Frame Generation: upstream's check of its depth convention is not here.) FSR 3.1 goes on the chain only
     # while PsychoV35 is on, unless RX_VK_FSR3_CHAIN says otherwise
     if "return env > 0 || (env != 0 && scene_tonemap_on());" not in function(fsr3, "bool fsr3_on_chain() {"):
