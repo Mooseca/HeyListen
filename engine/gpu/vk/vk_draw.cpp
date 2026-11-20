@@ -7006,8 +7006,54 @@ bool fallback_pipelines_ready(Program& p) {
     return !p.fallback_compute.empty();
 }
 
+/// (hookshot 9f8d336d, issue 640, RX_VK_LOG_FALLBACK=1, off by default) What the fallback's mesh draws ask for against what it runs:
+/// task workgroups (or mesh workgroups without a task) asked, and the most one dispatch holds here (the slots: capacity, over a task's
+/// threads), the draws that ask for more, the indirect ones and their entries past the first. The indirect counts are read from
+/// guest memory as the CPU sees them (the GPU's culling may have written others since). 30 draws that ask for more are named, then
+/// a line every 4000 fallback draws. Upstream's slots held 1024: its Kokiri Forest cut 3149 of 192000 draws; here, 65535
+void fallback_note(const Program& p, const DrawArgs& d, uint32_t capacity) {
+    static const bool on = getenv("RX_VK_LOG_FALLBACK") && atoi(getenv("RX_VK_LOG_FALLBACK")) != 0;
+    if (!on) return;
+    const uint32_t threads = p.fallback_task ? std::max(1u, p.fallback_task_threads) : 1u;
+    const uint32_t most = p.fallback_task ? std::max(1u, capacity / threads) : capacity;   // (workgroups one dispatch runs)
+    uint64_t asked = 0, run = 0;
+    uint32_t entries = 1;
+    if (d.indirect) {
+        entries = (uint32_t)std::max(d.max, 1);
+        const uint32_t stride = d.stride > 0 ? (uint32_t)d.stride : 8;
+        for (uint32_t i = 0; i < std::min(entries, 64u); i++) {
+            uint32_t count = 0;
+            host->gpu_read(d.indirect + (uint64_t)i * stride, &count, 4);
+            asked += count;
+            if (i == 0) run = std::min(count, most);
+        }
+    } else {
+        asked = (uint32_t)std::max(d.groups[0], 0);
+        run = std::min<uint64_t>(asked, most);
+    }
+    static std::atomic<uint64_t> draws{0}, cut{0}, indirect{0}, multi{0}, asked_all{0}, run_all{0}, most_asked{0};
+    const uint64_t n = ++draws;
+    indirect += d.indirect != 0, multi += entries > 1, asked_all += asked, run_all += run;
+    uint64_t was = most_asked.load();
+    while (asked > was && !most_asked.compare_exchange_weak(was, asked)) {}
+    if (asked > run) {
+        static std::atomic<int> told{0};
+        cut++;
+        if (told++ < 30)
+            logf("vk: fallback: draw of %016llx cut: %s%s, %llu %s workgroups asked in %u entr%s, %llu run (a dispatch holds %u; groups word %d)",
+                 (unsigned long long)p.key, d.indirect ? "indirect" : "direct", p.fallback_task ? ", task" : "", (unsigned long long)asked,
+                 p.fallback_task ? "task" : "mesh", entries, entries == 1 ? "y" : "ies", (unsigned long long)run, most, d.groups[0]);
+    }
+    if (n % 4000 == 0)
+        logf("vk: fallback: %llu mesh draws, %llu cut, %llu indirect (%llu with more than one entry); workgroups asked %llu, run %llu, "
+             "largest draw %llu", (unsigned long long)n, (unsigned long long)cut.load(), (unsigned long long)indirect.load(),
+             (unsigned long long)multi.load(), (unsigned long long)asked_all.load(), (unsigned long long)run_all.load(),
+             (unsigned long long)most_asked.load());
+}
+
 /// The dispatches of a mesh draw, outside any render pass, and the vertex count its graphics draw then covers.
 bool fallback_record(VkCommandBuffer cmd, Program& p, const DrawArgs& d) {
+    fallback_note(p, d, Shader::Backend::SPIRV::MESH_FALLBACK_CAPACITY);
     if (d.count_addr) {   // (more than one draw in the records: each its own dispatch, not one)
         static std::atomic<int> told{0};
         if (told++ < 2) logf("vk: fallback: a mesh draw with a count buffer is left out (issue 640)");
