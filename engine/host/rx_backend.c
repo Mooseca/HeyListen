@@ -574,13 +574,27 @@ static int texels_keep_core(void) {
     if (keep < 0) keep = env_on("HOS_TEXELS_KEEP_CORE");
     return keep;
 }
+/* (HeyListen, v0.4.4, RX_VK_RELEASE_HINT / HOS_RELEASE_KEEP_CORE) A texture's or a program's release, with the replay not
+   asynchronous, drains the stopped queues under the order lock and takes the replay's lock: behind a whole submission being
+   replayed, 2 s with an RX 580's pipeline compiles (OptimizeChangeBanc held core 4 for 2.0-2.5 s inside hookshot_vk.dll,
+   issue 67), and every game thread allowed on that core waited for it. The thread gives its core up for the call when the
+   back end says the call would wait (nvn_release_may_wait: a lock held now); releases are thousands a load, so a call
+   with the locks free keeps the core and pays nothing. HOS_RELEASE_KEEP_CORE=1: kept always, as before */
+static int release_gives_core(void) {
+    static int off = -1;
+    if (off < 0) off = env_on("HOS_RELEASE_KEEP_CORE");
+    if (off || !vk) return 0;
+    return !vk->nvn_release_may_wait || vk->nvn_release_may_wait();
+}
 void rx_nvn_texture_released(const nvn_tex *t) {
     if (!started && t) {
         early_call c = {3, 0};
         c.t = *t;
         if (keep_early(&c)) return;
     }
+    const int away = release_gives_core() ? hos_vcore_away() : 0;
     vk ? vk->nvn_texture_released(t) : wgr_nvn_texture_released(t);
+    if (away) hos_vcore_back();
 }
 void rx_nvn_texture_created(const nvn_tex *t) {
     if (!started && t) {
@@ -590,7 +604,11 @@ void rx_nvn_texture_created(const nvn_tex *t) {
     }
     if (vk && vk->nvn_texture_created) vk->nvn_texture_created(t);
 }
-void rx_nvn_program_released(const nvn_prog *p) { vk ? vk->nvn_program_released(p) : wgr_nvn_program_released(p); }
+void rx_nvn_program_released(const nvn_prog *p) {
+    const int away = release_gives_core() ? hos_vcore_away() : 0;   /* (the replay may be translating it: as texture releases) */
+    vk ? vk->nvn_program_released(p) : wgr_nvn_program_released(p);
+    if (away) hos_vcore_back();
+}
 void rx_nvn_read_texels(const nvn_tex *t, unsigned level, unsigned layer0, const NVNcopyRegion *r, uint8_t *dst,
                         size_t row, size_t img) {
     /* (the back end's texel copies take replay_mu, which the replay holds through a whole submission: hundreds of ms while

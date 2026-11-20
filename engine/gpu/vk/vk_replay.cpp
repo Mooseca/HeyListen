@@ -7159,7 +7159,24 @@ struct ParBlock {
 };
 ParBlock par_blocks[kParBlocks];
 thread_local int par_seg_draw = -1;     // (draws begun in the thread's segment; -1: not in one)
+/// (HeyListen, v0.4.4, RX_VK_RELEASE_HINT=0 turns the hint off: the host gives its core up for every release) Whether a texture's or a
+/// program's release called now would wait: the replay not asynchronous (its release drains the stopped queues under sync_order_mu
+/// and takes replay_mu, behind a whole submission being replayed) and one of the two locks held at this moment. The host
+/// (host/rx_backend.c release_gives_core) gives its thread's virtual core up around the call only then: with an RX 580's slow pipeline
+/// compiles OptimizeChangeBanc held a core for 2-2.5 s inside these (issue 67), and releases are thousands a load, so a call
+/// with the locks free must not pay a give-up. A best-effort look: a lock taken just after it is waited for with the core held
+static int release_may_wait() {
+    static const bool hint = !getenv("RX_VK_RELEASE_HINT") || atoi(getenv("RX_VK_RELEASE_HINT")) != 0;
+    if (!hint) return 1;
+    if (async_on()) return 0;   // (a job queued: nothing waited for here)
+    if (!sync_order_mu.mu.try_lock()) return 1;
+    sync_order_mu.mu.unlock();
+    if (!replay_mu.try_lock()) return 1;
+    replay_mu.unlock();
+    return 0;
+}
 thread_local int64_t par_block_t0 = 0, par_block_locks = 0;
+    t.nvn_release_may_wait = release_may_wait;
 thread_local int64_t par_first_draw = 0, par_last_draw = 0;
 std::atomic<int64_t> par_parts[6];   // (setup, lead, draws, tail, finish ns; segments)
 void par_block_close(int draws) {
