@@ -30,6 +30,19 @@ int main() {
     CHECK(low_commit(3071, kDefaultReserveMB));
     CHECK(!low_commit(3072, kDefaultReserveMB));
     CHECK(!low_commit(0, 0));
+    // (the prediction in play: two workers unless asked, never more than the CPUs, never none)
+    CHECK(play_workers(16, nullptr) == 2);
+    CHECK(play_workers(16, "") == 2);
+    CHECK(play_workers(16, "4") == 4);
+    CHECK(play_workers(16, "0") == 1);
+    CHECK(play_workers(1, nullptr) == 1);
+    CHECK(play_workers(3, "8") == 3);
+    CHECK(play_workers(16, "x") == 2);
+    // (and it waits while the PC has less than its free memory available; 0 never waits)
+    CHECK(low_memory(0, kDefaultPlayFreeMB));
+    CHECK(low_memory(6143, kDefaultPlayFreeMB));
+    CHECK(!low_memory(6144, kDefaultPlayFreeMB));
+    CHECK(!low_memory(0, 0));
     std::printf("predict_limits: %d failures\n", bad);
     return bad ? 1 : 0;
 }
