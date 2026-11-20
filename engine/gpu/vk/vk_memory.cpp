@@ -41,6 +41,7 @@
 #include "capture_merge.h"    // (TICK-043: the capture copied ahead)
 #include "mirror_inherit.h"   // (TICK-036 / #1127: what a new mirror takes from the retired pools' mirrors)
 #include "msync_diff.h"       // (TICK-048: the mirror syncs' diff)
+#include "wb_pool_eager.h"   // (issue 50: a CPU write makes a lazy pool eager, RX_VK_WB_POOL_EAGER)
 #include "gone_ring.h"        // (TICK-052: the recording threads' pool table)
 #include "shaders/msync_scatter_comp_spv.h"   // (TICK-021: the mirror syncs' scatter copy)
 #ifdef __linux__
@@ -4343,6 +4344,27 @@ bool wb_lazy_on() {
     static const bool v = !getenv("RX_VK_WB_EAGER") || getenv("RX_VK_WB_EAGER")[0] == '0';
     return v;
 }
+// (issue 50, RX_VK_WB_POOL_EAGER, on by default; =0 off) The comment above says a CPU write makes the whole game pool eager for
+// good, but the code only wrote that page back: a pool whose GPU words are left out (a particle effect's state, issue 50's cut
+// grass) and whose other pages the CPU writes later (a batch appended on each cut) had the CPU's page copied from guest memory
+// over the GPU's words in the mirror, the effect's state back at its first values: debris drawn at the first cut's place,
+// batches piling up. Now the first CPU write to a page of a game pool makes the pool eager, as the comment says.
+// (issue 50, RX_VK_WB_SMALL_EAGER_KB, default 4096; 0 off) Leaving a pool's GPU writes in the mirror pays only for big pools (the
+// 69 MB a frame of Hyrule Field). A small pool both sides write (the cut-grass debris' state in pools of 8 KB, a vegetation's
+// culling counts) lost its GPU words the first time the CPU wrote a page of it: the sync copied the page from guest memory over
+// them, the effect's state at its first values (leaves at the first cut's place), the counts at zero (every plant gone for a few
+// frames after a cut). Pools under this size are written back always, as the console's cache does for the CPU.
+uint64_t wb_small_eager_bytes() {
+    static const uint64_t v = [] {
+        const char* e = getenv("RX_VK_WB_SMALL_EAGER_KB");
+        return (e ? (uint64_t)strtoull(e, nullptr, 10) : 4096ull) << 10;
+    }();
+    return v;
+}
+bool wb_pool_eager_on() {
+    static const bool v = !getenv("RX_VK_WB_POOL_EAGER") || atoi(getenv("RX_VK_WB_POOL_EAGER")) != 0;
+    return v;
+}
 NvnPool* nvn_pool_at(uint64_t g, uint64_t* lo) {   // (nvn_pools_mu held)
     auto it = nvn_pools.upper_bound(g);
     if (it == nvn_pools.begin()) return nullptr;
@@ -4424,6 +4446,7 @@ void lazy_cpu_page(uint64_t page) {
             logf("vk: write-backs: page %#llx (pool flags %#x) written by the CPU after its GPU writes were left out: written back "
                  "from now on", (unsigned long long)(page << kPageShift), np->flags);
     }
+    if (wb_pool_eager::cpu_write_makes_eager(np->eager, wb_pool_eager_on())) nvn_pools_eager(page << kPageShift, (page + 1) << kPageShift, true);   // (issue 50: the whole pool)
 }
 // (TICK-056, RX_VK_MSYNC_FAST) lazy_cpu_page for a mirror sync's dirty pages at once, in their order: the lock taken once, and the
 // game pool looked up only when a page leaves the last one found (a sync's pages are in address order). The same sets result.
@@ -4463,6 +4486,7 @@ void lazy_cpu_pages(const std::vector<uint32_t>& pages) {
                 logf("vk: write-backs: page %#llx (pool flags %#x) written by the CPU after its GPU writes were left out: written back "
                      "from now on", (unsigned long long)g, np->flags);
         }
+        if (wb_pool_eager::cpu_write_makes_eager(np->eager, wb_pool_eager_on())) nvn_pools_eager(g, g + 4096, true);   // (issue 50: the whole pool; np->eager now: its next pages skip)
     }
 }
 // (the runs of p to copy back: the parts left out removed)
@@ -4487,7 +4511,7 @@ void lazy_filter(Pool& p, std::vector<VkBufferCopy>& runs) {
                 seg_end = std::min(end, np->hi);
                 // (CPU_NO_ACCESS 0x1 or CPU_CACHED 0x4, not CPU_UNCACHED 0x2)
                 const bool may_defer = (np->flags & (0x1u | 0x4u)) &&
-                                      !(np->flags & 0x2u);
+                                      !(np->flags & 0x2u) && wb_pool_eager::may_defer_size(np->hi - lo, wb_small_eager_bytes());   // (issue 50: not a small pool)
                 if (!np->eager && may_defer) {
                     if (!np->first_wb) np->first_wb = mirror_epoch + 1;
                     why = mirror_epoch + 1 - np->first_wb < kLazyWarm ? 4 : 5;
