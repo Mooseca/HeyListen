@@ -64,7 +64,7 @@ def main():
                  'std::clamp(atoi(getenv("RX_VK_IMPORT_LOW")), 10, 95) : 75;'):
         if want not in l:
             raise SystemExit("FAIL: Linux idle imports changed: missing " + want)
-    if "const bool on = env_high || budget < (12ull << 30);" not in idle:
+    if "small = env_high || budget < (12ull << 30);" not in idle:
         raise SystemExit("FAIL: the small-budget rule for idle imports is gone")
 
     imp = block(text, "bool import_pool(uint64_t lo, uint64_t hi, Pool& p) {")
