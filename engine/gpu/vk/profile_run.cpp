@@ -79,6 +79,7 @@ bool make_pool() {
     vkGetPhysicalDeviceQueueFamilyProperties(dev.physical, &n, nullptr);
     std::vector<VkQueueFamilyProperties> q(n);
     vkGetPhysicalDeviceQueueFamilyProperties(dev.physical, &n, q.data());
+    if (!dev.vk12.hostQueryReset) return false;   // (the pool is reset from the host after a read-back)
     if (dev.queue_family >= n || !q[dev.queue_family].timestampValidBits || dev.props.limits.timestampPeriod <= 0) return false;   // (no timestamps on the queue: no gpu block)
     const uint32_t bits = q[dev.queue_family].timestampValidBits;
     ts_mask = bits >= 64 ? ~0ull : ((1ull << bits) - 1);

@@ -63,7 +63,7 @@ def check_software_renderers(vk, main_src, pick):
                       ("ExitProcess(3);", "exit code 3, as no usable Vulkan")):
         if need not in stop:
             raise SystemExit("host_no_usable_gpu: %s is missing (%s)" % (need, why))
-    if not re.search(r"host_out_of_memory,\s*host_no_usable_gpu,\s*\};", rx):
+    if not re.search(r"host_out_of_memory,\s*host_no_usable_gpu,\s*(?:\w+,\s*)*\};", rx):
         raise SystemExit("vk_host does not fill no_usable_gpu after out_of_memory")
     hos = (ROOT / "host" / "hos_main.c").read_text(encoding="utf-8")
     if "no usable Vulkan here" not in hos or "return 3;" not in hos[hos.index("no usable Vulkan here"):][:200]:

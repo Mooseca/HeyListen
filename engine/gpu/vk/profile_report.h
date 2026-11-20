@@ -139,7 +139,7 @@ inline Module module_bucket(const std::string& file_name, bool exports_icd) {
 inline Module engine_bucket(const std::string& name) {
     const std::string n = lower(name);
     if (starts(n, "hl::") || starts(n, "hl_") || n.find("::hl::") != std::string::npos || starts(n, "_zn2hl")) return kNativeEngine;
-    if (starts(n, "nn_audio") || starts(n, "hos_audio") || starts(n, "opus_") || starts(n, "celt_") || starts(n, "silk_") ||
+    if (starts(n, "nn_audio") || starts(n, "opus_") || starts(n, "celt_") || starts(n, "silk_") ||
         n.find("audio") != std::string::npos)
         return kAudio;
     return kHost;
