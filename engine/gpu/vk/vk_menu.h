@@ -115,6 +115,8 @@ int menu_fps_limit();
 bool scene_tonemap_on();
 /// Whether the game is told it has an HDR10 display and its PQ picture is taken as it is (the HDR row on Native; RX_VK_HDR_FORCE: no HDR display needed). vk_replay.cpp
 bool hdr_game_native();
+/// RX_VK_HDR_FORCE=1: the game is told its display is HDR10 although the swapchain is SDR. vk_replay.cpp
+bool hdr_forced();
 /// (after Longshot 79a34381) PsychoV35's grading as the menu has it now, in ir_opt/psychov35.h's bank order (kSetting*, kSettingCount floats)
 void psychov35_bank(float* out);
 bool resolution_auto();       // (the game's dynamic resolution: Resolution Auto)

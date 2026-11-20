@@ -161,6 +161,19 @@ int main() {
         CHECK("changeable: DLAA", !ur::pre_bloom_fixed(ur::DLAA, false));
         CHECK("fixed: DLSS below Native", ur::pre_bloom_fixed(ur::DLSS, false));
         CHECK("fixed: the switch set", ur::pre_bloom_fixed(ur::DLAA, true));
+        CHECK("fixed: the parallel replay", ur::pre_bloom_fixed(ur::DLAA, false, true));
+        // (the bug: the menu asked the Upscaler row's choice, which is DLSS for DLAA too (ur::engine), so the row never came
+        // usable; it asks the mode the chain runs, which is DLAA for DLSS at the Render resolution's native choice)
+        CHECK("the row's choice is never DLAA", ur::engine(ur::DLAA) == ur::DLSS);
+        CHECK("DLSS at Native is DLAA", ur::mode_for(ur::DLSS, ur::kNativeAa) == ur::DLAA);
+        CHECK("usable: DLSS at Native", !ur::pre_bloom_fixed(ur::mode_for(ur::DLSS, ur::kNativeAa), false) &&
+                                          ur::pre_bloom_shown(true, ur::mode_for(ur::DLSS, ur::kNativeAa)));
+        for (int res : {0, 1, 2, 3, 4, 5, 6}) {   // (Auto, 100% to Ultra Performance: DLSS below Native)
+            CHECK("greyed, still shown: DLSS below Native", ur::pre_bloom_fixed(ur::mode_for(ur::DLSS, res), false) &&
+                                                              ur::pre_bloom_shown(true, ur::mode_for(ur::DLSS, res)));
+        }
+        CHECK("FSR 4 at Native is not DLAA", ur::pre_bloom_fixed(ur::mode_for(ur::FSR4, ur::kNativeAa), false) &&
+                                                !ur::pre_bloom_shown(true, ur::mode_for(ur::FSR4, ur::kNativeAa)));
     }
     std::puts("pre_bloom: ok");
     return 0;

@@ -135,6 +135,71 @@ static void new_refused() {
 
 namespace {
 
+// (Hookshot b9b48dfd, pixl27; issue 43) A driver that faults in vkCreateShaderModule. On an RX 570 (Polaris, AMD's driver 2.0.220 and
+// 2.0.279) the game closed with no message during its first shader preparation, one crash line per preparation worker. The shader
+// translator calls vkCreateShaderModule (vk_shader.cpp), which no guard covered (pipelines have guarded_graphics / guarded_compute,
+// vk_draw.cpp's own calls have guarded_shader_module). Its pointer goes through this guard now: a fault is that shader failing (the
+// translator takes a null module for a failed program), logged with the SPIR-V kept beside the game (the first two), and said once in
+// a box. RX_VK_NO_MODULE_GUARD=1: the driver's pointer as before
+#ifdef _WIN32
+PFN_vkCreateShaderModule driver_create_shader_module = nullptr;
+std::atomic<int> module_faults{0};
+__declspec(noinline) VkResult module_call(VkDevice d, const VkShaderModuleCreateInfo* ci, const VkAllocationCallbacks* a,
+                                          VkShaderModule* m, int* faulted) {
+    __try {
+        return driver_create_shader_module(d, ci, a, m);
+    } __except (GetExceptionCode() == EXCEPTION_ACCESS_VIOLATION || GetExceptionCode() == EXCEPTION_ILLEGAL_INSTRUCTION ||
+                        GetExceptionCode() == EXCEPTION_INT_DIVIDE_BY_ZERO ? 1 : 0) {
+        *faulted = 1;
+        return VK_ERROR_UNKNOWN;
+    }
+}
+void module_fault(const VkShaderModuleCreateInfo* ci) {
+    const int n = ++module_faults;
+    char saved[MAX_PATH + 48] = "";
+    if (n <= 2 && ci && ci->pCode && ci->codeSize) {   // (the SPIR-V the driver could not take: spirv-val / spirv-dis it here)
+        char path[MAX_PATH];
+        std::string dir(path, game_module_path(path, MAX_PATH));
+        dir = dir.substr(0, dir.find_last_of("\\/") + 1);
+        snprintf(saved, sizeof saved, "%sheylisten_driver_fault_%d.spv", dir.c_str(), n);
+        if (FILE* f = fopen(saved, "wb")) fwrite(ci->pCode, 1, ci->codeSize, f), fclose(f);
+        else saved[0] = 0;
+    }
+    if (n <= 8 || (n & (n - 1)) == 0)
+        logf("vk: THE GRAPHICS DRIVER CRASHED reading a shader (vkCreateShaderModule, %zu bytes of SPIR-V%s%s): it is left out "
+             "(%d so far)", ci ? (size_t)ci->codeSize : 0, saved[0] ? ", kept as " : "", saved, n);
+    if (n != 1 || dev.offscreen || getenv("HOS_HEADLESS")) return;
+    std::thread([name = std::string(dev.props.deviceName), old = !dev.mesh_shader] {
+        std::string text = "The graphics driver of your " + name + " crashed while HeyListen handed it one of the game's shaders. "
+            "HeyListen leaves such shaders out and goes on, but parts of the picture may be missing, and the driver may fail again.";
+        if (old)
+            text += "\n\nThis card has no mesh shaders and is below what HeyListen supports (NVIDIA GeForce RTX 20 series or newer, "
+                    "AMD Radeon RX 6000 series or newer, or Intel Arc). Updating its driver is worth a try, but it may not run "
+                    "the game.";
+        text += "\n\nIf you report it on HeyListen's GitHub page, please attach the log and the heylisten_driver_fault_1.spv file "
+                "from the game folder.";
+        MessageBoxA(nullptr, text.c_str(), "HeyListen: graphics driver", MB_OK | MB_ICONWARNING | MB_TOPMOST);
+    }).detach();
+}
+VKAPI_ATTR VkResult VKAPI_CALL guarded_create_shader_module(VkDevice d, const VkShaderModuleCreateInfo* ci,
+                                                            const VkAllocationCallbacks* a, VkShaderModule* m) {
+    int faulted = 0;
+    const VkResult r = module_call(d, ci, a, m, &faulted);
+    if (faulted) {
+        if (m) *m = VK_NULL_HANDLE;
+        module_fault(ci);
+    }
+    return r;
+}
+void guard_shader_modules() {
+    if (getenv("RX_VK_NO_MODULE_GUARD") || !vkx::vkCreateShaderModule) return;
+    driver_create_shader_module = vkx::vkCreateShaderModule;
+    vkx::vkCreateShaderModule = guarded_create_shader_module;
+}
+#else
+void guard_shader_modules() {}
+#endif
+
 // (hookshot, issue 640) The mesh shader fallback's task programs read the task payloads' address from the push constants by the
 // member's byte offset (64) where SPIR-V takes the member's index (3): an access chain past the block's last member. Such a module
 // is invalid, and NVIDIA's compiler faulted on it (vkCreateComputePipelines, "a fault in the driver", 10 ms). A GTX 1060's and a
@@ -597,6 +662,7 @@ bool create_device() {
     dev.null_descriptor = dev.null_descriptor && robust2.nullDescriptor;
     pv.transformFeedbackPreservesProvokingVertex = VK_FALSE;
     dev.provoking_vertex = dev.provoking_vertex && pv.provokingVertexLast;
+    dev.vertex_divisor = dev.vertex_divisor && vdiv.vertexAttributeInstanceRateDivisor;   // (a divisor over 1 needs the feature, not only the extension; Longshot 89447c39)
     dev.conditional_rendering = dev.conditional_rendering && cond.conditionalRendering;
     dev.custom_border_color = dev.custom_border_color && border.customBorderColors && border.customBorderColorWithoutFormat;
     dev.depth_clip_control = dev.depth_clip_control && clip.depthClipControl;
@@ -712,6 +778,7 @@ bool create_device() {
 
 
     load_device(dev.device);
+    guard_shader_modules();   // (Hookshot b9b48dfd)
     // (hookshot, issue 640) after the load, in front of the driver's: our own module guard (guarded_shader_module, vk_draw.cpp)
     // calls the pointer this chains onto, so a module is made through both
     fix_fallback_modules();
@@ -735,6 +802,13 @@ bool create_device() {
         p2.pNext = &pp;
         vkGetPhysicalDeviceProperties2(dev.physical, &p2);
         dev.max_push_descriptors = pp.maxPushDescriptors;
+    }
+    if (dev.vertex_divisor) {   // (Longshot b46d7732: a divisor is at most maxVertexAttribDivisor, VUID-...-divisor-01870)
+        VkPhysicalDeviceVertexAttributeDivisorPropertiesEXT vp{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VERTEX_ATTRIBUTE_DIVISOR_PROPERTIES_EXT};
+        VkPhysicalDeviceProperties2 p2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
+        p2.pNext = &vp;
+        vkGetPhysicalDeviceProperties2(dev.physical, &p2);
+        dev.max_vertex_divisor = vp.maxVertexAttribDivisor;
     }
     return true;
 }
@@ -815,11 +889,16 @@ bool create_swapchain(uint32_t width, uint32_t height) {
     // (hookshot) the Insert menu's HDR: a 10-bit HDR10 surface when the display lists one (Windows: "Use HDR" on in its display
     // settings), the picture then written by framegen_hdr. Otherwise the SDR one above, said once
     dev.hdr = false;
+    // (HeyListen) whether the display lists one is looked at with the HDR row Off too: the menu says so, and shows its HDR rows only
+    // where HDR can run (menu_rows.h hdr_effective)
+    VkSurfaceFormatKHR hdr_fmt = fmt;
+    dev.hdr_listed = false;
+    for (const auto& f : formats)
+        if ((f.format == VK_FORMAT_A2B10G10R10_UNORM_PACK32 || f.format == VK_FORMAT_A2R10G10B10_UNORM_PACK32) &&
+            f.colorSpace == VK_COLOR_SPACE_HDR10_ST2084_EXT)
+            hdr_fmt = f, dev.hdr_listed = true;
     if (opts.hdr) {
-        for (const auto& f : formats)
-            if ((f.format == VK_FORMAT_A2B10G10R10_UNORM_PACK32 || f.format == VK_FORMAT_A2R10G10B10_UNORM_PACK32) &&
-                f.colorSpace == VK_COLOR_SPACE_HDR10_ST2084_EXT)
-                fmt = f, dev.hdr = true;
+        if (dev.hdr_listed) fmt = hdr_fmt, dev.hdr = true;
         static bool told;
         if (!told) {
             told = true;

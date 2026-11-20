@@ -42,6 +42,7 @@
 #include "vk_dump.h"
 #include "vk_paths.h"   // (game_module_path: the frame trace beside the game)
 #include "vk_gprof.h"
+#include "profile_run.h"   // (the performance profile's pass timestamps: tprof_bind)
 #include "vk_framegen.h"
 #include "vk_menu.h"
 #include "perf_report.h"
@@ -1013,6 +1014,17 @@ Recording& begin_recording(uint64_t value) {
 // long the GPU had it (vk_timeline_wait)
 std::atomic<int64_t> value_submit_ns[1024];
 std::atomic<uint64_t> value_submit_v[1024];
+/// The game reads what the GPU wrote into its memory once the timeline reaches the submission; waiting on the host makes
+/// it visible to the device only (a fence's or a semaphore's access scope is device access), so each recording ends with
+/// a memory dependency into the host's reads
+void host_read_barrier(VkCommandBuffer cmd) {
+    VkMemoryBarrier2 b{VK_STRUCTURE_TYPE_MEMORY_BARRIER_2};
+    b.srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, b.srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT;
+    b.dstStageMask = VK_PIPELINE_STAGE_2_HOST_BIT, b.dstAccessMask = VK_ACCESS_2_HOST_READ_BIT;
+    VkDependencyInfo d{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
+    d.memoryBarrierCount = 1, d.pMemoryBarriers = &b;
+    vkCmdPipelineBarrier2(cmd, &d);
+}
 void submit_recording(Recording& r, bool signal_value = true, uint64_t signal_at = 0) {
     {
         const uint64_t v = signal_at ? signal_at : r.value;
@@ -1023,6 +1035,7 @@ void submit_recording(Recording& r, bool signal_value = true, uint64_t signal_at
     const bool uploads = texture_uploads_recorded();
     gprof_submitted(r.slot, uploads);
     gpu_time_end(r, uploads);
+    host_read_barrier(r.cmd);
     {
         std::lock_guard lk(ts_mu);
         ts_seq_submitted++;
@@ -2663,6 +2676,7 @@ Recording& begin_segment_recording(uint64_t value) {
     VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
     bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     vkBeginCommandBuffer(r.cmd, &bi);
+    tprof_bind(r.slot, r.cmd);   // (the performance profile)
     r.value = value;
     return r;
 }
@@ -2697,6 +2711,7 @@ Recording& begin_segment_slot(uint64_t value) {   // (begin_segment_recording wi
         gpu_time_collect(r);
         gprof_collect(r.slot);
     }
+    tprof_bind(r.slot, r.cmd);   // (the performance profile)
     r.value = value;
     return r;
 }
@@ -2826,6 +2841,7 @@ void presync_early_finish(bool segments) {
     }
     if (here && segments) presync_early_run(e);
     Recording& r = *e.r;
+    host_read_barrier(r.cmd);
     vkEndCommandBuffer(r.cmd);
     if (e.used) {
         VkCommandBufferSubmitInfo cb{VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO};
@@ -3041,6 +3057,7 @@ const uint8_t* replay_handle_early(VkCommandBuffer& cmd, const uint8_t* h, bool 
         j->inits = texture_segment_end(j->index);
         texture_segment_worker(-1);
         gpu_time_end(*j->r, j->uploads);   // (as replay_handle's)
+        host_read_barrier(c);
         vkEndCommandBuffer(j->r->upload);
         vkEndCommandBuffer(j->r->cmd);
         work_seg_end();   // (TICK-061, D6)
@@ -3556,6 +3573,7 @@ const uint8_t* replay_handle(VkCommandBuffer& cmd, const uint8_t* h, bool may_st
         j->inits = texture_segment_end(j->index);   // (after its last new image)
         texture_segment_worker(-1);
         gpu_time_end(*j->r, j->uploads);   // (TICK-057)
+        host_read_barrier(c);
         vkEndCommandBuffer(j->r->upload);
         vkEndCommandBuffer(j->r->cmd);
         work_seg_end();   // (TICK-061, D6)

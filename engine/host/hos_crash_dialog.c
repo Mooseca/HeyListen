@@ -2002,6 +2002,8 @@ static const PerfFeed pipeline_states = {HOS_PIPES_PENDING, HOS_PIPES_SENT, HOS_
                                          HOS_PIPES_MAX_BODY, HOS_PIPES_MAX_PENDING, HOS_PIPES_MAX_SENDS, HOS_PIPES_KEEP_SENT};
 static const PerfFeed zone_usage = {HOS_ZONES_PENDING, HOS_ZONES_SENT, HOS_TELEMETRY_ZONES_PATH, "heylisten-zone-usage",
                                     HOS_ZONES_MAX_BODY, HOS_ZONES_MAX_PENDING, HOS_ZONES_MAX_SENDS, HOS_ZONES_KEEP_SENT};
+static const PerfFeed profile_usage = {HOS_PROFILE_PENDING, HOS_PROFILE_SENT, HOS_TELEMETRY_PROFILE_PATH, "heylisten-profile",
+                                       HOS_PROFILE_MAX_BODY, HOS_PROFILE_MAX_PENDING, HOS_PROFILE_MAX_SENDS, HOS_PROFILE_KEEP_SENT};
 /* (the sent summaries kept as they went, perf_sent/: what the team got, for the player to read; the newest 48) */
 static void perf_keep_sent(const char *dir, const PerfFeed *feed, const char *name, const char *body, size_t n) {
     char sent[PATH_MAX_UTF8], path[PATH_MAX_UTF8];
@@ -2128,6 +2130,13 @@ int hos_zones_send_run(const char *dir) {
     if (!hos_telemetry_zones_on(getenv(HOS_TELEMETRY_ZONES_ENV))) return -1;
     return perf_feed_run(dir, &zone_usage);
 }
+/* The detailed performance profile the renderer queued in profile_pending/ (gpu/vk/profile_report.h), by the same rules, to
+   <the build's address>/telemetry/profile. Nothing with HL_TELEMETRY_PROFILE=0, nor without Send performance statistics. The
+   return is hos_perf_send_run's */
+int hos_profile_send_run(const char *dir) {
+    if (!hos_telemetry_profile_on(getenv(HOS_TELEMETRY_PROFILE_ENV))) return -1;
+    return perf_feed_run(dir, &profile_usage);
+}
 #ifdef _WIN32
 static DWORD WINAPI perf_send_thread(void *p) {
 #else
@@ -2143,6 +2152,9 @@ static void *perf_send_thread(void *p) {
     const int k = hos_zones_send_run(dir);
     if (k > 0) hos_log("perf: %d zone usage batches sent or refused (Send performance statistics is on, HL_TELEMETRY_ZONES is not 0)", k);
     else if (n >= 0 && !hos_telemetry_zones_on(getenv(HOS_TELEMETRY_ZONES_ENV))) hos_log("perf: per-zone shader and pipeline usage not sent: HL_TELEMETRY_ZONES=0");
+    const int q = hos_profile_send_run(dir);
+    if (q > 0) hos_log("perf: %d performance profile batches sent or refused (Send performance statistics is on, HL_TELEMETRY_PROFILE is not 0)", q);
+    else if (n >= 0 && !hos_telemetry_profile_on(getenv(HOS_TELEMETRY_PROFILE_ENV))) hos_log("perf: performance profile not sent: HL_TELEMETRY_PROFILE=0");
     free(dir);
 #ifdef _WIN32
     return 0;

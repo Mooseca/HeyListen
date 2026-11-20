@@ -1217,6 +1217,7 @@ static HANDLE renderer_thread;
 
 static DWORD WINAPI renderer_main(void *p) {
     (void)p;
+    SetThreadDescription(GetCurrentThread(), L"hos audio renderer");   /* (a name: the performance profile's audio role, gpu/vk/profile_report.h) */
     hos_thread_boost(2);
     output_open();
     int64_t period = 5000000, next = hos_now_ns() + period;   /* one audio frame: 240 samples at 48 kHz */

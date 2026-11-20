@@ -81,6 +81,7 @@ struct Device {
     bool eds3_polygon = false, eds3_clamp = false, eds3_blend = false, eds3_a2c = false;
     bool swapchain_colorspace = false;   // (hookshot) VK_EXT_swapchain_colorspace: HDR10 surfaces are listed
     bool hdr = false;                    // (hookshot) the swapchain is HDR10 (ST 2084, Rec. 2020): framegen_hdr writes it
+    bool hdr_listed = false;             // (HeyListen) the display lists an HDR10 surface (Windows' "Use HDR" on), found at each swapchain whatever the HDR row says: the menu's HDR rows
     bool mesh_fallback = false;   // (hookshot) no VK_EXT_mesh_shader: task and mesh programs as compute shaders (vk_shader.cpp)
     // (hookshot, issue 996, d1d6caa7) the GPU has mesh shaders but the draws that have a task stage run through the compute fallback
     // (AMD's Windows driver times out on them on RDNA 2, Navi 21 to 23; RX_VK_TASK_MESH_FALLBACK): mesh_mode.h. Mesh-only draws stay native
@@ -100,6 +101,7 @@ struct Device {
     VkShaderStageFlags warp_wide_stages = 0;
     uint32_t warp_lanes = 32;
     uint32_t max_push_descriptors = 0;
+    uint32_t max_vertex_divisor = 0;   // (maxVertexAttribDivisor, with dev.vertex_divisor)
     // no window (HOS_HEADLESS): presents go to an image of their own, which RX_VK_SHOTS can write out
     bool offscreen = false;
     // the window

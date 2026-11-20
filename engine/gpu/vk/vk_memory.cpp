@@ -41,6 +41,7 @@
 #include "capture_merge.h"    // (TICK-043: the capture copied ahead)
 #include "mirror_inherit.h"   // (TICK-036 / #1127: what a new mirror takes from the retired pools' mirrors)
 #include "msync_diff.h"       // (TICK-048: the mirror syncs' diff)
+#include "wb_pool_eager.h"   // (issue 50: a CPU write makes a lazy pool eager, RX_VK_WB_POOL_EAGER)
 #include "gone_ring.h"        // (TICK-052: the recording threads' pool table)
 #include "shaders/msync_scatter_comp_spv.h"   // (TICK-021: the mirror syncs' scatter copy)
 #ifdef __linux__
@@ -496,24 +497,13 @@ bool import_pool(uint64_t lo, uint64_t hi, Pool& p) {
         return true;
     }
 #endif
-    // (the host allocations' memory type: the same for every pointer, asked once)
-    static uint32_t type = UINT32_MAX;
-    if (type == UINT32_MAX) {
-        VkMemoryHostPointerPropertiesEXT hp{VK_STRUCTURE_TYPE_MEMORY_HOST_POINTER_PROPERTIES_EXT};
-        if (vkGetMemoryHostPointerPropertiesEXT(dev.device, VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT, ptr,
-                                                &hp) != VK_SUCCESS) {
-            import_remember_failure(lo, hi);
-            return false;
-        }
-        for (uint32_t i = 0; i < dev.memory.memoryTypeCount && type == UINT32_MAX; i++)   // (host visible, coherent)
-            if ((hp.memoryTypeBits >> i & 1) &&
-                (dev.memory.memoryTypes[i].propertyFlags & (VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)) ==
-                    (VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT))
-                type = i;
-        if (type == UINT32_MAX) {
-            import_remember_failure(lo, hi);
-            return false;
-        }
+    // (Longshot a48592e3, jcabarca) the memory types this pointer can be imported as: asked for each pointer, the driver answers
+    // per pointer (VUID-VkMemoryAllocateInfo-memoryTypeIndex-01744). Before, the first pointer's answer was kept for all
+    VkMemoryHostPointerPropertiesEXT hp{VK_STRUCTURE_TYPE_MEMORY_HOST_POINTER_PROPERTIES_EXT};
+    if (vkGetMemoryHostPointerPropertiesEXT(dev.device, VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT, ptr, &hp) !=
+        VK_SUCCESS) {
+        import_remember_failure(lo, hi);
+        return false;
     }
     t1 = clk::now();
     VkExternalMemoryBufferCreateInfo eb{VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_BUFFER_CREATE_INFO};
@@ -523,6 +513,25 @@ bool import_pool(uint64_t lo, uint64_t hi, Pool& p) {
     bi.size = bytes;
     bi.usage = kUsage;
     if (vkCreateBuffer(dev.device, &bi, nullptr, &p.buffer) != VK_SUCCESS) {
+        import_remember_failure(lo, hi);
+        return false;
+    }
+    // (the type must also be one the buffer allows, and the buffer must fit in the imported bytes: VUID-vkBindBufferMemory-memory-01035
+    // and VUID-vkBindBufferMemory-memory-10741)
+    VkMemoryRequirements req{};
+    vkGetBufferMemoryRequirements(dev.device, p.buffer, &req);
+    uint32_t type = UINT32_MAX;
+    for (uint32_t i = 0; i < dev.memory.memoryTypeCount && type == UINT32_MAX; i++)   // (host visible, coherent)
+        if ((hp.memoryTypeBits & req.memoryTypeBits) >> i & 1 &&
+            (dev.memory.memoryTypes[i].propertyFlags & (VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)) ==
+                (VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT))
+            type = i;
+    if (type == UINT32_MAX || req.size > bytes) {
+        logf("vk: import %#llx..%#llx not possible: %s", (unsigned long long)lo, (unsigned long long)hi,
+             type == UINT32_MAX ? "no host-visible coherent memory type this pointer and its buffer both allow"
+                                : "the buffer needs more than the imported bytes");
+        destroy_import_buffer(p.buffer);
+        p.buffer = VK_NULL_HANDLE;
         import_remember_failure(lo, hi);
         return false;
     }
@@ -4343,6 +4352,27 @@ bool wb_lazy_on() {
     static const bool v = !getenv("RX_VK_WB_EAGER") || getenv("RX_VK_WB_EAGER")[0] == '0';
     return v;
 }
+// (issue 50, RX_VK_WB_POOL_EAGER, on by default; =0 off) The comment above says a CPU write makes the whole game pool eager for
+// good, but the code only wrote that page back: a pool whose GPU words are left out (a particle effect's state, issue 50's cut
+// grass) and whose other pages the CPU writes later (a batch appended on each cut) had the CPU's page copied from guest memory
+// over the GPU's words in the mirror, the effect's state back at its first values: debris drawn at the first cut's place,
+// batches piling up. Now the first CPU write to a page of a game pool makes the pool eager, as the comment says.
+// (issue 50, RX_VK_WB_SMALL_EAGER_KB, default 4096; 0 off) Leaving a pool's GPU writes in the mirror pays only for big pools (the
+// 69 MB a frame of Hyrule Field). A small pool both sides write (the cut-grass debris' state in pools of 8 KB, a vegetation's
+// culling counts) lost its GPU words the first time the CPU wrote a page of it: the sync copied the page from guest memory over
+// them, the effect's state at its first values (leaves at the first cut's place), the counts at zero (every plant gone for a few
+// frames after a cut). Pools under this size are written back always, as the console's cache does for the CPU.
+uint64_t wb_small_eager_bytes() {
+    static const uint64_t v = [] {
+        const char* e = getenv("RX_VK_WB_SMALL_EAGER_KB");
+        return (e ? (uint64_t)strtoull(e, nullptr, 10) : 4096ull) << 10;
+    }();
+    return v;
+}
+bool wb_pool_eager_on() {
+    static const bool v = !getenv("RX_VK_WB_POOL_EAGER") || atoi(getenv("RX_VK_WB_POOL_EAGER")) != 0;
+    return v;
+}
 NvnPool* nvn_pool_at(uint64_t g, uint64_t* lo) {   // (nvn_pools_mu held)
     auto it = nvn_pools.upper_bound(g);
     if (it == nvn_pools.begin()) return nullptr;
@@ -4424,6 +4454,7 @@ void lazy_cpu_page(uint64_t page) {
             logf("vk: write-backs: page %#llx (pool flags %#x) written by the CPU after its GPU writes were left out: written back "
                  "from now on", (unsigned long long)(page << kPageShift), np->flags);
     }
+    if (wb_pool_eager::cpu_write_makes_eager(np->eager, wb_pool_eager_on())) nvn_pools_eager(page << kPageShift, (page + 1) << kPageShift, true);   // (issue 50: the whole pool)
 }
 // (TICK-056, RX_VK_MSYNC_FAST) lazy_cpu_page for a mirror sync's dirty pages at once, in their order: the lock taken once, and the
 // game pool looked up only when a page leaves the last one found (a sync's pages are in address order). The same sets result.
@@ -4463,6 +4494,7 @@ void lazy_cpu_pages(const std::vector<uint32_t>& pages) {
                 logf("vk: write-backs: page %#llx (pool flags %#x) written by the CPU after its GPU writes were left out: written back "
                      "from now on", (unsigned long long)g, np->flags);
         }
+        if (wb_pool_eager::cpu_write_makes_eager(np->eager, wb_pool_eager_on())) nvn_pools_eager(g, g + 4096, true);   // (issue 50: the whole pool; np->eager now: its next pages skip)
     }
 }
 // (the runs of p to copy back: the parts left out removed)
@@ -4487,7 +4519,7 @@ void lazy_filter(Pool& p, std::vector<VkBufferCopy>& runs) {
                 seg_end = std::min(end, np->hi);
                 // (CPU_NO_ACCESS 0x1 or CPU_CACHED 0x4, not CPU_UNCACHED 0x2)
                 const bool may_defer = (np->flags & (0x1u | 0x4u)) &&
-                                      !(np->flags & 0x2u);
+                                      !(np->flags & 0x2u) && wb_pool_eager::may_defer_size(np->hi - lo, wb_small_eager_bytes());   // (issue 50: not a small pool)
                 if (!np->eager && may_defer) {
                     if (!np->first_wb) np->first_wb = mirror_epoch + 1;
                     why = mirror_epoch + 1 - np->first_wb < kLazyWarm ? 4 : 5;
@@ -4715,7 +4747,54 @@ void cut_cpu_words(const Pool& p, std::vector<VkBufferCopy>& runs) {
 // (Extracted from the table, not erased: the node, and the Pool in it, stay where they were, so the mirror's lists and
 // a parallel replay thread's pool cache still point at a live one.)
 std::deque<std::map<uint64_t, Pool>::node_type> retired_pools;
-size_t retired_pools_count() { return retired_pools.size(); }
+// (hookshot 20352f9c, ported by hand) The retired pools nothing needs any more: their import given back, no mirror, no shadow, nothing
+// pending, the GPU past them. Each area change retires ~30 pools (798 in a 10-minute tour of six places) and each stayed in
+// retired_pools for the whole session, walked at every submission (retired_imports_give_back), for every range the game frees
+// (release_uncovered), at each of the game threads' frees (memory_guest_imported) and at every mirror made: the longer the game
+// ran, the longer each of those walks. Such a node moves here, alive at the same address (pointers to it may be kept elsewhere:
+// the pool cache, the mirror lists), and its per-page vector is let go. RX_VK_RETIRED_COMPACT=0: as before
+std::deque<std::map<uint64_t, Pool>::node_type> retired_done;
+size_t retired_pools_count() { return retired_pools.size() + retired_done.size(); }
+std::atomic<int64_t> st_retired_walk_ns{0};   // (time in the walks over retired_pools, for the imports line)
+uint64_t st_retired_vec_bytes = 0;            // (the per-page vector let go with the nodes moved to retired_done)
+bool retired_idle(const Pool& p) {
+    return !p.memory && p.pieces.empty() && !p.buffer && p.mstate == Pool::MIRROR_NONE && !p.mirror && !p.mirror_alloc && !p.shadow &&
+           !p.shadow_alloc && !p.inherit_pending && !p.lazy_held && !p.held_told && p.retired_value <= mem_completed &&
+           p.last_value <= mem_completed;
+}
+void retired_compact() {   // (pools_mu held)
+    static const bool on = !getenv("RX_VK_RETIRED_COMPACT") || atoi(getenv("RX_VK_RETIRED_COMPACT")) != 0;
+    if (!on) return;
+    {   // (nothing should bring a node back to use: none is reachable from the pools' table or the caches emptied at its
+        // retirement. Checked anyway, on the newest 256 moved, every 600 submissions: one in use goes back to the walked list)
+        static uint64_t checked_at;
+        if (mirror_epoch - checked_at >= 600 && !retired_done.empty()) {
+            checked_at = mirror_epoch;
+            const size_t from = retired_done.size() > 256 ? retired_done.size() - 256 : 0;
+            for (size_t i = from; i < retired_done.size();) {
+                if (retired_idle(retired_done[i].mapped())) { i++; continue; }
+                static int told;
+                if (told++ < 4) logf("vk: a retired pool %#llx in use again: walked again", (unsigned long long)retired_done[i].mapped().lo);
+                retired_pools.push_back(std::move(retired_done[i]));
+                retired_done.erase(retired_done.begin() + (ptrdiff_t)i);
+            }
+        }
+    }
+    bool any = false;
+    for (const auto& nh : retired_pools)
+        if (retired_idle(nh.mapped())) { any = true; break; }
+    if (!any) return;
+    std::deque<std::map<uint64_t, Pool>::node_type> keep;
+    for (auto& nh : retired_pools) {
+        Pool& p = nh.mapped();
+        if (!retired_idle(p)) { keep.push_back(std::move(nh)); continue; }
+        const uint64_t b = p.shadow_known.capacity() * sizeof(uint64_t);
+        std::vector<uint64_t>().swap(p.shadow_known);
+        st_retired_vec_bytes += b;
+        retired_done.push_back(std::move(nh));
+    }
+    retired_pools.swap(keep);
+}
 /// (PR 85, AMD on Windows: retired and idle imports given back as on NVIDIA) off by default since 2026-11-19: an RX 6750 XT
 /// (driver 26.11.2) lost the device on area changes and in cutscenes with it and played clean with RX_VK_KEEP_RETIRED=1.
 /// RX_VK_AMD_GIVE_BACK=1 turns PR 85's AMD rule back on (retired imports given back, idle ones past 70% down to 60%)
@@ -5644,8 +5723,14 @@ int memory_guest_imported(uint64_t lo, uint64_t hi) {
         if (it->second.hi > lo && it->second.memory) return 1;   // (RX_VK_NO_HOST_IMPORT: one given back is not)
         if (import_reach::beyond(live_reach, it->second.lo, lo)) break;   // (none further down reaches lo: import_reach.h)
     }
-    for (const auto& nh : retired_pools)
-        if (nh.mapped().memory && nh.mapped().lo < hi && lo < nh.mapped().hi) return 1;
+    {
+        const auto walk_t0 = std::chrono::steady_clock::now();
+        int found = 0;
+        for (const auto& nh : retired_pools)
+            if (nh.mapped().memory && nh.mapped().lo < hi && lo < nh.mapped().hi) { found = 1; break; }
+        st_retired_walk_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - walk_t0).count();
+        if (found) return 1;
+    }
     for (const auto& nh : evicted_pools)
         if (nh.mapped().memory && nh.mapped().lo < hi && lo < nh.mapped().hi) return 1;
     for (const auto& pending : dead_imports)
@@ -6108,6 +6193,7 @@ void retired_imports_give_back() {   // (pools_mu held)
     size_t retired_alive = 0, live = 0;
     for (auto& [lo, p] : imported)
         if (p.memory) live_bytes += p.hi - p.lo, live++;   // (RX_VK_NO_HOST_IMPORT: a pool whose import was given back is not)
+    const auto walk_t0 = std::chrono::steady_clock::now();
     for (auto& nh : retired_pools) {
         Pool& p = nh.mapped();
         if (!p.memory) continue;
@@ -6123,12 +6209,18 @@ void retired_imports_give_back() {   // (pools_mu held)
         }
         retired_alive++, retired_bytes += p.hi - p.lo;
     }
+    st_retired_walk_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - walk_t0).count();
+    retired_compact();
     static uint64_t logged_epoch;
     if (mirror_epoch - logged_epoch >= 1200) {
         logged_epoch = mirror_epoch;
         logf("vk: imports: %zu live (%llu MB), %zu retired still imported (%llu MB), %llu retired given back (%llu MB)",
              live, (unsigned long long)(live_bytes >> 20), retired_alive, (unsigned long long)(retired_bytes >> 20),
              (unsigned long long)st_retired_imports_freed, (unsigned long long)(st_retired_import_bytes_freed >> 20));
+        // (hookshot) the retired pools walked and set aside (retired_compact), and the time their walks took since the last line
+        logf("vk: retired pools: %zu walked, %zu set aside (%llu KB of their vectors let go); %.2f ms in their walks over the "
+             "last 1200 submissions; page generation %u", retired_pools.size(), retired_done.size(),
+             (unsigned long long)(st_retired_vec_bytes >> 10), st_retired_walk_ns.exchange(0) / 1e6, gen_now);
     }
 }
 // ---- (HeyListen) imports given back once the mirror holds the pool: RX_VK_NO_HOST_IMPORT=1 (default 0) ----
@@ -7729,6 +7821,7 @@ void memory_ledger_snapshot(LedgerSnap& s) {
         s.chunks.push_back(c);
     }
     for (const auto& nh : retired_pools) s.retired_chunks++, s.retired_chunk_bytes += nh.mapped().hi - nh.mapped().lo;
+    for (const auto& nh : retired_done) s.retired_chunks++, s.retired_chunk_bytes += nh.mapped().hi - nh.mapped().lo;
     s.evicted_chunks = evicted_pools.size();
     for (const DeadMirror& d : dead_mirrors) s.retired_mirror_bytes += allocation_size(d.alloc);
 }

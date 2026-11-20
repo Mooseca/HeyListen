@@ -41,6 +41,12 @@ enum { HOS_PIPES_MAX_PENDING = 4, HOS_PIPES_MAX_SENDS = 2, HOS_PIPES_KEEP_SENT =
 #define HOS_ZONES_SENT "zones_sent"
 enum { HOS_ZONES_MAX_PENDING = 4, HOS_ZONES_MAX_SENDS = 2, HOS_ZONES_KEEP_SENT = 3, HOS_ZONES_MAX_BODY = 512 * 1024 };
 
+/* The detailed performance profile (gpu/vk/profile_report.h) the same way: batches of at most 256 KiB, 8 waiting, 2 a start,
+   the last 3 sent kept for the player to read */
+#define HOS_PROFILE_PENDING "profile_pending"
+#define HOS_PROFILE_SENT "profile_sent"
+enum { HOS_PROFILE_MAX_PENDING = 8, HOS_PROFILE_MAX_SENDS = 2, HOS_PROFILE_KEEP_SENT = 3, HOS_PROFILE_MAX_BODY = 256 * 1024 };
+
 /* A summary's name, "<unix time>-<n>.json": 1 with its time and n, 0 for any other name */
 static inline int hos_perf_name(const char *name, int64_t *at, int64_t *n) {
     const char *p = name;

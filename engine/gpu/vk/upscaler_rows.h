@@ -191,16 +191,20 @@ inline char preset_letter(unsigned preset) { return preset ? (char)('A' + preset
 /// The Upscaler row is in every build and on every GPU (it always has the game's own and Off): no shown or fixed rule for it.
 /// Rows with nothing else to choose here (shown without arrows; Left and Right leave the saved value alone): the DLSS model
 /// while DLSS is not drawing. The Render resolution always has steps (DLAA and FSR 4's native AA are among them)
-/// The DLSS model row: shown where the Upscaler is (a build with DLSS), with nothing to choose while the game's own upscales
-inline bool model_shown(bool built) { return built; }
+/// The DLSS model row: shown while NVIDIA DLSS or DLAA is the Upscaler (a build with DLSS); hidden with any other, where it would
+/// have nothing to say
+inline bool model_shown(bool built, int upscaler) { return built && is_dlss(upscaler); }
 /// (env_set: RX_VK_DLSS_PRESET names a preset, which wins over the row for this run)
 inline bool model_fixed(int upscaler, bool env_set) { return !is_dlss(upscaler) || env_set; }
 /// (HeyListen, after Longshot 83b161e3) The DLAA before the bloom row (opts.dlss_pre_bloom): shown with NVIDIA DLSS chosen where
-/// it runs (DLSS or DLAA), and changeable with DLAA alone: in DLSS's other modes the scene, the bloom and the tone map are drawn
-/// smaller than the output DLSS draws, so its picture cannot go back into the scene (vk_temporal.cpp temporal_pre_bloom)
-inline bool pre_bloom_shown(bool dlss_ok, int upscaler) { return dlss_ok && is_dlss(upscaler); }
-/// (env_set: RX_VK_DLSS_PRE_BLOOM is set, and wins over the row for this run)
-inline bool pre_bloom_fixed(int upscaler, bool env_set) { return upscaler != DLAA || env_set; }
+/// it runs (DLSS or DLAA; hidden with any other Upscaler), and changeable with DLAA alone: in DLSS's other modes the scene, the
+/// bloom and the tone map are drawn smaller than the output DLSS draws, so its picture cannot go back into the scene
+/// (vk_temporal.cpp temporal_pre_bloom). The Upscaler row shows DLSS for DLAA too (engine), so the rule takes the mode the chain
+/// runs (temporal_mode: DLAA is DLSS at the Render resolution's native choice, mode_for), never the row's choice
+inline bool pre_bloom_shown(bool dlss_ok, int mode) { return dlss_ok && is_dlss(mode); }
+/// (env_set: RX_VK_DLSS_PRE_BLOOM is set, and wins over the row for this run; parallel: RX_VK_PARALLEL=2 or more, whose replay
+/// threads record a frame's passes out of order, so DLAA stays after the bloom)
+inline bool pre_bloom_fixed(int mode, bool env_set, bool parallel = false) { return mode != DLAA || env_set || parallel; }
 /// The Window scaling filter does something only when the window's size is not the game's picture's (the Output resolution);
 /// a size not known yet (0) counts as different
 inline bool filter_needed(unsigned picture_w, unsigned picture_h, unsigned window_w, unsigned window_h) {

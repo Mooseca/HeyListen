@@ -8,7 +8,7 @@ project's GitHub issue #55 and a message in the project's Discord server, and st
 
 | Row | What it does | Default |
 |---|---|---|
-| **Send performance statistics** | The game counts how its frames went and sends the counts, at the next start. The same row sends the new pipeline states the game made (hashes and render state, see *Pipeline states* below) and, per map, which shader programs and pipelines it drew with (see *Zone usage* below), unless `HL_TELEMETRY_PIPELINES=0` and `HL_TELEMETRY_ZONES=0` | Off |
+| **Send performance statistics** | The game counts how its frames went and sends the counts, at the next start. The same row sends the new pipeline states the game made (hashes and render state, see *Pipeline states* below) and, per map, which shader programs and pipelines it drew with (see *Zone usage* below) and a detailed profile of where each map's CPU and GPU time goes (see *Detailed profile* below), unless `HL_TELEMETRY_PIPELINES=0`, `HL_TELEMETRY_ZONES=0` and `HL_TELEMETRY_PROFILE=0` | Off |
 | **Send crash reports automatically** | After a crash, the crash report is sent at once, without the crash window asking | Off (the window asks) |
 
 Ported from Longshot's pull request #983 (Gabriel Moisan Matte), which builds on its crash window (#593, HumanBean) and its
@@ -22,8 +22,9 @@ tables.
 - `perf_pending/` in the game folder: the summaries waiting to be sent. `perf_sent/`: each summary the server took,
   exactly as it was sent (the 48 sent last), for a player to open and read. Turning **Send performance statistics** off
   deletes both folders' summaries at once. `pipelines_pending/` and `pipelines_sent/` are the same for the pipeline state
-  records (see below), and `zones_pending/` and `zones_sent/` the same for the per-zone shader and pipeline usage
-  (the 3 sent last), deleted together with them.
+  records (see below), `zones_pending/` and `zones_sent/` the same for the per-zone shader and pipeline usage
+  (the 3 sent last), and `profile_pending/` and `profile_sent/` for the detailed profile (the 3 sent last), deleted together
+  with them. `profile_local/` (only with `HL_PROFILE_LOCAL=1`) is never deleted by the game.
 - After a crash, the crash window (the game's own, drawn like the Insert menu) says what happened, and offers **Report
   automatically** (shows the report that would be sent, every line of it, and sends it only when Send is pressed),
   **Report manually** (copies a redacted report to the clipboard and opens a new issue on GitHub with a title and a short
@@ -44,6 +45,7 @@ until it is removed on request.
 | `POST /telemetry/perf` | Every 5 minutes of play and at exit, sent at the next start | **Send performance statistics** on | Totals for all players; never published per player |
 | `POST /telemetry/pipelines` | At exit the game queues the pipeline states it made that the shipped list lacks; sent at the next start | **Send performance statistics** on, and `HL_TELEMETRY_PIPELINES` not `0` | The records the next shipped pipeline state list is made from; nothing kept per player |
 | `POST /telemetry/zones` | At exit the game queues, per map, the shader program and pipeline state keys its draws first used; sent at the next start | **Send performance statistics** on, and `HL_TELEMETRY_ZONES` not `0` | Per map, version and GPU vendor, the keys to preload and unload; nothing kept per player |
+| `POST /telemetry/profile` | Every 5 minutes of play (the maps that changed) and at exit, sent at the next start | **Send performance statistics** on, and `HL_TELEMETRY_PROFILE` not `0` | Per map and build, where the CPU and GPU time goes; totals for all players, nothing kept per player |
 
 All bodies are `Content-Type: application/json`. The server answers 2xx for a taken report, 4xx with `{"error": ...}` for a
 refused one, 429 or 5xx when busy.
@@ -203,6 +205,86 @@ Never sent: the GPU's name or device id, the CPU, the OS, the PC's name or folde
 `pipelines_sent/` is the exact body of each batch sent (the last 3). `tests/test_state_report.py` checks the payload against
 this PC's own names and folders.
 
+### Detailed profile (`/telemetry/profile`, at most 256 KiB a batch)
+
+The performance summary says what a slow frame waited on. This says **where the time goes**: per map, how the CPU's samples
+split between the game's translated code, our native engine, the renderer, the driver, the OS and the rest, which functions
+have the most samples, and how long the GPU spends in each render pass. It is for cutting stutters and raising the 1% lows.
+
+**CPU.** A sampler thread looks, 250 times a second (`HL_PROFILE_HZ`, 50 to 1000), at each thread of the game that has run since
+the last look: it stops the thread, reads its instruction pointer, lets it go, and only then works out what the address is. A
+thread is sampled once for each 1/250 s of its own CPU time (a thread that works half the time gets half the samples, one that
+is waiting none), so the samples are CPU time, not wall time. Each address becomes one of nine **modules**
+(a fixed list): `game_lifted` (the game's translated code), `native_engine` (our native modules that replace game code: the
+`hl::` code and its `hl_` glue), `renderer` (our Vulkan renderer), `host` (the rest of the executable: the OS layer, input, the
+file system), `audio`, `driver` (the graphics driver), `os` (ntdll, kernel32, kernelbase, win32u and the other Windows system
+files), `runtime` (the C++ runtime and every other library), `other` (not in any module). A thread is one of seven **roles**
+(`game`, `render`, `present`, `compile`, `upload`, `audio`, `other`), found from the thread's name; threads of one role are
+merged and `count` says how many were seen. The samples of a frame are kept until the frame ends; if it ended as a hitch (a
+frame over twice its target and at least 25 ms, the performance summary's rule) its samples also count in the `hitch_*` fields.
+The most-sampled **32 game functions** are sent by their guest address (the address of the function in the game's own program,
+the same number the crash report's `guest_frames` name), and the most-sampled **32 engine locations** by their offset inside our
+own executable (`rva`) or, with `"module": "vk"`, inside our renderer's DLL, rounded down to the start of the function; the
+`build_id` says which build the offsets are for. Nothing of the game's code or data is sent, only these counts and addresses.
+
+**GPU.** Each render pass, compute dispatch and renderer pass the game records gets a pair of GPU timestamps, read back when the
+recording's slot comes round again (the wait the renderer makes anyway: no added stall). A pass is a 64-bit key (a hash of its
+target format, number of targets, depth, size rounded to 64 pixels and its first shader program's key) and a **kind**:
+`shadow` (depth only), `main` (colour and depth), `post` (colour only, few draws or under a quarter of the window), `ui`
+(colour only, many draws, large), `upscale` and `framegen` (the renderer's own FSR 3.1 passes), `compute` (a dispatch), `other`
+(`hdr` and `copy` are in the list and not sent yet). The kinds of the game's own passes are a heuristic. A pass's time counts
+in the `hitch_ms_sum` when it was recorded in the frame before a hitch. The 24 passes with the most time a map are sent. A queue
+with no timestamps sends no `gpu` block.
+
+Every 5 minutes (and at exit) the maps that changed since the last batch are written to `profile_pending/<unix time>-<n>.json`
+(at most 8 wait, 256 KiB a batch, 32 maps), sent at the next start with the system's `curl` (at most 2 a start, the last 3 kept
+in `profile_sent/`). Format version 1:
+
+| Field | Type | Limits | What it is |
+|---|---|---|---|
+| `v` | integer | | The format's version: 1 |
+| `version` | string | ≤ 40 characters | The game's version, as the performance summary says it |
+| `release` | boolean | | A release's version built from the release's own sources |
+| `build_id` | string | 16 lowercase hex digits | The executable's build id (the symbol tables' identity): says which build the `rva`s are for |
+| `vendor_id` | integer | | The GPU's PCI vendor id (4318 NVIDIA, 4098 AMD, 32902 Intel) |
+| `driver` | string | ≤ 60 characters | The GPU driver as the performance summary's `driver` says it |
+| `gpu`, `cpu`, `os` | string, optional | ≤ 120 characters | The plain names the performance summary sends too; left out when not known |
+| `maps` | array | ≤ 32 | The maps that changed since the last batch |
+
+Per map: `map` (name as the summaries name it), `seconds`, `frames`, `hitch_frames` (since the last batch), then:
+
+| Field | What it is |
+|---|---|
+| `cpu.hz` | The sampling rate |
+| `cpu.threads[]` | At most 16 entries, one per role: `role`, `count`, `samples`, `hitch_samples`, `modules` and `hitch_modules` (the nine module keys, counts that add up to `samples`) |
+| `cpu.top_guest[]` | At most 32: `addr` (`"0x..."`, the guest function), `samples`, `hitch_samples` |
+| `cpu.top_engine[]` | At most 32: `rva` (`"0x..."`), optional `"module": "vk"`, `samples`, `hitch_samples` |
+| `gpu.frame_ms_sum` | The sum of the map's frame times in the batch, ms |
+| `gpu.passes[]` | At most 24: `kind`, `key` (16 hex digits), `count`, `ms_sum`, `ms_max`, `hitch_ms_sum` (ms) |
+
+Example (cut short):
+
+```json
+{"v": 1, "version": "v0.4.3", "release": true, "build_id": "0123456789abcdef", "vendor_id": 4318, "driver": "NVIDIA 566.36",
+ "gpu": "NVIDIA GeForce RTX 5070", "cpu": "AMD Ryzen 7 7800X3D", "os": "Windows 11",
+ "maps": [{"map": "Kokiri Forest (child)", "seconds": 312.5, "frames": 18000, "hitch_frames": 12,
+           "cpu": {"hz": 250, "threads": [{"role": "game", "count": 2, "samples": 31000, "hitch_samples": 300,
+                     "modules": {"game_lifted": 21000, "native_engine": 900, "renderer": 0, "host": 4100, "audio": 100, "driver": 0,
+                                 "os": 4000, "runtime": 800, "other": 100},
+                     "hitch_modules": {"game_lifted": 190, "native_engine": 5, "renderer": 0, "host": 40, "audio": 0, "driver": 0,
+                                       "os": 60, "runtime": 5, "other": 0}}],
+                   "top_guest": [{"addr": "0x7100abcdef", "samples": 1200, "hitch_samples": 4}],
+                   "top_engine": [{"rva": "0x1a2b30", "samples": 900, "hitch_samples": 2}]},
+           "gpu": {"frame_ms_sum": 1234.5, "passes": [{"kind": "main", "key": "0123456789abcdef", "count": 18000,
+                   "ms_sum": 800.2, "ms_max": 3.1, "hitch_ms_sum": 12.0}]}}]}
+```
+
+Never sent: the PC's name or folders, the user name, any ID, any name of the game's functions or files. `profile_sent/` keeps the
+exact body of the last 3 batches. `tests/test_profile_report.py` checks the payload against this PC's own names and folders.
+`HL_TELEMETRY_PROFILE=0` turns it off by itself, and `HL_PROFILE_LOCAL=1` takes the same profile without an address or the row,
+and writes the same JSON into `profile_local/` (never sent), for our own runs and for testers. Linux: the CPU sampler is not
+built (there is no way to stop a thread there); the GPU part is.
+
 ### Zone usage (`/telemetry/zones`, at most 400 KiB a batch)
 
 While the row is on, the game notes, per map, which shader programs and which graphics pipelines its draws used: a program
@@ -297,6 +379,14 @@ driver and the two build stamps. No shader code, no game code, no game data, no 
   log says `vk: zones: N maps (...) queued ...` or `... nothing queued to send: <why>`, and at the next start
   `perf: N zone usage batches sent or refused`. Turning the row off deletes `zones_pending/`, `zones_sent/` and the sent
   hashes.
+- **The detailed profile** (`gpu/vk/profile_report.h` the rules and the JSON, `gpu/vk/profile_run.cpp` the sampler and the GPU's
+  timestamps, `perf_report.cpp` `profile_queue`, `host/hos_profile.c` what the executable tells about an address): with the row on,
+  an address and `HL_TELEMETRY_PROFILE` not `0` (or `HL_PROFILE_LOCAL=1`), a thread named "mkw_vk profile sampler" samples the
+  threads that ran (suspend, read the context, resume, and nothing between them) and the passes get timestamps in a query pool of
+  their own. Batches are written every 5 minutes and at exit into `profile_pending/<unix time>-<n>.json` (at most 8 wait, 256 KiB
+  a batch), by the same sender as the zones (`hos_profile_send_run`: 2 a start, the last 3 sent in `profile_sent/`, its own `.next`
+  backoff). The log says `vk: performance profile on: ...`, `vk: profile: N maps in ... files` and at the next start `perf: N
+  performance profile batches sent or refused`. Turning the row off deletes `profile_pending/` and `profile_sent/`.
 - **The address** (`host/hos_telemetry.h`): `nx2/addresses.ini`'s `telemetry=`, stamped by `nx2/make_game.py` into the game
   folder's `hookshot_version.txt`. Empty (the default): nothing is stamped, nothing can be sent, and both rows say **Not
   available in this build**.
@@ -311,6 +401,10 @@ driver and the two build stamps. No shader code, no game code, no game data, no 
 | `HL_TELEMETRY_PIPELINES=0` | on (with the row) | Turns off only the pipeline state records: none is queued or sent, the performance summaries go as the row says |
 | `HOS_PERF_REPORT=1` | off | With **Send performance statistics** on, measure and write the summaries even in a build with no address: for this machine alone, into `perf_pending/`, never sent (the sender still needs an address). A run's breakdown without any server |
 | `HL_TELEMETRY_ZONES=0` | on (with the row) | Turns off only the per-zone shader and pipeline usage: nothing is recorded, queued or sent, the rest goes as the row says |
+| `HL_TELEMETRY_PROFILE=0` | on (with the row) | Turns off only the detailed profile: nothing is sampled, queued or sent, the rest goes as the row says |
+| `HL_PROFILE_LOCAL=1` | off | Takes the detailed profile with no address and with the row off, and writes it into `profile_local/` in the game folder, never sent |
+| `HL_PROFILE_HZ` | `250` | The CPU sampler's rate, 50 to 1000 |
+| `HL_PROFILE_BATCH_S` | `300` | Seconds of play between two profile batches, 10 to 3600 (a short test run wants one before it ends) |
 | `RX_VK_PERF_INTERVAL` | `300` s | Seconds of play between two summaries (60 to 840) |
 | `HL_PERF_MAX_SENDS` | `12` | Summaries sent at one start (1 to 48) |
 | `HL_PERF_TIMEOUT` | `10` s | A request's time limit (2 to 60) |
