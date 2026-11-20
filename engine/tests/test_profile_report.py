@@ -122,7 +122,7 @@ def wiring():
     between = sample[sample.index("SuspendThread("):sample.index("ResumeThread(")]
     check(not re.search(r"\b(new|malloc|logf|printf|lock|push_back|emplace|std::)\b", between) and "GetThreadContext(" in between,
           "between the suspend and the resume the sampler only reads the context (no allocation, no log, no lock)")
-    check("THREAD_PRIORITY_ABOVE_NORMAL" in run and "QueryThreadCycleTime(" in run, "the sampler samples threads that ran, above normal priority")
+    check("THREAD_PRIORITY_ABOVE_NORMAL" in run and "QueryThreadCycleTime(" in run, "the sampler samples a thread for each share of its CPU time, above normal priority")
     check("pf::sample_hz(getenv(\"HL_PROFILE_HZ\"))" in cpp, "the rate is HL_PROFILE_HZ")
     api = source("gpu/vk/vk_api.h")
     check(re.search(r"#define MKWVK_API_VERSION 1[89]\b", api) and "profile_pc" in api and "build_id" in api and "profile_threads" in api, "the host's profile_pc and build_id are in the API")

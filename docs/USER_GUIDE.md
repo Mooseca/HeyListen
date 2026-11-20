@@ -366,7 +366,7 @@ in-game menu (Insert) control it:
   them at the next start, so a release can have the next zone's pipelines ready before you enter it; `zones_sent` keeps a
   copy. Set `HL_TELEMETRY_ZONES=0` to turn only this part off.
   The same row also sends, per map, a **detailed profile** of where the time goes, every 5 minutes and at exit: how many of
-  the CPU's samples (taken 250 times a second, only of threads that were working) fell in the game's translated code, our native
+  the CPU's samples (one for each 1/250 s of CPU time a thread uses) fell in the game's translated code, our native
   engine, the renderer, the graphics driver and the operating system, the addresses of the functions with the most samples
   (an address in the game's program or an offset in HeyListen's own files, **numbers only, no code, no names, no data**) and
   how long the GPU spent in each render pass, with the GPU's vendor and driver, the PC's GPU, CPU and operating system names

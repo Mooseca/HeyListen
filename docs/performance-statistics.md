@@ -213,7 +213,8 @@ have the most samples, and how long the GPU spends in each render pass. It is fo
 
 **CPU.** A sampler thread looks, 250 times a second (`HL_PROFILE_HZ`, 50 to 1000), at each thread of the game that has run since
 the last look: it stops the thread, reads its instruction pointer, lets it go, and only then works out what the address is. A
-thread that was waiting is not sampled, so the samples are CPU time, not wall time. Each address becomes one of nine **modules**
+thread is sampled once for each 1/250 s of its own CPU time (a thread that works half the time gets half the samples, one that
+is waiting none), so the samples are CPU time, not wall time. Each address becomes one of nine **modules**
 (a fixed list): `game_lifted` (the game's translated code), `native_engine` (our native modules that replace game code: the
 `hl::` code and its `hl_` glue), `renderer` (our Vulkan renderer), `host` (the rest of the executable: the OS layer, input, the
 file system), `audio`, `driver` (the graphics driver), `os` (ntdll, kernel32, kernelbase, win32u and the other Windows system

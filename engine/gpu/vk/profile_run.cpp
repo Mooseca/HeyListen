@@ -111,7 +111,6 @@ struct SampledPc {
     uint8_t role = 0;
 };
 constexpr int kMaxThreads = 256, kMaxPerTick = 128;
-constexpr ULONG64 kMinCycles = 200000;   // (a thread that ran less since its last sample is not sampled: a wake-up, not work)
 
 std::atomic<DWORD> registered_tid[16];
 std::atomic<uint8_t> registered_role[16];
@@ -256,6 +255,19 @@ void sampler_main() {
     int64_t next_refresh = 0, next = now_ns();
     SampledPc buf[kMaxPerTick];
     refresh_modules();
+    // (the thread's cycles for one sample's share of CPU time: this thread's own cycles over a short busy spell, once)
+    ULONG64 every = 4000000;
+    {
+        ULONG64 c0 = 0, c1 = 0;
+        const int64_t s0 = now_ns();
+        if (QueryThreadCycleTime(GetCurrentThread(), &c0)) {
+            volatile double sink = 0;
+            while (now_ns() - s0 < 4000000) sink = sink + 1.0;
+            const int64_t s1 = now_ns();
+            if (QueryThreadCycleTime(GetCurrentThread(), &c1) && c1 > c0 && s1 > s0)
+                every = (ULONG64)((double)(c1 - c0) / (double)(s1 - s0) * (double)period_ns * 0.9);
+        }
+    }
     while (!stop_sampler.load(std::memory_order_acquire)) {
         next += period_ns;
         const int64_t wait = next - now_ns();
@@ -273,9 +285,11 @@ void sampler_main() {
         const uint16_t map = cur_map.load(std::memory_order_relaxed);
         int n = 0;
         for (ThreadRec& t : threads) {
+            // (one sample for each 1/Hz of the thread's own CPU time: a thread that works half the time gets half the samples, and
+            // a waiting one none, so the samples are proportional to CPU time and the sampler's own cost follows the cores that are busy)
             ULONG64 c = 0;
-            if (!QueryThreadCycleTime(t.h, &c) || c - t.cycles < kMinCycles) continue;
-            t.cycles = c;
+            if (!QueryThreadCycleTime(t.h, &c) || c - t.cycles < every) continue;
+            t.cycles = c - t.cycles > 2 * every ? c - every : t.cycles + every;   // (what is over carries to the next tick)
             if (n >= kMaxPerTick) break;
             sample_thread(t, buf[n]);
             if (buf[n].pc) n++;
