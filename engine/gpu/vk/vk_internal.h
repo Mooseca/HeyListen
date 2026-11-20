@@ -77,6 +77,11 @@ struct Device {
     VkPhysicalDeviceVulkan12Features vk12{};
     VkPhysicalDeviceVulkan13Features vk13{};
     VkShaderStageFlags sg32_stages = 0;   // (stages that run at 32 lanes when asked: the size the translated programs assume)
+    // (wave64, issue 67: stages whose programs are translated for subgroups wider than the guest's 32 lanes (the translator then limits
+    // ballots, votes, shuffles and the lane id to the 32-lane partition), and the subgroup size they run at. 0 / 32 where the GPU runs
+    // them at 32 lanes, so those GPUs translate exactly as they did: vk_main.cpp, vk_shader.cpp make_profile)
+    VkShaderStageFlags warp_wide_stages = 0;
+    uint32_t warp_lanes = 32;
     uint32_t max_push_descriptors = 0;
     // no window (HOS_HEADLESS): presents go to an image of their own, which RX_VK_SHOTS can write out
     bool offscreen = false;
@@ -354,8 +359,10 @@ void memory_protect_gpu(uint64_t guest, uint64_t size);  // (RX_VK_PROTECT_BARE=
 /// (vk_replay.cpp) guest memory as the stream's place sees it: as submitted, the stream's uniform updates before it over it
 bool ub_read(uint64_t addr, void* dst, uint64_t n);
 /// [guest, guest + n) as of the submit being replayed: live itself, or scratch holding it with the kept pages over it. first: a
-/// texture's first upload, which takes only the copies the submission being recorded took (RX_VK_FIRST_UPLOAD_OWN, issue 66)
-const uint8_t* memory_as_submitted(uint64_t guest, const uint8_t* live, uint64_t n, std::vector<uint8_t>& scratch, bool first = false);
+/// texture's first upload, which takes only the copies the submission being recorded took (RX_VK_FIRST_UPLOAD_OWN, issue 66);
+/// again: a re-upload, the same (RX_VK_REUPLOAD_OWN)
+const uint8_t* memory_as_submitted(uint64_t guest, const uint8_t* live, uint64_t n, std::vector<uint8_t>& scratch, bool first = false,
+                                   bool again = false);
 void memory_drop_shadow(uint64_t guest, uint64_t size);   // (a write the capture did not take: the copies go)
 /// (EvilBoyce) the newest submission value whose write-back reaches into [guest, guest + size) (0: none ever); *ever set
 /// when any write-back ever did
@@ -472,6 +479,8 @@ bool precompile_wanted();                     // vk_draw.cpp
 bool precompile_blocking();                   // vk_draw.cpp: RX_VK_PRECOMPILE_WAIT=1 (else the pipelines are built while the game runs)
 void precompile_run(void (*progress)(size_t done, size_t total), bool wait = true);
 bool prepare_run(void (*progress)(size_t done, size_t total), bool background);
+/// (hookshot) How far prepare_run is by what its work costs (prepare_work.h), 0..1; -1 when none runs. The builder's bar goes by it
+double prepare_progress_by_cost();
 bool prepare_is_update();
 bool prepare_is_lazy_update();                 // (the update prepare_is_update found is lazy: nothing is made before the game)
 void prepare_background();
