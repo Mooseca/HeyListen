@@ -22,6 +22,8 @@ std::condition_variable work_cv, done_cv;
 struct Entry {
     std::function<void()> fn;
     const std::atomic<bool>* flag;   // (what the job sets when done, for jobs_wait to find it while queued)
+    uint64_t demand = 0;             // (the present a draw last asked for it in, or it was pushed in: jobs_pending_live)
+    bool urgent = false;             // (pushed to the front: a compute pipeline a dispatch cannot do without)
 };
 std::deque<Entry> queue;
 std::atomic<int> pending{0};
@@ -33,6 +35,14 @@ std::atomic<int> pending{0};
 std::atomic<uint64_t> frame_noted{0};
 std::atomic<uint64_t> last_push_frame{0};
 bool started = false;
+// (hookshot) RX_VK_JOB_DEMAND: where the jobs a draw asked for this present go in the queue (past the urgent ones), so that the
+// frame's draws are served in their order and ahead of what no draw has wanted since
+uint64_t demand_frame = 0;
+size_t demand_pos = 0;
+bool demand_on() {
+    static const bool on = getenv("RX_VK_JOB_DEMAND") && atoi(getenv("RX_VK_JOB_DEMAND")) != 0;
+    return on;
+}
 
 // (a job that throws: the game ended at once ("approach Malon, crash": an exception escaped a worker, KERNELBASE's RaiseException
 // with no handler, 2026-11-08). It is logged and let go; what it was making stays not ready and is asked for again)
@@ -59,6 +69,7 @@ void worker() {
             work_cv.wait(lk, [] { return !queue.empty(); });
             fn = std::move(queue.front().fn);
             queue.pop_front();
+            if (demand_pos) demand_pos--;   // (the promoted block's front went)
         }
         run_guarded(fn);
         pending--;
@@ -83,8 +94,9 @@ void jobs_push(std::function<void()> fn, bool urgent, const std::atomic<bool>* f
     if (!started) start();
     pending++;
     last_push_frame.store(frame_noted.load(std::memory_order_relaxed), std::memory_order_relaxed);
-    if (urgent) queue.push_front({std::move(fn), flag});
-    else queue.push_back({std::move(fn), flag});
+    const uint64_t now = frame_noted.load(std::memory_order_relaxed);
+    if (urgent) queue.push_front({std::move(fn), flag, now, true});
+    else queue.push_back({std::move(fn), flag, now, false});
     work_cv.notify_one();
 }
 // (issue 496) Intel A750: four of the game's big compute pipelines built at once by Intel's compiler (up to 58 s each) froze
@@ -132,15 +144,16 @@ bool jobs_wait(const std::atomic<bool>& flag) {
     const bool fresh = !flag.load(std::memory_order_acquire);   // (done already: nothing ran during this wait)
     // (still queued: run here, now. A draw that must wait for its pipeline waited for every job queued before it, and a new
     // area queues a hundred pipelines: with ten workers at 0.3-2 s a build, frames stopped for 6-12 s, the draw's own build
-    // still in the queue. Off by default since v0.4.3 (2026-11-19): frames drawn during a new area's translation storm
-    // sampled state not yet settled (cyan/white areas, green bands on slower GPUs), and the hold that hid them left a wash
-    // at its release; the arrival waits again as in v0.4.2 until that is fixed. RX_VK_JOB_STEAL=1: run here)
+    // still in the queue. On by default again (v0.4.4) behind the storm hold: the frames drawn during a new area's translation
+    // storm sampled state not yet settled (cyan/white areas, green bands on slower GPUs, why v0.4.3 had it off), and the hold now
+    // withholds those presents until the queue drains. RX_VK_JOB_STEAL=0: the arrival waits as in v0.4.2)
     static const bool steal = !getenv("RX_VK_JOB_STEAL") || atoi(getenv("RX_VK_JOB_STEAL")) != 0;
     if (steal && !flag.load(std::memory_order_acquire))
         for (auto it = queue.begin(); it != queue.end(); ++it)
             if (it->flag == &flag) {
                 std::function<void()> fn = std::move(it->fn);
                 queue.erase(it);
+                if (demand_pos) demand_pos--;
                 lk.unlock();
                 run_guarded(fn);
                 pending--;
@@ -153,6 +166,33 @@ bool jobs_wait(const std::atomic<bool>& flag) {
 }
 int jobs_pending() {
     return pending.load();
+}
+void jobs_demand(const std::atomic<bool>& flag) {
+    if (!demand_on()) return;
+    std::lock_guard lk(mu);
+    const uint64_t now = frame_noted.load(std::memory_order_relaxed);
+    if (now != demand_frame) demand_frame = now, demand_pos = 0;   // (the newest present's draws first)
+    size_t urgent = 0;
+    while (urgent < queue.size() && queue[urgent].urgent) urgent++;
+    for (size_t i = urgent; i < queue.size(); i++) {
+        if (queue[i].flag != &flag) continue;
+        if (queue[i].demand == now && queue[i].demand != 0 && i < urgent + demand_pos) return;   // (already moved up this present)
+        Entry e = std::move(queue[i]);
+        queue.erase(queue.begin() + (std::ptrdiff_t)i);
+        e.demand = now;
+        queue.insert(queue.begin() + (std::ptrdiff_t)(urgent + std::min(demand_pos, queue.size() - urgent)), std::move(e));
+        demand_pos++;
+        return;
+    }
+}
+int jobs_pending_live(uint64_t window) {
+    std::lock_guard lk(mu);
+    const uint64_t now = frame_noted.load(std::memory_order_relaxed);
+    const uint64_t from = now > window ? now - window : 0;
+    int live = std::max(0, pending.load() - (int)queue.size());   // (running: a worker has it)
+    for (const Entry& e : queue)
+        if (e.demand >= from) live++;
+    return live;
 }
 void jobs_frame_note(uint64_t frame) {
     frame_noted.store(frame, std::memory_order_relaxed);

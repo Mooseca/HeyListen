@@ -7488,7 +7488,10 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
         return;
     }
     if (!cp->ready.load(std::memory_order_acquire)) {
-        if (may_skip) return void(st_pending_skips++);
+        if (may_skip) {
+            jobs_demand(cp->ready);   // (RX_VK_JOB_DEMAND: this frame's draw wants it: ahead of what no draw wants lately)
+            return void(st_pending_skips++);
+        }
         // (hookshot) The translation finished in this draw's own wait: stolen to run here (9c42f5e7) or a worker seen
         // finishing it just then. Its variant's answers were read mid-storm — a cold area's arrival fades textures in and
         // out and rewrites the handles every frame — and what the frames of the storm drew from them showed as white/cyan
@@ -7529,6 +7532,7 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
         // first visit). RX_VK_PIPE_WAIT_FRESH=0: those are left out too (counted: st_pipe_fresh_skips); RX_VK_PIPE_SKIP=0: every draw waits
         static const bool wait_fresh = !getenv("RX_VK_PIPE_WAIT_FRESH") || strcmp(getenv("RX_VK_PIPE_WAIT_FRESH"), "0") != 0;
         if (may_skip || !(always_wait || wait_fresh)) {
+            jobs_demand(pe->ready);   // (RX_VK_JOB_DEMAND, as the program's above)
             st_pending_skips++;
             if (!may_skip) st_pipe_fresh_skips.fetch_add(1, std::memory_order_relaxed);
             return;

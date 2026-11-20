@@ -54,6 +54,10 @@ def check_source():
         raise SystemExit("jobs_wait no longer runs a queued job it waits for")
     if "return fresh" not in wait:
         raise SystemExit("jobs_wait no longer tells whether the job ran during the wait")
+    if "void jobs_demand(" not in jobs or "int jobs_pending_live(" not in jobs or 'RX_VK_JOB_DEMAND' not in jobs:
+        raise SystemExit("the jobs queue lost the demand ordering (RX_VK_JOB_DEMAND) or the live count")
+    if draw.count("jobs_demand(cp->ready)") != 1 or draw.count("jobs_demand(pe->ready)") != 1:
+        raise SystemExit("a draw left out for want of its program or pipeline no longer asks for the job (jobs_demand)")
     if "last_push_frame.store" not in jobs or "uint64_t jobs_last_push_age_frames" not in jobs:
         raise SystemExit("the jobs queue no longer tells how long it has gone unpushed")
     hold = (ROOT / "gpu/vk/storm_hold.h").read_text(encoding="utf-8")
@@ -85,8 +89,13 @@ def main():
         subprocess.run([args.cxx, "-std=c++20", "-Wall", "-Wextra", "-pthread", "-I", str(tmp),
                         str(tmp / "vk_jobs.cpp"), str(ROOT / "tests/test_jobs_wait_runs_queued.cpp"), "-o", str(exe)],
                        check=True)
-        # (the steal is off by default since v0.4.3: this checks it when turned on)
         subprocess.run([str(exe)], check=True, timeout=60, env={**os.environ, "RX_VK_JOB_STEAL": "1"})
+        # (RX_VK_JOB_DEMAND: one worker, so the queue's order is the run order)
+        demand = tmp / "jobs-demand"
+        subprocess.run([args.cxx, "-std=c++20", "-Wall", "-Wextra", "-pthread", "-I", str(tmp),
+                        str(tmp / "vk_jobs.cpp"), str(ROOT / "tests/test_jobs_demand.cpp"), "-o", str(demand)], check=True)
+        subprocess.run([str(demand)], check=True, timeout=60,
+                       env={**os.environ, "RX_VK_JOB_DEMAND": "1", "RX_VK_WORKERS": "1", "RX_VK_JOB_STEAL": "0"})
 
 
 if __name__ == "__main__":

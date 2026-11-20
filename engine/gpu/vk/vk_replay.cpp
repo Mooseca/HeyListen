@@ -5602,7 +5602,8 @@ void do_present(const nvn_tex* t, const int crop[4]) {
     draw_stats3(&storm_skips_now, &storm_w, &storm_wms);
     const int64_t storm_skips = storm_skips_now - storm_skips_was;
     storm_skips_was = storm_skips_now;
-    storm_hold_tick(jobs_pending(), (int64_t)jobs_last_push_age_frames(), storm_frame, storm_skips);
+    storm_hold_tick(jobs_pending(), (int64_t)jobs_last_push_age_frames(), storm_frame, storm_skips,
+                    storm_hold_rules().live_frames > 0 ? jobs_pending_live(storm_hold_rules().live_frames) : -1);
     const bool present_held = storm_hold_presents_held();
 
     // (hookshot) NVIDIA Reflex (vk_reflex.cpp): this frame's simulation ended, its submission starts; on the way out (after the
@@ -6023,6 +6024,7 @@ const StormHoldRules& storm_hold_rules() {
         if (const char* e = getenv("RX_VK_STORM_OFF_DEPTH")) r.off_depth = std::max<int64_t>(1, atoll(e));
         if (const char* e = getenv("RX_VK_STORM_WHOLE")) r.whole_frames = atoi(e) != 0;
         if (const char* e = getenv("RX_VK_STORM_SETTLE")) r.settle = std::max<int64_t>(1, atoll(e));
+        if (const char* e = getenv("RX_VK_STORM_LIVE")) r.live_frames = std::max<int64_t>(0, atoll(e));
         r.hold_present = !getenv("RX_VK_STORM_HOLD_PRESENT") || atoi(getenv("RX_VK_STORM_HOLD_PRESENT")) != 0;
         return r;
     }();
@@ -6041,10 +6043,10 @@ bool storm_hold_presents_held() {
     return storm_hold_on() && storm_hold_rules().hold_present;
 }
 
-StormHoldEvent storm_hold_tick(int64_t pending, int64_t push_age, uint64_t frame, int64_t skips) {
+StormHoldEvent storm_hold_tick(int64_t pending, int64_t push_age, uint64_t frame, int64_t skips, int64_t live) {
     const StormHoldRules& r = storm_hold_rules();
     static std::chrono::steady_clock::time_point engaged_at;
-    const StormHoldEvent ev = storm_hold_state.tick(r, pending, push_age, frame, skips);
+    const StormHoldEvent ev = storm_hold_state.tick(r, pending, push_age, frame, skips, live);
     storm_held.store(storm_hold_state.on, std::memory_order_relaxed);
     if (ev == StormHoldEvent::Engaged) {
         engaged_at = std::chrono::steady_clock::now();
@@ -6052,8 +6054,8 @@ StormHoldEvent storm_hold_tick(int64_t pending, int64_t push_age, uint64_t frame
              (int)pending, r.hold_present ? "presents" : "frame's draws", (unsigned long long)frame);
     } else if (ev == StormHoldEvent::Released) {
         const double sec = std::chrono::duration<double>(std::chrono::steady_clock::now() - engaged_at).count();
-        logf("vk: the storm drained: held %.1f s, %lld presents, %d jobs left, none pushed for %lld presents",
-             sec, (long long)(frame - storm_hold_state.since_frame), (int)pending, (long long)push_age);
+        logf("vk: the storm drained: held %.1f s, %lld presents, %d jobs left (%d asked for lately), none pushed for %lld presents",
+             sec, (long long)(frame - storm_hold_state.since_frame), (int)pending, (int)live, (long long)push_age);
     }
     // (hookshot, a test) RX_VK_STORM_TRACE=1: while held, the queue's depth and its quiet clock every 2 s, to see the
     // band the churn rides and what the release waited out. Tick-driven, so the present hold traces as the draw hold does
@@ -6063,8 +6065,8 @@ StormHoldEvent storm_hold_tick(int64_t pending, int64_t push_age, uint64_t frame
         const auto now = std::chrono::steady_clock::now();
         if (ev == StormHoldEvent::Engaged || now - last >= std::chrono::seconds(2)) {
             last = now;
-            logf("vk: storm trace: %d jobs queued, quiet for %lld presents, held %lld presents", (int)pending, (long long)push_age,
-                 (long long)(frame - storm_hold_state.since_frame));
+            logf("vk: storm trace: %d jobs queued (%d asked for lately), quiet for %lld presents, held %lld presents", (int)pending,
+                 (int)live, (long long)push_age, (long long)(frame - storm_hold_state.since_frame));
         }
     }
     return ev;

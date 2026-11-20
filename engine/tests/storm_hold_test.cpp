@@ -109,6 +109,19 @@ int main() {
         h2.tick(off, 300, 0, 0);
         for (int i = 1; i < 10; i++) expect(h2.tick(off, 150, 0, i, 0) == StormHoldEvent::None && h2.on, "whole frames off: the queue rules");
     }
+    {   // (live: the release counts the jobs a draw asked for lately, not the queue's stale rest; < 0: the queue)
+        StormHold h;
+        StormHoldRules d;
+        d.off_depth = 10, d.settle = 2;
+        h.tick(d, 300, 0, 0);
+        expect(h.tick(d, 300, 0, 10, -1, 5) == StormHoldEvent::None && h.on, "one present with few live jobs: held");
+        expect(h.tick(d, 300, 0, 11, -1, 50) == StormHoldEvent::None && h.on, "a live refill restarts the count");
+        expect(h.tick(d, 300, 0, 12, -1, 5) == StormHoldEvent::None && h.on, "one again");
+        expect(h.tick(d, 300, 0, 13, -1, 0) == StormHoldEvent::Released && !h.on, "the second running: released with 300 queued");
+        StormHold h2;
+        h2.tick(d, 300, 0, 0);
+        for (int i = 1; i < 6; i++) expect(h2.tick(d, 300, 0, i, -1, -1) == StormHoldEvent::None && h2.on, "no live count: the queue rules");
+    }
     {   // (re-engage: a second storm after a release starts its own clock)
         StormHold h;
         const StormHoldRules r = rules(200, 400, 100);

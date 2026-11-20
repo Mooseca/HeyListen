@@ -178,6 +178,8 @@ case-sensitive, and an unknown one is ignored.
 | `RX_VK_STORM_QUIET_FRAMES=<presents>` | No release while a job was pushed in the last this many presents (0: off; the queue's depth is the rule) |
 | `RX_VK_STORM_OFF_DEPTH=<jobs>`, `RX_VK_STORM_SETTLE=<presents>` | Released once fewer than this many jobs are queued (100) for this many presents running (1): the picture is partial while the queue is deep, its draws left out for want of their programs, and whole when it drains |
 | `RX_VK_STORM_WHOLE=1` | Also released by `RX_VK_STORM_SETTLE` frames running that left no draw or dispatch out, whatever the queue still holds (off by default: not yet measured on the PC 3050) |
+| `RX_VK_STORM_LIVE=<presents>` | The release counts only the jobs a draw asked for (pushed, or left out for want of them) in the last this many presents, not the whole queue: the arrival's superseded variants sit in it for good and are not what the picture waits for (0: off, the queue's depth) |
+| `RX_VK_JOB_DEMAND=1` | A draw left out for want of its translation or pipeline moves that job up the queue, ahead of every job no draw has asked for lately and behind the earlier draws of the same present (newest present first): the arrival's frame is served in its own order instead of behind the churn's variants (0/unset: first in, first out) |
 | `RX_VK_STORM_TRACE=1` | While held, the queue's depth and its quiet clock logged every 2 s |
 
 A held present is not written as a shot: `RX_VK_SHOTS` keeps showing only what reached the screen.

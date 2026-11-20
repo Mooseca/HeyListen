@@ -84,7 +84,9 @@ def check_source():
     if "hold_present = !getenv(\"RX_VK_STORM_HOLD_PRESENT\")" not in rules:
         raise SystemExit("RX_VK_STORM_HOLD_PRESENT is not on by default")
     tick = function(replay, "StormHoldEvent storm_hold_tick(")
-    if "storm_hold_state.tick(r, pending, push_age, frame, skips)" not in tick:
+    if "RX_VK_STORM_LIVE" not in rules or "jobs_pending_live(" not in present:
+        raise SystemExit("the hold's release no longer counts the jobs a draw asked for lately (RX_VK_STORM_LIVE)")
+    if "storm_hold_state.tick(r, pending, push_age, frame, skips, live)" not in tick:
         raise SystemExit("the present path no longer ticks the hold's own state machine")
 
     docs = (ROOT / "docs/development.md").read_text(encoding="utf-8")
