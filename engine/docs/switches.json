@@ -2,7 +2,7 @@
  "schema": 1,
  "generated_by": "engine/scripts/list_switches.py",
  "scope": "C, C++ and headers under engine/ (engine/tests and vendored trees other than a64-kit excluded) and the Python the builder, the lifter and the scripts run: getenv, std::getenv, _wgetenv, the code's own env helpers and table-driven reads, and os.environ.",
- "count": 1288,
+ "count": 1291,
  "switches": [
   {
    "name": "A64_DEVIRT",
@@ -3857,7 +3857,7 @@
     },
     {
      "path": "host/nn_os_sync.c",
-     "line": 660
+     "line": 689
     }
    ],
    "default": "unset",
@@ -4781,11 +4781,11 @@
    "files": [
     {
      "path": "gpu/vk/vk_vma.cpp",
-     "line": 115
+     "line": 120
     },
     {
      "path": "gpu/vk/vk_vma.cpp",
-     "line": 429
+     "line": 500
     },
     {
      "path": "host/hos_hostsplit.c",
@@ -4794,7 +4794,7 @@
    ],
    "default": "off (unset)",
    "values": "on or off (0, false, off, no and empty are off)",
-   "explanation": "undocumented: gpu/vk/vk_vma.cpp:115 (in `tag_mapped()`) reads it as an on/off switch: `static const bool named = getenv(\"HOS_HOST_SPLIT\") != nullptr || ledger_on();`. No comment in the source says what it changes.",
+   "explanation": "undocumented: gpu/vk/vk_vma.cpp:120 (in `tag_mapped()`) reads it as an on/off switch: `static const bool named = getenv(\"HOS_HOST_SPLIT\") != nullptr || ledger_on();`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -5125,12 +5125,12 @@
    "files": [
     {
      "path": "host/nn_os_sync.c",
-     "line": 100
+     "line": 119
     }
    ],
    "default": "off (unset)",
    "values": "on or off (0, false, off, no and empty are off)",
-   "explanation": "undocumented: host/nn_os_sync.c:100 (in `bury_locked()`) reads it as an on/off switch: `if (keep < 0) keep = getenv(\"HOS_KEEP_DEAD_OBJECTS\") != NULL;`. No comment in the source says what it changes.",
+   "explanation": "undocumented: host/nn_os_sync.c:119 (in `bury_locked()`) reads it as an on/off switch: `if (keep < 0) keep = getenv(\"HOS_KEEP_DEAD_OBJECTS\") != NULL;`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -5326,7 +5326,7 @@
    "files": [
     {
      "path": "host/nn_os_sync.c",
-     "line": 788
+     "line": 817
     }
    ],
    "default": "off (unset)",
@@ -5703,7 +5703,7 @@
    "files": [
     {
      "path": "host/nn_os_sync.c",
-     "line": 543
+     "line": 572
     }
    ],
    "default": "0",
@@ -5724,7 +5724,7 @@
    "files": [
     {
      "path": "host/nn_os_sync.c",
-     "line": 594
+     "line": 623
     }
    ],
    "default": "0",
@@ -5745,7 +5745,7 @@
    "files": [
     {
      "path": "host/nn_os_sync.c",
-     "line": 388
+     "line": 417
     }
    ],
    "default": "off (unset)",
@@ -5791,7 +5791,7 @@
    "files": [
     {
      "path": "host/nn_os_sync.c",
-     "line": 509
+     "line": 538
     }
    ],
    "default": "1",
@@ -5833,7 +5833,7 @@
    "files": [
     {
      "path": "host/nn_os_sync.c",
-     "line": 222
+     "line": 249
     }
    ],
    "default": "off (unset)",
@@ -5854,7 +5854,7 @@
    "files": [
     {
      "path": "host/nn_os_sync.c",
-     "line": 270
+     "line": 297
     }
    ],
    "default": "off (unset)",
@@ -6429,7 +6429,7 @@
    "files": [
     {
      "path": "host/nn_os_sync.c",
-     "line": 153
+     "line": 167
     }
    ],
    "default": "1",
@@ -6907,7 +6907,7 @@
    "files": [
     {
      "path": "host/nn_os_sync.c",
-     "line": 924
+     "line": 953
     }
    ],
    "default": "off (unset)",
@@ -7066,7 +7066,7 @@
    "files": [
     {
      "path": "host/nn_os_sync.c",
-     "line": 907
+     "line": 936
     }
    ],
    "default": "the engine's own value",
@@ -7087,7 +7087,7 @@
    "files": [
     {
      "path": "host/nn_os_sync.c",
-     "line": 1027
+     "line": 1056
     }
    ],
    "default": "off (unset)",
@@ -7606,12 +7606,12 @@
    "files": [
     {
      "path": "host/nn_os_sync.c",
-     "line": 409
+     "line": 438
     }
    ],
    "default": "unset",
    "values": "text",
-   "explanation": "undocumented: host/nn_os_sync.c:409 (in `spin_begin()`) reads it as a text value: `if (adaptive < 0) adaptive = getenv(\"HOS_SPIN_ALWAYS\") == NULL;`. No comment in the source says what it changes.",
+   "explanation": "undocumented: host/nn_os_sync.c:438 (in `spin_begin()`) reads it as a text value: `if (adaptive < 0) adaptive = getenv(\"HOS_SPIN_ALWAYS\") == NULL;`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -7631,7 +7631,7 @@
     },
     {
      "path": "host/nn_os_sync.c",
-     "line": 401
+     "line": 430
     }
    ],
    "default": "unset",
@@ -7666,6 +7666,27 @@
    "use": null
   },
   {
+   "name": "HOS_SYNC_REHASH_OLD",
+   "area": "shaders",
+   "group": "Mesh, draws and synchronization",
+   "audience": "developer",
+   "files": [
+    {
+     "path": "host/nn_os_sync.c",
+     "line": 165
+    }
+   ],
+   "default": "off (unset)",
+   "values": "on or off (0, false, off, no and empty are off); the description names `1`",
+   "explanation": "HOS_SYNC_REHASH_OLD=1: the rehash reads each object's kind to tell live from tombstone, as before the live bytes.",
+   "comment": "HOS_SYNC_REHASH_OLD=1: the rehash reads each object's kind to tell live from tombstone, as before the live bytes.",
+   "documented_in": null,
+   "source": "comment at host/nn_os_sync.c",
+   "documented": true,
+   "set_via": "In `hookshot_env.txt`, or in the environment.",
+   "use": null
+  },
+  {
    "name": "HOS_SYNC_TABLE_LOCK",
    "area": "shaders",
    "group": "Mesh, draws and synchronization",
@@ -7673,12 +7694,12 @@
    "files": [
     {
      "path": "host/nn_os_sync.c",
-     "line": 286
+     "line": 313
     }
    ],
    "default": "off (unset)",
    "values": "on or off (0, false, off, no and empty are off)",
-   "explanation": "undocumented: host/nn_os_sync.c:286 (in `obj_lookup()`) reads it as an on/off switch: `if (locked_reads < 0) locked_reads = getenv(\"HOS_SYNC_TABLE_LOCK\") != NULL;`. No comment in the source says what it changes.",
+   "explanation": "undocumented: host/nn_os_sync.c:313 (in `obj_lookup()`) reads it as an on/off switch: `if (locked_reads < 0) locked_reads = getenv(\"HOS_SYNC_TABLE_LOCK\") != NULL;`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -8248,7 +8269,7 @@
    "files": [
     {
      "path": "host/nn_os_sync.c",
-     "line": 785
+     "line": 814
     }
    ],
    "default": "off (unset)",
@@ -8269,7 +8290,7 @@
    "files": [
     {
      "path": "host/nn_os_sync.c",
-     "line": 848
+     "line": 877
     }
    ],
    "default": "unset",
@@ -8290,12 +8311,12 @@
    "files": [
     {
      "path": "host/nn_os_sync.c",
-     "line": 850
+     "line": 879
     }
    ],
    "default": "unset",
    "values": "text",
-   "explanation": "undocumented: host/nn_os_sync.c:850 (in `who_note_wait()`) reads it as a text value: `const char *l = getenv(\"HOS_WAIT_WHO_LR\");`. No comment in the source says what it changes.",
+   "explanation": "undocumented: host/nn_os_sync.c:879 (in `who_note_wait()`) reads it as a text value: `const char *l = getenv(\"HOS_WAIT_WHO_LR\");`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -8311,7 +8332,7 @@
    "files": [
     {
      "path": "host/nn_os_sync.c",
-     "line": 719
+     "line": 748
     }
    ],
    "default": "off (unset)",
@@ -13892,7 +13913,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_vma.cpp",
-     "line": 525
+     "line": 596
     }
    ],
    "default": "on (unless set to 0, false, off or no)",
@@ -13976,7 +13997,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 4723
+     "line": 4770
     }
    ],
    "default": "off (unset)",
@@ -14186,7 +14207,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 5009
+     "line": 5056
     },
     {
      "path": "gpu/vk/vk_replay.cpp",
@@ -14211,7 +14232,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 5812
+     "line": 5865
     }
    ],
    "default": "0 (unset)",
@@ -14639,7 +14660,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 5617
+     "line": 5664
     }
    ],
    "default": "off (unset)",
@@ -14660,7 +14681,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_vma.cpp",
-     "line": 279
+     "line": 350
     }
    ],
    "default": "16",
@@ -14681,7 +14702,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_vma.cpp",
-     "line": 395
+     "line": 466
     }
    ],
    "default": "off (unset)",
@@ -14894,7 +14915,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 5007
+     "line": 5054
     }
    ],
    "default": "unset",
@@ -17802,7 +17823,7 @@
     },
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 5483
+     "line": 5530
     }
    ],
    "default": "off (unset)",
@@ -18088,6 +18109,27 @@
    "comment": "(HeyListen, 2026-11-14, RX_VK_FREE_FINALIZED=1, default 0) a render target the game finalized goes 3 presents after its last use, once the GPU is past it, whatever the budget: under the budget nothing above took it (a finalized target is no longer kept as \"rendered\", but the usual pass runs only past 7/8 of the budget and the transient sweep only for targets drawn over), and the ledger saw 65 of them, 212 MB, in the market (2560x1440 R11G11B10 and D32 among them). Not one keep_finalized keeps (drawn in one frame, 4 MB or less, not drawn over: made again over its storage and sampled undrawn, the terrain's normal maps). Nothing samples it after: the game cannot sample a texture it finalized (a texture made again over the storage is a new one, uploaded from guest memory, which is the risk this switch takes for targets over 4 MB); the BC cache holds ASTC transcodes only; the write-back ...",
    "documented_in": null,
    "source": "comment at gpu/vk/vk_texture.cpp",
+   "documented": true,
+   "set_via": "In `hookshot_env.txt`, or in the environment.",
+   "use": null
+  },
+  {
+   "name": "RX_VK_FREE_LATER",
+   "area": "renderer",
+   "group": "Rendering and GPU",
+   "audience": "developer",
+   "files": [
+    {
+     "path": "gpu/vk/vk_vma.cpp",
+     "line": 147
+    }
+   ],
+   "default": "unset",
+   "values": "text (`0` named)",
+   "explanation": "(Upstream's reaper thread and its defragmentation step limit do not exist here: this tree has no image defragmentation.) RX_VK_FREE_LATER=0: on the caller's thread, as before (hookshot 8cb5a334, ported by hand; issue 136) VMA gives an emptied block (and a dedicated allocation) back to the driver with vkFreeMemory on the thread that emptied it, here the render thread when the image generations' pools go (vmaDestroyPool) or a dedicated image/buffer is destroyed: 4 to 7 ms a block on an RTX 3060 Ti, about 250 ms on a player's RTX 4080 SUPER (83 in a row at the Market: 5 frames a second for half a minute). VMA is done with the handle when it calls (its own accounting is updated before), so the call goes to a thread of its own, in the order given: the images and buffers destroyed before are gone before the memory is.",
+   "comment": "(Upstream's reaper thread and its defragmentation step limit do not exist here: this tree has no image defragmentation.) RX_VK_FREE_LATER=0: on the caller's thread, as before (hookshot 8cb5a334, ported by hand; issue 136) VMA gives an emptied block (and a dedicated allocation) back to the driver with vkFreeMemory on the thread that emptied it, here the render thread when the image generations' pools go (vmaDestroyPool) or a dedicated image/buffer is destroyed: 4 to 7 ms a block on an RTX 3060 Ti, about 250 ms on a player's RTX 4080 SUPER (83 in a row at the Market: 5 frames a second for half a minute). VMA is done with the handle when it calls (its own accounting is updated before), so the call goes to a thread of its own, in the order given: the images and buffers destroyed before are gone before the memory is.",
+   "documented_in": null,
+   "source": "comment at gpu/vk/vk_vma.cpp",
    "documented": true,
    "set_via": "In `hookshot_env.txt`, or in the environment.",
    "use": null
@@ -18825,7 +18867,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_vma.cpp",
-     "line": 345
+     "line": 416
     }
    ],
    "default": "off (unset)",
@@ -18846,7 +18888,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_vma.cpp",
-     "line": 152
+     "line": 223
     }
    ],
    "default": "the engine's own value",
@@ -18867,7 +18909,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_vma.cpp",
-     "line": 224
+     "line": 295
     }
    ],
    "default": "unset",
@@ -18888,7 +18930,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_vma.cpp",
-     "line": 247
+     "line": 318
     }
    ],
    "default": "64",
@@ -18909,7 +18951,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_vma.cpp",
-     "line": 243
+     "line": 314
     }
    ],
    "default": "512",
@@ -19005,7 +19047,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 6361
+     "line": 6421
     }
    ],
    "default": "unset",
@@ -19026,11 +19068,11 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 6368
+     "line": 6428
     },
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 6371
+     "line": 6431
     }
    ],
    "default": "75",
@@ -19072,7 +19114,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 6757
+     "line": 6817
     }
    ],
    "default": "off (unset)",
@@ -19206,7 +19248,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 6297
+     "line": 6357
     }
    ],
    "default": "off (unset)",
@@ -19248,11 +19290,11 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 6102
+     "line": 6155
     },
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 6105
+     "line": 6158
     }
    ],
    "default": "unset",
@@ -19558,11 +19600,11 @@
     },
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 5944
+     "line": 5997
     },
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 6693
+     "line": 6753
     }
    ],
    "default": "off (unset)",
@@ -19734,12 +19776,12 @@
    "files": [
     {
      "path": "gpu/vk/vk_vma.cpp",
-     "line": 308
+     "line": 379
     }
    ],
    "default": "off (unset)",
    "values": "on or off (0, false, off, no and empty are off)",
-   "explanation": "undocumented: gpu/vk/vk_vma.cpp:308 (in `create_image_()`) reads it as an on/off switch: `if (getenv(\"RX_VK_LOG_DEDICATED\") && told++ < 200)`. No comment in the source says what it changes.",
+   "explanation": "undocumented: gpu/vk/vk_vma.cpp:379 (in `create_image_()`) reads it as an on/off switch: `if (getenv(\"RX_VK_LOG_DEDICATED\") && told++ < 200)`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -19843,7 +19885,7 @@
     },
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 6783
+     "line": 6843
     }
    ],
    "default": "off (unset)",
@@ -19885,7 +19927,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 5288
+     "line": 5335
     }
    ],
    "default": "unset",
@@ -20380,7 +20422,7 @@
     },
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 7444
+     "line": 7504
     }
    ],
    "default": "off (unset)",
@@ -20879,7 +20921,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 5844
+     "line": 5897
     }
    ],
    "default": "off (unset)",
@@ -20900,7 +20942,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 6249
+     "line": 6309
     }
    ],
    "default": "off (unset)",
@@ -20946,7 +20988,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 5917
+     "line": 5970
     }
    ],
    "default": "unset",
@@ -20967,7 +21009,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 6662
+     "line": 6722
     }
    ],
    "default": "off (unset)",
@@ -20988,7 +21030,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 6265
+     "line": 6325
     }
    ],
    "default": "unset",
@@ -21181,7 +21223,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 4985
+     "line": 5032
     }
    ],
    "default": "unset",
@@ -21202,7 +21244,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 5017
+     "line": 5064
     }
    ],
    "default": "1",
@@ -21223,7 +21265,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 5082
+     "line": 5129
     },
     {
      "path": "host/hos_main.c",
@@ -21248,7 +21290,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 4792
+     "line": 4839
     }
    ],
    "default": "on (unless set to 0, false, off or no)",
@@ -21269,7 +21311,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 5021
+     "line": 5068
     }
    ],
    "default": "off (unset)",
@@ -21884,7 +21926,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 6148
+     "line": 6208
     }
    ],
    "default": "unset",
@@ -21905,12 +21947,12 @@
    "files": [
     {
      "path": "gpu/vk/vk_vma.cpp",
-     "line": 314
+     "line": 385
     }
    ],
    "default": "off (unset)",
    "values": "on or off (0, false, off, no and empty are off)",
-   "explanation": "undocumented: gpu/vk/vk_vma.cpp:314 (in `create_image_()`) reads it as an on/off switch: `static const bool no_pool = getenv(\"RX_VK_NO_IMAGE_POOL\") != nullptr;`. No comment in the source says what it changes.",
+   "explanation": "undocumented: gpu/vk/vk_vma.cpp:385 (in `create_image_()`) reads it as an on/off switch: `static const bool no_pool = getenv(\"RX_VK_NO_IMAGE_POOL\") != nullptr;`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -21926,7 +21968,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 4742
+     "line": 4789
     }
    ],
    "default": "off (unset)",
@@ -22140,7 +22182,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 6603
+     "line": 6663
     }
    ],
    "default": "off (unset)",
@@ -22232,7 +22274,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 5441
+     "line": 5488
     }
    ],
    "default": "off (unset)",
@@ -22445,7 +22487,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 7348
+     "line": 7408
     }
    ],
    "default": "off (unset)",
@@ -23401,20 +23443,20 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 5694
+     "line": 5747
     },
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 5712
+     "line": 5765
     },
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 5725
+     "line": 5778
     }
    ],
    "default": "off (unset)",
    "values": "on or off (0, false, off, no and empty are off)",
-   "explanation": "undocumented: gpu/vk/vk_memory.cpp:5694 (in `guest_span_cached()`) reads it as an on/off switch: `static const bool imported_only = getenv(\"RX_VK_POOL_END_IMPORTED\") != nullptr;`. No comment in the source says what it changes.",
+   "explanation": "undocumented: gpu/vk/vk_memory.cpp:5747 (in `guest_span_cached()`) reads it as an on/off switch: `static const bool imported_only = getenv(\"RX_VK_POOL_END_IMPORTED\") != nullptr;`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -23430,7 +23472,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 6479
+     "line": 6539
     }
    ],
    "default": "unset",
@@ -23472,7 +23514,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 5979
+     "line": 6032
     }
    ],
    "default": "unset",
@@ -23493,7 +23535,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 7958
+     "line": 8019
     }
    ],
    "default": "on (unless set to 0, false, off or no)",
@@ -23967,7 +24009,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 5071
+     "line": 5118
     }
    ],
    "default": "off (unset)",
@@ -24419,7 +24461,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 5419
+     "line": 5466
     }
    ],
    "default": "off (unset)",
@@ -24440,7 +24482,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 5482
+     "line": 5529
     }
    ],
    "default": "off (unset)",
@@ -24792,7 +24834,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_vma.cpp",
-     "line": 28
+     "line": 33
     }
    ],
    "default": "off (unset)",
@@ -24801,6 +24843,27 @@
    "comment": "(TICK-038) allocations by kind and memory class, RX_VK_RES_LOG=1 ----.",
    "documented_in": null,
    "source": "comment at gpu/vk/vk_vma.cpp",
+   "documented": true,
+   "set_via": "In `hookshot_env.txt`, or in the environment.",
+   "use": null
+  },
+  {
+   "name": "RX_VK_RETIRED_COMPACT",
+   "area": "renderer",
+   "group": "Rendering and GPU",
+   "audience": "developer",
+   "files": [
+    {
+     "path": "gpu/vk/vk_memory.cpp",
+     "line": 4734
+    }
+   ],
+   "default": "on (unless set to 0, false, off or no)",
+   "values": "on or off (0, false, off, no and empty are off); the description names `0`",
+   "explanation": "(Hookshot 20352f9c, ported by hand) The retired pools nothing needs any more: their import given back, no mirror, no shadow, nothing pending, the GPU past them. Each area change retires ~30 pools (798 in a 10-minute tour of six places) and each stayed in retired_pools for the whole session, walked at every submission (retired_imports_give_back), for every range the game frees (release_uncovered), at each of the game threads' frees (memory_guest_imported) and at every mirror made: the longer the game ran, the longer each of those walks. Such a node moves here, alive at the same address (pointers to it may be kept elsewhere: the pool cache, the mirror lists), and its per-page vector is let go. RX_VK_RETIRED_COMPACT=0: as before.",
+   "comment": "(Hookshot 20352f9c, ported by hand) The retired pools nothing needs any more: their import given back, no mirror, no shadow, nothing pending, the GPU past them. Each area change retires ~30 pools (798 in a 10-minute tour of six places) and each stayed in retired_pools for the whole session, walked at every submission (retired_imports_give_back), for every range the game frees (release_uncovered), at each of the game threads' frees (memory_guest_imported) and at every mirror made: the longer the game ran, the longer each of those walks. Such a node moves here, alive at the same address (pointers to it may be kept elsewhere: the pool cache, the mirror lists), and its per-page vector is let go. RX_VK_RETIRED_COMPACT=0: as before.",
+   "documented_in": null,
+   "source": "comment at gpu/vk/vk_memory.cpp",
    "documented": true,
    "set_via": "In `hookshot_env.txt`, or in the environment.",
    "use": null
@@ -26272,7 +26335,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_vma.cpp",
-     "line": 164
+     "line": 235
     }
    ],
    "default": "off (unset)",
@@ -26356,7 +26419,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_vma.cpp",
-     "line": 519
+     "line": 590
     }
    ],
    "default": "0",
@@ -27607,7 +27670,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 6891
+     "line": 6951
     }
    ],
    "default": "on (unless set to 0, false, off or no)",
@@ -27649,7 +27712,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 5892
+     "line": 5945
     }
    ],
    "default": "unset",
@@ -27691,7 +27754,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 6909
+     "line": 6969
     }
    ],
    "default": "0 (unset)",
@@ -27758,7 +27821,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 7101
+     "line": 7161
     }
    ],
    "default": "unset",

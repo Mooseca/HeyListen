@@ -4715,7 +4715,54 @@ void cut_cpu_words(const Pool& p, std::vector<VkBufferCopy>& runs) {
 // (Extracted from the table, not erased: the node, and the Pool in it, stay where they were, so the mirror's lists and
 // a parallel replay thread's pool cache still point at a live one.)
 std::deque<std::map<uint64_t, Pool>::node_type> retired_pools;
-size_t retired_pools_count() { return retired_pools.size(); }
+// (hookshot 20352f9c, ported by hand) The retired pools nothing needs any more: their import given back, no mirror, no shadow, nothing
+// pending, the GPU past them. Each area change retires ~30 pools (798 in a 10-minute tour of six places) and each stayed in
+// retired_pools for the whole session, walked at every submission (retired_imports_give_back), for every range the game frees
+// (release_uncovered), at each of the game threads' frees (memory_guest_imported) and at every mirror made: the longer the game
+// ran, the longer each of those walks. Such a node moves here, alive at the same address (pointers to it may be kept elsewhere:
+// the pool cache, the mirror lists), and its per-page vector is let go. RX_VK_RETIRED_COMPACT=0: as before
+std::deque<std::map<uint64_t, Pool>::node_type> retired_done;
+size_t retired_pools_count() { return retired_pools.size() + retired_done.size(); }
+std::atomic<int64_t> st_retired_walk_ns{0};   // (time in the walks over retired_pools, for the imports line)
+uint64_t st_retired_vec_bytes = 0;            // (the per-page vector let go with the nodes moved to retired_done)
+bool retired_idle(const Pool& p) {
+    return !p.memory && p.pieces.empty() && !p.buffer && p.mstate == Pool::MIRROR_NONE && !p.mirror && !p.mirror_alloc && !p.shadow &&
+           !p.shadow_alloc && !p.inherit_pending && !p.lazy_held && !p.held_told && p.retired_value <= mem_completed &&
+           p.last_value <= mem_completed;
+}
+void retired_compact() {   // (pools_mu held)
+    static const bool on = !getenv("RX_VK_RETIRED_COMPACT") || atoi(getenv("RX_VK_RETIRED_COMPACT")) != 0;
+    if (!on) return;
+    {   // (nothing should bring a node back to use: none is reachable from the pools' table or the caches emptied at its
+        // retirement. Checked anyway, on the newest 256 moved, every 600 submissions: one in use goes back to the walked list)
+        static uint64_t checked_at;
+        if (mirror_epoch - checked_at >= 600 && !retired_done.empty()) {
+            checked_at = mirror_epoch;
+            const size_t from = retired_done.size() > 256 ? retired_done.size() - 256 : 0;
+            for (size_t i = from; i < retired_done.size();) {
+                if (retired_idle(retired_done[i].mapped())) { i++; continue; }
+                static int told;
+                if (told++ < 4) logf("vk: a retired pool %#llx in use again: walked again", (unsigned long long)retired_done[i].mapped().lo);
+                retired_pools.push_back(std::move(retired_done[i]));
+                retired_done.erase(retired_done.begin() + (ptrdiff_t)i);
+            }
+        }
+    }
+    bool any = false;
+    for (const auto& nh : retired_pools)
+        if (retired_idle(nh.mapped())) { any = true; break; }
+    if (!any) return;
+    std::deque<std::map<uint64_t, Pool>::node_type> keep;
+    for (auto& nh : retired_pools) {
+        Pool& p = nh.mapped();
+        if (!retired_idle(p)) { keep.push_back(std::move(nh)); continue; }
+        const uint64_t b = p.shadow_known.capacity() * sizeof(uint64_t);
+        std::vector<uint64_t>().swap(p.shadow_known);
+        st_retired_vec_bytes += b;
+        retired_done.push_back(std::move(nh));
+    }
+    retired_pools.swap(keep);
+}
 /// (PR 85, AMD on Windows: retired and idle imports given back as on NVIDIA) off by default since 2026-11-19: an RX 6750 XT
 /// (driver 26.11.2) lost the device on area changes and in cutscenes with it and played clean with RX_VK_KEEP_RETIRED=1.
 /// RX_VK_AMD_GIVE_BACK=1 turns PR 85's AMD rule back on (retired imports given back, idle ones past 70% down to 60%)
@@ -5644,8 +5691,14 @@ int memory_guest_imported(uint64_t lo, uint64_t hi) {
         if (it->second.hi > lo && it->second.memory) return 1;   // (RX_VK_NO_HOST_IMPORT: one given back is not)
         if (import_reach::beyond(live_reach, it->second.lo, lo)) break;   // (none further down reaches lo: import_reach.h)
     }
-    for (const auto& nh : retired_pools)
-        if (nh.mapped().memory && nh.mapped().lo < hi && lo < nh.mapped().hi) return 1;
+    {
+        const auto walk_t0 = std::chrono::steady_clock::now();
+        int found = 0;
+        for (const auto& nh : retired_pools)
+            if (nh.mapped().memory && nh.mapped().lo < hi && lo < nh.mapped().hi) { found = 1; break; }
+        st_retired_walk_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - walk_t0).count();
+        if (found) return 1;
+    }
     for (const auto& nh : evicted_pools)
         if (nh.mapped().memory && nh.mapped().lo < hi && lo < nh.mapped().hi) return 1;
     for (const auto& pending : dead_imports)
@@ -6108,6 +6161,7 @@ void retired_imports_give_back() {   // (pools_mu held)
     size_t retired_alive = 0, live = 0;
     for (auto& [lo, p] : imported)
         if (p.memory) live_bytes += p.hi - p.lo, live++;   // (RX_VK_NO_HOST_IMPORT: a pool whose import was given back is not)
+    const auto walk_t0 = std::chrono::steady_clock::now();
     for (auto& nh : retired_pools) {
         Pool& p = nh.mapped();
         if (!p.memory) continue;
@@ -6123,12 +6177,18 @@ void retired_imports_give_back() {   // (pools_mu held)
         }
         retired_alive++, retired_bytes += p.hi - p.lo;
     }
+    st_retired_walk_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - walk_t0).count();
+    retired_compact();
     static uint64_t logged_epoch;
     if (mirror_epoch - logged_epoch >= 1200) {
         logged_epoch = mirror_epoch;
         logf("vk: imports: %zu live (%llu MB), %zu retired still imported (%llu MB), %llu retired given back (%llu MB)",
              live, (unsigned long long)(live_bytes >> 20), retired_alive, (unsigned long long)(retired_bytes >> 20),
              (unsigned long long)st_retired_imports_freed, (unsigned long long)(st_retired_import_bytes_freed >> 20));
+        // (hookshot) the retired pools walked and set aside (retired_compact), and the time their walks took since the last line
+        logf("vk: retired pools: %zu walked, %zu set aside (%llu KB of their vectors let go); %.2f ms in their walks over the "
+             "last 1200 submissions; page generation %u", retired_pools.size(), retired_done.size(),
+             (unsigned long long)(st_retired_vec_bytes >> 10), st_retired_walk_ns.exchange(0) / 1e6, gen_now);
     }
 }
 // ---- (HeyListen) imports given back once the mirror holds the pool: RX_VK_NO_HOST_IMPORT=1 (default 0) ----
@@ -7729,6 +7789,7 @@ void memory_ledger_snapshot(LedgerSnap& s) {
         s.chunks.push_back(c);
     }
     for (const auto& nh : retired_pools) s.retired_chunks++, s.retired_chunk_bytes += nh.mapped().hi - nh.mapped().lo;
+    for (const auto& nh : retired_done) s.retired_chunks++, s.retired_chunk_bytes += nh.mapped().hi - nh.mapped().lo;
     s.evicted_chunks = evicted_pools.size();
     for (const DeadMirror& d : dead_mirrors) s.retired_mirror_bytes += allocation_size(d.alloc);
 }
