@@ -9173,7 +9173,6 @@ struct CompileTurn {
 };
 }  // namespace
 
->>>>>>> 24b82c261a85 (fix(vk): the driver's compiles run as many at once as the memory holds)
 /// Every shader of the game, before its first start (vk_shader.cpp, the seed): once for this translator. True: prepared now.
 /// background: in play, behind the game: a few workers at idle priority, translation only (the driver's part is left to first use:
 /// its compiler crashing in here would take the game with it)
