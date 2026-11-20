@@ -222,6 +222,11 @@ void barrier_stats(int64_t* made, int64_t* left_out);
 /// (hookshot) Set around a draw's sampled-texture lookups (vk_draw.cpp): a new ASTC texture there may wait for a later frame
 /// once this frame's uploads passed their budget (texture_touch). Never for compute: a dispatch may bake what it reads once
 extern thread_local bool upload_defer_ok;
+/// (hookshot) Whether this thread's last texture_touch held a sampled texture back (upload_defer): the draw whose descriptor
+/// build looked it up is left out of the frame rather than sampling the placeholder. Only set inside a draw's lookups
+bool texture_sample_deferred();
+/// The same, and clear it: the draw asks once, after its descriptors are built
+bool texture_sample_deferred_take();
 /// A draw pass just ended on cmd (end_pass): pass_start_barrier knows nothing else ran after it
 void note_pass_end(VkCommandBuffer cmd);
 /// The barrier a draw pass starts with. Full, unless RX_VK_PASS_BARRIER=game and the last thing on cmd was a draw pass with no

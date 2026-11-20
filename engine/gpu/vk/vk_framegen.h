@@ -29,12 +29,10 @@ int framegen_engine(int* mult, bool* automatic);
 bool framegen_record(VkCommandBuffer cmd, VkImageView src, uint32_t sw, uint32_t sh, const int crop[4], bool native_pq);
 /// The first frame the last framegen_record made (null when it made none), w x h, GENERAL
 VkImage framegen_made_image(uint32_t* w, uint32_t* h);
-/// After that recording's submit (value): the display thread shows its frames
-void framegen_queue(uint64_t value);
-/// The window's present of an image (GENERAL, w x h; crop as above or null), vk_replay.cpp: the display thread's. pq: the image
-/// is the game's own HDR10 picture (PQ codes), not an SDR one for the HDR pass. It goes with the image, not in a flag the replay
-/// thread sets for the next game frame: the display thread shows frames a game frame late, and at a change (a loading screen
-/// in SDR, the play in HDR) a frame was taken for the other kind, a flash
+/// After that recording's submit (value): the display thread shows its frames. held: the storm hold withheld this
+/// frame's present (storm_hold.h) — its frames are not shown, even if the hold lifts before the display thread gets there
+void framegen_queue(uint64_t value, bool held = false);
+/// The window's present of an image (GENERAL, w x h; crop as above or null), vk_replay.cpp: the display thread's
 void present_image(VkImage src, uint32_t w, uint32_t h, const int crop[4], VkImageView view = VK_NULL_HANDLE, bool pq = false);
 /// The Insert menu's upscaling of a frame to the window (dw x dh), recorded: the image to show, or null when it is off.
 /// pq: src is the game's own HDR10 picture (Native HDR), scaled into an RGB10A2 image

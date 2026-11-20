@@ -3247,6 +3247,19 @@ uint32_t texture_epoch() {
 }
 
 thread_local bool upload_defer_ok = false;
+/// (hookshot) Set when this thread's texture_touch held a sampled ASTC texture back (upload_defer): the draw whose
+/// descriptor build looked it up is left out of the frame instead of sampling the placeholder (vk_draw.cpp). Only
+/// ever set inside a draw's sampled-texture lookups — upload_defer_ok is false everywhere else — and cleared by that
+/// draw once its descriptors are built (texture_sample_deferred_take)
+thread_local bool tl_sample_deferred = false;
+bool texture_sample_deferred() {
+    return tl_sample_deferred;
+}
+bool texture_sample_deferred_take() {
+    const bool v = tl_sample_deferred;
+    tl_sample_deferred = false;
+    return v;
+}
 namespace {
 /// (hookshot) A new ASTC texture a draw samples, met after this frame's uploads took their budget: not uploaded now, the draw
 /// samples the placeholder, and the next frame's first look at it uploads it. An area's load made 300-800 ASTC uploads in one
@@ -3288,7 +3301,10 @@ Texture* texture_touch(Texture* tex, bool for_sampling) {
     tex->last_frame = frame_no;
     tex->last_value = rec_value;
     if (!for_sampling) return tex;
-    if (upload_defer(*tex)) return nullptr;
+    if (upload_defer(*tex)) {
+        tl_sample_deferred = true;   // (the draw whose build looked this up decides what to do with it)
+        return nullptr;
+    }
     if (tex->defer_frame) defer_note_done(*tex, true);   // (held back before: it comes in now)
     // contents: from guest memory unless the GPU wrote the image (then it is the content, unless the texture was
     // finalized since and the CPU writes its memory again). What the CPU writes into it after the GPU's write is taken

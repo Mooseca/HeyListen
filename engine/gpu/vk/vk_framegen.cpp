@@ -73,6 +73,7 @@ struct Job {
     OutSet* set;
     int64_t at;
     uint64_t value;   // (the recording that makes its frames)
+    bool held;        // (the storm hold withheld this frame's present when it was recorded: shown by nobody)
 };
 struct Pipe {
     VkDescriptorSetLayout set = VK_NULL_HANDLE;
@@ -511,7 +512,10 @@ void display_main() {
             while (now_ns() < due) SwitchToThread();
             const int64_t t = now_ns();
             present_kind.store(timed ? (j.set->game[k] ? 0 : 1) : k < j.set->made ? 1 : 0);
-            present_image(j.set->frame[k].image, fg.w, fg.h, nullptr, j.set->frame[k].view, j.set->pq);
+            // (the storm hold withheld this frame's present when it was recorded: its picture is one of the arrival's
+            // churn and reached the display thread late; it is shown to no one, whatever the hold says by now
+            // (storm_hold.h). The set is released as every job's is, so the pacer's line goes on)
+            if (!j.held) present_image(j.set->frame[k].image, fg.w, fg.h, nullptr, j.set->frame[k].view, j.set->pq);
             menu_note_frame(!timed && k == j.set->made);
             if (shown_at) {
                 const int64_t d = t - shown_at;
@@ -914,10 +918,10 @@ bool framegen_record(VkCommandBuffer cmd, VkImageView src, uint32_t sw, uint32_t
     return true;
 }
 
-void framegen_queue(uint64_t value) {
+void framegen_queue(uint64_t value, bool held) {
     if (!fg.recorded) return;
     std::lock_guard lk(fg.mu);
-    fg.jobs.push_back({fg.recorded, fg.recorded_at, value});
+    fg.jobs.push_back({fg.recorded, fg.recorded_at, value, held});
     fg.recorded = nullptr;
     fg.cv.notify_all();
 }
