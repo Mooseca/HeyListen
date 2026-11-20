@@ -8348,7 +8348,7 @@
    "files": [
     {
      "path": "host/nn_video.c",
-     "line": 767
+     "line": 771
     }
    ],
    "default": "off (unset)",
@@ -8369,7 +8369,7 @@
    "files": [
     {
      "path": "host/nn_video.c",
-     "line": 797
+     "line": 801
     }
    ],
    "default": "off (unset)",

@@ -945,7 +945,7 @@ HOS_FRAME_SLEEP_MS (diagnostic): slower frames, for game speed against frame rat
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/nn_video.c:767`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/nn_video.c:771`.
 
 #### `HOS_VIDEO_NO_HOLD` - developer
 
@@ -955,7 +955,7 @@ HOS_FRAME_SLEEP_MS (diagnostic): slower frames, for game speed against frame rat
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/nn_video.c:797`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/nn_video.c:801`.
 
 #### `RX_ADAPTER` - developer
 
