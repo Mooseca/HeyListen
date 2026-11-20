@@ -6048,6 +6048,8 @@ StormHoldEvent storm_hold_tick(int64_t pending, int64_t push_age, uint64_t frame
     static std::chrono::steady_clock::time_point engaged_at;
     const StormHoldEvent ev = storm_hold_state.tick(r, pending, push_age, frame, skips, live);
     storm_held.store(storm_hold_state.on, std::memory_order_relaxed);
+    if (ev == StormHoldEvent::Engaged) jobs_set_boost(true);
+    else if (ev == StormHoldEvent::Released) jobs_set_boost(false);
     if (ev == StormHoldEvent::Engaged) {
         engaged_at = std::chrono::steady_clock::now();
         logf("vk: a translation storm: %d jobs queued, the %s held until it drains (from present %llu)",

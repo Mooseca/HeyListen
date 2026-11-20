@@ -2,7 +2,7 @@
  "schema": 1,
  "generated_by": "engine/scripts/list_switches.py",
  "scope": "C, C++ and headers under engine/ (engine/tests and vendored trees other than a64-kit excluded) and the Python the builder, the lifter and the scripts run: getenv, std::getenv, _wgetenv, the code's own env helpers and table-driven reads, and os.environ.",
- "count": 1313,
+ "count": 1314,
  "switches": [
   {
    "name": "A64_DEVIRT",
@@ -14395,7 +14395,7 @@
     },
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 6726
+     "line": 6728
     }
    ],
    "default": "off (unset)",
@@ -15594,7 +15594,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 6865
+     "line": 6867
     }
    ],
    "default": "off (unset)",
@@ -18221,7 +18221,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 6085
+     "line": 6087
     }
    ],
    "default": "unset",
@@ -18242,12 +18242,12 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 6253
+     "line": 6255
     }
    ],
    "default": "off (unset)",
    "values": "on or off (0, false, off, no and empty are off)",
-   "explanation": "undocumented: gpu/vk/vk_replay.cpp:6253 (in `framelog_collect()`) reads it as an on/off switch: `static const bool drop = getenv(\"RX_VK_FRAMELOG_DROP\") != nullptr;`. No comment in the source says what it changes.",
+   "explanation": "undocumented: gpu/vk/vk_replay.cpp:6255 (in `framelog_collect()`) reads it as an on/off switch: `static const bool drop = getenv(\"RX_VK_FRAMELOG_DROP\") != nullptr;`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -18263,7 +18263,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 6581
+     "line": 6583
     }
    ],
    "default": "the engine's own value",
@@ -19419,7 +19419,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_jobs.cpp",
-     "line": 150
+     "line": 165
     }
    ],
    "default": "on (unless set to 0, false, off or no)",
@@ -20442,7 +20442,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 6624
+     "line": 6626
     }
    ],
    "default": "off (unset)",
@@ -20631,12 +20631,12 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 6643
+     "line": 6645
     }
    ],
    "default": "off (unset)",
    "values": "on or off (0, false, off, no and empty are off)",
-   "explanation": "undocumented: gpu/vk/vk_replay.cpp:6643 (in `vmap_changing()`) reads it as an on/off switch: `static const bool log_calls = getenv(\"RX_VK_LOG_VMAP_CHANGING\") != nullptr;`. No comment in the source says what it changes.",
+   "explanation": "undocumented: gpu/vk/vk_replay.cpp:6645 (in `vmap_changing()`) reads it as an on/off switch: `static const bool log_calls = getenv(\"RX_VK_LOG_VMAP_CHANGING\") != nullptr;`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -23299,7 +23299,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 7247
+     "line": 7249
     }
    ],
    "default": "0 (unset)",
@@ -24205,7 +24205,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 6718
+     "line": 6720
     }
    ],
    "default": "off (unset)",
@@ -24226,7 +24226,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 6469
+     "line": 6471
     }
    ],
    "default": "off (unset)",
@@ -24959,7 +24959,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 7023
+     "line": 7025
     },
     {
      "path": "gpu/vk/vk_shader.cpp",
@@ -26380,7 +26380,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 6062
+     "line": 6064
     }
    ],
    "default": "off (unset)",
@@ -26408,6 +26408,27 @@
    "values": "a whole number (`0` in the description)",
    "explanation": "Also released by `RX_VK_STORM_SETTLE` frames running that left no draw or dispatch out, whatever the queue still holds (off by default: not yet measured on the PC 3050).",
    "comment": null,
+   "documented_in": "development.md",
+   "source": "development.md",
+   "documented": true,
+   "set_via": "In `hookshot_env.txt`, or in the environment.",
+   "use": null
+  },
+  {
+   "name": "RX_VK_STORM_WORKERS",
+   "area": "renderer",
+   "group": "Rendering and GPU",
+   "audience": "developer",
+   "files": [
+    {
+     "path": "gpu/vk/vk_jobs.cpp",
+     "line": 69
+    }
+   ],
+   "default": "unset",
+   "values": "text",
+   "explanation": "While the storm hold is on, n workers translate: the base ones (a third of the hardware threads, 2 to 4) and extra ones that take jobs only then — the game's own threads wait on the arrival's translations, and the cold area's queue is worth every core (0/unset: the base count only).",
+   "comment": "(Hookshot) RX_VK_STORM_WORKERS=<n>: while the storm hold is on, n workers translate (the base ones and extra ones that take jobs only while it is). The game's own threads wait on the arrival's translations then, and the cold area's queue is worth every core; outside a storm the base count is what shares the CPU with the game. 0/unset: no extra workers.",
    "documented_in": "development.md",
    "source": "development.md",
    "documented": true,
@@ -26527,7 +26548,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 6912
+     "line": 6914
     }
    ],
    "default": "0",
@@ -26548,7 +26569,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 6903
+     "line": 6905
     }
    ],
    "default": "on (unless set to 0, false, off or no)",
@@ -27098,11 +27119,11 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 6766
+     "line": 6768
     },
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 6767
+     "line": 6769
     }
    ],
    "default": "off (unset)",
@@ -28265,7 +28286,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_jobs.cpp",
-     "line": 84
+     "line": 98
     }
    ],
    "default": "0 (unset)",

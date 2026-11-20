@@ -58,6 +58,10 @@ def check_source():
         raise SystemExit("the jobs queue lost the demand ordering (RX_VK_JOB_DEMAND) or the live count")
     if draw.count("jobs_demand(cp->ready)") != 1 or draw.count("jobs_demand(pe->ready)") != 1:
         raise SystemExit("a draw left out for want of its program or pipeline no longer asks for the job (jobs_demand)")
+    if "void jobs_set_boost(" not in jobs or 'RX_VK_STORM_WORKERS' not in jobs:
+        raise SystemExit("the jobs queue lost the storm workers (RX_VK_STORM_WORKERS)")
+    if "jobs_set_boost(true)" not in (ROOT / "gpu/vk/vk_replay.cpp").read_text(encoding="utf-8"):
+        raise SystemExit("the storm hold's engage no longer turns the extra workers on")
     if "last_push_frame.store" not in jobs or "uint64_t jobs_last_push_age_frames" not in jobs:
         raise SystemExit("the jobs queue no longer tells how long it has gone unpushed")
     hold = (ROOT / "gpu/vk/storm_hold.h").read_text(encoding="utf-8")
@@ -90,6 +94,11 @@ def main():
                         str(tmp / "vk_jobs.cpp"), str(ROOT / "tests/test_jobs_wait_runs_queued.cpp"), "-o", str(exe)],
                        check=True)
         subprocess.run([str(exe)], check=True, timeout=60, env={**os.environ, "RX_VK_JOB_STEAL": "1"})
+        boost = tmp / "jobs-boost"
+        subprocess.run([args.cxx, "-std=c++20", "-Wall", "-Wextra", "-pthread", "-I", str(tmp),
+                        str(tmp / "vk_jobs.cpp"), str(ROOT / "tests/test_jobs_boost.cpp"), "-o", str(boost)], check=True)
+        subprocess.run([str(boost)], check=True, timeout=60,
+                       env={**os.environ, "RX_VK_WORKERS": "1", "RX_VK_STORM_WORKERS": "4", "RX_VK_JOB_STEAL": "0"})
         # (RX_VK_JOB_DEMAND: one worker, so the queue's order is the run order)
         demand = tmp / "jobs-demand"
         subprocess.run([args.cxx, "-std=c++20", "-Wall", "-Wextra", "-pthread", "-I", str(tmp),

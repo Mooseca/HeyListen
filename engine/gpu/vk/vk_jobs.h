@@ -24,6 +24,8 @@ void jobs_frame_note(uint64_t frame);
 /// Presents since the last jobs_push (UINT64_MAX/2: nothing pushed yet). A queue that has not grown for a while of the
 /// game's frames is a churn that has stopped pushing, whatever depth it still shows: the storm hold releases on it
 uint64_t jobs_last_push_age_frames();
+/// (RX_VK_STORM_WORKERS=<n>) The storm hold's engage and release: while on, n workers translate (extra ones take jobs only then)
+void jobs_set_boost(bool on);
 /// (RX_VK_JOB_DEMAND=1) A draw left out for want of this job's result asks for it again: the job moves up behind the jobs the
 /// frame's earlier draws asked for, ahead of everything queued for no draw lately (the churn's superseded variants). No-op
 /// when the switch is off or the job is not queued
