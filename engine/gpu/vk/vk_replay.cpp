@@ -5709,6 +5709,20 @@ void do_present(const nvn_tex* t, const int crop[4]) {
                 if (old) wait_value(old);
             }
         }
+        {   // (ported from hookshot 737a0975, bubblesnout) On an AMD integrated GPU each present waits for its own frame's GPU work: the
+            // GPU reads guest memory where it is, and a Radeon 890M (ROG Xbox Ally X) ran far enough behind that the game had rewritten
+            // its HUD's records before a pass read them: icons flashing mid-screen, the minimap drawn with another texture whenever the
+            // camera moved, gone with the wait (48-56 fps there). RX_VK_WAIT_OWN=1 / 0 turns the wait on / off on any GPU; setting
+            // RX_VK_WAIT_GPU (a ring of frames, above) leaves the default off
+            static const bool own = [] {
+                if (const char* e = getenv("RX_VK_WAIT_OWN")) return atoi(e) != 0;
+                if (getenv("RX_VK_WAIT_GPU")) return false;
+                const bool amd_igpu = dev.props.vendorID == 0x1002 && dev.props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU;
+                if (amd_igpu) logf("vk: an AMD integrated GPU: each present waits for its frame's GPU work (RX_VK_WAIT_OWN=0: not)");
+                return amd_igpu;
+            }();
+            if (own) wait_value(value);
+        }
         if (presents % 300 == 0) pipeline_cache_save(false), shader_key_commit();
         {   // (RX_VK_DUMP_KEY: F9 dumps the next frame, 8 times at most)
             static const bool dump_key = getenv("RX_VK_DUMP_KEY") != nullptr;

@@ -2,7 +2,7 @@
  "schema": 1,
  "generated_by": "engine/scripts/list_switches.py",
  "scope": "C, C++ and headers under engine/ (engine/tests and vendored trees other than a64-kit excluded) and the Python the builder, the lifter and the scripts run: getenv, std::getenv, _wgetenv, the code's own env helpers and table-driven reads, and os.environ.",
- "count": 1280,
+ "count": 1281,
  "switches": [
   {
    "name": "A64_DEVIRT",
@@ -14190,7 +14190,7 @@
     },
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 6545
+     "line": 6559
     }
    ],
    "default": "off (unset)",
@@ -15368,7 +15368,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 6684
+     "line": 6698
     }
    ],
    "default": "off (unset)",
@@ -16511,7 +16511,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 5760
+     "line": 5774
     }
    ],
    "default": "0",
@@ -16616,7 +16616,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 5730
+     "line": 5744
     }
    ],
    "default": "unset",
@@ -16637,7 +16637,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 5714
+     "line": 5728
     }
    ],
    "default": "off (unset)",
@@ -16658,12 +16658,12 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 5720
+     "line": 5734
     }
    ],
    "default": "1",
    "values": "a whole number",
-   "explanation": "undocumented: gpu/vk/vk_replay.cpp:5720 (in `do_present()`) reads it as a number: `static const int n = getenv(\"RX_VK_DUMP_KEY_N\") ? std::max(1, atoi(getenv(\"RX_VK_DUMP_KEY_N\"))) : 1;`. No comment in the source says what it changes.",
+   "explanation": "undocumented: gpu/vk/vk_replay.cpp:5734 (in `do_present()`) reads it as a number: `static const int n = getenv(\"RX_VK_DUMP_KEY_N\") ? std::max(1, atoi(getenv(\"RX_VK_DUMP_KEY_N\"))) : 1;`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -16721,7 +16721,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 5734
+     "line": 5748
     }
    ],
    "default": "unset",
@@ -17438,7 +17438,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 5794
+     "line": 5808
     }
    ],
    "default": "off (unset)",
@@ -17459,7 +17459,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 5823
+     "line": 5837
     }
    ],
    "default": "40",
@@ -17480,7 +17480,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 5822
+     "line": 5836
     }
    ],
    "default": "48",
@@ -17501,7 +17501,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 5819
+     "line": 5833
     }
    ],
    "default": "6",
@@ -17543,7 +17543,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 5846
+     "line": 5860
     }
    ],
    "default": "0",
@@ -17899,7 +17899,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 5922
+     "line": 5936
     }
    ],
    "default": "unset",
@@ -17920,12 +17920,12 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 6090
+     "line": 6104
     }
    ],
    "default": "off (unset)",
    "values": "on or off (0, false, off, no and empty are off)",
-   "explanation": "undocumented: gpu/vk/vk_replay.cpp:6090 (in `framelog_collect()`) reads it as an on/off switch: `static const bool drop = getenv(\"RX_VK_FRAMELOG_DROP\") != nullptr;`. No comment in the source says what it changes.",
+   "explanation": "undocumented: gpu/vk/vk_replay.cpp:6104 (in `framelog_collect()`) reads it as an on/off switch: `static const bool drop = getenv(\"RX_VK_FRAMELOG_DROP\") != nullptr;`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -17941,7 +17941,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 6400
+     "line": 6414
     }
    ],
    "default": "the engine's own value",
@@ -20070,7 +20070,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 6443
+     "line": 6457
     }
    ],
    "default": "off (unset)",
@@ -20259,12 +20259,12 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 6462
+     "line": 6476
     }
    ],
    "default": "off (unset)",
    "values": "on or off (0, false, off, no and empty are off)",
-   "explanation": "undocumented: gpu/vk/vk_replay.cpp:6462 (in `vmap_changing()`) reads it as an on/off switch: `static const bool log_calls = getenv(\"RX_VK_LOG_VMAP_CHANGING\") != nullptr;`. No comment in the source says what it changes.",
+   "explanation": "undocumented: gpu/vk/vk_replay.cpp:6476 (in `vmap_changing()`) reads it as an on/off switch: `static const bool log_calls = getenv(\"RX_VK_LOG_VMAP_CHANGING\") != nullptr;`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -22877,7 +22877,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 7065
+     "line": 7079
     }
    ],
    "default": "0 (unset)",
@@ -23779,7 +23779,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 6537
+     "line": 6551
     }
    ],
    "default": "off (unset)",
@@ -23800,7 +23800,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 6288
+     "line": 6302
     }
    ],
    "default": "off (unset)",
@@ -24504,7 +24504,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 6842
+     "line": 6856
     },
     {
      "path": "gpu/vk/vk_shader.cpp",
@@ -25862,7 +25862,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 6731
+     "line": 6745
     }
    ],
    "default": "0",
@@ -25883,7 +25883,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 6722
+     "line": 6736
     }
    ],
    "default": "on (unless set to 0, false, off or no)",
@@ -26433,11 +26433,11 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 6585
+     "line": 6599
     },
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 6586
+     "line": 6600
     }
    ],
    "default": "off (unset)",
@@ -27078,6 +27078,10 @@
     {
      "path": "gpu/vk/vk_replay.cpp",
      "line": 5700
+    },
+    {
+     "path": "gpu/vk/vk_replay.cpp",
+     "line": 5719
     }
    ],
    "default": "unset",
@@ -27110,6 +27114,27 @@
    "documented": true,
    "set_via": "In `hookshot_env.txt`, or in the environment.",
    "use": null
+  },
+  {
+   "name": "RX_VK_WAIT_OWN",
+   "area": "renderer",
+   "group": "Rendering and GPU",
+   "audience": "player",
+   "files": [
+    {
+     "path": "gpu/vk/vk_replay.cpp",
+     "line": 5718
+    }
+   ],
+   "default": "0 (unset)",
+   "values": "a whole number (`0`, `1` in the description)",
+   "explanation": "(Ported from hookshot 737a0975, bubblesnout) On an AMD integrated GPU each present waits for its own frame's GPU work: the GPU reads guest memory where it is, and a Radeon 890M (ROG Xbox Ally X) ran far enough behind that the game had rewritten its HUD's records before a pass read them: icons flashing mid-screen, the minimap drawn with another texture whenever the camera moved, gone with the wait (48-56 fps there). RX_VK_WAIT_OWN=1 / 0 turns the wait on / off on any GPU; setting RX_VK_WAIT_GPU (a ring of frames, above) leaves the default off.",
+   "comment": "(Ported from hookshot 737a0975, bubblesnout) On an AMD integrated GPU each present waits for its own frame's GPU work: the GPU reads guest memory where it is, and a Radeon 890M (ROG Xbox Ally X) ran far enough behind that the game had rewritten its HUD's records before a pass read them: icons flashing mid-screen, the minimap drawn with another texture whenever the camera moved, gone with the wait (48-56 fps there). RX_VK_WAIT_OWN=1 / 0 turns the wait on / off on any GPU; setting RX_VK_WAIT_GPU (a ring of frames, above) leaves the default off.",
+   "documented_in": null,
+   "source": "comment at gpu/vk/vk_replay.cpp",
+   "documented": true,
+   "set_via": "In `hookshot_env.txt`, or in the environment.",
+   "use": "HUD icons flashing mid-screen or a minimap drawn with another texture on a Radeon handheld or iGPU: `=1` makes each present wait for its frame's GPU work (on by default on AMD integrated GPUs, `=0` turns it off)."
   },
   {
    "name": "RX_VK_WARM_COMPUTES",

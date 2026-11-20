@@ -704,6 +704,9 @@ PLAYER_USE = [
                          "the light meter's sums on the GPU before they are added to (on by default)."),
     ("RX_VK_METER_HOLD", "White flashes or the exposure stepping in dark scenes: `=0` stops giving the game the light "
                          "meter's last result again when it reads zeros (on by default)."),
+    ("RX_VK_WAIT_OWN", "HUD icons flashing mid-screen or a minimap drawn with another texture on a Radeon handheld or "
+                       "iGPU: `=1` makes each present wait for its frame's GPU work (on by default on AMD integrated "
+                       "GPUs, `=0` turns it off)."),
     ("RX_VK_NO_PROGRAM_CACHE", "Shaders are translated wrongly after a driver or card change (a bad cache): reads "
                                "and writes no program cache for one run."),
     ("RX_VK_NO_DRAWN_PAGE_MAP", "HUD labels go blank after a zone change, or black surfaces flicker in Zora's Domain: "
