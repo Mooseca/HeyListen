@@ -6,6 +6,10 @@
 
 namespace mkwvk::upscaler_rows {
 
+/// RX_VK_PSYCHOV35_DLSS as parsed by env_switch (-1 when unset/empty): compatible Native HDR paths run by default.
+/// Explicit zero opts out; the tone mapper, engine support and format guards still decide admission.
+inline bool psychov35_compatibility(int setting) { return setting != 0; }
+
 /// The Upscaler row (opts.dlss, RX_VK_DLSS): the game's own network, NVIDIA DLSS, NVIDIA DLAA, AMD FSR 3.1 (built from AMD's
 /// shader sources: gpu/vk/vk_fsr3.cpp), AMD FSR 4 and its native anti-aliasing (AMD's library, a build with FSR 4:
 /// gpu/vk/vk_fsr4.cpp), and Off: no upscaling network at all, the 3D stretched to the output (vk_draw.cpp off_stand_in). The
@@ -27,6 +31,10 @@ inline bool is_fsr4(int upscaler) { return upscaler == FSR4 || upscaler == FSR4_
 /// No upscaling network. The Render resolution row applies as with the game's own (the 3D is drawn at that share), and so does
 /// Sharpness (it works on the present, whatever made the picture)
 inline bool is_off(int upscaler) { return upscaler == OFF; }
+/// The engines that take Native PsychoV35's RGBA16F scene unless RX_VK_PSYCHOV35_DLSS=0 (vk_temporal.cpp temporal_scene_format):
+/// those the frame chain gives linear light in HDR: DLSS / DLAA, FSR 4 / its native AA and FSR 3.1 on the shared chain (HeyListen: while PsychoV35 is on, vk_fsr3.cpp fsr3_on_chain).
+/// FSR 3.1's legacy own-input route is not a chain mode; the game's network and Off are separate paths.
+inline bool takes_psychov35(int upscaler) { return is_dlss(upscaler) || is_fsr4(upscaler) || upscaler == FSR3; }
 /// The 3D drawn at full size, the upscaler anti-aliasing alone (DLAA, FSR 4's native AA): the modes the chain runs for the
 /// Render resolution's native choice
 inline bool full_scale(int upscaler) { return upscaler == DLAA || upscaler == FSR4_AA; }
@@ -187,6 +195,12 @@ inline char preset_letter(unsigned preset) { return preset ? (char)('A' + preset
 inline bool model_shown(bool built) { return built; }
 /// (env_set: RX_VK_DLSS_PRESET names a preset, which wins over the row for this run)
 inline bool model_fixed(int upscaler, bool env_set) { return !is_dlss(upscaler) || env_set; }
+/// (HeyListen, after Longshot 83b161e3) The DLAA before the bloom row (opts.dlss_pre_bloom): shown with NVIDIA DLSS chosen where
+/// it runs (DLSS or DLAA), and changeable with DLAA alone: in DLSS's other modes the scene, the bloom and the tone map are drawn
+/// smaller than the output DLSS draws, so its picture cannot go back into the scene (vk_temporal.cpp temporal_pre_bloom)
+inline bool pre_bloom_shown(bool dlss_ok, int upscaler) { return dlss_ok && is_dlss(upscaler); }
+/// (env_set: RX_VK_DLSS_PRE_BLOOM is set, and wins over the row for this run)
+inline bool pre_bloom_fixed(int upscaler, bool env_set) { return upscaler != DLAA || env_set; }
 /// The Window scaling filter does something only when the window's size is not the game's picture's (the Output resolution);
 /// a size not known yet (0) counts as different
 inline bool filter_needed(unsigned picture_w, unsigned picture_h, unsigned window_w, unsigned window_h) {

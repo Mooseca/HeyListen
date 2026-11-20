@@ -228,6 +228,9 @@ restart" and the help on the Graphics tab lists it; closing the menu then asks w
 the change for the next start (and is not asked again until you change one of those rows); **Restart now** saves your
 choices and starts the game again, so progress since your last save is lost.
 
+The HDR tone mapper shows only with HDR set to Native, and the PsychoV35 rows only with that tone mapper on PsychoV35:
+they apply at once, with no new translation.
+
 | Tab | Option | Choices | Default |
 |---|---|---|---|
 | Graphics | Quality preset | Custom, Minimum (4GB), Low (6GB), Balanced (8GB), High (12GB), Ultra (16GB+) | Custom |
@@ -236,9 +239,22 @@ choices and starts the game again, so progress since your last save is lost.
 | | Upscaler | Game's own, NVIDIA DLSS (only in builds with NVIDIA's DLSS SDK, below; on RTX GPUs), AMD FSR 3.1 (every build, on GPUs it runs on, below), AMD FSR 4 (only in builds with FSR 4, below), Off (every build and GPU, `dlss=6`: no upscaling network, the 3D at the Render resolution stretched to the output, no anti-aliasing; Render resolution steps as for the game's own, Sharpness applies) | Game's own |
 | | Render resolution | Auto (the game's own dynamic resolution), 100%, 75%, 67%, 50% (each with its size). With DLSS, FSR 3.1 or FSR 4: Auto, Quality (67%), Balanced (58%), Performance (50%), Ultra Performance (33%). With DLSS also **DLAA (native)** and with FSR 4 **Native AA (FSR 4)**, after Auto: the 3D at 100% with the upscaler's anti-aliasing (saved as `resolution=7`; they were Upscaler choices before, and an options file that saved them as the Upscaler is read as DLSS or FSR 4 with this) | Auto |
 | | DLSS model | DLSS 4 (Transformer, preset K), DLSS 4.5 (Transformer 2, preset M), DLSS 4.5 (Transformer 2, preset L), NVIDIA default, DLSS 3 (CNN, preset E) (builds with DLSS; used by DLSS, DLAA included) | first run only, by GPU: DLSS 3 under 7 GB of video memory, else DLSS 4 on RTX 20 and 30, DLSS 4.5 (M) on RTX 40 and 50 |
+| | DLAA before the bloom | Off, On: where NVIDIA DLAA smooths the picture, after the game's bloom and tone map or before them, so the glow is made from a smooth picture (shown with NVIDIA DLSS; changeable with Render resolution Native (DLAA) only; changes at once; `RX_VK_DLSS_PRE_BLOOM` over it for one run) | Off |
 | | Frame generation by | Built-in / AMD FSR 3.1 (the renderer's own interpolation, and AMD FSR 3.1's at 2x where it runs), NVIDIA DLSS FG (RTX 40 and newer, with a temporal Upscaler and NVIDIA's runtime), AMD FSR 3.1 FG (shown in a build with DLSS, or where AMD FSR 3.1's frame interpolation runs; saved as `frame_generation_by`: 0, 1, 2) | Built-in / AMD FSR 3.1 |
 | | Frame generation | Off, Auto, 2x to 8x, but only what Frame generation by makes: NVIDIA DLSS FG 2x up to its runtime's most (6x on an RTX 50, 2x on an RTX 40) and no Auto, AMD FSR 3.1 FG 2x, Built-in Auto and 2x to 8x. Right under Frame generation by; changing the mode keeps the multiplier within the new mode's | Off |
 | | Frame pacing | Off, On | Off |
+| | HDR contrast | 50% to 200% around mid grey, in steps of 5, as the RenoDX HDR mods grade it (while HDR is on; with Native the game's own HDR picture too; hidden with PsychoV35, which has its own Contrast) | 100% |
+| | HDR tone mapper | Vanilla (the game's curve), PsychoV35 (RenoDX's zelda-oot-oz; with HDR set to Native. Every Upscaler takes its scene: DLSS, DLAA, FSR, TAAU and Off) | Vanilla |
+| | PsychoV35 UI brightness | 80 to 500 nits: the menus' and HUD's white; the scene keeps the paper white (RenoDX's UI Brightness) | 203 nits |
+| | PsychoV35 color space | Vanilla (the game's own matrix), BT.709, DCI-P3 (RenoDX's Global Color Space) | BT.709 |
+| | PsychoV35 midgray | Render, Vanilla (mid grey where the game's own curve puts it) | Vanilla |
+| | PsychoV35 match tone slope | Off, On (the game's own slope at mid grey) | On |
+| | PsychoV35 tone slope | 0 to 100: how steeply tones rise through mid grey | 50 |
+| | PsychoV35 hue clip emulation | 0 to 100: how much of the game's colour shift in its brightest parts is kept | 50 |
+| | PsychoV35 exposure | 0% to 200%: the scene's brightness at mid grey | 100% |
+| | PsychoV35 highlights, shadows, contrast, saturation | 0 to 100 each: RenoDX's grading (contrast 0 breaks the picture, as in the mod) | 50 |
+| | PsychoV35 bloom | 0 to 100: the glow around bright things (0 none, 100 twice the game's) | 50 |
+| | PsychoV35 reset all | Puts every PsychoV35 row back to RenoDX's defaults | |
 | | NVIDIA Reflex | Off, On, On + Boost (NVIDIA GPUs with `VK_NV_low_latency2`) | Off |
 | | Frame rate limit | 60, 90, 120, 144, 165, 240, Unlimited (saved as `frame_rate_limit` 0 to 6). The rate shown, the game's frames and the made ones: with a fixed Frame generation multiplier the game runs at the limit over it (120 at 3x: the game at 40; the multiplier is lowered where that would leave the game under 20 frames a second). Above 60 needs Game speed on Real time | 60 |
 | | Output resolution | 1920x1080, 2048x1152, 2560x1440, 3840x2160, 5120x1440 (after a restart) | 2048x1152 |

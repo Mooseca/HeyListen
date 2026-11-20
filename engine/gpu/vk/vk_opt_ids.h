@@ -30,3 +30,9 @@
 /* The V-Sync mode row (gpu/vk/vk_replay.cpp answers): 0 FIFO (double buffering), 1 FIFO (triple buffering), 2 Mailbox. A new
    id, after the VRR row's (on feat/vsync-buffering's base: 90, 91; here 93, the VRR cap moved past it); nothing renumbered. */
 #define HL_OPT_VSYNC_MODE 92
+
+/* The HDR tone mapper (after Longshot ddb156df, #2481): HDR set to Native with its Tone mapper row on PsychoV35 (vk_menu.cpp
+   scene_tonemap_on; gpu/vk/vk_replay.cpp answers it). host/nn_vi.c makes the scene buffer RGBA16F only then, so Native HDR with the
+   row on Vanilla keeps the game's R11G11B10F and the temporal upscalers, which take only that scene. 47, Longshot's id for it in
+   its vk_api.h, so the two agree. */
+#define HL_OPT_HDR_TONEMAP 47

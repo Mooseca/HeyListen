@@ -89,6 +89,28 @@ holds nothing back: the game runs as fast as the PC can, and every one of its fr
 V-Sync setting of the driver, may still hold the shown rate). Above 60 the limit needs **Game speed** on Real time (the default); with
 Per frame the game runs at 60 as before and the limit does not apply.
 
+### HDR
+
+The Graphics tab's **HDR** row sends HDR10 to an HDR screen (Windows: turn on **Use HDR** in the display settings). **Off** is the
+SDR picture, **Expanded** is the game's SDR picture with its whites at the **HDR paper white** and its highlights up to the **HDR peak
+brightness** (set those two rows to your screen's), and **Native (the game's)** is the game's own HDR picture, told your screen's peak
+and paper white. With Native two more rows appear:
+
+- **HDR tone mapper**: **Vanilla** (the default) keeps the game's own curve. **PsychoV35** is [RenoDX](https://github.com/clshortfuse/renodx)'s
+  tone mapper for this game (its zelda-oot-oz mod, MIT, ported here by Duck912): the same mid grey, with highlights that roll off into
+  the peak and keep their colour, and no banding in the sky and in the dark (the game's scene is drawn in 16-bit floats with it). It
+  comes with rows of its own, each under 0 to 100 with 50 as the game's: **PsychoV35 UI brightness**, **color space**, **midgray**,
+  **match tone slope**, **tone slope**, **hue clip emulation**, **exposure**, **highlights**, **shadows**, **contrast**,
+  **saturation**, **bloom**, and **PsychoV35 reset all**, which puts them back to RenoDX's defaults. They apply at once.
+- **HDR contrast** (while HDR is on; hidden with PsychoV35, which has its own contrast).
+
+PsychoV35 works with every **Upscaler** (the game's own, NVIDIA DLSS, AMD FSR 3.1 and FSR 4, Off) and with frame generation, which keeps
+the HDR picture at 10 bits. **DLAA before the bloom** (with NVIDIA DLSS, under **DLSS model**; off by default) smooths the scene before
+the game's bloom and tone map, so the glow comes from a smooth picture. In `hookshot_options.ini` the rows are `hdr`, `hdr_tone_mapper`
+(0 Vanilla, 1 PsychoV35) and `dlss_pre_bloom`. An options file from the earlier build that had **Native + our tone mapper** (`hdr=3`)
+is read as Native with PsychoV35 (that tone mapper is gone: there is one). `RX_VK_PSYCHOV35_DLSS=0` turns PsychoV35's upscaler routes
+off for troubleshooting.
+
 ## Install with RecompLauncher
 
 [RecompLauncher](https://recomplauncher.com) installs HeyListen for you, like a PC game, and keeps it up to date. It does

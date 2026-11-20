@@ -30,8 +30,12 @@
 #include <thread>
 #include <setjmp.h>
 #include <signal.h>
+#if defined(__linux__) && defined(__GLIBC__)
+#include <malloc.h>   // (compile_gate.h trims: a long compile's freed memory handed back)
+#endif
 
 #include "shader_recompiler/backend/spirv/emit_spirv.h"
+#include "shader_recompiler/ir_opt/psychov35.h"   // (PsychoV35's grading bank: uniform_range)
 
 #include "compat/hookshot_env.h"   // (env_value_off: the switches' one rule)
 #include "vk_paths.h"
@@ -42,15 +46,16 @@
 #include "vk_temporal.h"
 #include "vk_fsr3.h"          // (AMD FSR 3.1 in the gameplay upscale's place)
 #include "vk_fsr3_inputs.h"
-#include "vk_hdr_tonemap.h"   // (heylisten: the native HDR mode's tone-mapping pass)
 #include "vk_dump.h"
 #include "vk_gprof.h"
 #include "vk_jobs.h"
 #include "vk_shader.h"
+#include "vk_menu.h"     // (psychov35_bank: PsychoV35's grading for its bank, uniform_range)
 #include "vk_texture.h"
 #include "vk_ledger.h"   // (RX_VK_LEDGER)
 #include "ubo_memo.h"    // (HL_UBO_MEMO)
 #include "predict_limits.h"   // (what the prediction of pipelines holds itself to)
+#include "compile_gate.h"     // (Longshot c392df3a: how many of the driver's compiles run at once)
 #include "movie_upscale_policy.h"
 #include "skip_code.h"
 
@@ -59,6 +64,7 @@
 #include "shaders/clear_u_frag_spv.h"
 #include "shaders/clear_vert_spv.h"
 #include "shaders/taau_upscale_comp_spv.h"
+#include "shaders/taau_upscale_rgba_comp_spv.h"
 #include "shaders/movie_upscale_comp_spv.h"
 #include "shader_recompiler/backend/spirv/mma_layout.h"
 #include "precompile_save.h"   // (the pipeline cache written before the title after a long precompile)
@@ -2873,6 +2879,15 @@ VkDescriptorBufferInfo uniform_range(const NvnState& s, const Stage& st, uint32_
         c.prog = (const Program*)1, c.at = at, c.buf = cur->stream, c.size = n, c.bytes = tmp;
         return {cur->stream, at, n};
     }
+    if (index == Shader::Optimization::PsychoV35::kSettingsBank) {   // the renderer's own: PsychoV35's grading, as the menu has it
+        constexpr uint64_t n = (Shader::Optimization::PsychoV35::kSettingCount * sizeof(float) + 15) & ~uint64_t{15};
+        const uint64_t at = stream_alloc(n, align);
+        if (at == UINT64_MAX) return bi;
+        float bank[n / sizeof(float)] = {};
+        psychov35_bank(bank);
+        std::memcpy(cur->mapped + at, bank, n);
+        return {cur->stream, at, n};
+    }
     if (index == 1) {
         FINE_SCOPE(FT_C1);
         FINE_N(FC_C1_CALLS, 1);
@@ -3281,7 +3296,11 @@ void desc_counts_unpack(uint64_t packed, size_t* nbuf, size_t* nimg, size_t* nvi
     *ntex = (size_t)(packed >> 48 & 0xffff);
 }
 
+// (ported from hookshot 53eb0441, pixl27, RX_VK_METER_ZERO) where an exposure program's sums were bound, for its dispatch's reset
+struct MeterOut { VkBuffer buffer = VK_NULL_HANDLE; VkDeviceSize offset = 0, size = 0; };
+thread_local MeterOut meter_out;
 void build_descriptors(const NvnState& s, const Program& p) {
+    if (p.key == 0x435a0138b9013040ull || p.key == 0x592079442d7129daull) meter_out = {};
     // (hookshot) the thread's writer asked for once: each out is a call and a thread-local read (__tls_get_addr in the shared
     // library), and a build made dozens of them. The same object for the thread's life, reset in place here
     DescWriter& out = dw();
@@ -3472,6 +3491,11 @@ void build_descriptors(const NvnState& s, const Program& p) {
                                  ns, n_desc, k, (unsigned)d.cbuf_index, off, d.is_written ? " written" : "", (unsigned long long)addr,
                                  (unsigned long long)size, b ? "yes" : "NO");
                     }
+                }
+                // (ported from hookshot 53eb0441, pixl27) OoT's exposure meter: where its two programs bind their block
+                if ((p.key == 0x435a0138b9013040ull || p.key == 0x592079442d7129daull) && d.is_written && b && n == 0x1040) {
+                    memory_meter_range(host->gpu_guest(base), n);
+                    meter_out = {b.buffer, b.offset + (addr - base), n - (addr - base)};
                 }
                 // (census: every single descriptor, and table entries that hold something, with where they came from)
                 if (d.count == 1 || addr) {
@@ -7107,7 +7131,7 @@ static void dlss_trace_draw(const NvnState& s, const Program& p, const DrawArgs&
 /// binding 3: 3 x 4 matrices, a whole number of them) and the object's origin in its buffer 4 (binding 1, at 0x40)
 static void skin_check(const NvnState& s, const Program& p, const DrawArgs& d, const Targets& at) {
     if (d.mesh || !d.indexed || d.indirect || d.instances != 1 || !at.n || !at.color[0] || !at.depth ||
-        !temporal_scene_size(at.width, at.height) || at.color_format[0] != VK_FORMAT_B10G11R11_UFLOAT_PACK32 || s.nvattr < 7 ||
+        !temporal_scene_size(at.width, at.height) || !temporal_scene_format(at.color_format[0]) || s.nvattr < 7 ||
         !temporal_wanted())
         return;
     const auto attr = [&](int i) { return *reinterpret_cast<const nvn_va_st*>(&s.vattr[i]); };
@@ -7227,43 +7251,6 @@ static void hdr_find(const NvnState& s, const Program& p, const Targets& at) {
                               (unsigned long long)s.ubo[ns][i].size, (unsigned)st.info.constant_buffer_used_sizes[i + 3]);
     }
     logf("%s", line);
-}
-
-/// (heylisten, the HDR row's "Native + our tone mapper") The game's tone-mapping pass, a full-screen draw of its scene image into the
-/// HDR10 window image, done by our own pass (vk_hdr_tonemap.cpp) instead: the same image in, the same one out, the exposure read from
-/// the pass's own uniform buffer. true: it is done and the draw is left out. false: it cannot be (another kind of target, no
-/// pipeline), and the game's pass draws as it would
-static bool hdr_tonemap_draw(VkCommandBuffer cmd, NvnState& s, const Program& p, const Targets& at) {
-    if (p.stages.empty() || p.compute || p.mesh || at.n != 1 || !at.color[0] || at.depth || at.samples != VK_SAMPLE_COUNT_1_BIT ||
-        at.color_format[0] != VK_FORMAT_A2B10G10R10_UNORM_PACK32)
-        return false;
-    const Stage* fs = nullptr;
-    for (const Stage& st : p.stages)
-        if (st.vk_stage == VK_SHADER_STAGE_FRAGMENT_BIT) fs = &st;
-    if (!fs || fs->info.texture_descriptors.empty()) return false;
-    const uint32_t handle = handle_of(s, *fs, fs->info.texture_descriptors[0], 0);
-    Texture* scene = nullptr;
-    const VkImageView scene_view = handle ? texture_view_of(handle, VK_IMAGE_VIEW_TYPE_2D, ViewUse::Sample, VK_FORMAT_UNDEFINED, &scene) : VK_NULL_HANDLE;
-    // (the scene as the game's pass takes it: a float image. Anything else bound first is not our pass's scene, and the
-    // game's draw is kept)
-    if (scene && scene->format != VK_FORMAT_B10G11R11_UFLOAT_PACK32 && scene->format != VK_FORMAT_E5B9G9R9_UFLOAT_PACK32 &&
-        scene->format != VK_FORMAT_R16G16B16A16_SFLOAT)
-        return false;
-    VkFormat out_format = VK_FORMAT_UNDEFINED;
-    const VkImageView out_view = texture_view(at.color[0], s.rt.color[0], s.rt.has_cview[0] ? &s.rt.cview[0] : nullptr, VK_IMAGE_VIEW_TYPE_2D,
-                                              ViewUse::Storage, &out_format, VK_FORMAT_A2B10G10R10_UNORM_PACK32);
-    if (!scene || !scene_view || !out_view || out_format != VK_FORMAT_A2B10G10R10_UNORM_PACK32) return false;
-    const VkDescriptorBufferInfo ubo = uniform_range(s, *fs, 3);
-    end_pass(cmd);
-    full_barrier(cmd);
-    if (!hdr_tonemap_record(cmd, p.key, scene_view, out_view, at.width, at.height, ubo)) return false;
-    full_barrier(cmd);
-    // (no reason to texture_written: it notes a virtual-pool texture's page map, and this is the draw path with no ParLock of
-    // its own — the upscale stand-in's storage writes say nothing either)
-    texture_written(at.color[0]);
-    descriptors_disturbed();   // (the pass's own pushes are gone from the compute bind point)
-    if (dump_on()) dump_image(cmd, at.color[0], at.color_level[0], at.color_layer[0], "hdr tone mapping result");
-    return true;
 }
 
 void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
@@ -7633,9 +7620,15 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
     texture_watch_prog(p.key);
     if (!same_desc) gfx_sampled() = draw_sampled();
     hdr_find(s, p, at);   // (RX_VK_HDR_FIND)
-    if (!d.mesh && hdr_tonemap_wanted() && hdr_tonemap_key(p.key) && hdr_tonemap_draw(cmd, s, p, at)) {   // (heylisten: the HDR row's tone mapper)
-        st_draws++;
-        return;
+    // (HeyListen, after Longshot a7621bd7 / 83b161e3) NVIDIA DLAA before the game's bloom and tone map: the frame's draws into
+    // the scene and those that read it, and at the bloom's first draw DLAA on the scene, before this draw reads it
+    // (vk_temporal.cpp, pre_bloom.h). Its passes and its actor motion's draws bound a pipeline, a viewport, vertex streams and
+    // descriptors of their own: this draw sets all of its again, as after the network's stand-in (temporal_stand_in). Kept, a
+    // draw of the scene's size took the actor motion's upright viewport for the game's upside-down one (Longshot #1672)
+    const bool pre_recorded = temporal_pre_bloom(cmd, p.key, gfx_sampled(), at.color, at.n);
+    if (pre_recorded) {
+        last_dyn_valid = false, last_vb_valid = false, last_pipeline = VK_NULL_HANDLE;
+        vertex_set.on = false, last_ib.on = false;
     }
     static const bool barrier_every = getenv("RX_VK_BARRIER_EVERY_DRAW") != nullptr;   // (an experiment: a pass each)
     if (barrier_every) end_pass(cmd);
@@ -7733,7 +7726,7 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
         if (res_log_on()) res_note_pipeline_use(pl);   // (TICK-038)
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pl), last_pipeline = pl;
     }
-    if (!same_desc) {
+    if (!same_desc || pre_recorded) {   // (after DLAA's commands its pushes are gone: temporal_pre_bloom)
         FINE_SCOPE(FT_BINDDESC);
         if (!bind_descriptors(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, p)) SKIP_HERE();
         last_desc_valid = true, last_desc_prog = &p, last_desc_bind = s.bind_gen, last_desc_reg = reg_gen;
@@ -8267,6 +8260,37 @@ bool upscale_stub(VkCommandBuffer cmd, const NvnState& s, uint64_t key) {
     }
     // The generic failed-network path can receive RGB9E5 bits in a shared R11 image.
     // Match the observed base-level 2D case only; other fallbacks keep their existing blit.
+    const bool gameplay_taau = key == 0xfd029a317a9a4b94ull;
+    if (gameplay_taau && scene_tonemap_on() &&
+        (src->format == VK_FORMAT_R16G16B16A16_SFLOAT || dst->format == VK_FORMAT_R16G16B16A16_SFLOAT)) {
+        if (src->format != VK_FORMAT_R16G16B16A16_SFLOAT || dst->format != VK_FORMAT_R16G16B16A16_SFLOAT ||
+            in.d.format != NVN_FORMAT_RGB9E5F || out.d.format != NVN_FORMAT_R11G11B10F ||
+            !(fd.optimalTilingFeatures & VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT) ||
+            src->type != VK_IMAGE_TYPE_2D || dst->type != VK_IMAGE_TYPE_2D || src->depth != 1 || dst->depth != 1 ||
+            src->layers != 1 || dst->layers != 1 || src->levels != 1 || dst->levels != 1 || src->skip || dst->skip ||
+            in.d.swizzle_r != NVN_TEXTURE_SWIZZLE_R || in.d.swizzle_g != NVN_TEXTURE_SWIZZLE_G ||
+            in.d.swizzle_b != NVN_TEXTURE_SWIZZLE_B) return false;
+        nvn_tex selected_in{}, selected_out{};
+        nvn_view iv{}, ov{};
+        bool ihv = false, ohv = false;
+        if (texture_of((int)(in_h & 0xFFFFF), &selected_in, &iv, &ihv) &&
+            texture_of((int)(out_h & 0xFFFFF), &selected_out, &ov, &ohv) && !ihv && !ohv &&
+            selected_in.serial == in.serial && selected_out.serial == out.serial) {
+            VkFormat input_format = VK_FORMAT_UNDEFINED, output_format = VK_FORMAT_UNDEFINED;
+            const VkImageView input_view = texture_view(src, &in, nullptr, VK_IMAGE_VIEW_TYPE_2D, ViewUse::Sample,
+                                                         &input_format, VK_FORMAT_R16G16B16A16_SFLOAT);
+            const VkImageView output_view = texture_view(dst, &out, nullptr, VK_IMAGE_VIEW_TYPE_2D, ViewUse::Storage,
+                                                          &output_format, VK_FORMAT_R16G16B16A16_SFLOAT);
+            if (input_view && output_view && input_format == VK_FORMAT_R16G16B16A16_SFLOAT &&
+                output_format == VK_FORMAT_R16G16B16A16_SFLOAT &&
+                typed_upscale(cmd, input_view, output_view, dst, 0, key, "PsychoV35 TAAU fallback", true)) {
+                full_barrier(cmd);
+                texture_written(dst);
+                return true;
+            }
+        }
+        return false; // Do not blit perceptually encoded PsychoV35 input into a linear output.
+    }
     // (the gameplay networks too, when they are left out (no f16 shaders, vk_shader.cpp): their input is the scene's RGB9E5 bits
     // in a B10G11R11 image, and the blit below read them as B10G11R11, full-screen yellow and magenta noise with RX_VK_NO_F16.
     // Through the typed upscale as the TAAU network's stand-in (taau_stand_in), its edges smoothed in the shader)
@@ -8347,10 +8371,21 @@ bool taau_key(uint64_t key) {
 static bool typed_upscale(VkCommandBuffer cmd, VkImageView input_view, VkImageView output_view,
                           Texture* out, uint32_t level, uint64_t key, const char* keys, bool temporal) {
     if (!dev.push_descriptor || !vkCmdPushDescriptorSetKHR || !input_view || !output_view || !out) return false;
-    static VkPipeline pipe = VK_NULL_HANDLE;
-    static VkPipelineLayout layout = VK_NULL_HANDLE;
-    static VkSampler linear = VK_NULL_HANDLE;
-    static bool tried = false;
+    const bool rgba = out->format == VK_FORMAT_R16G16B16A16_SFLOAT;
+    // (RGBA16F: Native PsychoV35's scene, the TAAU network's stand-in and the Upscaler's Off: HeyListen, after Longshot b80a68f1)
+    if (out->format != VK_FORMAT_B10G11R11_UFLOAT_PACK32 && !(rgba && scene_tonemap_on())) return false;
+    struct Pipeline {
+        VkPipeline pipe = VK_NULL_HANDLE;
+        VkPipelineLayout layout = VK_NULL_HANDLE;
+        VkSampler linear = VK_NULL_HANDLE;
+        bool tried = false;
+    };
+    static Pipeline pipelines[2];
+    Pipeline& pipeline = pipelines[rgba ? 1 : 0];
+    auto& pipe = pipeline.pipe;
+    auto& layout = pipeline.layout;
+    auto& linear = pipeline.linear;
+    auto& tried = pipeline.tried;
     if (!tried) {
         tried = true;
         VkDescriptorSetLayoutBinding b[3] = {{0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr},
@@ -8366,7 +8401,8 @@ static bool typed_upscale(VkCommandBuffer cmd, VkImageView input_view, VkImageVi
         pi.setLayoutCount = 1, pi.pSetLayouts = &set, pi.pushConstantRangeCount = 1, pi.pPushConstantRanges = &pr;
         vkCreatePipelineLayout(dev.device, &pi, nullptr, &layout);
         VkShaderModuleCreateInfo mi{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
-        mi.codeSize = sizeof TAAU_UPSCALE_COMP_SPV, mi.pCode = TAAU_UPSCALE_COMP_SPV;
+        mi.codeSize = rgba ? sizeof TAAU_UPSCALE_RGBA_COMP_SPV : sizeof TAAU_UPSCALE_COMP_SPV;
+        mi.pCode = rgba ? TAAU_UPSCALE_RGBA_COMP_SPV : TAAU_UPSCALE_COMP_SPV;
         VkShaderModule m{};
         IntelDriverGate gate;
         if (guarded_shader_module(&mi, &m) != VK_SUCCESS) m = VK_NULL_HANDLE;
@@ -8380,7 +8416,7 @@ static bool typed_upscale(VkCommandBuffer cmd, VkImageView input_view, VkImageVi
         si.addressModeU = si.addressModeV = si.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
         si.maxLod = 0.25f;
         vkCreateSampler(dev.device, &si, nullptr, &linear);
-        logf("vk: typed upscale helper %s%s", keys,
+        logf("vk: typed upscale helper %s, %s output%s", keys, rgba ? "RGBA16F" : "packed",
              pipe ? "" : ": its pipeline was not made");
     }
     if (!pipe) return false;
@@ -8392,6 +8428,7 @@ static bool typed_upscale(VkCommandBuffer cmd, VkImageView input_view, VkImageVi
         VmaAllocation memory = nullptr;
         VkImageView view = VK_NULL_HANDLE;
         uint32_t width = 0, height = 0;
+        VkFormat format = VK_FORMAT_UNDEFINED;
         uint64_t frame = 0;
     };
     static History histories[2];
@@ -8416,12 +8453,12 @@ static bool typed_upscale(VkCommandBuffer cmd, VkImageView input_view, VkImageVi
         destroy_image(old_hist[i].image, old_hist[i].mem);
         old_hist.erase(old_hist.begin() + (ptrdiff_t)i);
     }
-    if (hist_w != size[0] || hist_h != size[1]) {
+    if (hist_w != size[0] || hist_h != size[1] || history.format != out->format) {
         // (the one before is kept for the while: work in flight may still use it)
         if (hist && !leak) old_hist.push_back({hist, hist_mem, hist_view, texture_frame_no()});
         hist = VK_NULL_HANDLE, hist_view = VK_NULL_HANDLE;
         VkImageCreateInfo ic{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
-        ic.imageType = VK_IMAGE_TYPE_2D, ic.format = VK_FORMAT_B10G11R11_UFLOAT_PACK32;
+        ic.imageType = VK_IMAGE_TYPE_2D, ic.format = out->format;
         ic.extent = {size[0], size[1], 1}, ic.mipLevels = 1, ic.arrayLayers = 1, ic.samples = VK_SAMPLE_COUNT_1_BIT;
         ic.tiling = VK_IMAGE_TILING_OPTIMAL, ic.usage = VK_IMAGE_USAGE_STORAGE_BIT;
         if (!create_image(ic, hist, hist_mem)) { hist = VK_NULL_HANDLE; return false; }
@@ -8439,7 +8476,7 @@ static bool typed_upscale(VkCommandBuffer cmd, VkImageView input_view, VkImageVi
         VkDependencyInfo di{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
         di.imageMemoryBarrierCount = 1, di.pImageMemoryBarriers = &ib;
         vkCmdPipelineBarrier2(cmd, &di);
-        hist_w = size[0], hist_h = size[1], hist_frame = 0;
+        hist_w = size[0], hist_h = size[1], history.format = out->format, hist_frame = 0;
     }
     // (bounded when the history is last frame's or so: a pause of the TAAU, a menu, starts again unbounded)
     const uint64_t now_frame = texture_frame_no();
@@ -8488,7 +8525,12 @@ bool fsr3_stand_in(VkCommandBuffer cmd, const NvnState& s, const Program& p) {
     uint32_t level = 0;
     const uint32_t out_handle = handle_of(s, st, od, 0);
     if (out_handle) texture_view_of(out_handle, VK_IMAGE_VIEW_TYPE_2D, ViewUse::Storage, image_format(od.format), &out, &level);
-    return fsr3_upscale(cmd, p.key, gameplay_network(p.key), in, dw().imgs[0].imageView, out, dw().imgs[ntex].imageView, level);
+    VkImageView input_view = dw().imgs[0].imageView, output_view = dw().imgs[ntex].imageView;
+    if (in && out && fsr3_inputs::colour_pair(in->format, out->format) && out->format == VK_FORMAT_R16G16B16A16_SFLOAT) {
+        input_view = texture_view_of(in_handle, VK_IMAGE_VIEW_TYPE_2D, ViewUse::Sample, VK_FORMAT_R16G16B16A16_SFLOAT);
+        output_view = texture_view_of(out_handle, VK_IMAGE_VIEW_TYPE_2D, ViewUse::Storage, VK_FORMAT_R16G16B16A16_SFLOAT);
+    }
+    return fsr3_upscale(cmd, p.key, gameplay_network(p.key), in, input_view, out, output_view, level);
 }
 /// (hookshot) A temporal upscaler (NVIDIA DLSS, AMD FSR 4: vk_temporal.cpp) in place of the gameplay upscale network, when
 /// one is on and its inputs are as expected: the network's input as it samples it, its output's storage view
@@ -8514,7 +8556,12 @@ bool temporal_stand_in(VkCommandBuffer cmd, const NvnState& s, const Program& p)
     uint32_t level = 0;
     const uint32_t out_handle = handle_of(s, st, od, 0);
     if (out_handle) texture_view_of(out_handle, VK_IMAGE_VIEW_TYPE_2D, ViewUse::Storage, image_format(od.format), &out, &level);
-    const bool done = temporal_upscale(cmd, p.key, gameplay_network(p.key), in, dw().imgs[0].imageView, out, dw().imgs[ntex].imageView, level);
+    VkImageView in_view = dw().imgs[0].imageView, out_view = dw().imgs[ntex].imageView;
+    if (in && out && temporal_colour_pair(in->format, out->format) && out->format == VK_FORMAT_R16G16B16A16_SFLOAT) {
+        in_view = texture_view_of(in_handle, VK_IMAGE_VIEW_TYPE_2D, ViewUse::Sample, VK_FORMAT_R16G16B16A16_SFLOAT);
+        out_view = texture_view_of(out_handle, VK_IMAGE_VIEW_TYPE_2D, ViewUse::Storage, VK_FORMAT_R16G16B16A16_SFLOAT);
+    }
+    const bool done = temporal_upscale(cmd, p.key, gameplay_network(p.key), in, in_view, out, out_view, level);
     // (its actor motion may have drawn with a pipeline, viewport and descriptors of its own: the next draw sets all of its again)
     last_dyn_valid = false, last_desc_valid = false, last_vb_valid = false, last_pipeline = VK_NULL_HANDLE;
     vertex_set.on = false, last_ib.on = false;
@@ -8529,13 +8576,17 @@ static bool temporal_rejected_network(VkCommandBuffer cmd, uint64_t key, Texture
     end_pass(cmd);
     VkFormat in_format = VK_FORMAT_UNDEFINED, out_format = VK_FORMAT_UNDEFINED;
     const VkImageView in_view = texture_view(src, in, nullptr, VK_IMAGE_VIEW_TYPE_2D, ViewUse::Sample, &in_format);
+    const bool rgba_pair = (temporal_colour_pair(src->format, dst->format) || fsr3_inputs::colour_pair(src->format, dst->format)) &&
+                           dst->format == VK_FORMAT_R16G16B16A16_SFLOAT;
     const VkImageView out_view = texture_view(dst, out, nullptr, VK_IMAGE_VIEW_TYPE_2D, ViewUse::Storage, &out_format,
-                                              VK_FORMAT_B10G11R11_UFLOAT_PACK32);
+                                              rgba_pair ? VK_FORMAT_R16G16B16A16_SFLOAT : VK_FORMAT_B10G11R11_UFLOAT_PACK32);
     // (the gameplay networks' own formats: their input is the square root of the scene colour, which the fixed shares' networks
     // sample as RGB9E5 from the B10G11R11 image it is kept in (shaders/taau_upscale.comp), the 3/4 one as B10G11R11. Decoded,
     // both are what the temporal upscaler's prep pass takes. The movies' (RGBA8) are not the scene)
-    if (!in_view || !out_view || out_format != VK_FORMAT_B10G11R11_UFLOAT_PACK32 ||
-        (in_format != VK_FORMAT_B10G11R11_UFLOAT_PACK32 && in_format != VK_FORMAT_E5B9G9R9_UFLOAT_PACK32))
+    const bool packed_pair = out_format == VK_FORMAT_B10G11R11_UFLOAT_PACK32 &&
+                             (in_format == VK_FORMAT_B10G11R11_UFLOAT_PACK32 || in_format == VK_FORMAT_E5B9G9R9_UFLOAT_PACK32);
+    if (!in_view || !out_view || (!packed_pair && !temporal_colour_pair(in_format, out_format) &&
+                                !fsr3_inputs::colour_pair(in_format, out_format)))
         return false;
     const bool done = temporal_upscale(cmd, key, false, src, in_view, dst, out_view, 0);
     last_dyn_valid = false, last_desc_valid = false, last_vb_valid = false, last_pipeline = VK_NULL_HANDLE;
@@ -8573,14 +8624,25 @@ static bool off_stand_in(VkCommandBuffer cmd, const NvnState& s, const Program& 
     Texture* out = nullptr;
     uint32_t level = 0;
     texture_view_of(out_handle, VK_IMAGE_VIEW_TYPE_2D, ViewUse::Storage, image_format(od.format), &out, &level);
-    if (!out || out->format != VK_FORMAT_B10G11R11_UFLOAT_PACK32) return false;
-    if (!known) {   // (another network of the upscale's shape: only the scene into the picture, the rest runs)
+    if (!out) return false;
+    // (Native PsychoV35: its RGBA16F scene into the RGBA16F picture, the typed upscale's RGBA16F shader, which decodes the
+    // network input's perceptual colour as the packed one does; never a pair of the two formats. After Longshot b80a68f1)
+    const bool rgba = out->format == VK_FORMAT_R16G16B16A16_SFLOAT && scene_tonemap_on();
+    if (out->format != VK_FORMAT_B10G11R11_UFLOAT_PACK32 && !rgba) return false;
+    const uint32_t in_handle = handle_of(s, st, st.info.texture_descriptors[0], 0);
+    if (!known || rgba) {   // (another network of the upscale's shape: only the scene into the picture, the rest runs)
         Texture* in = nullptr;
-        const uint32_t in_handle = handle_of(s, st, st.info.texture_descriptors[0], 0);
         if (in_handle) texture_view_of(in_handle, VK_IMAGE_VIEW_TYPE_2D, ViewUse::Sample, VK_FORMAT_UNDEFINED, &in);
-        if (!in || in->format != VK_FORMAT_B10G11R11_UFLOAT_PACK32 || (out->width >> level) <= in->width) return false;
+        if (!in || in->format != out->format) return false;
+        if (!known && (out->width >> level) <= in->width) return false;
     }
-    if (!typed_upscale(cmd, dw().imgs[0].imageView, dw().imgs[ntex].imageView, out, level, p.key, "Upscaler Off", false))
+    VkImageView input_view = dw().imgs[0].imageView, output_view = dw().imgs[ntex].imageView;
+    if (rgba) {
+        input_view = texture_view_of(in_handle, VK_IMAGE_VIEW_TYPE_2D, ViewUse::Sample, VK_FORMAT_R16G16B16A16_SFLOAT);
+        output_view = texture_view_of(out_handle, VK_IMAGE_VIEW_TYPE_2D, ViewUse::Storage, VK_FORMAT_R16G16B16A16_SFLOAT);
+        if (!input_view || !output_view) return false;
+    }
+    if (!typed_upscale(cmd, input_view, output_view, out, level, p.key, "Upscaler Off", false))
         return false;
     static std::mutex mu;
     static std::unordered_set<uint64_t> seen;
@@ -8603,9 +8665,22 @@ bool taau_stand_in(VkCommandBuffer cmd, const NvnState& s, const Program& p) {
     const uint32_t handle = handle_of(s, st, od, 0);
     if (!handle) return false;
     texture_view_of(handle, VK_IMAGE_VIEW_TYPE_2D, ViewUse::Storage, image_format(od.format), &out, &level);
-    if (!out || out->format != VK_FORMAT_B10G11R11_UFLOAT_PACK32) return false;
+    if (!out) return false;
+    VkImageView input_view = dw().imgs[0].imageView, output_view = dw().imgs[ntex].imageView;
+    if (out->format == VK_FORMAT_R16G16B16A16_SFLOAT && scene_tonemap_on()) {
+        const uint32_t input_handle = handle_of(s, st, st.info.texture_descriptors[0], 0);
+        Texture* input = nullptr;
+        if (!input_handle) return false;
+        texture_view_of(input_handle, VK_IMAGE_VIEW_TYPE_2D, ViewUse::Sample, VK_FORMAT_UNDEFINED, &input);
+        if (!input || input->format != VK_FORMAT_R16G16B16A16_SFLOAT) return false;
+        input_view = texture_view_of(input_handle, VK_IMAGE_VIEW_TYPE_2D, ViewUse::Sample, VK_FORMAT_R16G16B16A16_SFLOAT);
+        output_view = texture_view_of(handle, VK_IMAGE_VIEW_TYPE_2D, ViewUse::Storage, VK_FORMAT_R16G16B16A16_SFLOAT);
+        if (!input_view || !output_view) return false;
+    } else if (out->format != VK_FORMAT_B10G11R11_UFLOAT_PACK32) {
+        return false;
+    }
     const char* keys = getenv("RX_VK_TAAU_KEYS") ? getenv("RX_VK_TAAU_KEYS") : "fd029a317a9a4b94";
-    return typed_upscale(cmd, dw().imgs[0].imageView, dw().imgs[ntex].imageView, out, level, p.key, keys, true);
+    return typed_upscale(cmd, input_view, output_view, out, level, p.key, keys, true);
 }
 
 // ---- (TICK-038) resources: the pipelines the game binds (RX_VK_RES_LOG=1), and compute programs' shader modules let go ----
@@ -8995,6 +9070,180 @@ struct CommitGate {
     CommitGate& operator=(const CommitGate&) = delete;
 };
 }  // namespace
+// ---- (Longshot c392df3a, Tomiss, PR #426: compute_gate.h, widened here to the start-up graphics pipelines: issue 88) how many of
+// the GPU driver's compiles run at once. A driver's compile takes the PC's RAM, not the GPU's: Mesa's Intel compiler spent
+// gigabytes on the game's large programs, and the start-up build ran twelve at once on twelve threads on a 31 GB PC until the
+// kernel killed the process at 1,360 of 16,358 (the reporter's log, issue 88, with the shader preparation finished). The same
+// shape upstream measured on an Iris Xe. The gate weighs each compile (gpu/vk/compile_gate.h) and starts one beside the others
+// only while their weights fit in what was available past the gate's reserve, and the memory is still there now.
+namespace {
+/// (Linux) What the process's cgroup v2 limits leave, in MB: the least of memory.max less memory.current over its cgroup and
+/// those above it (a limit on a parent slice binds too); kUnknownMB with none set, or no cgroup v2 (compile_gate.h
+/// cgroup_room_mb). MemAvailable does not see them, and a cgroup's OOM killer ends the game whatever the system has
+uint64_t cgroup_available_mb() {
+#if defined(__linux__)
+    FILE* f = std::fopen("/proc/self/cgroup", "r");
+    if (!f) return compile_gate::kUnknownMB;
+    char line[512] = "";
+    std::string path;
+    while (std::fgets(line, sizeof line, f))
+        if (const char* at = std::strstr(line, "::")) {   // (v2's one line: "0::/user.slice/...")
+            path = at + 2;
+            while (!path.empty() && (path.back() == '\n' || path.back() == '\r')) path.pop_back();
+            break;
+        }
+    std::fclose(f);
+    if (path.empty()) return compile_gate::kUnknownMB;
+    uint64_t room = compile_gate::kUnknownMB;
+    for (;;) {   // (its own cgroup and each above it: a slice's MemoryMax binds what its children do)
+        const std::string dir = "/sys/fs/cgroup" + (path == "/" ? std::string() : path);
+        auto read1 = [&](const char* name) {
+            std::string v;
+            if (FILE* g = std::fopen((dir + "/" + name).c_str(), "rb")) {
+                char b[64] = "";
+                if (std::fgets(b, sizeof b, g)) v = b;
+                std::fclose(g);
+            }
+            return v;
+        };
+        const std::string max = read1("memory.max"), current = read1("memory.current");
+        if (!current.empty()) {
+            unsigned long long cur = 0;
+            if (std::sscanf(current.c_str(), "%llu", &cur) == 1) room = std::min(room, compile_gate::cgroup_room_mb(max.c_str(), cur));
+        }
+        if (path == "/" || path.empty()) break;
+        const size_t slash = path.find_last_of('/');
+        path = slash == std::string::npos || slash == 0 ? "/" : path.substr(0, slash);
+    }
+    return room;
+#else
+    return compile_gate::kUnknownMB;
+#endif
+}
+}  // namespace
+/// MB the system has for the process now: MemAvailable on Linux (the POSIX shim's GlobalMemoryStatusEx ullAvailPhys reads it
+/// from /proc/meminfo), ullAvailPhys on Windows, and the least of that and the cgroup's. kUnknownMB when it cannot be read
+uint64_t memory_available_mb() {
+    MEMORYSTATUSEX m{};
+    m.dwLength = sizeof m;
+    const uint64_t avail = GlobalMemoryStatusEx(&m) ? (uint64_t)(m.ullAvailPhys >> 20) : compile_gate::kUnknownMB;
+    // (the least of the system's and the cgroup's: kUnknownMB is the largest, so either one alone stands when the other is not known)
+    return std::min(avail, cgroup_available_mb());
+}
+namespace {
+/// Whether the gate is on by itself: Linux with Mesa's Intel driver (ANV; the reporter's Arc B580 and upstream's Iris Xe), and
+/// Linux with RADV on an integrated GPU on a PC with under 13 GB of RAM (upstream's rule, #1398's 12 GB Radeon 760M). Nothing
+/// on Windows: IntelDriverGate and the commit rule already hold its compiles and its allocations, and a Windows run must behave
+/// as it did. RX_VK_COMPILE_AT_ONCE=<n> or 0 says otherwise on any GPU
+bool compile_gate_by_memory() {
+#if defined(__linux__)
+    if (dev.props.vendorID == 0x8086) return true;
+    if (dev.props.vendorID == 0x1002 && dev.props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU) {
+        MEMORYSTATUSEX m{};
+        m.dwLength = sizeof m;
+        return compile_gate::radv_by_memory(true, GlobalMemoryStatusEx(&m) ? (uint64_t)(m.ullTotalPhys >> 20) : 0);
+    }
+#endif
+    return false;
+}
+/// The gate, set once: RX_VK_COMPILE_AT_ONCE=<n> (at most n at once, whatever the memory; 0: no limit, as before), or by
+/// memory with the budget of what is available now
+compile_gate::Gate& compile_compiles() {
+    static compile_gate::Gate gate;
+    static std::once_flag once;
+    std::call_once(once, [] {
+        const char* e = getenv("RX_VK_COMPILE_AT_ONCE");
+        if (e && *e) {
+            const unsigned n = (unsigned)std::max(0, atoi(e));
+            if (n) {
+                gate.set(n, false);
+                logf("vk: the driver's compiles: at most %u at once (RX_VK_COMPILE_AT_ONCE)", n);
+            } else {
+                logf("vk: the driver's compiles: no gate (RX_VK_COMPILE_AT_ONCE=0)");
+            }
+        } else if (compile_gate_by_memory()) {
+            gate.set(0, true, compile_gate::budget_for(memory_available_mb()));
+            logf("vk: the driver's compiles: as many at once as the memory holds (RX_VK_COMPILE_AT_ONCE=<n> or 0 says otherwise)");
+        }
+    });
+    return gate;
+}
+/// What the memory past the reserve leaves for the compiles, and whether it is the memory that decides (compile_gate_begin)
+std::atomic<bool> compile_gate_memory_rule{false};
+std::atomic<uint64_t> compile_gate_budget_mb{0};
+/// The budget is what is available when a phase starts (the preparation's own step may be long enough for it to change). Returns
+/// the budget in MB (0: no memory rule, or not known), which the start-up build reads to keep out a compile that could not fit
+/// beside anything, or at all
+uint64_t compile_gate_begin() {
+    compile_gate::Gate& gate = compile_compiles();
+    if (!gate.on()) {
+        compile_gate_memory_rule.store(false, std::memory_order_relaxed);
+        return 0;
+    }
+    // (only the memory rule has a budget to refresh: an asked count stands)
+    const char* e = getenv("RX_VK_COMPILE_AT_ONCE");
+    if (e && *e) {
+        compile_gate_memory_rule.store(false, std::memory_order_relaxed);
+        return 0;
+    }
+    const uint64_t avail = memory_available_mb();
+    const uint64_t budget = compile_gate::budget_for(avail);
+    gate.set(0, true, budget);
+    compile_gate_budget_mb.store(budget, std::memory_order_relaxed);
+    compile_gate_memory_rule.store(true, std::memory_order_relaxed);
+    logf("vk: the compiles: as many at once as %llu MB hold (%llu MB available now, %llu left to the PC), at most %u; one of "
+         "%llu MB at the least (gpu/vk/compile_gate.h)", (unsigned long long)budget,
+         (unsigned long long)(avail == compile_gate::kUnknownMB ? 0 : avail), (unsigned long long)compile_gate::kReserveMB,
+         compile_gate::kMost, (unsigned long long)compile_gate::kWordsSmallMB);
+    return budget;
+}
+/// What a compile weighs at the gate: a program's SPIR-V (all its stages, in 32-bit words, as the start-up build's pipelines are
+/// weighed); a compute program's size is not known before it is read, so a pinned one (every compute stage, where the device
+/// runs 32 lanes) weighs kPinnedMB and another kFreeMB, as upstream's
+uint64_t compile_weight(const Program& p) {
+    uint64_t words = 0;
+    for (const Stage& st : p.stages) words += st.spirv_words;
+    if (words) return compile_gate::weight_words(words);
+    const bool pinned = (dev.sg32_stages & VK_SHADER_STAGE_COMPUTE_BIT) != 0;
+    return compile_gate::weight(pinned, 0, p.fallback);
+}
+/// (the start-up build, the prediction) Whether this program's compile is too heavy to run at all: the driver was never given what
+/// its compiler cannot finish, and a compile heavier than everything past the reserve would be the process's death (issue 88:
+/// a 66-151k-word program takes ~1 GB, the two of 502k and 1014k took 11 and 29 GB on the PC 3050, and RX_VK_PREDICT_MAX_KWORDS
+/// already leaves those two to the draw that needs them). Only where the memory rule is on: a Windows run is unchanged
+bool compile_too_heavy(const Program& p) {
+    if (!compile_gate_memory_rule.load(std::memory_order_relaxed)) return false;
+    return !compile_gate::fits_alone(compile_weight(p), true, compile_gate_budget_mb.load(std::memory_order_relaxed));
+}
+/// A turn at the gate around one driver compile. None taken when the gate is off (a Windows run, or any GPU it is not on for):
+/// every call returns at once. A compile that held its turn for a long time hands the memory it freed back to the system as it
+/// leaves (compile_gate.h trims: glibc's malloc_trim, nothing on other C libraries)
+struct CompileTurn {
+    compile_gate::Gate* gate;
+    uint64_t weight_mb;
+    std::chrono::steady_clock::time_point t0;
+    bool stopped = false;
+    explicit CompileTurn(uint64_t weight) : gate(compile_compiles().on() ? &compile_compiles() : nullptr), weight_mb(weight) {
+        if (!gate) return;
+        t0 = std::chrono::steady_clock::now();
+        if (!gate->enter(weight_mb, memory_available_mb, [] { return prepare_stopped(); })) gate = nullptr, stopped = true;
+    }
+    ~CompileTurn() {
+        if (!gate) return;
+        const int64_t held_ms =
+            std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
+        gate->leave(weight_mb);
+#if defined(__linux__) && defined(__GLIBC__)
+        if (compile_gate::trims(true, held_ms)) malloc_trim(0);
+#else
+        (void)held_ms;
+#endif
+    }
+    CompileTurn(const CompileTurn&) = delete;
+    CompileTurn& operator=(const CompileTurn&) = delete;
+};
+}  // namespace
+
 /// Every shader of the game, before its first start (vk_shader.cpp, the seed): once for this translator. True: prepared now.
 /// background: in play, behind the game: a few workers at idle priority, translation only (the driver's part is left to first use:
 /// its compiler crashing in here would take the game with it)
@@ -9126,11 +9375,17 @@ bool prepare_run(void (*progress)(size_t done, size_t total), bool background) {
         VkPipeline pl = VK_NULL_HANDLE;
         // (into the app's pipeline cache, saved to mkw_vk_pipelines.bin: without it the next start compiled them again in play
         // where the driver's own cache missed them, AMD's 15 s culling compiles each time)
-        if (gated_compute(pcache, &ci, &pl) == VK_SUCCESS && pl) {
-            vkDestroyPipeline(dev.device, pl, nullptr);
-            libs++;
-            pcache_built_since_save++;
-            if (id) ledger_add(id);
+        {
+            // (Longshot c392df3a: the preparation's warm compiles are as many at once as the memory holds: on an Iris Xe this is
+            // the step that was killed at 24 GB, upstream's measurement)
+            const CompileTurn turn(compile_weight(p));
+            if (turn.stopped) return;
+            if (gated_compute(pcache, &ci, &pl) == VK_SUCCESS && pl) {
+                vkDestroyPipeline(dev.device, pl, nullptr);
+                libs++;
+                pcache_built_since_save++;
+                if (id) ledger_add(id);
+            }
         }
         if (p.layout) vkDestroyPipelineLayout(dev.device, p.layout, nullptr), p.layout = VK_NULL_HANDLE;
         if (p.set_layout) vkDestroyDescriptorSetLayout(dev.device, p.set_layout, nullptr), p.set_layout = VK_NULL_HANDLE;
@@ -9342,6 +9597,9 @@ void precompile_finished(Pre* pre) {
 
 void precompile_run(void (*progress)(size_t done, size_t total), bool wait) {
     const auto t0 = std::chrono::steady_clock::now();
+    // (Longshot c392df3a, widened here to these graphics pipelines: how many of the driver's compiles run at once, gpu/vk/
+    // compile_gate.h. Nothing when the gate is off, as on Windows)
+    compile_gate_begin();
     // (a start that dies in here would die in here every time, the notes being what it builds from: a player saw the console reach
     // 542 of 543 and the game close. The file says this step began and did not end: the next start lets the notes go and plays)
     // (two starts in a row, not one: closing the window while it ran counted as a crash, and the next start then skipped the
@@ -9386,8 +9644,15 @@ void precompile_run(void (*progress)(size_t done, size_t total), bool wait) {
     // the pipeline cache when first dispatched (on a worker, the dispatch waiting up to 50 ms as for any compute pipeline), a few ms
     // each, at the scene's load. A new driver's start (the cache's data refused) precompiles them all as before.
     // RX_VK_LAZY_COMPUTE=0: precompiled always, as before; 2: lazy even without the cache's data
+    // (Longshot c392df3a, adapted: on Mesa's Intel driver the preparation and a first start build only the listed compute
+    // programs (`RX_VK_PRECOMPILE_COMPUTES=listed`), because every program read in is a VkShaderModule the driver holds, and
+    // on an Arc B580 14,676 of them were read before the start-up build's 16,358 pipelines (issue 88). Here the same saving is
+    // the switch this tree already has: under the compile gate's memory rule (Linux, Mesa's Intel driver by default) the
+    // compute programs stay on disk until their first dispatch, exactly as TICK-038 already does once the pipeline cache began
+    // with this driver's data. Windows and every GPU without the rule keep the old choice)
     const int lazy_mode = getenv("RX_VK_LAZY_COMPUTE") ? atoi(getenv("RX_VK_LAZY_COMPUTE")) : 1;
-    const bool lazy_compute = lazy_mode == 2 || (lazy_mode == 1 && pcache_loaded);
+    const bool gated_memory = compile_gate_memory_rule.load(std::memory_order_relaxed);
+    const bool lazy_compute = lazy_mode == 2 || (lazy_mode == 1 && (pcache_loaded || gated_memory));
     // (upstream, Sync 11: without the lazy start, the compute programs play dispatched (hookshot_computes.bin), or every kept one
     // when there is no list yet. RX_VK_PRECOMPILE_COMPUTES=all / none)
     const char* which = getenv("RX_VK_PRECOMPILE_COMPUTES");
@@ -9408,10 +9673,20 @@ void precompile_run(void (*progress)(size_t done, size_t total), bool wait) {
         else if (p.fallback) pre->fallbacks.push_back(&p);   // (hookshot: the mesh fallback's compute pipelines too, before play)
     }, all_computes, !fallbacks_noted_only());
     if (variants_left) logf("vk: precompile: %zu texture variants of compute programs are left to their first dispatch (RX_VK_WARM_VARIANTS=all: built)", variants_left);
-    if (lazy_compute) logf("vk: precompile: the compute programs stay on disk until dispatched (RX_VK_LAZY_COMPUTE)");
+    if (lazy_compute)
+        logf("vk: precompile: the compute programs stay on disk until dispatched (%s)", gated_memory && !pcache_loaded
+                                                                                            ? "gpu/vk/compile_gate.h: the memory "
+                                                                                              "rule's driver (RX_VK_LAZY_COMPUTE=0: "
+                                                                                              "precompiled)"
+                                                                                            : "RX_VK_LAZY_COMPUTE");
     else logf("vk: precompile: compute programs: %s (%zu keys listed as dispatched in play)",
               all_computes ? "every kept one" : (which && !strcmp(which, "none")) ? "none" : "those play dispatched", used.size());
     // The entries are made here, before the game draws: a draw that asks for one finds it (not ready) and does not make another
+    // (RX_VK_PREDICT_MAX_KWORDS, as the prediction reads it: the start-up build leaves the same programs to their first draw)
+    static const unsigned long long predict_max_kwords =
+        getenv("RX_VK_PREDICT_MAX_KWORDS") ? strtoull(getenv("RX_VK_PREDICT_MAX_KWORDS"), nullptr, 10)
+                                           : predictlimits::kDefaultMaxKWords;
+    size_t too_heavy = 0, pipelines_too_heavy = 0;
     {
         ParLock lk;
         for (auto& n : notes) {
@@ -9419,6 +9694,25 @@ void precompile_run(void (*progress)(size_t done, size_t total), bool wait) {
             if (!p) {
                 pre->missing++;
                 continue;
+            }
+            // (Longshot c392df3a's rule, for the start-up build: the driver is not given what its compiler cannot finish. A
+            // program over RX_VK_PREDICT_MAX_KWORDS is left to the draw that needs it, as the prediction leaves it; one whose
+            // compile does not fit the memory past the reserve at all is too. No entry is made, so the draw that first needs it
+            // builds it as it would have without a note; only where the memory rule is on, so a Windows run is unchanged)
+            if (compile_gate_memory_rule.load(std::memory_order_relaxed)) {
+                uint64_t words = 0;
+                for (const Stage& st : p->stages) words += st.spirv_words;
+                const bool big = predictlimits::too_big(words, predict_max_kwords);
+                if (big || compile_too_heavy(*p)) {
+                    too_heavy++;
+                    pipelines_too_heavy++;   // (one note, one pipeline: the notes name each pipeline they need)
+                    if (too_heavy <= 20)
+                        logf("vk: precompile: %016llx left out, %llu k words of SPIR-V%s: its driver compile %s; a draw that needs "
+                             "it builds it", (unsigned long long)p->key, (unsigned long long)(words / 1000),
+                             big ? (" (RX_VK_PREDICT_MAX_KWORDS " + std::to_string(predict_max_kwords) + ")").c_str() : "",
+                             big ? "takes minutes and gigabytes" : "does not fit the memory (gpu/vk/compile_gate.h)");
+                    continue;
+                }
             }
             Targets at = note_targets(*n);
             const uint64_t key = pipeline_key(*p, n->s, at, (VkPrimitiveTopology)n->topo);   // (not the note's own: it is made again)
@@ -9438,6 +9732,10 @@ void precompile_run(void (*progress)(size_t done, size_t total), bool wait) {
         p->compute_state.compare_exchange_strong(none, 1);   // (being built: a dispatch that meets it before it is ready is left out)
     }
     pre->total = pre->computes.size() + pre->fallbacks.size() + pre->items.size();
+    if (too_heavy)
+        logf("vk: precompile: %zu of %zu noted pipelines left out for their size (%zu more than the notes' own programs leave for "
+             "play): the driver is not given what its compiler could never finish (RX_VK_PREDICT_MAX_KWORDS, gpu/vk/compile_gate.h)",
+             pipelines_too_heavy, notes_n, too_heavy);
     const size_t total = pre->total;
     const unsigned cpus = std::max(1u, std::thread::hardware_concurrency());
     // (below normal, half the CPUs, in the background: the game's own threads come first. Waited for: all of them, as before)
@@ -9453,39 +9751,59 @@ void precompile_run(void (*progress)(size_t done, size_t total), bool wait) {
             if (i >= total) break;
             if (i < pre->computes.size()) {
                 Program& p = *pre->computes[i];
-                VkComputePipelineCreateInfo ci{VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};
-                ci.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-                ci.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-                ci.stage.module = p.stages[0].module;
-                ci.stage.pName = "main";
-                pin_subgroup(ci.stage, p.workgroup[0]);
-                ci.layout = p.layout;
-                VkPipeline made = VK_NULL_HANDLE;
-                const bool quick = precompile_compute_quick(ci);
-                if (gated_compute(pcache, &ci, &made) != VK_SUCCESS) made = VK_NULL_HANDLE;
-                if (made) {
-                    std::atomic_ref<VkPipeline>(p.compute_pipeline).store(made, std::memory_order_release);
-                    if (quick) p.optimize_owed.store(true, std::memory_order_release);   // (its module stays for compute_optimize)
-                    else cs_module_release(p);   // (TICK-038)
-                    p.compute_state.store(2, std::memory_order_release);
+                if (compile_too_heavy(p)) {   // (the driver is not given what it could never finish: a dispatch makes its own)
+                    p.compute_state.store(0, std::memory_order_release);
+                    static std::atomic<int> told{0};
+                    if (told++ < 20)
+                        logf("vk: precompile: compute %016llx is not built: its compile does not fit the memory (gpu/vk/"
+                             "compile_gate.h); a dispatch that needs it makes it", (unsigned long long)p.key);
                 } else {
-                    p.compute_state.store(0, std::memory_order_release);   // (a dispatch makes its own, and says why it fails)
+                    VkComputePipelineCreateInfo ci{VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};
+                    ci.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+                    ci.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+                    ci.stage.module = p.stages[0].module;
+                    ci.stage.pName = "main";
+                    pin_subgroup(ci.stage, p.workgroup[0]);
+                    ci.layout = p.layout;
+                    VkPipeline made = VK_NULL_HANDLE;
+                    const bool quick = precompile_compute_quick(ci);
+                    {
+                        // (as many of the driver's compiles at once as the memory holds; a stopped preparation takes no turn)
+                        const CompileTurn turn(compile_weight(p));
+                        if (!turn.stopped && gated_compute(pcache, &ci, &made) != VK_SUCCESS) made = VK_NULL_HANDLE;
+                    }
+                    if (made) {
+                        std::atomic_ref<VkPipeline>(p.compute_pipeline).store(made, std::memory_order_release);
+                        if (quick) p.optimize_owed.store(true, std::memory_order_release);   // (its module stays for compute_optimize)
+                        else cs_module_release(p);   // (TICK-038)
+                        p.compute_state.store(2, std::memory_order_release);
+                    } else {
+                        p.compute_state.store(0, std::memory_order_release);   // (a dispatch makes its own, and says why it fails)
+                    }
                 }
             } else if (i < pre->computes.size() + pre->fallbacks.size()) {
                 // (a program a draw is already building is left to it: compute_state, as in fallback_pipelines_ready)
                 Program& p = *pre->fallbacks[i - pre->computes.size()];
                 int none = 0;
                 if (p.compute_state.compare_exchange_strong(none, 1)) {
-                    fallback_compute_pipelines(p);
-                    p.compute_state.store(2, std::memory_order_release);
+                    // (a fallback stage is large: its weight says how much; a stopped preparation leaves it to play)
+                    const CompileTurn turn(compile_weight(p));
+                    if (turn.stopped) p.compute_state.store(0, std::memory_order_release);
+                    else {
+                        fallback_compute_pipelines(p);
+                        p.compute_state.store(2, std::memory_order_release);
+                    }
                 }
             } else {
                 Pre::Item& it = pre->items[i - pre->computes.size() - pre->fallbacks.size()];
-                const VkPipeline made = build_graphics(*it.program, it.note->s, it.at, (VkPrimitiveTopology)it.note->topo);
-                if (made) pre->made++;
-                else pre->failed++;
-                if (made) it.entry->pipeline.store(made);
-                it.entry->ready.store(true, std::memory_order_release);   // (a draw leaves out a pipeline that failed, as any)
+                const CompileTurn turn(compile_weight(*it.program));
+                if (!turn.stopped) {   // (a stopped preparation leaves it for play: the entry stays not-ready, a draw builds it)
+                    VkPipeline made = build_graphics(*it.program, it.note->s, it.at, (VkPrimitiveTopology)it.note->topo);
+                    if (made) pre->made++;
+                    else pre->failed++;
+                    if (made) it.entry->pipeline.store(made);
+                    it.entry->ready.store(true, std::memory_order_release);   // (a draw leaves out a pipeline that failed, as any)
+                }
                 it.note.reset();
             }
             pre->done++;
@@ -9596,9 +9914,11 @@ void predict_run(void (*progress)(size_t done, size_t total), bool background, b
         std::atomic<unsigned> worker_n{0};
     };
     const std::shared_ptr<Shared> shared = std::make_shared<Shared>();
-    shared->notes = pipe_notes_read();
-    if (shared->notes.empty() || (!noted && getenv("RX_VK_NO_PREDICT"))) return;
-    const std::vector<std::unique_ptr<PipeNote>>& notes = shared->notes;
+    // (Longshot c392df3a, widened here to these graphics pipelines: the prediction's builds are the same driver compiles as the
+    // start-up build's, and issue 88's run spent 142 s of them before the game; gpu/vk/compile_gate.h)
+    compile_gate_begin();
+    const std::vector<std::unique_ptr<PipeNote>> notes = pipe_notes_read();
+    if (notes.empty() || (!noted && getenv("RX_VK_NO_PREDICT"))) return;
     size_t programs = 0;
     if (!noted) shared->made_up = predict_pipelines(notes, &programs);
     const std::vector<std::unique_ptr<PipeNote>>& predicted = noted ? notes : shared->made_up;
@@ -9719,9 +10039,17 @@ void predict_run(void (*progress)(size_t done, size_t total), bool background, b
                         }
                         const auto t_build = std::chrono::steady_clock::now();
                         if (test_slow.first && test_slow.first == p.key) Sleep((DWORD)test_slow.second * 1000);
-                        const VkPipeline pl = build_graphics(p, n->s, note_targets(*n), (VkPrimitiveTopology)n->topo);
-                        if (S.abandoned.load()) return;   // (let go while it built: nothing is waiting for it, and what it used may be gone: no more work)
-                        if (pl) vkDestroyPipeline(dev.device, pl, nullptr), made++;
+                        {
+                            // (Longshot c392df3a: the same driver compiles, before the game: a turn at the gate, weighed by
+                            // this program's SPIR-V. The 502k- and 1014k-word programs are left out above, so what takes a
+                            // turn here is what the driver builds in 25 s and a few hundred MB to a couple of gigabytes)
+                            const CompileTurn turn(compile_weight(p));
+                            if (!turn.stopped) {
+                                const VkPipeline pl = build_graphics(p, n->s, note_targets(*n), (VkPrimitiveTopology)n->topo);
+                                if (S.abandoned.load()) return;   // (let go while it built: nothing is waiting for it, and what it used may be gone: no more work)
+                                if (pl) vkDestroyPipeline(dev.device, pl, nullptr), made++;
+                            }
+                        }
                         const double build_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_build).count();
                         static std::atomic<int> slow_logged{0};
                         if (build_ms > 3000 && slow_logged.fetch_add(1, std::memory_order_relaxed) < 40) {
@@ -10158,6 +10486,19 @@ void dispatch(VkCommandBuffer cmd, NvnState& s, uint32_t x, uint32_t y, uint32_t
         logf("vk: %lld dispatches right after another ordered by the game's barriers so far, with none of their own (RX_VK_GAME_ORDER)",
              (long long)st_dispatch_unordered);
     work_since_barrier = true;
+    {   // (ported from hookshot 53eb0441, pixl27, RX_VK_METER_ZERO=0 turns it off) OoT's exposure meter: 435a0138b9013040 and
+        // 592079442d7129da add a frame's sums into the first 16 bytes of their block, which the game reads and sets back to zero.
+        // With the game ahead of the GPU its zeros reach the mirror late, or a write-back lands over them first and the old sums
+        // come back: the next frame's are added on top (twice the light). Cleared here right before each program
+        if (meter_zero_on() && (p.key == 0x435a0138b9013040ull || p.key == 0x592079442d7129daull) && meter_out.buffer &&
+            meter_out.size >= 16 && !(meter_out.offset & 3)) {
+            static std::atomic<int64_t> st_zeroed{0};
+            full_barrier(cmd);
+            vkCmdFillBuffer(cmd, meter_out.buffer, meter_out.offset, 16, 0);
+            full_barrier(cmd);
+            if (st_zeroed.fetch_add(1) % 4000 == 0) logf("vk: exposure sums cleared on the GPU before their programs: %lld so far (RX_VK_METER_ZERO)", (long long)st_zeroed.load());
+        }
+    }
     if (!p.stages.empty() && p.stages[0].info.uses_cooperative_matrix) {   // (the game's networks, once each: what they read and write)
         static std::mutex mu;
         static std::unordered_map<uint64_t, int> seen;

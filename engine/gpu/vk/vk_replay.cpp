@@ -367,6 +367,19 @@ bool readback_strict_wanted(uint64_t size) {
 // (TICK-060, RX_VK_LATE_DEFER) the highest timeline value a submit sent to the queue signals: a capture's late value at or below it
 // is reached with nothing more submitted, so its wait can move to the queue (vk_memory.cpp take_capture)
 std::atomic<uint64_t> tl_signal_sent{0};
+// (w1, white flashes under load) RX_VK_STRICT_SLOW_MS (default 22, 0: off): while the presents run slower than that (the machine is
+// loaded: other games, a busy CPU), the light meter's ranges wait for their write-back whatever RX_VK_READBACK_STRICT says. The
+// recordings' timeline a read waits for is signalled by the heavy submission's FIRST recording; with the GPU or the replay late
+// the meter's write-back (its last piece) lands after it and the CPU reads the stale or reset sums: the exposure pulses, the
+// picture goes white for ~16 frames. At full speed the pulse is 1 in 10,000 frames and the wait costs ~10-18%, so it is not
+// always on
+std::atomic<double> present_ms_ema{0.0};
+std::atomic<int64_t> present_last_ns{0};
+bool readback_strict_slow(uint64_t size) {
+    static const double limit = getenv("RX_VK_STRICT_SLOW_MS") ? atof(getenv("RX_VK_STRICT_SLOW_MS")) : 22.0;
+    static const readback_late::Rules meter = readback_late::parse("1040,c0");
+    return limit > 0 && present_ms_ema.load(std::memory_order_relaxed) > limit && readback_late::wanted(meter, size, false);
+}
 void note_signal_sent(uint64_t v) {
     uint64_t cur = tl_signal_sent.load(std::memory_order_relaxed);
     while (v > cur && !tl_signal_sent.compare_exchange_weak(cur, v, std::memory_order_release, std::memory_order_relaxed)) {}
@@ -4785,7 +4798,7 @@ void invalidate(uint64_t gpu, uint64_t size) {
                     rbs.mark(2);
                 // (sprint 5, RX_VK_READBACK_STRICT: the value itself reached on the GPU's timeline before the CPU reads)
                 static std::atomic<int64_t> st_strict{0};
-                if (readback_strict_wanted(size) && v > completed()) {
+                if ((readback_strict_wanted(size) || readback_strict_slow(size)) && v > completed()) {
                     wait_value(v);
                     rbs.mark(4);
                     if (st_strict.fetch_add(1) % 500 == 0) logf("vk: readback strict: %lld waits for the value past the recordings' timeline", (long long)st_strict.load());
@@ -4810,6 +4823,25 @@ void invalidate(uint64_t gpu, uint64_t size) {
                 logf("vk: readbacks of GPU results: %lld of 3000 waited for their write-back, %.2f ms each", (long long)n,
                      n ? ns.exchange(0) / (double)n / 1e6 : 0.0);
             }
+        }
+    }
+    {   // (ported from hookshot 53eb0441, pixl27, RX_VK_METER_HOLD=0 turns it off) OoT's exposure sums read before a new result
+        // has landed are the zeros the game wrote after its last read: it is given the last result again
+        if (meter_hold_on() && size == 0x1040 && memory_is_meter(host->gpu_guest(gpu))) {
+            static std::mutex mu;
+            static std::unordered_map<uint64_t, std::array<uint32_t, 4>> last;
+            static std::atomic<int64_t> st_reads{0}, st_given{0};
+            std::array<uint32_t, 4> w{};
+            host->gpu_read(gpu, w.data(), 16);
+            std::lock_guard lk(mu);
+            if (w[0] | w[1] | w[2] | w[3]) {
+                last[gpu] = w;
+            } else if (auto it = last.find(gpu); it != last.end()) {
+                host->gpu_write(gpu, it->second.data(), 16);
+                st_given++;
+            }
+            if (++st_reads % 2000 == 0)
+                logf("vk: exposure sums: 2000 reads, %lld of them given the last result again (RX_VK_METER_HOLD)", (long long)st_given.exchange(0));
         }
     }
     {   // (sprint 5, RX_VK_LOG_READBACK2=<present>: what the CPU is about to read, after the waits: 400 ranges of 0x1000 bytes or more)
@@ -5206,8 +5238,8 @@ bool write_png(const char* path, const uint8_t* rgba, uint32_t w, uint32_t h) {
     }
 }
 
-// (do_present: the game's picture is already HDR10, Native HDR taken. Read by present_image, and by vk_fsr4.cpp, whose context is
-// made for HDR colour while it is)
+// (do_present: the game's picture is already HDR10, Native HDR taken. Read by present_image, and by vk_fsr4.cpp and vk_dlss.cpp,
+// whose context and feature are made for HDR colour while it is)
 std::atomic<bool> present_native_pq{false};
 /// (RX_VK_HDR_FORCE=1, for a PC with no HDR display: the game is told its display is HDR10 although the swapchain is SDR, so its
 /// own HDR path runs and can be looked at in the dumps and the shots; what the window shows is then not meant to look right)
@@ -5215,9 +5247,9 @@ bool hdr_forced() {
     static const bool on = getenv("RX_VK_HDR_FORCE") && atoi(getenv("RX_VK_HDR_FORCE")) != 0;
     return on;
 }
-/// Whether the game is told it has an HDR10 display and its PQ picture is taken as it is (the HDR row on Native, or on our
-/// tone mapper: vk_hdr_tonemap.cpp's extern of this is why it is out of the unnamed namespace)
-bool hdr_game_native() { return (dev.hdr || hdr_forced()) && opts.hdr >= 2; }
+/// Whether the game is told it has an HDR10 display and its PQ picture is taken as it is (the HDR row on Native; out of the
+/// unnamed namespace for vk_menu.cpp's scene_tonemap_on)
+bool hdr_game_native() { return (dev.hdr || hdr_forced()) && opts.hdr == 2; }
 
 namespace {
 
@@ -5576,9 +5608,28 @@ void do_present(const nvn_tex* t, const int crop[4]) {
                  tex ? (tex->gpu_written ? "rendered" : "never rendered") : "no image");
         if (tex) src = tex->image, sw = tex->width, sh = tex->height;
         // (the Insert menu's HDR set to Native: the game, told its display is HDR10, presents PQ codes in RGB10A2 (vk
-        // A2B10G10R10); that picture goes to the HDR10 swapchain as it is, not through the SDR-to-HDR pass)
-        present_native_pq.store(tex && hdr_game_native() && tex->format == VK_FORMAT_A2B10G10R10_UNORM_PACK32,
+        // A2B10G10R10); that picture goes to the HDR10 swapchain as PQ, not through the SDR-to-HDR expansion. Told by the format
+        // the game presents, the one its view is made in (direct_view below), not by the cached image's: images are shared by
+        // format class (vk_texture.cpp format_class), and while RGBA8 and RGB10A2 shared one (#2038) the window's RGB10A2 picture
+        // was a view of an RGBA8 image and took the SDR expansion, a flat, grey picture. The image's format is not asked as well:
+        // an image first made as RGB10A2 under an RGBA8 picture would take an SDR picture for PQ)
+        const VkFormat shown_format = t ? vk_format(t->d.format).format : VK_FORMAT_UNDEFINED;
+        present_native_pq.store(tex && hdr_game_native() && shown_format == VK_FORMAT_A2B10G10R10_UNORM_PACK32,
                                 std::memory_order_relaxed);
+        {   // (the presented picture's format, the game's and its image's, and the HDR path it takes, said when any of them
+            // changes: what an HDR report needs)
+            static int64_t said = -1;
+            const int64_t now =
+                tex ? ((int64_t)tex->format * 4096 + (int64_t)shown_format) * 8 + (dev.hdr ? 4 : 0) + opts.hdr : -2;
+            if (now != said) {
+                said = now;
+                logf("vk: present: %ux%u, format %d (its image's %d); the Insert menu's HDR %d, HDR10 swapchain %s: %s",
+                     tex ? tex->width : 0, tex ? tex->height : 0, (int)shown_format, tex ? (int)tex->format : 0, opts.hdr,
+                     dev.hdr ? "yes" : "no",
+                     !dev.hdr ? "SDR" : present_native_pq.load(std::memory_order_relaxed) ? "the game's PQ picture (Native)"
+                                                                                        : "the SDR picture expanded to HDR10");
+            }
+        }
         if (tex && !dev.offscreen && (opts.upscale || opts.sharpness || dev.hdr)) {
             // Keep the sampled view with the same cached image as the direct present, before advancing its age.
             direct_view = texture_view(tex, t, nullptr, VK_IMAGE_VIEW_TYPE_2D, ViewUse::Sample);
@@ -5593,11 +5644,20 @@ void do_present(const nvn_tex* t, const int crop[4]) {
         const bool fg_after = framegen_on() && tex && !fg_inline;
         interpolated = framegen_on() && tex && fg_inline &&
                        framegen_record(r.cmd, texture_view(tex, t, nullptr, VK_IMAGE_VIEW_TYPE_2D, ViewUse::Sample), sw,
-                                       sh, crop);
+                                       sh, crop, present_native_pq.load(std::memory_order_relaxed));
         texture_frame(completed());
         full_barrier(r.cmd);
         presents++;
         presents_now = presents;
+        {   // (w1, white flashes under load) the smoothed interval of the presents, for readback_strict_slow
+            const int64_t now = std::chrono::steady_clock::now().time_since_epoch().count();
+            const int64_t before = present_last_ns.exchange(now, std::memory_order_relaxed);
+            if (before) {
+                const double ms = (double)(now - before) / 1e6;
+                present_ms_ema.store(present_ms_ema.load(std::memory_order_relaxed) * 0.9 + std::min(ms, 500.0) * 0.1,
+                                     std::memory_order_relaxed);
+            }
+        }
         occ_present(presents, occ_serial, completed());
         if (presents == 1) hang_watch_start();
         {   // (EvilBoyce, diagnostics) RX_VK_WATCH_CPU=<present>:<gpu address>[,...] (hex addresses): from that present on, the
@@ -5670,7 +5730,7 @@ void do_present(const nvn_tex* t, const int crop[4]) {
             // (its slot is free again once the next submit's value is reached: that one comes after it)
             Recording& g = begin_recording(value + 1);
             interpolated = framegen_record(g.cmd, texture_view(tex, t, nullptr, VK_IMAGE_VIEW_TYPE_2D, ViewUse::Sample),
-                                           sw, sh, crop);
+                                           sw, sh, crop, present_native_pq.load(std::memory_order_relaxed));
             submit_recording(g, false);
         }
         if (interpolated) framegen_queue(value);
@@ -5689,6 +5749,20 @@ void do_present(const nvn_tex* t, const int crop[4]) {
                 values[presents % ahead] = value;
                 if (old) wait_value(old);
             }
+        }
+        {   // (ported from hookshot 737a0975, bubblesnout) On an AMD integrated GPU each present waits for its own frame's GPU work: the
+            // GPU reads guest memory where it is, and a Radeon 890M (ROG Xbox Ally X) ran far enough behind that the game had rewritten
+            // its HUD's records before a pass read them: icons flashing mid-screen, the minimap drawn with another texture whenever the
+            // camera moved, gone with the wait (48-56 fps there). RX_VK_WAIT_OWN=1 / 0 turns the wait on / off on any GPU; setting
+            // RX_VK_WAIT_GPU (a ring of frames, above) leaves the default off
+            static const bool own = [] {
+                if (const char* e = getenv("RX_VK_WAIT_OWN")) return atoi(e) != 0;
+                if (getenv("RX_VK_WAIT_GPU")) return false;
+                const bool amd_igpu = dev.props.vendorID == 0x1002 && dev.props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU;
+                if (amd_igpu) logf("vk: an AMD integrated GPU: each present waits for its frame's GPU work (RX_VK_WAIT_OWN=0: not)");
+                return amd_igpu;
+            }();
+            if (own) wait_value(value);
         }
         if (presents % 300 == 0) pipeline_cache_save(false), shader_key_commit();
         {   // (RX_VK_DUMP_KEY: F9 dumps the next frame, 8 times at most)
@@ -6082,7 +6156,7 @@ std::mutex present_image_mu;
 void present_image(VkImage src, uint32_t sw, uint32_t sh, const int crop[4], VkImageView view, bool pq) {
     std::lock_guard lk(present_image_mu);
     static int hdr_was = -1;   // (the Insert menu's HDR, on or off, as the swapchain was made for it; -1: not yet looked at)
-    // (only on or off is the swapchain's format: Expanded to Native, or to our tone mapper, keeps it, and the picture does not go
+    // (only on or off is the swapchain's format: Expanded to Native keeps it, and the picture does not go
     // through a new swapchain for it)
     const bool hdr_changed = hdr_was >= 0 && hdr_was != (opts.hdr != 0);
     if (hdr_was < 0) hdr_was = opts.hdr != 0;
@@ -6233,11 +6307,15 @@ void present_image(VkImage src, uint32_t sw, uint32_t sh, const int crop[4], VkI
         // The following blit overlaps the clear in the content rectangle.
         image_barrier(f.cmd, dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
     }
-    const VkImage scaled = src && view ? framegen_scale(f.cmd, view, src, sw, sh, crop, rect.w, rect.h) : VK_NULL_HANDLE;
+    // (Native HDR: scaled in 10 bits (framegen_scale's pq), and read by the HDR pass in every case, through the view in the
+    // format the game presents (do_present): at 100% contrast it writes the game's PQ codes as they are. Never blitted from its
+    // image: a blit converts from the image's own format, not the picture's)
+    const bool native_pq = pq;   // (the image's own, as present_image is given it: the display thread shows frames a game frame late)
+    const VkImage scaled = src && view ? framegen_scale(f.cmd, view, src, sw, sh, crop, rect.w, rect.h, native_pq) : VK_NULL_HANDLE;
     // (hookshot) the Insert menu's HDR: the picture (scaled, or the game's own with its crop) to HDR10, copied in as the SDR one is
-    const VkImage hdr_image = dev.hdr && src && view && !pq
-        ? (scaled ? framegen_hdr(f.cmd, framegen_scaled_view(), rect.w, rect.h, nullptr, rect.w, rect.h)
-                  : framegen_hdr(f.cmd, view, sw, sh, crop, rect.w, rect.h))
+    const VkImage hdr_image = dev.hdr && src && view
+        ? (scaled ? framegen_hdr(f.cmd, framegen_scaled_view(), rect.w, rect.h, nullptr, rect.w, rect.h, native_pq)
+                  : framegen_hdr(f.cmd, view, sw, sh, crop, rect.w, rect.h, native_pq))
         : VK_NULL_HANDLE;
     if (hdr_image) {
         trace_route = 3;
@@ -6246,9 +6324,13 @@ void present_image(VkImage src, uint32_t sw, uint32_t sh, const int crop[4], VkI
     } else if (scaled) {
         trace_route = 1;
         blit_crop_to_rect(f.cmd, scaled, rect.w, rect.h, nullptr, dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, rect);
-    } else if (src) {
+    } else if (src && (!native_pq || !dev.hdr)) {   // (RX_VK_HDR_FORCE: an SDR swapchain, nothing to encode for)
         blit_crop_to_rect(f.cmd, src, sw, sh, crop, dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, rect);
     } else {
+        if (src) {   // (Native, unscaled, and the HDR pass not made: black, said once, rather than the picture converted)
+            static bool told;
+            if (!told) told = true, logf("vk: HDR: Native's picture could not go through the HDR pass: shown black");
+        }
         trace_route = 2;
         const VkClearColorValue black{};
         const VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
@@ -6990,6 +7072,7 @@ void fill_replay_table(MkwVkRenderer& t) {
         if (id == HOS_OPT_CHEAT_ACTION) return menu_take_cheat_action();
         if (id == HOS_OPT_CHEAT_CAMERA) return menu_free_camera();
         if (id == HOS_OPT_HDR_NATIVE) return hdr_game_native();
+        if (id == HL_OPT_HDR_TONEMAP) return scene_tonemap_on();   // (HeyListen, after Longshot ddb156df: vk_opt_ids.h)
         if (id == HOS_OPT_HDR_PEAK) return std::clamp(opts.hdr_peak, 400, 10000);
         if (id == HOS_OPT_HDR_WHITE) return std::clamp(opts.hdr_white, 80, 500);
         if (id == HOS_OPT_DISCORD) return opts.discord != 0;
