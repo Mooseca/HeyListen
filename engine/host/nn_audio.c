@@ -909,7 +909,7 @@ static int output_try(int candidate, const WAVEFORMATEX *f) {
 #ifndef _WIN32
             device = 0;   /* Issue 99: try device 0 when HOS_AUDIO_DEVICE is unset (Linux only — Windows device 0 isn't always default) */
 #else
-            device = candidate == 1 ? WAVE_MAPPER : (unsigned)(candidate - 2);
+            return 0;   /* (Windows: no device asked for, so the default is the first candidate, as before) */
 #endif
         }
         else device = (unsigned)atoi(want);
