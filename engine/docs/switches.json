@@ -14441,7 +14441,7 @@
     },
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 6716
+     "line": 6721
     }
    ],
    "default": "off (unset)",
@@ -15640,7 +15640,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 6855
+     "line": 6860
     }
    ],
    "default": "off (unset)",
@@ -16875,7 +16875,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 5923
+     "line": 5928
     }
    ],
    "default": "0",
@@ -16980,7 +16980,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 5893
+     "line": 5898
     }
    ],
    "default": "unset",
@@ -17001,7 +17001,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 5877
+     "line": 5882
     }
    ],
    "default": "off (unset)",
@@ -17022,12 +17022,12 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 5883
+     "line": 5888
     }
    ],
    "default": "1",
    "values": "a whole number",
-   "explanation": "undocumented: gpu/vk/vk_replay.cpp:5883 (in `do_present()`) reads it as a number: `static const int n = getenv(\"RX_VK_DUMP_KEY_N\") ? std::max(1, atoi(getenv(\"RX_VK_DUMP_KEY_N\"))) : 1;`. No comment in the source says what it changes.",
+   "explanation": "undocumented: gpu/vk/vk_replay.cpp:5888 (in `do_present()`) reads it as a number: `static const int n = getenv(\"RX_VK_DUMP_KEY_N\") ? std::max(1, atoi(getenv(\"RX_VK_DUMP_KEY_N\"))) : 1;`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -17085,7 +17085,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 5897
+     "line": 5902
     }
    ],
    "default": "unset",
@@ -17806,7 +17806,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 5957
+     "line": 5962
     }
    ],
    "default": "off (unset)",
@@ -17827,7 +17827,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 5986
+     "line": 5991
     }
    ],
    "default": "40",
@@ -17848,7 +17848,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 5985
+     "line": 5990
     }
    ],
    "default": "48",
@@ -17869,7 +17869,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 5982
+     "line": 5987
     }
    ],
    "default": "6",
@@ -17911,7 +17911,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 6009
+     "line": 6014
     }
    ],
    "default": "0",
@@ -18267,7 +18267,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 6085
+     "line": 6090
     }
    ],
    "default": "unset",
@@ -18288,12 +18288,12 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 6253
+     "line": 6258
     }
    ],
    "default": "off (unset)",
    "values": "on or off (0, false, off, no and empty are off)",
-   "explanation": "undocumented: gpu/vk/vk_replay.cpp:6253 (in `framelog_collect()`) reads it as an on/off switch: `static const bool drop = getenv(\"RX_VK_FRAMELOG_DROP\") != nullptr;`. No comment in the source says what it changes.",
+   "explanation": "undocumented: gpu/vk/vk_replay.cpp:6258 (in `framelog_collect()`) reads it as an on/off switch: `static const bool drop = getenv(\"RX_VK_FRAMELOG_DROP\") != nullptr;`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -18309,7 +18309,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 6571
+     "line": 6576
     }
    ],
    "default": "the engine's own value",
@@ -20467,7 +20467,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 6614
+     "line": 6619
     }
    ],
    "default": "off (unset)",
@@ -20656,12 +20656,12 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 6633
+     "line": 6638
     }
    ],
    "default": "off (unset)",
    "values": "on or off (0, false, off, no and empty are off)",
-   "explanation": "undocumented: gpu/vk/vk_replay.cpp:6633 (in `vmap_changing()`) reads it as an on/off switch: `static const bool log_calls = getenv(\"RX_VK_LOG_VMAP_CHANGING\") != nullptr;`. No comment in the source says what it changes.",
+   "explanation": "undocumented: gpu/vk/vk_replay.cpp:6638 (in `vmap_changing()`) reads it as an on/off switch: `static const bool log_calls = getenv(\"RX_VK_LOG_VMAP_CHANGING\") != nullptr;`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -23324,7 +23324,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 7254
+     "line": 7259
     }
    ],
    "default": "0 (unset)",
@@ -24230,7 +24230,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 6708
+     "line": 6713
     }
    ],
    "default": "off (unset)",
@@ -24251,7 +24251,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 6459
+     "line": 6464
     }
    ],
    "default": "off (unset)",
@@ -24984,7 +24984,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 7013
+     "line": 7018
     },
     {
      "path": "gpu/vk/vk_shader.cpp",
@@ -25076,7 +25076,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 7169
+     "line": 7174
     }
    ],
    "default": "on (unless set to 0, false, off or no)",
@@ -26451,7 +26451,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 6902
+     "line": 6907
     }
    ],
    "default": "0",
@@ -26472,7 +26472,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 6893
+     "line": 6898
     }
    ],
    "default": "on (unless set to 0, false, off or no)",
@@ -27022,11 +27022,11 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 6756
+     "line": 6761
     },
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 6757
+     "line": 6762
     }
    ],
    "default": "off (unset)",
@@ -27674,9 +27674,9 @@
     }
    ],
    "default": "unset",
-   "values": "text (`1`, `2`, `0` named)",
-   "explanation": "(Ported from hookshot 737a0975, bubblesnout) On an AMD integrated GPU each present waits for its own frame's GPU work: the GPU reads guest memory where it is, and a Radeon 890M (ROG Xbox Ally X) ran far enough behind that the game had rewritten its HUD's records before a pass read them: icons flashing mid-screen, the minimap drawn with another texture whenever the camera moved, gone with the wait (48-56 fps there). RX_VK_WAIT_OWN=1 / 0 turns the wait on / off on any GPU; setting RX_VK_WAIT_GPU (a ring of frames, above) leaves the default off (v0.4.4: RX_VK_WAIT_OWN=2, the default on an AMD integrated GPU: the frame before's work, not this frame's own: the game one frame ahead as the console's two frames in flight, the GPU busy while it builds the next; =1: the rule of v0.4.3, the frame's own; =0 off. wait_own.h).",
-   "comment": "(Ported from hookshot 737a0975, bubblesnout) On an AMD integrated GPU each present waits for its own frame's GPU work: the GPU reads guest memory where it is, and a Radeon 890M (ROG Xbox Ally X) ran far enough behind that the game had rewritten its HUD's records before a pass read them: icons flashing mid-screen, the minimap drawn with another texture whenever the camera moved, gone with the wait (48-56 fps there). RX_VK_WAIT_OWN=1 / 0 turns the wait on / off on any GPU; setting RX_VK_WAIT_GPU (a ring of frames, above) leaves the default off (v0.4.4: RX_VK_WAIT_OWN=2, the default on an AMD integrated GPU: the frame before's work, not this frame's own: the game one frame ahead as the console's two frames in flight, the GPU busy while it builds the next; =1: the rule of v0.4.3, the frame's own; =0 off. wait_own.h).",
+   "values": "text (`1`, `3`, `2`, `0` named)",
+   "explanation": "(Ported from hookshot 737a0975, bubblesnout) On an AMD integrated GPU each present waits for its own frame's GPU work: the GPU reads guest memory where it is, and a Radeon 890M (ROG Xbox Ally X) ran far enough behind that the game had rewritten its HUD's records before a pass read them: icons flashing mid-screen, the minimap drawn with another texture whenever the camera moved, gone with the wait (48-56 fps there). RX_VK_WAIT_OWN=1 / 0 turns the wait on / off on any GPU; setting RX_VK_WAIT_GPU (a ring of frames, above) leaves the default off (v0.4.4: RX_VK_WAIT_OWN=3, the default on an AMD integrated GPU: the frame before's work, the frame's own when it uploaded textures: the game one frame ahead as the console's two frames in flight, the GPU busy while it builds the next; =2 the frame before's always; =1: the rule of v0.4.3, the frame's own; =0 off. wait_own.h).",
+   "comment": "(Ported from hookshot 737a0975, bubblesnout) On an AMD integrated GPU each present waits for its own frame's GPU work: the GPU reads guest memory where it is, and a Radeon 890M (ROG Xbox Ally X) ran far enough behind that the game had rewritten its HUD's records before a pass read them: icons flashing mid-screen, the minimap drawn with another texture whenever the camera moved, gone with the wait (48-56 fps there). RX_VK_WAIT_OWN=1 / 0 turns the wait on / off on any GPU; setting RX_VK_WAIT_GPU (a ring of frames, above) leaves the default off (v0.4.4: RX_VK_WAIT_OWN=3, the default on an AMD integrated GPU: the frame before's work, the frame's own when it uploaded textures: the game one frame ahead as the console's two frames in flight, the GPU busy while it builds the next; =2 the frame before's always; =1: the rule of v0.4.3, the frame's own; =0 off. wait_own.h).",
    "documented_in": null,
    "source": "comment at gpu/vk/vk_replay.cpp",
    "documented": true,
@@ -27720,14 +27720,14 @@
     }
    ],
    "default": "off (unset)",
-   "values": "on or off (0, false, off, no and empty are off); the description names `1`, `2`, `0`",
-   "explanation": "(Ported from hookshot 737a0975, bubblesnout) On an AMD integrated GPU each present waits for its own frame's GPU work: the GPU reads guest memory where it is, and a Radeon 890M (ROG Xbox Ally X) ran far enough behind that the game had rewritten its HUD's records before a pass read them: icons flashing mid-screen, the minimap drawn with another texture whenever the camera moved, gone with the wait (48-56 fps there). RX_VK_WAIT_OWN=1 / 0 turns the wait on / off on any GPU; setting RX_VK_WAIT_GPU (a ring of frames, above) leaves the default off (v0.4.4: RX_VK_WAIT_OWN=2, the default on an AMD integrated GPU: the frame before's work, not this frame's own: the game one frame ahead as the console's two frames in flight, the GPU busy while it builds the next; =1: the rule of v0.4.3, the frame's own; =0 off. wait_own.h).",
-   "comment": "(Ported from hookshot 737a0975, bubblesnout) On an AMD integrated GPU each present waits for its own frame's GPU work: the GPU reads guest memory where it is, and a Radeon 890M (ROG Xbox Ally X) ran far enough behind that the game had rewritten its HUD's records before a pass read them: icons flashing mid-screen, the minimap drawn with another texture whenever the camera moved, gone with the wait (48-56 fps there). RX_VK_WAIT_OWN=1 / 0 turns the wait on / off on any GPU; setting RX_VK_WAIT_GPU (a ring of frames, above) leaves the default off (v0.4.4: RX_VK_WAIT_OWN=2, the default on an AMD integrated GPU: the frame before's work, not this frame's own: the game one frame ahead as the console's two frames in flight, the GPU busy while it builds the next; =1: the rule of v0.4.3, the frame's own; =0 off. wait_own.h).",
+   "values": "on or off (0, false, off, no and empty are off); the description names `1`, `3`, `2`, `0`",
+   "explanation": "(Ported from hookshot 737a0975, bubblesnout) On an AMD integrated GPU each present waits for its own frame's GPU work: the GPU reads guest memory where it is, and a Radeon 890M (ROG Xbox Ally X) ran far enough behind that the game had rewritten its HUD's records before a pass read them: icons flashing mid-screen, the minimap drawn with another texture whenever the camera moved, gone with the wait (48-56 fps there). RX_VK_WAIT_OWN=1 / 0 turns the wait on / off on any GPU; setting RX_VK_WAIT_GPU (a ring of frames, above) leaves the default off (v0.4.4: RX_VK_WAIT_OWN=3, the default on an AMD integrated GPU: the frame before's work, the frame's own when it uploaded textures: the game one frame ahead as the console's two frames in flight, the GPU busy while it builds the next; =2 the frame before's always; =1: the rule of v0.4.3, the frame's own; =0 off. wait_own.h).",
+   "comment": "(Ported from hookshot 737a0975, bubblesnout) On an AMD integrated GPU each present waits for its own frame's GPU work: the GPU reads guest memory where it is, and a Radeon 890M (ROG Xbox Ally X) ran far enough behind that the game had rewritten its HUD's records before a pass read them: icons flashing mid-screen, the minimap drawn with another texture whenever the camera moved, gone with the wait (48-56 fps there). RX_VK_WAIT_OWN=1 / 0 turns the wait on / off on any GPU; setting RX_VK_WAIT_GPU (a ring of frames, above) leaves the default off (v0.4.4: RX_VK_WAIT_OWN=3, the default on an AMD integrated GPU: the frame before's work, the frame's own when it uploaded textures: the game one frame ahead as the console's two frames in flight, the GPU busy while it builds the next; =2 the frame before's always; =1: the rule of v0.4.3, the frame's own; =0 off. wait_own.h).",
    "documented_in": null,
    "source": "comment at gpu/vk/vk_replay.cpp",
    "documented": true,
    "set_via": "In `hookshot_env.txt`, or in the environment.",
-   "use": "HUD icons flashing mid-screen or a minimap drawn with another texture on a Radeon handheld or iGPU: `=1` makes each present wait for its own frame's GPU work (v0.4.3's rule, lower fps), `=2` for the frame before's (the default on AMD integrated GPUs), `=0` turns the wait off."
+   "use": "HUD icons flashing mid-screen or a minimap drawn with another texture on a Radeon handheld or iGPU: `=1` makes each present wait for its own frame's GPU work (v0.4.3's rule, lower fps), `=2` for the frame before's, `=3` for the frame before's and the frame's own after a texture upload (the default on AMD integrated GPUs), `=0` turns the wait off."
   },
   {
    "name": "RX_VK_WARM_COMPUTES",

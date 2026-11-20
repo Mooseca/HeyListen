@@ -706,7 +706,8 @@ PLAYER_USE = [
                          "meter's last result again when it reads zeros (on by default)."),
     ("RX_VK_WAIT_OWN", "HUD icons flashing mid-screen or a minimap drawn with another texture on a Radeon handheld or "
                        "iGPU: `=1` makes each present wait for its own frame's GPU work (v0.4.3's rule, lower fps), `=2` "
-                       "for the frame before's (the default on AMD integrated GPUs), `=0` turns the wait off."),
+                       "for the frame before's, `=3` for the frame before's and the frame's own after a texture upload (the default "
+                       "on AMD integrated GPUs), `=0` turns the wait off."),
     ("RX_VK_STRICT_BOUND", "White flashes in dark scenes on an AMD card, or long stalls (hundreds of ms) in the readback "
                            "hitch rows: `=0` makes the light meter's strict wait last as long as the GPU needs again, as in "
                            "v0.4.3 (`=2` bounds the 0xc0 ranges too; RX_VK_STRICT_BOUND_MS sets the bound, 4)."),

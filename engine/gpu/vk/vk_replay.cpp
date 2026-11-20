@@ -5854,21 +5854,26 @@ void do_present(const nvn_tex* t, const int crop[4]) {
             // its HUD's records before a pass read them: icons flashing mid-screen, the minimap drawn with another texture whenever the
             // camera moved, gone with the wait (48-56 fps there). RX_VK_WAIT_OWN=1 / 0 turns the wait on / off on any GPU; setting
             // RX_VK_WAIT_GPU (a ring of frames, above) leaves the default off
-            // (v0.4.4: RX_VK_WAIT_OWN=2, the default on an AMD integrated GPU: the frame before's work, not this frame's own: the game
-            // one frame ahead as the console's two frames in flight, the GPU busy while it builds the next; =1: the rule of v0.4.3,
-            // the frame's own; =0 off. wait_own.h)
+            // (v0.4.4: RX_VK_WAIT_OWN=3, the default on an AMD integrated GPU: the frame before's work, the frame's own when it uploaded
+            // textures: the game one frame ahead as the console's two frames in flight, the GPU busy while it builds the next; =2 the
+            // frame before's always; =1: the rule of v0.4.3, the frame's own; =0 off. wait_own.h)
             static const int own = [] {
                 const int m = wait_own::mode(getenv("RX_VK_WAIT_OWN"), getenv("RX_VK_WAIT_GPU") != nullptr,
                                              dev.props.vendorID == 0x1002 && dev.props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU);
                 if (m && !getenv("RX_VK_WAIT_OWN"))
-                    logf("vk: an AMD integrated GPU: each present waits for the GPU's work of the frame before (RX_VK_WAIT_OWN=1: its own frame's, =0: not)");
+                    logf("vk: an AMD integrated GPU: each present waits for the GPU's work of the frame before, of its own frame when textures were uploaded (RX_VK_WAIT_OWN=1: its own frame's always, =2: the frame before's always, =0: not)");
                 else if (m)
-                    logf("vk: RX_VK_WAIT_OWN=%d: each present waits for the GPU's work of %s", m, m == 1 ? "its own frame" : "the frame before");
+                    logf("vk: RX_VK_WAIT_OWN=%d: each present waits for the GPU's work of %s", m, m == 1 ? "its own frame" : m == 2 ? "the frame before" : "the frame before (its own when textures were uploaded)");
                 return m;
             }();
             static uint64_t own_prev = 0;
+            static int64_t own_uploads = 0;
             if (own) {
-                const uint64_t t = wait_own::target(own, value, own_prev);
+                int64_t uploads = 0, astc = 0, bytes = 0;
+                texture_stats(&uploads, &astc, &bytes);   // (mode 3: did this frame upload textures)
+                const bool uploaded = uploads != own_uploads;
+                own_uploads = uploads;
+                const uint64_t t = wait_own::target(own, value, own_prev, uploaded);
                 if (t) wait_value(t);
             }
         }
