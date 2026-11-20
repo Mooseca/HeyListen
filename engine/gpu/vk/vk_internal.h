@@ -100,6 +100,10 @@ struct Device {
     // them at 32 lanes, so those GPUs translate exactly as they did: vk_main.cpp, vk_shader.cpp make_profile)
     VkShaderStageFlags warp_wide_stages = 0;
     uint32_t warp_lanes = 32;
+    uint32_t max_workgroup_subgroups = 0;   // (maxComputeWorkgroupSubgroups: a workgroup held to 32 lanes has at most 32 times this)
+    // (a GPU whose pinned compute stage cannot hold the largest guest workgroup (32 * max_workgroup_subgroups < 1024) while its default
+    // subgroup is wider than 32: a compute program too big to be pinned is translated for warp_lanes, as an unpinned stage: pins_32)
+    bool compute_unpinned_wide = false;
     uint32_t max_push_descriptors = 0;
     uint32_t max_vertex_divisor = 0;   // (maxVertexAttribDivisor, with dev.vertex_divisor)
     // no window (HOS_HEADLESS): presents go to an image of their own, which RX_VK_SHOTS can write out
@@ -137,6 +141,17 @@ extern Device dev;
 /// Mesa ANV's) 4 bytes an aligned access could start at any word of the binding and the view read the vector before it: OoT's
 /// light colours shifted (green lighting, cyan sky). Found for Lichii (zortos293/Lichii#295, Fritchii 57ed438cd, from Matt
 /// Artist and sharkiix); NVIDIA's own alignment is 16 already. RX_VK_SSBO_DEVICE_ALIGN=1: the device's own, as before
+/// (longshot c4e8e2ea) Whether a stage of this many invocations runs at 32 lanes (pin_subgroup, translated profile): one the GPU
+/// pins, and for a stage with a workgroup (compute, task, mesh) 32-lane subgroups that cover it, at most requiredSubgroupSize *
+/// maxComputeWorkgroupSubgroups invocations (VUID-VkPipelineShaderStageCreateInfo-pNext-02756), a limit the spec sets no minimum
+/// for. The default, 64: a task or mesh workgroup has 63 threads at most (a 6-bit count), and the mesh fallback runs the same
+/// workgroups as compute shaders
+inline bool pins_32(VkShaderStageFlags stage, uint64_t invocations = 64) {
+    if (!(dev.sg32_stages & stage)) return false;
+    const VkShaderStageFlags workgroup = VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_TASK_BIT_EXT | VK_SHADER_STAGE_MESH_BIT_EXT;
+    return !(stage & workgroup) || invocations <= 32ull * dev.max_workgroup_subgroups;
+}
+
 inline uint64_t storage_binding_align() {
     static const bool device_own = [] {
         const char* e = getenv("RX_VK_SSBO_DEVICE_ALIGN");

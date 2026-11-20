@@ -704,6 +704,7 @@ bool create_device() {
         vkGetPhysicalDeviceProperties2(dev.physical, &p2);
         const bool pin = f13.subgroupSizeControl && sc.minSubgroupSize <= 32 && sc.maxSubgroupSize >= 32 && !getenv("RX_VK_NO_SUBGROUP_PIN");
         dev.sg32_stages = pin ? sc.requiredSubgroupSizeStages : 0;
+        dev.max_workgroup_subgroups = sc.maxComputeWorkgroupSubgroups;
         logf("vk: subgroups: default %u lanes, %u-%u, pinned to 32 on stages %#x", sg.subgroupSize, sc.minSubgroupSize, sc.maxSubgroupSize,
              (unsigned)dev.sg32_stages);
         {   // (issues 67 and 37) a stage the GPU does not hold to 32 lanes, with a default of more, runs the programs' lane masks and
@@ -716,7 +717,14 @@ bool create_device() {
                                                    VK_SHADER_STAGE_TASK_BIT_EXT | VK_SHADER_STAGE_MESH_BIT_EXT;
             if (forced) dev.warp_wide_stages = kStages;
             else if (sg.subgroupSize > 32) dev.warp_wide_stages = kStages & ~dev.sg32_stages;
-            if (dev.warp_wide_stages) {
+            // (c4e8e2ea: a pinned compute stage that cannot hold the largest guest workgroup, 32 * maxComputeWorkgroupSubgroups < 1024:
+            // its bigger programs are not pinned (pins_32) and run at the default size, so they are translated for it too)
+            if (sg.subgroupSize > 32 && (dev.sg32_stages & VK_SHADER_STAGE_COMPUTE_BIT) && 32ull * dev.max_workgroup_subgroups < 1024 &&
+                !(dev.warp_wide_stages & VK_SHADER_STAGE_COMPUTE_BIT)) {
+                dev.compute_unpinned_wide = true;
+                if (!dev.warp_wide_stages) dev.warp_lanes = std::max<uint32_t>({sg.subgroupSize, sc.maxSubgroupSize, 33u});
+            }
+            if (dev.warp_wide_stages || dev.compute_unpinned_wide) {
                 dev.warp_lanes = std::max<uint32_t>({sg.subgroupSize, sc.maxSubgroupSize, forced ? 64u : 33u});   // (forced: 64, so the wide code is made even on 32 lanes)
                 logf("vk: subgroups wider than the guest's 32 lanes on stages %#x: programs translated for %u lanes, 32-lane warps emulated%s",
                      (unsigned)dev.warp_wide_stages, dev.warp_lanes, forced ? " (RX_VK_WARP_WIDE)" : "");

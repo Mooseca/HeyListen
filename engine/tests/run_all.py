@@ -170,6 +170,7 @@ ARGS = {
     "tests/test_menu_keys.py": ["--cxx", "{cxx}"],
     "tests/test_menu_touchpad.py": [],
     "tests/test_warp_wide.py": [],
+    "tests/test_subgroup_pin_limit.py": ["--cxx", "{cxx}"],
     "tests/test_prompt_font_bind.py": ["--cc", "gcc"],
     "tests/test_hl_gates.py": ["--cc", "gcc"],
     "tests/test_stick_dead_zone.py": ["--cc", "gcc", "--cxx", "g++"],
