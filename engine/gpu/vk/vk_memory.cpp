@@ -1136,6 +1136,78 @@ bool cap_fit() {
 uint64_t cap_now_ms() {
     return (uint64_t)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
 }
+// (longshot 8f462db52, SadTransGirl; RX_VK_CAP_FREE_ASYNC, on; =0: as before) A capture buffer let go past the spares is destroyed on a
+// thread of its own, not on the thread that retired it (the replay's take, holding pools_mu): freeing a 64-256 MB host-cached memory
+// object is the driver unmapping and releasing every page of it. Only buffers the GPU is done with get here (a retire waits for that),
+// and nothing else holds them; the memory goes back a moment later. At the process's exit (an atexit hook) what is queued is left.
+// (Longshot's second half, RX_VK_LATE_STAMPS_AHEAD, needs its stamp blocks, which this fork's late fix does not have: not taken)
+bool cap_free_async_on() {
+    static const bool on = [] {
+        const char* e = getenv("RX_VK_CAP_FREE_ASYNC");
+        const bool v = !e || atoi(e) != 0;
+        if (!v) logf("vk: capture buffers past the spares destroyed on the replay's thread, as before (RX_VK_CAP_FREE_ASYNC=0)");
+        return v;
+    }();
+    return on;
+}
+// (never destroyed: the thread waits on them for the life of the process)
+struct CapGone {
+    std::mutex mu;                  // (a leaf: the queue alone)
+    std::condition_variable cv;
+    std::vector<std::pair<VkBuffer, VmaAllocation>> queue;
+    bool started = false;
+    std::mutex destroying;          // (held while the thread destroys a batch: the exit hook waits for it)
+    std::atomic<bool> exiting{false};
+};
+CapGone& cap_gone() {
+    static CapGone* g = new CapGone;
+    return *g;
+}
+void destroy_buffer_later(VkBuffer buffer, VmaAllocation alloc) {
+    CapGone& g = cap_gone();
+    {
+        std::lock_guard lk(g.mu);
+        g.queue.push_back({buffer, alloc});
+        if (!g.started) {
+            g.started = true;
+            try {
+                std::thread([] {
+                    CapGone& g = cap_gone();
+                    std::vector<std::pair<VkBuffer, VmaAllocation>> batch;
+                    for (;;) {
+                        {
+                            std::unique_lock lk(g.mu);
+                            g.cv.wait(lk, [&g] { return !g.queue.empty(); });
+                            batch.swap(g.queue);
+                        }
+                        {
+                            std::lock_guard dk(g.destroying);
+                            for (const auto& [b, a] : batch)
+                                if (!g.exiting.load()) destroy_buffer(b, a);
+                        }
+                        batch.clear();
+                    }
+                }).detach();
+                // (registered after the renderer's own statics exist: it runs before they are destroyed)
+                std::atexit([] {
+                    CapGone& g = cap_gone();
+                    g.exiting = true;
+                    std::lock_guard dk(g.destroying);
+                });
+            } catch (...) {   // (no thread: destroyed here, as before)
+                g.started = false;
+                g.queue.pop_back();
+                destroy_buffer(buffer, alloc);
+                return;
+            }
+        }
+    }
+    g.cv.notify_one();
+}
+void cap_destroy(VkBuffer buffer, VmaAllocation alloc) {
+    if (cap_free_async_on() && !cap_gone().exiting.load()) return destroy_buffer_later(buffer, alloc);
+    destroy_buffer(buffer, alloc);
+}
 void cap_buf_free(VkBuffer buffer, VmaAllocation alloc, void* map, uint64_t size) {
     FreeBuf old[12];
     int n_old = 0;
@@ -1180,8 +1252,8 @@ void cap_buf_free(VkBuffer buffer, VmaAllocation alloc, void* map, uint64_t size
             buffer = VK_NULL_HANDLE;
         }
     }
-    if (buffer) destroy_buffer(buffer, alloc);
-    for (int i = 0; i < n_old; i++) destroy_buffer(old[i].buffer, old[i].alloc);
+    if (buffer) cap_destroy(buffer, alloc);   // (after the spare list was offered it: a spare is never destroyed)
+    for (int i = 0; i < n_old; i++) cap_destroy(old[i].buffer, old[i].alloc);
 }
 void cap_buf_retire(std::map<uint32_t, CapBuf>::iterator it) {
     if (it->second.hash && cap_hash_free.size() < 32) cap_hash_free.push_back(std::move(it->second.hash));
