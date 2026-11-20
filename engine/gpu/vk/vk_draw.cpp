@@ -45,6 +45,7 @@
 #include "vk_hdr_tonemap.h"   // (heylisten: the native HDR mode's tone-mapping pass)
 #include "vk_dump.h"
 #include "vk_gprof.h"
+#include "profile_run.h"   // (the performance profile's pass timestamps: tprof_end)
 #include "vk_jobs.h"
 #include "vk_shader.h"
 #include "vk_texture.h"
@@ -5539,6 +5540,9 @@ void end_pass(VkCommandBuffer cmd) {
                  (int)ps.format0, ps.n, ps.depth ? "+d" : "", ps.draws > 256 ? ">256" : ps.draws > 32 ? "33-256" : ps.draws > 4 ? "5-32" : "0-4",
                  ps.sampled.size(), (unsigned long long)ps.first_prog, (unsigned long long)ps.prog);
         gprof_end(cmd, label, ps.draws);
+    } else if (tprof_on()) {   // (the performance profile: the pass's kind and key; a dynamic resolution's small steps are one pass)
+        const profile_report::PassKind kind = profile_report::pass_kind(ps.n, ps.depth != VK_NULL_HANDLE, ps.width, ps.height, ps.draws, tprof_output_pixels());
+        tprof_end(cmd, kind, profile_report::pass_key((int)ps.format0, ps.n, ps.depth != VK_NULL_HANDLE, ps.width, ps.height, ps.first_prog));
     }
     if (dump_on())
         for (int i = 0; i < ps.n; i++)
@@ -10272,6 +10276,8 @@ void dispatch(VkCommandBuffer cmd, NvnState& s, uint32_t x, uint32_t y, uint32_t
         snprintf(label, sizeof label, "dispatch %s prog %016llx%s grid %ux%ux%u", indirect ? "indirect" : "", (unsigned long long)p.key,
                  !p.stages.empty() && p.stages[0].info.uses_cooperative_matrix ? " mma" : "", indirect ? 0u : x, indirect ? 0u : y, indirect ? 0u : z);
         gprof_end(cmd, label);
+    } else if (tprof_on()) {
+        tprof_end(cmd, profile_report::kCompute, p.key);   // (the performance profile: a compute dispatch, by its program)
     }
     st_dispatches++;
     if (pass_trace_on())

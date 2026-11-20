@@ -19,6 +19,10 @@
 // pipeline state keys a map's draws first used (zone_report.h): each draw looks them up here once per key per map, and at the
 // session's end the maps not sent before are queued into zones_pending/, which hos_zones_send_run sends at the next start to
 // /telemetry/zones, so that a release can preload a zone's pipelines before the player enters it.
+// (v0.4.3) The same row, the same address and HL_TELEMETRY_PROFILE (on unless 0) also take the detailed profile (profile_report.h,
+// profile_run.cpp): where a map's CPU and GPU time goes. Its batches are written into profile_pending/ every five minutes and at the
+// end, and hos_profile_send_run sends them at the next start to /telemetry/profile. HL_PROFILE_LOCAL=1 takes it with no address and
+// with the row off, and writes the same JSON into profile_local/ (never sent).
 #include "perf_report.h"
 
 #include <algorithm>
@@ -36,6 +40,8 @@
 
 #include "../../host/hos_telemetry.h"
 #include "perf_parts.h"
+#include "profile_report.h"
+#include "profile_run.h"
 #include "report_info.h"
 #include "state_report.h"
 #include "upscaler_rows.h"
@@ -289,6 +295,131 @@ void zone_note(bool program, uint64_t key) {
     zone_uses++;
 }
 
+// ---- the detailed profile (profile_report.h): its gate, its map and frame feed, and its batches ----
+
+namespace pf = profile_report;
+void at_exit();
+bool write_summary(const fsys::path& dir, const std::string& name, const std::string& json, const char* sub, int limit);
+constexpr int kMaxProfilePending = 8;   // (batches waiting in profile_pending at most: host/hos_perf_send.h HOS_PROFILE_MAX_PENDING)
+constexpr int kMaxProfileLocal = 1000;  // (files in profile_local at most: a tester's own copies)
+double since_profile = 0;               // (seconds of play since the last batch)
+int profile_seq = 0;
+std::string profile_map_name;           // (the map the profile is on)
+std::string profile_host_map;           // (the map the host named last, where_now: the profile's own, not held to the summary's 16)
+bool profile_told = false;
+
+/// Whether the profile may be sent: the row, an address and not HL_TELEMETRY_PROFILE=0 (the row decides first)
+bool profile_gate_telemetry() {
+    return !*pf::why_not(opts.send_perf == 1, telemetry_available(), getenv(HOS_TELEMETRY_PROFILE_ENV));
+}
+/// HL_PROFILE_LOCAL=1: the profile is taken (and copied into profile_local/) with no address and with the row off
+bool profile_local() {
+    static const bool v = pf::local_on(getenv("HL_PROFILE_LOCAL"));
+    return v;
+}
+
+/// The map's name as the summaries name it: the host's, else the start-up screen or the title
+std::string map_name_of(const char* host_map) {
+    return host_map[0] ? host_map : shaders_preparing() ? pr::kPreparingShaders : pr::kTitleAndIntro;
+}
+
+/// The profile's batch (mu held): the maps that have anything since the last one, in as many files as the cap needs, into
+/// profile_pending (the row, an address) and profile_local (HL_PROFILE_LOCAL). `final`: at the end, written now (the process ends
+/// next); else on a thread of its own
+void profile_queue(bool final) {
+    if (!profile_running()) return;
+    since_profile = 0;
+    const bool tele = profile_gate_telemetry(), local = profile_local();
+    std::vector<pf::MapProfile> taken = profile_take(final);
+    if (taken.empty() || (!tele && !local)) return;
+    if (!machine_read) {
+        char map[120] = "";
+        int64_t movie[5] = {};
+        read_machine(host->perf_info ? host->perf_info(map, sizeof map, movie) : nullptr);
+    }
+    pf::Meta meta;
+    meta.version = machine.version, meta.release = machine.release, meta.build_id = profile_build_id();
+    meta.vendor_id = dev.props.vendorID, meta.driver = machine.driver;
+    meta.gpu = machine.gpu, meta.cpu = machine.cpu, meta.os = machine.os;
+    std::vector<std::string> parts;
+    for (const pf::MapProfile& m : taken) parts.push_back(pf::map_json(m));
+    size_t over = 0;
+    const std::vector<std::vector<size_t>> groups = pf::batch_groups(parts, pf::kMaxBodyBytes, &over);
+    const fsys::path dir = game_dir_path();
+    const long long at = (long long)std::time(nullptr);
+    size_t files = 0;
+    for (const std::vector<size_t>& g : groups) {
+        std::vector<std::string> sub;
+        for (size_t i : g) sub.push_back(parts[i]);
+        std::string json = pf::payload_json(meta, sub);
+        char name[48];
+        snprintf(name, sizeof name, "%lld-%d", at, profile_seq++);
+        const auto write = [dir, n = std::string(name), j = std::move(json), tele, local] {
+            if (tele && !write_summary(dir, n, j, "profile_pending", kMaxProfilePending))
+                logf("vk: profile: a batch not queued: %d are waiting to be sent already, or the file could not be written", kMaxProfilePending);
+            if (local) write_summary(dir, n, j, "profile_local", kMaxProfileLocal);
+        };
+        if (final) write();
+        else std::thread(write).detach();
+        files++;
+    }
+    logf("vk: profile: %zu maps in %zu file%s (%s%s%s)%s; %s", taken.size(), files, files == 1 ? "" : "s", tele ? "profile_pending" : "",
+         tele && local ? ", " : "", local ? "profile_local" : "", over ? ", a map over the cap left out" : "", profile_stats().c_str());
+}
+
+/// Starts or stops the profile as the gates say (mu held; every 64th frame and at each row change)
+void profile_follow() {
+    const bool want = profile_gate_telemetry() || profile_local(), was = profile_running();
+    if (want == was) return;
+    if (!want) {
+        profile_stop();
+        profile_map_name.clear();
+        return;
+    }
+    folder = game_dir_path();
+    if (!machine_read) {
+        char map[120] = "";
+        int64_t movie[5] = {};
+        read_machine(host->perf_info ? host->perf_info(map, sizeof map, movie) : nullptr);
+    }
+    static bool registered = false;
+    if (!registered) registered = true, std::atexit(at_exit);
+    since_profile = 0;
+    if (!profile_start(pf::sample_hz(getenv("HL_PROFILE_HZ"))) && !profile_told)
+        profile_told = true, logf("vk: profile: neither the CPU sampler nor the GPU timestamps can run here");
+}
+
+/// The frame feed (mu held): the map as the host names it, about once a second, and each frame's time and verdict
+void profile_feed(const std::string& map_name, double ms, bool hitch) {
+    if (!profile_running()) return;
+    static thread_local bool registered = false;
+    if (!registered) registered = true, profile_register_thread(pf::kRolePresent);   // (the presenting thread: its name says nothing)
+    if (map_name != profile_map_name) profile_map_name = map_name, profile_map(map_name);
+    profile_frame(ms, hitch);
+    since_profile += ms / 1000.0;
+    if (since_profile >= pf::kBatchSeconds) profile_queue(false);
+}
+
+/// HL_PROFILE_LOCAL with the performance summary off: the profile alone, from the presenting thread's frames (mu held)
+void profile_local_frame(int64_t now) {
+    static double since_map = 1e9, avg = 0;
+    static std::string map = "";
+    const int64_t before = last_frame_ns;
+    last_frame_ns = now;
+    if (!before || now - before > 2000000000LL) return;
+    const double ms = (double)(now - before) / 1e6;
+    if (since_map >= kMapEvery) {
+        char name[120] = "";
+        int64_t movie[5] = {};
+        if (host->perf_info) host->perf_info(name, sizeof name, movie);
+        map = map_name_of(name), since_map = 0;
+    }
+    const double usual = avg ? avg : ms;
+    avg = usual * 0.98 + ms * 0.02;
+    since_map += ms / 1000.0;
+    profile_feed(map, ms, pr::is_hitch(ms, std::max(1000.0 / fps_cap_now(), usual)));
+}
+
 /// The map from the host, and the movies' totals since the last ask, onto the map they played on. True when Link is on a map
 /// the summary has no room for (pr::kMaxMaps): it stays on the one before, for a summary to make room
 bool where_now() {
@@ -298,6 +429,7 @@ bool where_now() {
     if (!machine_read) read_machine(version);
     // (before a map: the start-up screen while the shaders are prepared, then the intro, the title and the file select)
     const std::string name = map[0] ? map : shaders_preparing() ? pr::kPreparingShaders : pr::kTitleAndIntro;
+    profile_host_map = name;
     if (name != zone_map) zone_enter(name);   // (the zone recorder's own map switch: not held back by the summary's map cap)
     const bool full = current && name != current_map && !maps.count(name) && maps.size() >= (size_t)pr::kMaxMaps;
     if (!full && (!current || name != current_map)) {
@@ -488,13 +620,14 @@ void switch_off() {
     perf_measure.store(false, std::memory_order_relaxed);
     perf_parts::on.store(false, std::memory_order_relaxed);
     zones_measure.store(false, std::memory_order_relaxed);
+    if (!profile_local()) profile_stop();   // (the gates say it: profile_follow stops it anyway; here its waiting batches go too)
     maps.clear(), current = nullptr, primed = false, last_frame_ns = 0;
     {
         std::lock_guard lk(zones_mu);
         zone_slots.clear(), zone_ids.clear(), zone_now = (uint32_t)zr::kMaxZones, zone_map.clear(), zones_told_full = false;
     }
     std::error_code ec;
-    for (const char* sub : {"perf_pending", "perf_sent", "pipelines_pending", "pipelines_sent", "zones_pending", "zones_sent"}) {
+    for (const char* sub : {"perf_pending", "perf_sent", "pipelines_pending", "pipelines_sent", "zones_pending", "zones_sent", "profile_pending", "profile_sent"}) {
         for (fsys::directory_iterator it(folder / sub, ec), end; !ec && it != end; it.increment(ec)) {
             const std::string ext = it->path().extension().string(), leaf = it->path().filename().string();
             if (ext == ".json" || ext == ".tmp" || leaf == ".next" || leaf.rfind(".sending.", 0) == 0) fsys::remove(it->path(), ec);
@@ -504,7 +637,8 @@ void switch_off() {
     fsys::remove(folder / state_report::kSentFile, ec);
     fsys::remove(folder / zr::kSentFile, ec);
     logf("vk: performance statistics off: what was waiting in perf_pending and perf_sent (and the pipeline state records in "
-         "pipelines_pending and pipelines_sent, and the per-zone shader and pipeline keys in zones_pending and zones_sent) is deleted");
+         "pipelines_pending and pipelines_sent, the per-zone shader and pipeline keys in zones_pending and zones_sent, and the performance "
+         "profile in profile_pending and profile_sent) is deleted");
 }
 
 /// The summary of what came in since the one before (under mu), written on a thread of its own unless `now` (the exit, a
@@ -543,12 +677,15 @@ void summarize(bool now) {
 // (an exit that runs atexit: Windows' ExitProcess, exit(). The window's close writes it first, mkwvk_close_asked; then
 // this finds nothing new. Only tried: ExitProcess has already ended the other threads, and one may have held mu)
 void at_exit() {
-    if (!perf_measure.load(std::memory_order_relaxed)) return;
+    if (!perf_measure.load(std::memory_order_relaxed) && !profile_running()) return;
     std::unique_lock lk(mu, std::try_to_lock);
     if (!lk) return;
-    summarize(true);
-    states_queue();
-    zones_queue();
+    if (perf_measure.load(std::memory_order_relaxed)) {
+        summarize(true);
+        states_queue();
+        zones_queue();
+    }
+    profile_queue(true);
 }
 
 /// HOS_PERF_REPORT=1 (from the real environment): a summary with no address to send to, measured and written the same
@@ -570,6 +707,7 @@ bool wanted() {
 
 /// The row changed (checked about once a second, under mu): on starts a session's measuring, off deletes what was kept
 void follow_row() {
+    profile_follow();
     const bool on = wanted(), was = perf_measure.load(std::memory_order_relaxed);
     if (on == was) return;
     if (!on) return switch_off();
@@ -621,7 +759,13 @@ void perf_frame_shown() {
             std::lock_guard lk(mu);
             follow_row();
         }
-        if (!perf_measure.load(std::memory_order_relaxed)) return;
+        if (!perf_measure.load(std::memory_order_relaxed)) {
+            if (profile_running()) {   // (HL_PROFILE_LOCAL alone: the profile's own frame feed)
+                std::lock_guard lk(mu);
+                profile_local_frame(clock_ns());
+            }
+            return;
+        }
     }
     const int64_t now = clock_ns();
     // (the renderer's counters since the frame before: what the slow frames waited on)
@@ -707,6 +851,7 @@ void perf_frame_shown() {
     const bool loading = load_now || load_last || map_switched;
     load_last = load_now, map_switched = false;
     pr::add_frame(*current, f, w, target, last_ms, usual, loading);
+    profile_feed(profile_host_map, f.ms, pr::is_hitch(f.ms, std::max(target, usual)));
     last_ms = f.ms;
     since_map += f.ms / 1000.0, since_summary += f.ms / 1000.0;
     if (since_summary >= period) summarize(false), since_summary = 0;
@@ -719,6 +864,7 @@ void perf_report_final(int event) {
     if (measuring) summarize(true);
     states_queue();   // (off: logs why it queues nothing)
     zones_queue();    // (the same moment: the per-zone keys are the recorder's own)
+    profile_queue(true);   // (and the profile's last batch)
 }
 
 }   // namespace mkwvk

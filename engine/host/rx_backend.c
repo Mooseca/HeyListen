@@ -59,6 +59,8 @@ const char *hos_mic_name(int index);
 void hos_mic_select(int mode, const char *name, int index);
 void hos_bind(int set, int button, int slot, int code);
 const char *hos_perf_info(char *map, int cap, int64_t movie[5]);   /* hos_main.c: the performance summary's map and movies */
+int hos_profile_pc(uintptr_t pc, uint64_t *key);   /* hos_profile.c: the performance profile's sampled counters */
+uint64_t hos_profile_build_id(void);
 int hos_prompts_face(void);         /* prompts.c */
 #if defined(A64_WRITE_TRACK) && !defined(__EMSCRIPTEN__)
 void hos_mark_written(const void *p, size_t n);
@@ -310,7 +312,7 @@ static MkwVkHost vk_host = {   /* (not const: trace_gpu set when HL_TRACE is on)
     hos_gpu_maps_generation, nvn_vmap_generation, hos_reserved_cpus, host_collect_in, host_guest_alloc,
     host_watch_guest_writes, hos_pad_raw, hos_binding, hos_bind, host_aspect_ratio, host_take_key_press,
     hos_mouse_pointer, hos_mic_count, hos_mic_name, hos_mic_select, hos_sdl_gyro_status, hos_log_flush, hos_prompts_face,
-    host_romfs_dir, NULL, hos_perf_info, host_out_of_memory, host_no_usable_gpu,
+    host_romfs_dir, NULL, hos_perf_info, host_out_of_memory, host_no_usable_gpu, hos_profile_pc, hos_profile_build_id,
 };
 
 static const MkwVkRenderer *vk;   /* the Vulkan back end, when it was chosen and started */
