@@ -222,7 +222,9 @@ int main() {
                                                         !ur::model_fixed(ur::DLAA, false));
     }
     CHECK("preset letters", ur::preset_letter(11) == 'K' && ur::preset_letter(13) == 'M' && ur::preset_letter(0) == '0');
-    CHECK("model row shown with DLSS built", ur::model_shown(true) && !ur::model_shown(false));
+    CHECK("model row shown with DLSS built and DLSS or DLAA chosen", ur::model_shown(true, DLSS) && ur::model_shown(true, DLAA) &&
+                                                                         !ur::model_shown(false, DLSS) && !ur::model_shown(true, GAME) &&
+                                                                         !ur::model_shown(true, ur::FSR3) && !ur::model_shown(true, ur::OFF));
     CHECK("model row fixed with the game's own or the switch", ur::model_fixed(GAME, false) && !ur::model_fixed(DLSS, false) &&
                                                                !ur::model_fixed(DLAA, false) && ur::model_fixed(DLSS, true));
     {   // Off: a new value after the saved ones (no renumbering), on every GPU, last in the row's order

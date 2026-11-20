@@ -58,7 +58,7 @@ def main():
     # the menu's rules are upscaler_rows.h's, checked by behaviour in test_upscaler_rows.cpp: here only that the menu uses them
     uses = {
         "row_fixed": ("reflex_available()", "ur::model_fixed("),
-        "row_shown": ("ur::model_shown(dlss_built())",),
+        "row_shown": ("ur::model_shown(dlss_built(), upscaler())",),
         "set_row": ("ur::step_upscaler(", "ur::step(", "ur::snap(", "row_fixed("),
     }
     for name, calls in uses.items():
@@ -182,7 +182,7 @@ def main():
     if "ur::migrate(" in function(menu, "void set_row(Row& r, int v, int dir, bool keep = true) {"):
         raise SystemExit("set_row migrates: the saved values are for the load path")
     # DLAA and the native AA are no stop of the Upscaler row, and the row shows DLSS or FSR 4 while they run
-    if "ur::engine(temporal_mode())" not in function(menu, "int upscaler() {"):
+    if "ur::engine(upscaler_mode())" not in function(menu, "int upscaler() {") or "temporal_mode()" not in function(menu, "int upscaler_mode() {"):
         raise SystemExit("upscaler(): the Upscaler row shows DLAA and FSR 4 Native AA, which are Render resolution choices now")
     resolution_text = function(menu, "const char* tx_resolution(int v) {")
     if '"DLAA (native)"' not in resolution_text or '"Native AA (FSR 4)"' not in resolution_text or "ur::kNativeAa" not in resolution_text:

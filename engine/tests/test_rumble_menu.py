@@ -157,9 +157,9 @@ def menu_fixture():
     if "opts.rumble = rumble_step(opts.rumble);" not in load:
         raise SystemExit("the ini's Rumble strength is not put on the row's steps")
     wheel_free(menu)
-    arrow = re.search(r"\n\s*(set_row\(r, \*r\.value \+ \(press\[4\] \? r\.step : -r\.step\), press\[4\] \? 1 : -1\);)", menu)
+    arrow = re.search(r"\n\s*(change_row\(r, \*r\.value \+ \(press\[4\] \? r\.step : -r\.step\), press\[4\] \? 1 : -1\);)", menu)
     if not arrow:
-        raise SystemExit("the arrows no longer step a row with set_row")
+        raise SystemExit("the arrows no longer step a row with change_row")
     return FIXTURE % {
         "options": re.search(r"struct Options \{.*?\n\};", header, re.S).group(0),
         "tabs": re.search(r"enum MenuTab \{.*?\};", menu, re.S).group(0),
@@ -170,7 +170,7 @@ def menu_fixture():
         "ini_key": definition(menu, "const char* ini_key"),
         "set_row": definition(menu, "void set_row"),
         "frame_rows": read("gpu", "vk", "framegen_rows.h").replace("#pragma once", ""),
-        "arrow": "bool press[5] = {false, false, false, !right, right}; " + arrow.group(1),
+        "arrow": "bool press[5] = {false, false, false, !right, right}; " + arrow.group(1).replace("change_row(", "set_row("),   # (change_row only keeps the cursor on its row)
         "exempt": ", nullptr, false, true" if exempt else "",   # (after the help: no hint, no restart)
         "lo": row.group(1), "hi": row.group(2), "step": row.group(3),
     }

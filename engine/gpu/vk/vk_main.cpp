@@ -889,11 +889,16 @@ bool create_swapchain(uint32_t width, uint32_t height) {
     // (hookshot) the Insert menu's HDR: a 10-bit HDR10 surface when the display lists one (Windows: "Use HDR" on in its display
     // settings), the picture then written by framegen_hdr. Otherwise the SDR one above, said once
     dev.hdr = false;
+    // (HeyListen) whether the display lists one is looked at with the HDR row Off too: the menu says so, and shows its HDR rows only
+    // where HDR can run (menu_rows.h hdr_effective)
+    VkSurfaceFormatKHR hdr_fmt = fmt;
+    dev.hdr_listed = false;
+    for (const auto& f : formats)
+        if ((f.format == VK_FORMAT_A2B10G10R10_UNORM_PACK32 || f.format == VK_FORMAT_A2R10G10B10_UNORM_PACK32) &&
+            f.colorSpace == VK_COLOR_SPACE_HDR10_ST2084_EXT)
+            hdr_fmt = f, dev.hdr_listed = true;
     if (opts.hdr) {
-        for (const auto& f : formats)
-            if ((f.format == VK_FORMAT_A2B10G10R10_UNORM_PACK32 || f.format == VK_FORMAT_A2R10G10B10_UNORM_PACK32) &&
-                f.colorSpace == VK_COLOR_SPACE_HDR10_ST2084_EXT)
-                fmt = f, dev.hdr = true;
+        if (dev.hdr_listed) fmt = hdr_fmt, dev.hdr = true;
         static bool told;
         if (!told) {
             told = true;

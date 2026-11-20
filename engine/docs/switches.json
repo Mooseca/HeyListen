@@ -3054,7 +3054,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_main.cpp",
-     "line": 1076
+     "line": 1081
     }
    ],
    "default": "off (unset)",
@@ -4058,7 +4058,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2458
+     "line": 2510
     }
    ],
    "default": "0 (unset)",
@@ -4163,7 +4163,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2466
+     "line": 2518
     },
     {
      "path": "host/nn_vi.c",
@@ -4238,7 +4238,7 @@
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2466
+     "line": 2518
     },
     {
      "path": "host/nn_vi.c",
@@ -4540,7 +4540,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2549
+     "line": 2601
     },
     {
      "path": "host/display.c",
@@ -6655,7 +6655,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2375
+     "line": 2427
     }
    ],
    "default": "unset",
@@ -6676,7 +6676,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2378
+     "line": 2430
     },
     {
      "path": "host/hos_main.c",
@@ -6764,7 +6764,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2459
+     "line": 2511
     },
     {
      "path": "host/nn_applet.c",
@@ -7313,7 +7313,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2457
+     "line": 2509
     }
    ],
    "default": "0 (unset)",
@@ -8583,11 +8583,11 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 417
+     "line": 449
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 452
+     "line": 484
     },
     {
      "path": "host/hos_wide_ui.c",
@@ -16515,7 +16515,7 @@
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 263
+     "line": 287
     }
    ],
    "default": "unset",
@@ -16557,11 +16557,11 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 299
+     "line": 323
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2453
+     "line": 2505
     }
    ],
    "default": "unset",
@@ -17660,19 +17660,23 @@
    "files": [
     {
      "path": "gpu/vk/vk_main.cpp",
-     "line": 933
+     "line": 938
     },
     {
      "path": "gpu/vk/vk_main.cpp",
-     "line": 1562
+     "line": 1567
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 476
+     "line": 441
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 506
+     "line": 508
+    },
+    {
+     "path": "gpu/vk/vk_menu.cpp",
+     "line": 538
     }
    ],
    "default": "off (unset)",
@@ -18154,7 +18158,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2447
+     "line": 2499
     }
    ],
    "default": "0 (unset)",
@@ -18942,7 +18946,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2449
+     "line": 2501
     }
    ],
    "default": "unset",
@@ -19156,19 +19160,23 @@
    "files": [
     {
      "path": "gpu/vk/vk_main.cpp",
-     "line": 934
+     "line": 939
     },
     {
      "path": "gpu/vk/vk_main.cpp",
-     "line": 1562
+     "line": 1567
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 476
+     "line": 441
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 506
+     "line": 508
+    },
+    {
+     "path": "gpu/vk/vk_menu.cpp",
+     "line": 538
     }
    ],
    "default": "off (unset)",
@@ -20652,7 +20660,7 @@
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2441
+     "line": 2493
     }
    ],
    "default": "2",
@@ -20715,7 +20723,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2746
+     "line": 2798
     }
    ],
    "default": "unset",
@@ -21042,7 +21050,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_internal.h",
-     "line": 404
+     "line": 405
     }
    ],
    "default": "on (unless set to 0, false, off or no)",
@@ -21063,7 +21071,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_internal.h",
-     "line": 400
+     "line": 401
     }
    ],
    "default": "on (unless set to 0, false, off or no)",
@@ -22261,7 +22269,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_main.cpp",
-     "line": 1435
+     "line": 1440
     }
    ],
    "default": "unset",
@@ -22981,7 +22989,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2448
+     "line": 2500
     }
    ],
    "default": "0 (unset)",
@@ -23001,6 +23009,10 @@
    "audience": "developer",
    "files": [
     {
+     "path": "gpu/vk/vk_menu.cpp",
+     "line": 328
+    },
+    {
      "path": "gpu/vk/vk_replay.cpp",
      "line": 2613
     },
@@ -23012,7 +23024,7 @@
    "default": "off (unset)",
    "values": "on or off (0, false, off, no and empty are off); the description names `2`, `0`",
    "explanation": "DLAA only (DLSS's other modes draw the scene smaller than the output), and not with the parallel replay (`RX_VK_PARALLEL=2` and more). With PsychoV35, its RGBA16F scene is taken the same way, linear. `RX_VK_DLSS_HDR=0` keeps it at the gameplay upscale (it needs the HDR feature).",
-   "comment": "(HeyListen, after Longshot a7621bd7 / 5e33d3b7 / 83b161e3) DLAA before the game's bloom and tone map (temporal_pre_bloom) now, the mode being DLAA: the Graphics tab's DLAA before the bloom row (opts.dlss_pre_bloom, off by default; RX_VK_DLSS_PRE_BLOOM over it for a run, vk_menu.cpp), and not with the parallel replay (RX_VK_PARALLEL=2 and more), whose threads record a frame's passes out of order. Read at each call, the row changing at once; a change is logged.",
+   "comment": "RX_VK_PARALLEL=2 or more (vk_temporal.cpp pre_bloom_wanted): DLAA stays after the bloom.",
    "documented_in": "development.md",
    "source": "development.md",
    "documented": true,
@@ -24390,7 +24402,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_internal.h",
-     "line": 583
+     "line": 584
     }
    ],
    "default": "unset",
@@ -25793,7 +25805,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_internal.h",
-     "line": 583
+     "line": 584
     },
     {
      "path": "gpu/vk/vk_replay.cpp",
@@ -25965,7 +25977,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_internal.h",
-     "line": 141
+     "line": 142
     }
    ],
    "default": "unset",
@@ -26116,7 +26128,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_main.cpp",
-     "line": 1101
+     "line": 1106
     }
    ],
    "default": "unset",
@@ -26137,7 +26149,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_main.cpp",
-     "line": 1204
+     "line": 1209
     }
    ],
    "default": "0 (unset)",
@@ -27193,7 +27205,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2718
+     "line": 2770
     }
    ],
    "default": "unset",
@@ -27361,7 +27373,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2454
+     "line": 2506
     }
    ],
    "default": "0 (unset)",

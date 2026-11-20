@@ -69,7 +69,7 @@ def wiring():
         fails.append("scene_tonemap_on is not Native HDR with the row on")
     if not re.search(r'\{TAB_GRAPHICS, "HDR tone mapper", &opts\.hdr_tonemap, 0, 1, 1, tx_tonemap,', menu):
         fails.append("the HDR tone mapper row")
-    if "(v != &opts.hdr_tonemap || opts.hdr == 2)" not in menu:
+    if "(v != &opts.hdr_tonemap || mrow::tonemap_shown(hdr_now()))" not in menu:
         fails.append("the tone mapper row shown without Native HDR")
     if "int hdr_tonemap = 0;" not in (VK / "vk_menu.h").read_text(encoding="utf-8"):
         fails.append("the tone mapper not Vanilla out of the box")

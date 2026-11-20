@@ -51,6 +51,7 @@
 #include "vk_temporal.h"
 #include "vk_reflex.h"
 #include "upscaler_rows.h"
+#include "menu_rows.h"   // (which dependent rows show: row_shown)
 #include "menu_restart.h"
 #include "present_mode.h"
 #ifndef HOOKSHOT_VERSION   // (nx2/build.py gives it to this file: nx2/version.py)
@@ -127,7 +128,28 @@ const char* tx_menu_shortcut(int v) {
     static const char* const names[] = {"Insert or F1", "Insert only", "F1 only"};
     return names[v];
 }
-const char* tx_hdr(int v) { return v == 1 ? "Expanded" : v == 2 ? "Native (the game's)" : "Off"; }
+namespace mrow = menu_rows;
+/// The HDR row as it works on this PC (menu_rows.h hdr_effective): what the HDR rows under it follow
+int hdr_now() { return mrow::hdr_effective(opts.hdr, dev.hdr_listed || dev.hdr, hdr_forced()); }
+const char* tx_hdr(int v) {
+    const char* const name = v == 1 ? "Expanded" : v == 2 ? "Native (the game's)" : "Off";
+    if (v == 1) return hdr_now() ? name : "Expanded (no HDR display)";
+    if (v == 2) return hdr_now() ? name : "Native (no HDR display)";
+    return name;
+}
+/// HDR: what the choice is, and when it cannot run
+const char* hn_hdr(int v, int variant) {
+    static const char* const t[] = {
+        "Off: the game's SDR picture.",
+        "Expanded: the game's SDR picture, its white at the paper white and its highlights up to the peak. Needs an HDR screen with Windows HDR on (Use HDR in the display settings).",
+        "Native: the game's own HDR, told the display's peak and paper white. Needs an HDR screen with Windows HDR on (Use HDR in the display settings). Its HDR tone mapper row, with PsychoV35, appears then.",
+    };
+    static const char* const none = "Needs an HDR screen with Windows HDR on (Use HDR in the display settings): this display lists no HDR10, so the picture stays SDR "
+                                    "and the HDR rows (paper white, peak, tone mapper, PsychoV35) are hidden. They appear once HDR is on and this is set to Expanded or Native.";
+    const int i = std::clamp(v, 0, 2);
+    if (variant < 0) return i && !hdr_now() ? none : t[i];
+    return variant == 0 ? t[i] : variant == 1 && i && !hdr_now() ? none : nullptr;
+}
 // (HeyListen, after Longshot ddb156df and 79a34381: the HDR tone mapper and PsychoV35's rows)
 const char* tx_tonemap(int v) { return v == 1 ? "PsychoV35" : "Vanilla"; }
 const char* tx_midgray(int v) { return v == 1 ? "Vanilla" : "Render"; }
@@ -195,7 +217,9 @@ unsigned upscalers_available() {
 /// The Upscaler row's choice that runs (FSR 3.1 has inputs of its own; DLSS and FSR 4 run on the frame chain they share,
 /// temporal_mode; Off draws no network, vk_draw.cpp off_stand_in). DLAA and FSR 4's native AA are those engines at the Render
 /// resolution's native choice, so the row shows DLSS or FSR 4 for them (ur::engine); native_aa_now says which
-int upscaler() { return upscaler_off() ? (int)ur::OFF : fsr3_wanted() ? (int)ur::FSR3 : ur::engine(temporal_mode()); }
+/// What runs, as the chain's mode: DLAA and FSR 4's native AA stay themselves here (temporal_mode)
+int upscaler_mode() { return upscaler_off() ? (int)ur::OFF : fsr3_wanted() ? (int)ur::FSR3 : temporal_mode(); }
+int upscaler() { return ur::engine(upscaler_mode()); }
 /// Whether the chain runs DLAA or FSR 4's native AA now: the Render resolution's native choice, with DLSS or FSR 4 running
 bool native_aa_now() { return !upscaler_off() && !fsr3_wanted() && ur::full_scale(temporal_mode()); }
 const char* tx_upscaler(int) {
@@ -299,6 +323,11 @@ bool pre_bloom_env() {
     static const char* const e = getenv("RX_VK_DLSS_PRE_BLOOM");
     return e && *e;
 }
+/// RX_VK_PARALLEL=2 or more (vk_temporal.cpp pre_bloom_wanted): DLAA stays after the bloom
+bool pre_bloom_parallel() {
+    static const bool on = getenv("RX_VK_PARALLEL") && atoi(getenv("RX_VK_PARALLEL")) >= 2;
+    return on;
+}
 /// Its line: the value chosen; variant 1: DLSS at a Render resolution below Native (the row waits for DLAA); variant 2: set
 /// for this run by RX_VK_DLSS_PRE_BLOOM
 const char* hn_dlss_pre_bloom(int v, int variant) {
@@ -306,10 +335,12 @@ const char* hn_dlss_pre_bloom(int v, int variant) {
         "Off: DLAA smooths the finished picture, after the game's bloom and tone map.",
         "On: DLAA smooths the 3D before the game's bloom and tone map, so the glow is made from a smooth picture.",
     };
-    static const char* const not_dlaa = "DLAA only: set the Render resolution to Native. DLSS's other modes draw the 3D smaller "
-                                        "than the picture, which this cannot go back into.";
+    static const char* const not_dlaa = "Needs DLAA: set the Render resolution to Native (DLSS at the full output size). DLSS's other modes draw the 3D "
+                                        "smaller than the picture, which this cannot go back into.";
     static const char* const env = "Set for this run by RX_VK_DLSS_PRE_BLOOM.";
-    if (variant < 0) variant = pre_bloom_env() ? 2 : upscaler() != ur::DLAA ? 1 : 0;
+    static const char* const parallel = "Not with the parallel replay (RX_VK_PARALLEL=2 or more): DLAA stays after the game's bloom and tone map.";
+    if (variant < 0) variant = pre_bloom_env() ? 2 : upscaler_mode() != ur::DLAA ? 1 : pre_bloom_parallel() ? 3 : 0;
+    if (variant == 3) return parallel;
     if (variant == 1) return not_dlaa;
     if (variant == 2) return env;
     return variant == 0 ? t[std::clamp(v, 0, 1)] : nullptr;
@@ -407,8 +438,9 @@ const char* hn_resolution(int v, int variant) {
     return "A steady size: lower is faster, and softer.";
 }
 /// (the V-Sync mode row with V-Sync Off: greyed, with a hint saying so, and Left and Right leave it alone)
+bool vsync_env_decides() { return getenv("RX_VK_FIFO") || getenv("RX_VK_IMMEDIATE"); }
 bool row_inactive(const int* value) {
-    return value == &opts.vsync_mode && opts.vsync == 0;
+    return value == &opts.vsync_mode && mrow::vsync_mode_fixed(opts.vsync, vsync_env_decides());
 }
 /// A row with nothing else to choose here: shown without its arrows, Left and Right leave it (and the saved value) alone
 bool row_fixed(const int* value) {
@@ -416,7 +448,7 @@ bool row_fixed(const int* value) {
            (value == &opts.upscale && !filter_needed()) ||
            (value == &opts.hud_layout && getenv("HOS_WIDE_UI") && *getenv("HOS_WIDE_UI")) ||   // (host/hos_wide_ui.c's, first)
            (value == &opts.dlss_model && ur::model_fixed(upscaler(), dlss_preset_env() != nullptr)) ||
-           (value == &opts.dlss_pre_bloom && ur::pre_bloom_fixed(upscaler(), pre_bloom_env()));
+           (value == &opts.dlss_pre_bloom && ur::pre_bloom_fixed(upscaler_mode(), pre_bloom_env(), pre_bloom_parallel()));
 }
 /// (heylisten) The two telemetry rows: Off or On, and "Not available in this build" when the build has no address to send to
 /// (nx2/addresses.ini's telemetry= is empty), where nothing can be sent whatever the row says
@@ -844,8 +876,8 @@ Row rows[] = {
     {TAB_GRAPHICS, "HDR", &opts.hdr, 0, 2, 1, tx_hdr,
      "HDR10 out on an HDR display (Windows: Use HDR on in the display settings). Expanded: the game's SDR picture, its white at "
      "the paper white and its highlights up to the peak. Native: the game's own HDR, told the display's peak and paper white. "
-     "With Native, the HDR tone mapper row below chooses the game's own curve or PsychoV35.",
-     nullptr, false, true},
+     "With Native, the HDR tone mapper row below chooses the game's own curve or PsychoV35. Needs an HDR screen with Windows HDR on.",
+     hn_hdr, false, true},
     {TAB_GRAPHICS, "HDR paper white", &opts.hdr_white, 80, 400, 10, tx_nits,
      "How bright the picture's white is with HDR on. Around 200 for a normal room; higher in a bright one.", nullptr, false, true},
     {TAB_GRAPHICS, "HDR peak brightness", &opts.hdr_peak, 400, 4000, 100, tx_nits,
@@ -1234,14 +1266,20 @@ bool row_shown(int i) {
     }
     const int* v = rows[i].value;
     return (rows[i].cheat < 0 || cheats_on()) &&
-           (rows[i].value != &opts.dlss_model || ur::model_shown(dlss_built())) &&
+           (rows[i].value != &opts.dlss_model || ur::model_shown(dlss_built(), upscaler())) &&
            (rows[i].value != &opts.framegen_by || dlss_built() || fsr3fi::capable()) &&   // (a build with DLSS, or a GPU AMD FSR 3.1's frame interpolation runs on: the row has a choice)
-           (rows[i].value != &opts.dlss_pre_bloom || ur::pre_bloom_shown(dlss_why() == DLSS_OK, upscaler())) &&
+           (rows[i].value != &opts.dlss_pre_bloom || ur::pre_bloom_shown(dlss_why() == DLSS_OK, upscaler_mode())) &&
+           // (HeyListen: the rows that only matter with another setting on show only then. Frame generation's sub-rows with it on)
+           ((v != &opts.framegen_by && v != &opts.pace) || mrow::framegen_sub_shown(opts.framegen)) &&
+           // (V-Sync mode with V-Sync On; greyed, with the hint, where RX_VK_FIFO or RX_VK_IMMEDIATE decide)
+           (v != &opts.vsync_mode || mrow::vsync_mode_shown(opts.vsync, vsync_env_decides())) &&
+           // (HDR paper white and peak with HDR on, where the display has it: hdr_now)
+           ((v != &opts.hdr_white && v != &opts.hdr_peak) || mrow::hdr_levels_shown(hdr_now())) &&
            // (HeyListen, after Longshot ddb156df / 79a34381: the tone mapper with Native HDR, PsychoV35's rows with it on PsychoV35)
-           (v != &opts.hdr_tonemap || opts.hdr == 2) &&
+           (v != &opts.hdr_tonemap || mrow::tonemap_shown(hdr_now())) &&
            // (HeyListen, after Longshot a0dfd28b / 79a34381: HDR contrast with HDR on, and not with PsychoV35, which has its own)
-           (v != &opts.hdr_contrast || (opts.hdr != 0 && (opts.hdr != 2 || opts.hdr_tonemap != 1))) &&
-           (strncmp(rows[i].name, "PsychoV35 ", 10) || (opts.hdr == 2 && opts.hdr_tonemap == 1));
+           (v != &opts.hdr_contrast || mrow::contrast_shown(hdr_now(), opts.hdr_tonemap)) &&
+           (strncmp(rows[i].name, "PsychoV35 ", 10) || mrow::psychov35_shown(hdr_now(), opts.hdr_tonemap));
 }
 int tab_row_count(int t) {
     int c = 0;
@@ -1258,6 +1296,13 @@ int tab_row_to_global(int t, int local_idx) {
         }
     }
     return 0;
+}
+
+/// The cursor on global row g of tab t after rows were hidden or shown above or below it (a row is shown only while the setting it
+/// depends on is on): the same row stays selected. A hidden row leaves the cursor where it was (it is clamped when drawn)
+void reselect(int t, int g) {
+    const int at = mrow::local_index(kRows, g, [&](int i) { return rows[i].tab == (MenuTab)t && row_shown(i); });
+    if (at >= 0) tab_selected[t] = at;
 }
 
 std::atomic<bool> open_now{false};
@@ -1487,6 +1532,13 @@ void set_row(Row& r, int v, int dir, bool keep = true) {
         restart_state.note(now);
     }
     if (keep) save();
+}
+/// set_row from the menu's input: the cursor stays on its row when the change hides or shows the rows above it (a row that depends
+/// on the one changed: the tone mapper under HDR, Frame generation by under Frame generation)
+void change_row(Row& r, int v, int dir, bool keep = true) {
+    const int cursor_row = r.tab == cur_tab ? tab_row_to_global(cur_tab, tab_selected[cur_tab]) : -1;
+    set_row(r, v, dir, keep);
+    if (cursor_row >= 0) reselect(cur_tab, cursor_row);
 }
 
 // ---- (hookshot) the Controls page: what presses each of the Switch's buttons, a gamepad input and up to two keys ----
@@ -2900,7 +2952,7 @@ void menu_tick() {
             if (press[2]) csel = (csel + 1) % n, changed = true;
             if (i < 0 && (press[3] || press[4] || press[7])) {   // (the page's own rows: Enter as Right)
                 Row& r = rows[tab_row_to_global(TAB_PAGE, csel)];   // (Custom is only what the bindings are: set_row skips it)
-                set_row(r, *r.value + (press[3] ? -r.step : r.step), press[3] ? -1 : 1);
+                change_row(r, *r.value + (press[3] ? -r.step : r.step), press[3] ? -1 : 1);
                 changed = true;
             } else if (i >= 0) {
                 if ((press[3] || press[4]) && i < kControls && !keys_only(i) && !menu_row(i)) ccol ^= 1, changed = true;
@@ -3006,7 +3058,7 @@ void menu_tick() {
                 } else {
                     const int permille = hits.drag((float)mx, drag_row);
                     const int v = permille < 0 ? *d.value : menu_hit::slider_value(permille, d.lo, d.hi, d.step);
-                    if (v != *d.value) set_row(d, v, v > *d.value ? 1 : -1, false), changed = true;
+                    if (v != *d.value) change_row(d, v, v > *d.value ? 1 : -1, false), changed = true;
                 }
             } else if (on_row && (moved || ptr.pressed) && hit.index != sel) {
                 sel = hit.index, changed = true;
@@ -3019,7 +3071,7 @@ void menu_tick() {
                     Row& d = rows[tab_row_to_global(cur_tab, hit.index)];
                     drag_row = hit.index;
                     const int v = menu_hit::slider_value(hit.permille, d.lo, d.hi, d.step);
-                    if (v != *d.value) set_row(d, v, v > *d.value ? 1 : -1, false);
+                    if (v != *d.value) change_row(d, v, v > *d.value ? 1 : -1, false);
                     changed = true;
                 } else if (hit.part == menu_hit::kRow) {
                     Row& d = rows[tab_row_to_global(cur_tab, hit.index)];
@@ -3085,7 +3137,7 @@ void menu_tick() {
         else if (press[7] && !r.value && can_bind()) page = 1, csel = 0, ccol = 0, changed = true;
         if ((press[3] || press[4] || press[7]) && r.value) {   // (Enter, or A, as Right)
             if (press[7]) press[4] = true;
-            set_row(r, *r.value + (press[4] ? r.step : -r.step), press[4] ? 1 : -1);
+            change_row(r, *r.value + (press[4] ? r.step : -r.step), press[4] ? 1 : -1);
             changed = true;
         }
         const int64_t now = prof_now();

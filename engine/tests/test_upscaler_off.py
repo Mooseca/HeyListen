@@ -197,7 +197,8 @@ def check_source():
     need("std::min(std::max(v, r.lo), r.hi)" in menu, "load: a row's value is no longer kept to its range")
     available = function(menu, "unsigned upscalers_available() {")
     need("ur::bit(ur::OFF)" in available, "upscalers_available: Off is not available on every GPU")
-    need("upscaler_off()" in function(menu, "int upscaler() {") and "ur::OFF" in function(menu, "int upscaler() {"),
+    need("upscaler_off()" in function(menu, "int upscaler_mode() {") and "ur::OFF" in function(menu, "int upscaler_mode() {") and
+         "upscaler_mode()" in function(menu, "int upscaler() {"),
          "upscaler(): the row does not show Off while it draws")
     need('"Off"}' in function(menu, "const char* tx_upscaler(int) {") or '"Off"};' in function(menu, "const char* tx_upscaler(int) {"),
          "tx_upscaler: no name for Off")
