@@ -124,6 +124,7 @@ thread_local VkCommandBuffer trust_cmd = VK_NULL_HANDLE;   // (TICK-057: the bar
 thread_local VkCommandBuffer up_cmd = VK_NULL_HANDLE;
 uint64_t rec_value = 0;
 thread_local bool up_used = false;
+thread_local uint64_t up_astc_texels = 0;   // (vk_texture.cpp: texture_begin_recording resets it)
 thread_local uint64_t tl_seg = 0;
 uint32_t epoch = 0;
 #include "rb_texture.inc"
