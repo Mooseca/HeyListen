@@ -93,6 +93,20 @@ int main() {
                "two again: held");
         expect(h.tick(d, 0, 0, 15) == StormHoldEvent::Released && !h.on, "the third running: released");
     }
+    {   // (whole frames end the hold whatever the queue holds; a frame that left a draw out starts the count again)
+        StormHold h;
+        const StormHoldRules d;
+        h.tick(d, 300, 0, 0);
+        expect(h.tick(d, 97, 0, 10, 0) == StormHoldEvent::None && h.tick(d, 97, 0, 11, 0) == StormHoldEvent::None, "two whole frames");
+        expect(h.tick(d, 97, 0, 12, 5) == StormHoldEvent::None && h.on, "a frame with a draw left out restarts the count");
+        expect(h.tick(d, 97, 0, 13, 0) == StormHoldEvent::None && h.tick(d, 97, 0, 14, 0) == StormHoldEvent::None && h.on, "two again");
+        expect(h.tick(d, 97, 0, 15, 0) == StormHoldEvent::Released && !h.on, "the third whole frame running: released");
+        StormHold h2;
+        StormHoldRules off;
+        off.whole_frames = false;
+        h2.tick(off, 300, 0, 0);
+        for (int i = 1; i < 10; i++) expect(h2.tick(off, 97, 0, i, 0) == StormHoldEvent::None && h2.on, "whole frames off: the queue rules");
+    }
     {   // (re-engage: a second storm after a release starts its own clock)
         StormHold h;
         const StormHoldRules r = rules(200, 400, 100);

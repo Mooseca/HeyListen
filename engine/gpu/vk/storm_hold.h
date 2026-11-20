@@ -30,6 +30,7 @@ struct StormHoldRules {
     int64_t min_frames = 0;     ///< no release within this many presents of the engage
     int64_t quiet_frames = 0;   ///< none while a job was pushed in the last this many presents (<= 0: the depth rule)
     int64_t off_depth = 4;      ///< (quiet_frames <= 0) release once fewer than this many jobs are queued ...
+    bool whole_frames = true;   ///< (quiet_frames <= 0) also released by settle whole frames running (RX_VK_STORM_WHOLE=0: off)
     int64_t settle = 3;         ///< ... for this many presents running (the picture is partial while the queue is deep: draws whose
                                 ///< programs are not built are left out, and it completes the moment the queue is drained)
     bool hold_present = true;   ///< withhold the present (the default), not the frame's draws
@@ -43,21 +44,26 @@ struct StormHold {
     bool on = false;
     uint64_t since_frame = 0;   ///< the present the latch engaged at
     int64_t calm = 0;           ///< presents running the queue has been under the release depth
+    int64_t whole = 0;          ///< presents running no draw was left out of
 
     /// One tick a present. pending: jobs queued; push_age: presents since the last push; frame: this present's number.
-    StormHoldEvent tick(const StormHoldRules& r, int64_t pending, int64_t push_age, uint64_t frame) {
+    /// skips: the draws and dispatches left out of the frame just drawn for want of their programs (< 0: not known). A frame
+    /// that left none out is a whole picture, and the hold ends after settle of them running, however deep the queue still is
+    /// (it holds the variants the picture will want later: the Market's was 97 jobs deep at a clean picture)
+    StormHoldEvent tick(const StormHoldRules& r, int64_t pending, int64_t push_age, uint64_t frame, int64_t skips = -1) {
         if (r.deep <= 0) {
             on = false;   // (RX_VK_STORM_HOLD=0: never held)
             return StormHoldEvent::None;
         }
         if (!on) {
             if (pending < r.deep) return StormHoldEvent::None;
-            on = true, since_frame = frame, calm = 0;
+            on = true, since_frame = frame, calm = 0, whole = 0;
             return StormHoldEvent::Engaged;
         }
         const int64_t held = (int64_t)(frame - since_frame);
         calm = pending < r.off_depth ? calm + 1 : 0;
-        const bool quiet = r.quiet_frames > 0 ? push_age >= r.quiet_frames : calm >= r.settle;
+        whole = skips == 0 ? whole + 1 : 0;
+        const bool quiet = r.quiet_frames > 0 ? push_age >= r.quiet_frames : calm >= r.settle || (r.whole_frames && whole >= r.settle);
         if (quiet && held >= r.min_frames) {
             on = false;
             return StormHoldEvent::Released;
@@ -69,7 +75,7 @@ struct StormHold {
 /// The switches and the one hold of this process (defined in vk_replay.cpp)
 const StormHoldRules& storm_hold_rules();
 /// Ticks the hold for the present just recorded: the queue's depth, how long it has gone unpushed, the present's number
-StormHoldEvent storm_hold_tick(int64_t pending, int64_t push_age, uint64_t frame);
+StormHoldEvent storm_hold_tick(int64_t pending, int64_t push_age, uint64_t frame, int64_t skips = -1);
 /// The latch, as the last tick left it
 bool storm_hold_on();
 /// Whether the frame's draws are what is held back (RX_VK_STORM_HOLD_PRESENT=0), read by the draw path
