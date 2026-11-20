@@ -1483,6 +1483,50 @@ static void memory_notice(void) {
     MessageBoxA(NULL, text, "HeyListen", MB_OK | MB_ICONWARNING);
 }
 #endif
+/* (HeyListen, #55: seven "Title and intro" crashes since v0.4.1, "exception 0xc0000005 (write 0x100000000000, guest 0)" in the
+   guest's memset, from the module system's set-up (f_83b797e0), on RTX 3060, RX 580, RX 6700 XT.) The game sizes the heap of each
+   of its modules from a file of its own, System/HeapSize/Product.Nin_Ounce_NVN2.HeapDef.byml.zs, which it opens first of all. Where
+   the game's files do not hold it (an incomplete or another version's romfs folder), nothing says so: the game reads no sizes,
+   creates no heap for its third module, and its first allocation there returns null and is written through. A run with that
+   file taken out crashes with the same address and the same eleven guest frames. The file's absence (or an empty one) is told
+   before the boot instead, and the game does not start. HOS_ROMFS_CHECK=0: not checked (as before). */
+#ifndef A64_MEM_ZERO
+#define HOS_ROMFS_SHOWN "System/HeapSize/Product.Nin_Ounce_NVN2.HeapDef.byml"
+#define HOS_ROMFS_BOOT_FILE "System" SEP_S "HeapSize" SEP_S "Product.Nin_Ounce_NVN2.HeapDef.byml"
+static int romfs_file_ok(const char *romfs, const char *rel_with_ext) {
+    char p[MAX_PATH];
+    snprintf(p, sizeof p, "%s" SEP_S "%s", romfs, rel_with_ext);
+    const DWORD at = GetFileAttributesA(p);
+    if (at == INVALID_FILE_ATTRIBUTES || (at & FILE_ATTRIBUTE_DIRECTORY)) return 0;
+    FILE *f = fopen(p, "rb");   /* (not empty, and readable) */
+    if (!f) return 0;
+    const int one = fgetc(f) != EOF;
+    fclose(f);
+    return one;
+}
+/* 1: the boot file is in the folder (the compressed one the game asks for, or the plain one it falls back to) */
+static int romfs_boot_file_present(const char *romfs) {
+    return romfs_file_ok(romfs, HOS_ROMFS_BOOT_FILE ".zs") || romfs_file_ok(romfs, HOS_ROMFS_BOOT_FILE);
+}
+static int romfs_notice(const char *romfs, int quiet) {   /* 1: the game can start */
+    const char *off = getenv("HOS_ROMFS_CHECK");
+    if (!romfs || (off && atoi(off) == 0) || romfs_boot_file_present(romfs)) return 1;
+    hos_log("boot: the game's files are incomplete: %s lacks the game's heap sizes (" HOS_ROMFS_SHOWN ".zs): "
+            "the game would crash right after its window opens (HOS_ROMFS_CHECK=0: start anyway)", romfs);
+    if (quiet || getenv("HOS_HEADLESS")) return 0;
+    char text[MAX_PATH + 700];
+    snprintf(text, sizeof text,
+             "The game's files in this folder are incomplete:\n\n%s\n\nThe file " HOS_ROMFS_SHOWN ".zs is missing or empty, "
+             "and without it the game stops with a crash when its window opens.\n\nPrepare the game's files again with "
+             "HeyListen Builder (the full game, with its update), then start the game.", romfs);
+#ifndef _WIN32
+    int hos_sdl_load(void);
+    hos_sdl_load();
+#endif
+    MessageBoxA(NULL, text, "HeyListen: the game's files", MB_OK | MB_ICONERROR | MB_SETFOREGROUND);
+    return 0;
+}
+#endif
 #ifdef _WIN32
 /* (hookshot) On laptops with two GPUs, the drivers run a program on the dedicated one when it exports these (NVIDIA Optimus, AMD
    PowerXpress): without them a laptop could put the game on its integrated GPU, 5 fps (issue 176) */
@@ -1783,6 +1827,11 @@ static int game_main(int argc, char **argv) {
             (unsigned long long)(hos_total_memory >> 20));
 #ifndef A64_MEM_ZERO
     memory_notice();
+    {   /* (a romfs folder without the game's heap sizes: told here, not crashed on later; the builder's shader run has no window to tell) */
+        int prepare = 0;
+        for (int i = 1; i < argc; i++) prepare |= !strcmp(argv[i], "--prepare-shaders");
+        if (!romfs_notice(hos_romfs_dir, prepare)) return 4;
+    }
 #endif
     void hos_mods_init(const char *image_path);
     hos_mods_init(image);   /* mods.c: <exe folder>\mods (RomFS files) */

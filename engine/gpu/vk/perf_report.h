@@ -31,6 +31,8 @@ void perf_report_final(int event);
 int64_t gpu_time_ns();
 /// (vk_replay.cpp) the read-backs' waits for the GPU so far, ns: the game's CPU reads of GPU results (invalidate), any thread
 int64_t readback_wait_ns();
+/// (vk_replay.cpp, v0.4.4) the longest single read's wait since the last call, ns (0: none of 1 ms or more), and its label (readback_wait.h)
+int64_t readback_worst_take(char* label, size_t cap);
 /// (perf_report.cpp) a draw's program key, once per key per map: the zone usage recorder (zone_report.h), on only while
 /// the performance statistics row is on, the build has an address and HL_TELEMETRY_ZONES is not 0
 void zone_note_program(uint64_t key);
@@ -106,6 +108,9 @@ struct Waits {
     double descriptors = 0;    // (descriptor building and binding on the drawing threads)
     double present = 0;        // (the swapchain: waiting for its image and the present call, vk_replay.cpp present_image)
     double os_wait = 0;        // (the presenting thread off the CPU while nothing of the renderer ran: a gap with no work)
+    // (v0.4.4: what the frame's longest wait of those two causes was on: readback_wait.h label of the read that waited most,
+    // the descriptor work that built longest (draw or dispatch, pool or push); empty: not known. Put in the hitch's detail row)
+    std::string readback_which, descriptors_which;
 };
 
 /// Seconds of play between summaries: RX_VK_PERF_INTERVAL's whole seconds, 60 to 840, else 300. A summary ends on the frame
@@ -140,6 +145,10 @@ inline Cause cause_of(const fps_stats::Frame& f, const Waits& w) {
     return (Cause)best;
 }
 
+/// What the descriptor work of a frame was mostly (v0.4.4, the hitch rows' label): the sets and pools of the descriptor pools
+/// (made, reset, allocated: a scene with more sets than a recording's pool holds), or the build of the descriptors themselves
+inline std::string descriptor_kind(double self_ms, double pool_ms) { return pool_ms > self_ms ? "pool" : "build"; }
+
 /// A frame off its slot: more than a quarter of the target away from the frame before (uneven pacing, even at a good
 /// average). Hitches are counted apart
 inline bool is_pacing_miss(double ms, double last_ms, double target_ms) {
@@ -154,7 +163,18 @@ struct HitchDetail {
     double ms_sum = 0, ms_max = 0;
     int64_t load_count = 0;
     double load_ms_sum = 0, load_ms_max = 0;
+    /// (v0.4.4, readback and descriptors hitches) what the frame waited on, by label (readback_wait.h): the hitches of each, at
+    /// most kWhichMax labels, the rest under "other"
+    std::map<std::string, int64_t> which;
 };
+constexpr size_t kWhichMax = 8;
+inline void note_which(HitchDetail& d, const std::string& label) {
+    if (label.empty()) return;
+    auto it = d.which.find(label);
+    if (it == d.which.end() && d.which.size() >= kWhichMax) it = d.which.try_emplace("other", 0).first;
+    else if (it == d.which.end()) it = d.which.try_emplace(label, 0).first;
+    it->second++;
+}
 
 /// The totals of one map since the summary before
 struct MapTotals {
@@ -192,6 +212,8 @@ inline void add_frame(MapTotals& m, const fps_stats::Frame& f, const Waits& w, d
         m.hitch[c]++;
         HitchDetail& d = m.hitch_detail[c];
         d.count++, d.ms_sum += f.ms, d.ms_max = std::max<double>(d.ms_max, f.ms);
+        if (c == kReadback) note_which(d, w.readback_which);
+        else if (c == kDescriptors) note_which(d, w.descriptors_which);
         if (loading) d.load_count++, d.load_ms_sum += f.ms, d.load_ms_max = std::max<double>(d.load_ms_max, f.ms);
     } else if (is_pacing_miss(f.ms, last_ms, target_ms)) m.pacing_misses++;
     m.left_out += f.left_out;
@@ -283,7 +305,17 @@ inline std::string summary_json(const Machine& m, bool first, double session_s, 
             o += std::string(comma2 ? "," : "") + "\"" + cause_name(c) + "\":{\"count\":" + std::to_string(d.count) +
                  ",\"ms_sum\":" + json_num(d.ms_sum) + ",\"ms_max\":" + json_num(d.ms_max) +
                  ",\"load_count\":" + std::to_string(d.load_count) + ",\"load_ms_sum\":" + json_num(d.load_ms_sum) +
-                 ",\"load_ms_max\":" + json_num(d.load_ms_max) + "}";
+                 ",\"load_ms_max\":" + json_num(d.load_ms_max);
+            if (!d.which.empty()) {   // (v0.4.4: the labels of what the readback and descriptor hitches waited on)
+                o += ",\"which\":{";
+                bool comma3 = false;
+                for (const auto& [label, n] : d.which) {
+                    o += std::string(comma3 ? "," : "") + json_text(label, 60) + ":" + std::to_string(n);
+                    comma3 = true;
+                }
+                o += "}";
+            }
+            o += "}";
             comma2 = true;
         }
         o += "},\"pacing_misses\":" + std::to_string(t.pacing_misses) + ",\"draws_left_out\":" + std::to_string(t.left_out) +

@@ -50,6 +50,7 @@
 #include "vk_gprof.h"
 #include "profile_run.h"   // (the performance profile's pass timestamps: tprof_end)
 #include "vk_jobs.h"
+#include "storm_hold.h"
 #include "vk_shader.h"
 #include "vk_menu.h"     // (psychov35_bank: PsychoV35's grading for its bank, uniform_range)
 #include "vk_texture.h"
@@ -70,6 +71,7 @@
 #include "shader_recompiler/backend/spirv/mma_layout.h"
 #include "precompile_save.h"   // (the pipeline cache written before the title after a long precompile)
 #include "prepare_work.h"   // (what a program of the seed costs a preparation: its progress bar)
+#include "mesh_conv.h"   // (RX_VK_MESH_CONV: the indirect mesh draws' ring slots and the batch at the game's barriers)
 #include "vk_work.h"   // (after the others: counts the commands that do GPU work, for full_barrier)
 
 namespace mkwvk {
@@ -183,13 +185,14 @@ bool no_a2c() {   // (RX_VK_NO_A2C, read once: it was a getenv on every alpha-to
 }
 
 /// 32 lanes, where the stage can be held to it (workgroup_x: a compute stage's width, which full subgroups must divide)
-void pin_subgroup(VkPipelineShaderStageCreateInfo& st, uint32_t workgroup_x = 0) {
+/// (invocations: its whole workgroup, x * y * z, which 32-lane subgroups must cover: pins_32)
+void pin_subgroup(VkPipelineShaderStageCreateInfo& st, uint32_t workgroup_x = 0, uint64_t invocations = 64) {
     static const VkPipelineShaderStageRequiredSubgroupSizeCreateInfo size = [] {
         VkPipelineShaderStageRequiredSubgroupSizeCreateInfo r{VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO};
         r.requiredSubgroupSize = 32;
         return r;
     }();
-    if (!(dev.sg32_stages & st.stage)) return;
+    if (!pins_32(st.stage, invocations)) return;
     st.pNext = &size;
     if (workgroup_x && !(workgroup_x % 32) && dev.vk13.computeFullSubgroups)
         st.flags |= VK_PIPELINE_SHADER_STAGE_CREATE_REQUIRE_FULL_SUBGROUPS_BIT;
@@ -395,6 +398,12 @@ thread_local uint64_t rec_value = 0;
 struct RecordingRes {
     VkDescriptorPool pool = VK_NULL_HANDLE;
     std::vector<VkDescriptorPool> extra;   // (pools added when the first ran out)
+    uint32_t pool_shift = 0;   // (longshot 382a3d675: the slot's pool's size: make_pool's shift, pool_shift_first at first)
+    // (v0.4.4, RX_VK_DESC_POOL_KEEP) the extra pools are kept from one recording to the next, reset, not destroyed and made again:
+    // extra_used of them are in use now (the one sets come from is the last of them, else `pool`), the rest idle; idle ones
+    // unused for kExtraIdle recordings go
+    size_t extra_used = 0;
+    uint32_t extra_idle = 0;
     // (the stream in use: the first, or one a recording that outgrew it was moved to. Descriptors written before the move hold
     // the old buffer's range, so the old ones stay until the slot's next recording, which the GPU's use of this one is done by)
     VkBuffer stream = VK_NULL_HANDLE;
@@ -421,17 +430,38 @@ bool stream_grow_off() {
     static const bool off = getenv("RX_VK_STREAM_GROW_OFF") != nullptr;
     return off;
 }
-const uint64_t kStream = (getenv("RX_VK_STREAM_MB") ? (uint64_t)std::max(1, atoi(getenv("RX_VK_STREAM_MB"))) : stream_grow_off() ? 24u : 2u) << 20;
+const uint64_t kStream = (getenv("RX_VK_STREAM_MB") ? (uint64_t)std::max(1, atoi(getenv("RX_VK_STREAM_MB"))) : stream_grow_off() ? 24u : 1u) << 20;   // (longshot 382a3d675: 1 MB, not 2: the most a recording held was 339-453 KB at 1080p and 1440p in
+// Castle Town and Hyrule Field, and the 48 streams are host-visible VRAM where the card has resizable BAR: 48 MB given back to the
+// textures. A recording that needs more is given a bigger stream; RX_VK_STREAM_MB=2: as before)
 std::atomic<uint64_t> stream_peak{0}, stream_extra{0}, stream_grown{0};
 std::deque<RecordingRes> res;   // (a deque: a recording thread keeps its own in place while another is added)
 thread_local RecordingRes* cur = nullptr;
 
-VkDescriptorPool make_pool() {
+// (longshot 382a3d675) A slot's pool starts at half the size below (shift 1) and is made at the whole size (shift 0) from the recording
+// after one that ran out of it: a recording took at most 289 sets and 13,015 sampled images of the 8,192 and 32,768 (Castle Town and
+// Hyrule Field at 1440p), and RADV (the Steam Deck) keeps a pool's descriptors in GPU memory, ~4 MB a whole pool for the 48 slots. The
+// pools added when one ran out are whole. RX_VK_DESC_POOL_GROW=0: every pool whole, as before
+uint32_t pool_shift_first() {
+    static const uint32_t v = getenv("RX_VK_DESC_POOL_GROW") && atoi(getenv("RX_VK_DESC_POOL_GROW")) == 0 ? 0u : 1u;
+    return v;
+}
+std::atomic<uint64_t> pools_grown{0};   // (slots whose pool was made whole after one ran out: draw_begin_recording)
+// (v0.4.4, RX_VK_DESC_POOL_KEEP=0: the extra pools destroyed at each recording's start and made again where one runs out, as before)
+// A scene with more than 8192 sets or 32768 descriptors in a recording (Hyrule Field, Kakariko) made a pool and destroyed it at every
+// recording: vkCreateDescriptorPool of that size on the render thread, in the middle of the draws, and vkDestroyDescriptorPool a
+// recording later. Kept, the pool is reset with the first one's (a reset is cheap) and the next recording finds it ready
+bool desc_pool_keep() {
+    static const bool v = !getenv("RX_VK_DESC_POOL_KEEP") || atoi(getenv("RX_VK_DESC_POOL_KEEP")) != 0;
+    return v;
+}
+constexpr uint32_t kExtraIdle = 120;   // (recordings of a slot that did not need its idle extra pools before they are destroyed)
+VkDescriptorPool make_pool(uint32_t shift = 0) {
     // (each recording's pool: 8192 sets of up to 32768 descriptors a type, for the programs with more descriptors than the push limit,
     // 24 or 48 pools at once, and the driver may keep host memory for all of that. A pool that runs out is followed by another of the same
     // size (cur->extra), so a smaller one is safe, and costs a pool made and destroyed per recording in a scene that needs more.
     // RX_VK_DESC_POOL_DIV=<n> (1..32): a n-th of both)
-    static const uint32_t div = getenv("RX_VK_DESC_POOL_DIV") ? (uint32_t)std::clamp(atoi(getenv("RX_VK_DESC_POOL_DIV")), 1, 32) : 1;
+    static const uint32_t div0 = getenv("RX_VK_DESC_POOL_DIV") ? (uint32_t)std::clamp(atoi(getenv("RX_VK_DESC_POOL_DIV")), 1, 32) : 1;
+    const uint32_t div = div0 << std::min(shift, 4u);
     const VkDescriptorPoolSize sizes[] = {
         {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 32768 / div}, {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 16384 / div},
         {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 32768 / div}, {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 4096 / div},
@@ -1801,7 +1831,7 @@ uint64_t ledger_context() {
         for (size_t i = 0; i < n; i++) h = (h ^ ((const uint8_t*)d)[i]) * 1099511628211ull;
     };
     const uint64_t fixed[] = {kStateStamp, kPipeKeyVersion, dev.props.vendorID, dev.props.deviceID, dev.props.driverVersion,
-                              dev.props.apiVersion, (uint64_t)dev.mesh_shader | (uint64_t)dev.mesh_fallback << 1 | (uint64_t)dev.task_mesh_fallback << 7 |
+                              dev.props.apiVersion, (uint64_t)dev.mesh_shader | (uint64_t)dev.mesh_fallback << 1 | (uint64_t)dev.task_mesh_fallback << 7 | (uint64_t)dev.mesh_only_fallback << 8 |
                               (uint64_t)dev.eds3_blend << 2 | (uint64_t)dev.eds3_polygon << 3 | (uint64_t)dev.eds3_clamp << 4 |
                               (uint64_t)dev.eds3_a2c << 5 | (uint64_t)dev.push_descriptor << 6};
     add(fixed, sizeof fixed);
@@ -2712,6 +2742,14 @@ bool log_img_wanted(uint64_t key) {   // (hookshot) RX_VK_LOG_IMG=<key prefix,..
     return false;
 }
 
+/// (hookshot) RX_VK_DEFER_SKIP=1 (default): a draw whose sampled texture is held back for a later frame (the upload budget
+/// spent) is left out of that frame, as a draw whose pipeline is not ready is, and its descriptors are not reused: the next
+/// frame's build meets the texture with the budget fresh and uploads it. =0: drawn as before, the placeholder sampled
+static bool defer_skip_on() {
+    static const bool on = !getenv("RX_VK_DEFER_SKIP") || atoi(getenv("RX_VK_DEFER_SKIP")) != 0;
+    return on;
+}
+
 VkImageView texture_view_of(uint32_t handle, VkImageViewType want, ViewUse use, VkFormat storage_as = VK_FORMAT_UNDEFINED,
                             Texture** tex_out = nullptr, uint32_t* level_out = nullptr) {
     const uint32_t version = texture_slot_version((int)(handle & 0xFFFFF));
@@ -2774,6 +2812,14 @@ VkImageView texture_view_of(uint32_t handle, VkImageViewType want, ViewUse use, 
                      t.d.height, t.d.depth, t.d.levels, (unsigned long long)t.gpu, has_view ? "yes" : "no",
                      has_view && v.set_format ? v.format : 0, has_view && v.set_target ? v.target : -1, (int)want, (int)use);
         }
+    }
+    // (hookshot) The view of a held-back texture is no view: caching it would serve the placeholder for every later draw
+    // of the handle until the game rewrote its slot — a storm hold's release drew the crowd's burst behind the budget, and
+    // the sky behind that kept its washed placeholder for tens of presents (RX_VK_DEFER_SKIP leaves the draws out instead)
+    if (defer_skip_on() && texture_sample_deferred()) {
+        if (tex_out) *tex_out = tex;
+        if (level_out) *level_out = level;
+        return view;
     }
     handle_hits()[key] = {view, tex, dgen, level, version, texture_epoch(), use == ViewUse::Sample || use == ViewUse::Storage};
     if (tex_out) *tex_out = tex;
@@ -3742,8 +3788,12 @@ void build_descriptors(const NvnState& s, const Program& p) {
                         view = VK_NULL_HANDLE, tex = nullptr;
                     }
                     sampler = sampler_for((int)(handle >> 20), d.is_depth);
+                    // (hookshot) A slot that resolved through a held-back texture holds no view to reuse: invalid, so the
+                    // next draw resolves again and its fresh budget uploads the texture (RX_VK_DEFER_SKIP)
+                    const bool held_back = defer_skip_on() && texture_sample_deferred();
                     if (sl)
-                        *sl = TexSlot{handle, version, samp_version, texture_epoch(), dgen_now, samp_retired, samp_frame, view, tex, sampler, true};
+                        *sl = TexSlot{handle, version, samp_version, texture_epoch(), dgen_now, samp_retired, samp_frame,
+                                      view, tex, sampler, !held_back};
                 }
                 upload_defer_ok = false;
                 // (Lichii bd0171f7) the shader clamps its index to the last element: a table that names a texture there may run
@@ -3976,17 +4026,30 @@ bool bind_descriptors(VkCommandBuffer cmd, VkPipelineBindPoint bp, const Program
         for (const VkWriteDescriptorSet& w : wr.writes) fine_n[FC_POOL_DESCS] += w.descriptorCount;
     }
     VkDescriptorSetAllocateInfo ai{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
-    ai.descriptorPool = cur->extra.empty() ? cur->pool : cur->extra.back();
+    const bool keep = desc_pool_keep();
+    const int64_t pool_t0 = prof_now();   // (v0.4.4: the pool's time, exact, for the descriptors cause: PD_POOL)
+    ai.descriptorPool = keep ? (cur->extra_used ? cur->extra[cur->extra_used - 1] : cur->pool)
+                             : (cur->extra.empty() ? cur->pool : cur->extra.back());
     ai.descriptorSetCount = 1;
     ai.pSetLayouts = &p.set_layout;
     VkDescriptorSet set = VK_NULL_HANDLE;
     if (vkAllocateDescriptorSets(dev.device, &ai, &set) != VK_SUCCESS) {
-        cur->extra.push_back(make_pool());
+        if (keep && cur->extra_used < cur->extra.size()) {   // (an idle one kept from an earlier recording: reset already)
+            cur->extra_used++;
+        } else {
+            cur->extra.push_back(make_pool());
+            if (keep) cur->extra_used = cur->extra.size();
+        }
         ai.descriptorPool = cur->extra.back();
-        if (vkAllocateDescriptorSets(dev.device, &ai, &set) != VK_SUCCESS) return false;
+        if (keep) ai.descriptorPool = cur->extra[cur->extra_used - 1];
+        if (vkAllocateDescriptorSets(dev.device, &ai, &set) != VK_SUCCESS) {
+            prof_desc[PD_POOL] += prof_now() - pool_t0;
+            return false;
+        }
     }
     for (auto& w : wr.writes) w.dstSet = set;
     vkUpdateDescriptorSets(dev.device, (uint32_t)wr.writes.size(), wr.writes.data(), 0, nullptr);
+    prof_desc[PD_POOL] += prof_now() - pool_t0;
     vkCmdBindDescriptorSets(cmd, bp, p.layout, 0, 1, &set, 0, nullptr);
     return true;
 }
@@ -4821,8 +4884,18 @@ void dynamic_state(VkCommandBuffer cmd, const NvnState& s, const Targets& at, Vk
     {   // (hookshot) A colour pass after a depth pass tests EQUAL against what another program wrote. Intel's compiler does not give two
         // programs the same position to the last bit, and the ground came out in holes: the sky through them, a white forest.
         // A small margin towards the camera instead. RX_VK_EQ_BIAS=<units>, 0: as the game asks
+        // (longshot d9e40483) Not for a draw that blends: the game keeps such a draw (a haze sheet across Death Mountain Trail's entrance,
+        // program 701ae221d88b2908) where the depth is exactly its own, and LESS_OR_EQUAL drew the whole sheet over the mountain behind:
+        // a flat khaki veil on Intel (Arc 155H). The prepass's colour passes the margin was made for do not blend: some have blending
+        // on with ONE, ZERO (the same as off), and those keep the margin (without it, Death Mountain Trail's ground had holes).
         static const float eq_bias = getenv("RX_VK_EQ_BIAS") ? (float)atof(getenv("RX_VK_EQ_BIAS")) : dev.props.vendorID == 0x8086 ? 64.0f : 0.0f;
-        if (eq_bias > 0 && d.dt && !d.dw && d.dop == VK_COMPARE_OP_EQUAL) {
+        bool blends = false;
+        for (int i = 0; i < at.n && !blends && eq_bias > 0; i++) {
+            const nvn_blend_st& b = s.blend[i];
+            blends = (s.color.blend_en >> i & 1) && at.color_format[i] && (!cur_program || target_write_mask(*cur_program, s, i)) &&
+                     (blend_factor(b.src_rgb) != VK_BLEND_FACTOR_ONE || blend_factor(b.dst_rgb) != VK_BLEND_FACTOR_ZERO);
+        }
+        if (eq_bias > 0 && d.dt && !d.dw && d.dop == VK_COMPARE_OP_EQUAL && !blends) {
             d.dop = VK_COMPARE_OP_LESS_OR_EQUAL;
             d.bias_en = VK_TRUE;
             d.bias[0] = -eq_bias, d.bias[1] = 0.0f, d.bias[2] = 0.0f;
@@ -5133,12 +5206,21 @@ bool writes_sampled_target(uint16_t writes, uint16_t sampled_targets) {
 /// a pass of its own, after a full barrier (begin_pass makes it), as for the clears above: in one pass the GPU orders
 /// the targets' writes with each other only, not with the draws' texture reads of them. (A draw that samples a target
 /// it writes itself is left as it is.) Returns the targets the draw writes. RX_VK_NO_PASS_HAZARDS=1: not checked.
-uint16_t draw_hazards(VkCommandBuffer cmd, const Program& p, const NvnState& s, const Targets& at) {
+uint16_t draw_hazards(VkCommandBuffer cmd, const Program& p, const NvnState& s, const Targets& at, uint16_t& samples) {
     Pass& ps = pass();   // (hookshot, once: the accessor is a call and a thread-local read at each use (__tls_get_addr in the shared library). The same object for the thread's life: draw_begin_recording resets it in place)
     uint16_t writes = 0;
     for (int i = 0; i < at.n; i++)
         if (at.color[i] && target_write_mask(p, s, i)) writes |= (uint16_t)(1u << i);
     if (at.depth && s.ds.dw) writes |= 1u << 8;
+    // (longshot 7daafa7a, #1553) the targets this draw samples, once: colour i bit i, depth bit 8. The pass keeps them as a mask
+    // (draw(): RX_VK_PASS_SAMPLE_MASK) instead of searching a list of every texture the pass sampled for each sampled texture
+    samples = 0;
+    for (const Texture* t : gfx_sampled()) {
+        if (!t) continue;
+        for (int i = 0; i < at.n; ++i)
+            if (at.color[i] == t) samples |= (uint16_t)(1u << i);
+        if (at.depth == t) samples |= 1u << 8;
+    }
     {   // (hookshot: a draw that samples a target it writes itself reads it undefined in Vulkan (a feedback loop): named, a few times)
         static std::atomic<int> self_logged{0};
         if (self_logged.load(std::memory_order_relaxed) < 12)
@@ -5159,16 +5241,7 @@ uint16_t draw_hazards(VkCommandBuffer cmd, const Program& p, const NvnState& s, 
     bool same = ps.depth == at.depth_view && ps.n == at.n && ps.width == at.width && ps.height == at.height;
     for (int i = 0; i < at.n && same; i++) same = ps.color[i] == at.color_view[i];
     if (!same) return writes;   // (other targets: begin_pass ends this pass with a barrier anyway)
-    auto slot_of = [&](const Texture* t) {
-        for (int i = 0; i < at.n; i++)
-            if (at.color[i] == t) return i;
-        return at.depth == t ? 8 : -1;
-    };
-    const char* kind = nullptr;
-    for (const Texture* t : gfx_sampled()) {
-        const int k = slot_of(t);
-        if (k >= 0 && (ps.written >> k & 1) && !(writes >> k & 1)) { kind = "samples a target the pass wrote"; break; }
-    }
+    const char* kind = (samples & ps.written & ~writes) ? "samples a target the pass wrote" : nullptr;
     if (!kind && writes_sampled_target(writes, ps.sampled_targets))
         kind = "writes a target an earlier draw sampled";
     if (!kind) return writes;
@@ -5254,14 +5327,19 @@ void clear_stats(int64_t* clears, int64_t* masked) {
 namespace {
 } // namespace
 
+namespace {
+void mesh_conv_begin_recording();   // (below, with the indirect mesh draws' conversion)
+} // namespace
 void draw_begin_recording(int slot, VkCommandBuffer cmd, uint64_t value) {
     rec_cmd = cmd;
+    mesh_conv_begin_recording();   // (RX_VK_MESH_CONV read for the recording; the last batch let go)
     rec_value = value;
     ParLock lk;
     if ((size_t)slot >= res.size()) res.resize((size_t)slot + 1);
     RecordingRes& r = res[slot];
     if (!r.pool) {
-        r.pool = make_pool();
+        r.pool_shift = pool_shift_first();
+        r.pool = make_pool(r.pool_shift);
         void* mapped = nullptr;
         RecordingRes::Stream s{};
         s.size = kStream;
@@ -5272,9 +5350,31 @@ void draw_begin_recording(int slot, VkCommandBuffer cmd, uint64_t value) {
         if (logged++ < 1) log_alloc_where("a recording stream", s.alloc);
         r.streams.push_back(s);
     } else {
+        const int64_t pool_t0 = prof_now();
         vkResetDescriptorPool(dev.device, r.pool, 0);
-        for (VkDescriptorPool p : r.extra) vkDestroyDescriptorPool(dev.device, p, nullptr);
-        r.extra.clear();
+        // (the last recording of the slot ran out of a pool smaller than whole: the slot's pool is made whole now. With the extra
+        // pools kept, extra_used says the last recording used one)
+        const bool ran_out = desc_pool_keep() ? r.extra_used > 0 : !r.extra.empty();
+        if (ran_out && r.pool_shift > 0) {
+            if (const VkDescriptorPool whole = make_pool(0)) {
+                vkDestroyDescriptorPool(dev.device, r.pool, nullptr);
+                r.pool = whole, r.pool_shift = 0;
+                pools_grown.fetch_add(1, std::memory_order_relaxed);
+            }
+        }
+        if (desc_pool_keep()) {   // (v0.4.4: the extra pools of the last recording reset and kept; idle ones for a long time go)
+            for (size_t i = 0; i < r.extra_used; i++) vkResetDescriptorPool(dev.device, r.extra[i], 0);
+            if (r.extra_used) r.extra_idle = 0;
+            else if (!r.extra.empty() && ++r.extra_idle >= kExtraIdle) {
+                for (VkDescriptorPool p : r.extra) vkDestroyDescriptorPool(dev.device, p, nullptr);
+                r.extra.clear(), r.extra_idle = 0;
+            }
+            r.extra_used = 0;
+        } else {
+            for (VkDescriptorPool p : r.extra) vkDestroyDescriptorPool(dev.device, p, nullptr);
+            r.extra.clear(), r.extra_used = 0;
+        }
+        prof_desc[PD_POOL] += prof_now() - pool_t0;
         // (the streams the last recording of the slot grew into: given back after 120 recordings that stayed in the first, the
         // slot's last one being done (recording_wait). RX_VK_STREAM_KEEP=1: kept)
         static const bool keep = getenv("RX_VK_STREAM_KEEP") != nullptr;
@@ -5299,10 +5399,10 @@ void draw_begin_recording(int slot, VkCommandBuffer cmd, uint64_t value) {
     if (r.c1_at.size() > c1_peak.load(std::memory_order_relaxed)) c1_peak.store(r.c1_at.size(), std::memory_order_relaxed);
     if (++begun % 3000 == 0)
         logf("vk: the recording streams: %zu of %llu MB, the most one held %llu KB; %llu made on demand (%llu MB kept now); "
-             "c1 stages: at most %zu a recording", res.size(),
+             "c1 stages: at most %zu a recording; %llu slots' descriptor pools made whole after one ran out", res.size(),
              (unsigned long long)(kStream >> 20), (unsigned long long)(stream_peak.load(std::memory_order_relaxed) >> 10),
              (unsigned long long)stream_grown.load(), (unsigned long long)(stream_extra.load() >> 20),
-             c1_peak.load(std::memory_order_relaxed));
+             c1_peak.load(std::memory_order_relaxed), (unsigned long long)pools_grown.load(std::memory_order_relaxed));
     r.used = 0, r.before = 0;
     r.c1_at.reset();   // (hookshot: its array kept: emptied at every recording's start, it fills again to about the same size)
     r.ub_snap.clear();
@@ -6663,77 +6763,198 @@ void occ_present(int64_t presents, uint64_t serial, uint64_t done) {
 // then each record's count word copied over x). RX_VK_MESH_IND_COUNT_WORD=1 takes the second word for the count
 // instead; RX_VK_MESH_IND_RAW=1 draws from the records as they are, as before. A first task other than 0 has no Vulkan
 // counterpart (as for the direct draws: drawn from 0).
+// (longshot 9027e7374, SadTransGirl) RX_VK_MESH_CONV (mesh_conv.h): 0 as before, a pass split and four barriers a draw; 1 the ring filled with
+// 1s once, a draw's copy between two full barriers; 2 (the default) as 1, and the draws after each barrier of the game's converted
+// there at once (mesh_conv_batch), so they keep their passes. Read at each recording's start.
 namespace {
 constexpr uint64_t kMeshRing = 4ull << 20;
 VkBuffer mesh_ring = VK_NULL_HANDLE;
 VmaAllocation mesh_ring_mem = nullptr;
 std::mutex mesh_ring_mu;
-uint64_t mesh_ring_at = 0;
+uint64_t mesh_ring_at = 0;   // (mesh_conv.h take: every byte given out, never coming round; mesh_ring_mu)
+std::atomic<uint64_t> mesh_ring_pos{0};   // (the same, for still_holds without the lock)
+// (filled with 1s once, before any recording used it: RX_VK_MESH_CONV=1 and 2. Set after mesh_ring, under mesh_ring_mu: a thread
+// that sees it set sees the ring)
+std::atomic<bool> mesh_ring_filled{false};
 VkBuffer mesh_dbg = VK_NULL_HANDLE;   // (RX_VK_G3_MESHCOUNT)
 VmaAllocation mesh_dbg_mem = nullptr;
 void* mesh_dbg_ptr = nullptr;
 thread_local VkBuffer mesh_conv_buf = VK_NULL_HANDLE;   // (the converted records for the draw in progress)
 thread_local uint64_t mesh_conv_off = 0;
-bool mesh_indirect_convert(VkCommandBuffer cmd, const DrawArgs& d) {
-    mesh_conv_buf = VK_NULL_HANDLE;
-    static const bool raw = getenv("RX_VK_MESH_IND_RAW") && atoi(getenv("RX_VK_MESH_IND_RAW")) != 0;
+int mesh_conv_env() {
+    static const int env = [] {
+        // RX_VK_MESH_CONV=0/1/2 (default 2): 0 converts each indirect mesh draw's arguments at the draw as before (its pass ended, a fill, a copy, four
+        // barriers); 1 the ring filled with 1s once and the copy alone between two full barriers; 2 as 1, and the draws after each barrier of the
+        // game's converted there at once, so they keep their passes. Read at each recording's start
+        const char* e = getenv("RX_VK_MESH_CONV");
+        return e ? std::clamp(atoi(e), 0, 2) : 2;
+    }();
+    return env;
+}
+thread_local int mesh_mode = -1;   // (this recording's RX_VK_MESH_CONV: mesh_conv_begin_recording; -1 on a thread that has not begun one: the switch's)
+int mesh_mode_now() { return mesh_mode >= 0 ? mesh_mode : mesh_conv_env(); }
+thread_local mesh_conv::Batch mesh_batch;   // (RX_VK_MESH_CONV=2: the draws converted at the last barrier of the game's)
+// (the counts behind the log's "indirect mesh draws' arguments" line: mesh_conv_stats)
+enum { kMcOne, kMcBatched, kMcBatches, kMcBatchItems, kMcDropped, kMcStale, kMcNoMesh, kMcCount };
+std::atomic<int64_t> st_mc[kMcCount];
+uint32_t mesh_count_word() {
     static const uint32_t word = getenv("RX_VK_MESH_IND_COUNT_WORD") ? (uint32_t)atoi(getenv("RX_VK_MESH_IND_COUNT_WORD")) & 3 : 0;
+    return word;
+}
+bool mesh_args_rewrite() {
     // (amd-fix: the rewrite with the firsts in the draw does it, RX_VK_MESH_ARGS; this one drew every draw from its first 0)
     static const bool rewrite = getenv("RX_VK_MESH_ARGS") && atoi(getenv("RX_VK_MESH_ARGS")) != 0;   // (sharkiix version: off, as upstream)
-    if (raw || rewrite || !d.mesh || !d.indirect) return false;
+    return rewrite;
+}
+bool mesh_conv_raw() {
+    static const bool raw = getenv("RX_VK_MESH_IND_RAW") && atoi(getenv("RX_VK_MESH_IND_RAW")) != 0;
+    return raw;
+}
+bool mesh_conv_diag() {   // (RX_VK_G3_MESHCOUNT: its twin of the ring is written by the one-by-one conversion only)
+    static const bool on = getenv("RX_VK_G3_MESHCOUNT") != nullptr;
+    return on;
+}
+/// The ring made, and filled with 1s in a submission of its own that is waited for, so that it is filled before any recording
+/// that uses it runs, whichever thread made it. A copy writes only x words (mesh_conv.h: slots at 48 bytes), so
+/// every record's y and z stay 1 from then on. mesh_ring_mu held. Without the fill (no fence, a failed submit) RX_VK_MESH_CONV
+/// 1 and 2 convert as 0 does, with a fill each draw
+bool mesh_ring_make() {
+    void* unused = nullptr;
+    if (!create_buffer(kMeshRing, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT, false, mesh_ring, mesh_ring_mem,
+                       &unused))
+        return false;
+    VkCommandPoolCreateInfo cpci{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
+    cpci.queueFamilyIndex = dev.queue_family;
+    VkCommandPool pool = VK_NULL_HANDLE;
+    if (vkCreateCommandPool(dev.device, &cpci, nullptr, &pool) != VK_SUCCESS) return true;
+    VkCommandBufferAllocateInfo cba{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+    cba.commandPool = pool, cba.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY, cba.commandBufferCount = 1;
+    VkCommandBuffer c = VK_NULL_HANDLE;
+    VkFenceCreateInfo fci{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+    VkFence fence = VK_NULL_HANDLE;
+    bool sent = false;
+    if (vkAllocateCommandBuffers(dev.device, &cba, &c) == VK_SUCCESS && vkCreateFence(dev.device, &fci, nullptr, &fence) == VK_SUCCESS) {
+        VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+        bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+        vkBeginCommandBuffer(c, &bi);
+        vkCmdFillBuffer(c, mesh_ring, 0, VK_WHOLE_SIZE, 1u);
+        VkMemoryBarrier2 mb{VK_STRUCTURE_TYPE_MEMORY_BARRIER_2};
+        mb.srcStageMask = VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, mb.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+        mb.dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, mb.dstAccessMask = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT;
+        VkDependencyInfo di{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
+        di.memoryBarrierCount = 1, di.pMemoryBarriers = &mb;
+        vkCmdPipelineBarrier2(c, &di);
+        if (vkEndCommandBuffer(c) == VK_SUCCESS) {
+            VkCommandBufferSubmitInfo csi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO};
+            csi.commandBuffer = c;
+            VkSubmitInfo2 si{VK_STRUCTURE_TYPE_SUBMIT_INFO_2};
+            si.commandBufferInfoCount = 1, si.pCommandBufferInfos = &csi;
+            std::lock_guard qk(dev.present_mu);   // (one queue: submits and presents take turns)
+            queue_flush_locked();
+            sent = vkQueueSubmit2(dev.queue, 1, &si, fence) == VK_SUCCESS;
+        }
+    }
+    // (a fill that is not known done keeps its pool and fence: the GPU may still run it)
+    const bool filled = sent && vkWaitForFences(dev.device, 1, &fence, VK_TRUE, 5000000000ull) == VK_SUCCESS;
+    mesh_ring_filled.store(filled, std::memory_order_release);
+    if (filled || !sent) {
+        if (fence) vkDestroyFence(dev.device, fence, nullptr);
+        vkDestroyCommandPool(dev.device, pool, nullptr);
+    }
+    logf("vk: the indirect mesh draws' ring (%llu MB) %s", (unsigned long long)(kMeshRing >> 20),
+         filled ? "made and filled with 1s" : "made, but its fill did not complete: each draw fills its slot (RX_VK_MESH_CONV=0)");
+    return true;
+}
+/// n records' slot in the ring (made on first use); false: no ring
+bool mesh_ring_slot(uint32_t n, uint64_t* off, uint64_t* start) {
+    std::lock_guard lk(mesh_ring_mu);
+    if (!mesh_ring && !mesh_ring_make()) return false;
+    *off = mesh_conv::take(mesh_ring_at, kMeshRing, n, start);
+    mesh_ring_pos.store(mesh_ring_at, std::memory_order_relaxed);
+    return true;
+}
+bool mesh_indirect_convert(VkCommandBuffer cmd, const DrawArgs& d) {
+    mesh_conv_buf = VK_NULL_HANDLE;
+    if (mesh_conv_raw() || mesh_args_rewrite() || !d.mesh || !d.indirect) return false;
+    const int mode = mesh_mode_now();
+    if (mode >= 2 && !mesh_conv_diag() && mesh_ring_filled.load(std::memory_order_acquire)) {   // (converted at the barrier before it: mesh_conv_batch)
+        if (const mesh_conv::Entry* e = mesh_batch.take(cmd, d.op)) {
+            if (mesh_conv::still_holds(mesh_ring_pos.load(std::memory_order_relaxed), e->start, kMeshRing)) {
+                st_mc[kMcBatched].fetch_add(1, std::memory_order_relaxed);
+                mesh_conv_buf = mesh_ring, mesh_conv_off = e->off;
+                return true;
+            }
+            st_mc[kMcStale].fetch_add(1, std::memory_order_relaxed);   // (the ring came round onto it: converted again below)
+        }
+    }
     PROF_EXACT();   // (a pass ended and three barriers: not one of the cheap per-draw steps PROF_DRAW samples)
-    const uint32_t n = (uint32_t)std::clamp(d.max, 1, 4096);
+    const uint32_t word = mesh_count_word();
+    const uint32_t n = (uint32_t)std::clamp(d.max, 1, (int)mesh_conv::kMaxRecords);
     const uint32_t stride = d.stride > 0 ? (uint32_t)d.stride : 8;
     const BufferRef args = gpu_buffer_bind(d.indirect, (uint64_t)(n - 1) * stride + 4 * (word + 1), false);
     if (!args) return false;
-    uint64_t off;
-    {
-        std::lock_guard lk(mesh_ring_mu);
-        if (!mesh_ring) {
-            void* unused = nullptr;
-            if (!create_buffer(kMeshRing, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT, false, mesh_ring,
-                               mesh_ring_mem, &unused))
-                return false;
-        }
-        const uint64_t bytes = ((uint64_t)n * 12 + 15) & ~15ull;
-        if (mesh_ring_at + bytes > kMeshRing) mesh_ring_at = 0;   // (4 MB: frames of draws before it comes round)
-        off = mesh_ring_at;
-        mesh_ring_at += bytes;
-    }
+    uint64_t off = 0, start = 0;
+    if (!mesh_ring_slot(n, &off, &start)) return false;
+    st_mc[kMcOne].fetch_add(1, std::memory_order_relaxed);
     end_pass(cmd);
-    VkMemoryBarrier2 mb{VK_STRUCTURE_TYPE_MEMORY_BARRIER_2};
-    VkDependencyInfo di{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
-    di.memoryBarrierCount = 1, di.pMemoryBarriers = &mb;
-    mb.srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, mb.srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT;
-    mb.dstStageMask = VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, mb.dstAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT;
-    vkCmdPipelineBarrier2(cmd, &di);
-    // (RX_VK_CHECKPOINTS: the conversion's fill and copy are transfer work between the game's culling dispatch and the mesh draws, ours: a
-    // marker each, at the arguments' address, so a stall report shows whether the GPU was in them)
-    checkpoint_mark(cmd, d.indirect, 's', 'C', n, stride);
-    vkCmdFillBuffer(cmd, mesh_ring, off, (uint64_t)n * 12, 1u);
-    mb.srcStageMask = VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, mb.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
-    mb.dstStageMask = VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, mb.dstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
-    vkCmdPipelineBarrier2(cmd, &di);
-    std::vector<VkBufferCopy> regions(n);
-    for (uint32_t i = 0; i < n; i++) regions[i] = {args.offset + (uint64_t)i * stride + 4 * word, off + (uint64_t)i * 12, 4};
-    checkpoint_mark(cmd, d.indirect, 'y', 'C', n, stride);
-    vkCmdCopyBuffer(cmd, args.buffer, mesh_ring, n, regions.data());
-    {   // (diagnosis, default off) RX_VK_G3_MESHCOUNT=1: the same counts into a host-visible twin of the ring, for mesh_count_note
-        static const bool on = getenv("RX_VK_G3_MESHCOUNT") != nullptr;
-        if (on) {
-            if (!mesh_dbg && !create_buffer(kMeshRing, VK_BUFFER_USAGE_TRANSFER_DST_BIT, true, mesh_dbg, mesh_dbg_mem, &mesh_dbg_ptr)) mesh_dbg = VK_NULL_HANDLE;
-            if (mesh_dbg) {
-                std::vector<VkBufferCopy> r2(n);
-                for (uint32_t i = 0; i < n; i++) r2[i] = {args.offset + (uint64_t)i * stride + 4 * word, off + (uint64_t)i * 12, 4};
-                vkCmdCopyBuffer(cmd, args.buffer, mesh_dbg, n, r2.data());
-            }
+    GprofSpan gp(cmd, "meshconv (an indirect mesh draw's arguments -> {count, 1, 1}, with its barriers)");   // (RX_VK_PASS_TIMING)
+    thread_local std::vector<VkBufferCopy> regions;
+    regions.resize(n);
+    for (uint32_t i = 0; i < n; i++) regions[i] = {args.offset + (uint64_t)i * stride + 4 * word, off + (uint64_t)i * mesh_conv::kRecord, 4};
+    if (mode >= 1 && mesh_ring_filled.load(std::memory_order_acquire)) {
+        // (y and z are 1 already: the copy alone, ordered after what wrote the counts and before the draw by full barriers. The
+        // pass the draw opens right after starts with nothing recorded since the second: its barrier is left out)
+        full_barrier(cmd, "barrier (before an indirect mesh draw's arguments)");
+        checkpoint_mark(cmd, d.indirect, 'y', 'C', n, stride);
+        vkCmdCopyBuffer(cmd, args.buffer, mesh_ring, n, regions.data());
+    } else {
+        VkMemoryBarrier2 mb{VK_STRUCTURE_TYPE_MEMORY_BARRIER_2};
+        VkDependencyInfo di{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
+        di.memoryBarrierCount = 1, di.pMemoryBarriers = &mb;
+        mb.srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, mb.srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT;
+        mb.dstStageMask = VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, mb.dstAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT;
+        vkCmdPipelineBarrier2(cmd, &di);
+        // (RX_VK_CHECKPOINTS: the conversion's fill and copy are transfer work between the game's culling dispatch and the mesh draws, ours: a
+        // marker each, at the arguments' address, so a stall report shows whether the GPU was in them)
+        checkpoint_mark(cmd, d.indirect, 's', 'C', n, stride);
+        vkCmdFillBuffer(cmd, mesh_ring, off, (uint64_t)n * mesh_conv::kRecord, 1u);
+        mb.srcStageMask = VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, mb.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+        mb.dstStageMask = VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, mb.dstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+        vkCmdPipelineBarrier2(cmd, &di);
+        checkpoint_mark(cmd, d.indirect, 'y', 'C', n, stride);
+        vkCmdCopyBuffer(cmd, args.buffer, mesh_ring, n, regions.data());
+    }
+    if (mesh_conv_diag()) {   // (diagnosis, default off) RX_VK_G3_MESHCOUNT=1: the same counts into a host-visible twin of the ring, for mesh_count_note
+        if (!mesh_dbg && !create_buffer(kMeshRing, VK_BUFFER_USAGE_TRANSFER_DST_BIT, true, mesh_dbg, mesh_dbg_mem, &mesh_dbg_ptr)) mesh_dbg = VK_NULL_HANDLE;
+        if (mesh_dbg) {
+            std::vector<VkBufferCopy> r2(n);
+            for (uint32_t i = 0; i < n; i++) r2[i] = {args.offset + (uint64_t)i * stride + 4 * word, off + (uint64_t)i * mesh_conv::kRecord, 4};
+            vkCmdCopyBuffer(cmd, args.buffer, mesh_dbg, n, r2.data());
         }
     }
-    mb.srcStageMask = VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, mb.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
-    mb.dstStageMask = VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT, mb.dstAccessMask = VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT;
-    vkCmdPipelineBarrier2(cmd, &di);
+    if (mode >= 1 && mesh_ring_filled.load(std::memory_order_acquire)) {
+        full_barrier(cmd, "barrier (after an indirect mesh draw's arguments)");
+    } else {
+        VkMemoryBarrier2 mb{VK_STRUCTURE_TYPE_MEMORY_BARRIER_2};
+        VkDependencyInfo di{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
+        di.memoryBarrierCount = 1, di.pMemoryBarriers = &mb;
+        mb.srcStageMask = VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, mb.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+        mb.dstStageMask = VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT, mb.dstAccessMask = VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT;
+        vkCmdPipelineBarrier2(cmd, &di);
+    }
     mesh_conv_buf = mesh_ring, mesh_conv_off = off;
     return true;
+}
+/// (draw(), dispatch()) GPU work that may write buffer memory is recorded: the batch's counts, read before it, may not be the
+/// draws' any more. Its draws not yet drawn convert one by one again
+void mesh_batch_drop() {
+    if (!mesh_batch.live()) return;
+    st_mc[kMcDropped].fetch_add((int64_t)(mesh_batch.e.size() - mesh_batch.next), std::memory_order_relaxed);
+    mesh_batch.clear();
+}
+void mesh_conv_begin_recording() {
+    mesh_mode = mesh_conv_env();
+    mesh_batch.clear();
 }
 /// (RX_VK_G3_MESHCOUNT=1, diagnosis) an indirect mesh draw of program key put its record at ring offset off: 2000 draws on, the count the GPU
 /// wrote there is read, and every 4000 of them the programs with the most workgroups are logged (draws, mean, largest, sum a frame)
@@ -6763,6 +6984,65 @@ void mesh_count_note(uint64_t key, uint64_t off) {
     agg.clear();
 }
 } // namespace
+/// (vk_replay.cpp) RX_VK_MESH_CONV=2 on a GPU with mesh shaders: the replay scans after each barrier of the game's. Not with the
+/// diagnosis twin (RX_VK_G3_MESHCOUNT), whose counts are written by the one-by-one conversion
+bool mesh_conv_batching() { return mesh_mode_now() >= 2 && dev.mesh_shader && !mesh_args_rewrite() && !mesh_conv_raw() && !mesh_conv_diag(); }
+/// this recording's RX_VK_MESH_CONV (the recording thread's)
+int mesh_conv_mode() { return mesh_mode_now(); }
+/// (vk_replay.cpp, right after a barrier of the game's: the pass ended, a full barrier recorded) The indirect mesh draws up to
+/// the next barrier converted here at once (mesh_conv.h scan found them): their copies, then one full barrier. draw() takes
+/// each one's slot; any it cannot (mesh_batch.take) converts as before. With none, the last batch is let go
+void mesh_conv_batch(VkCommandBuffer cmd, const mesh_conv::Item* items, size_t n) {
+    mesh_batch.clear();
+    if (!n || !mesh_conv_batching()) return;
+    {
+        std::lock_guard lk(mesh_ring_mu);
+        if (!mesh_ring && !mesh_ring_make()) return;
+    }
+    if (!mesh_ring_filled.load(std::memory_order_acquire)) return;
+    PROF_EXACT();
+    const uint32_t word = mesh_count_word();
+    struct Copy {
+        BufferRef args;
+        uint32_t n, stride;
+        uint64_t off, start;
+        const void* op;
+    };
+    thread_local std::vector<Copy> copies;
+    copies.clear();
+    for (size_t i = 0; i < n; i++) {   // (bound first: a binding's own work, if it records any, is ordered by the barrier below)
+        const uint32_t k = (uint32_t)std::clamp(items[i].max, 1, (int)mesh_conv::kMaxRecords);
+        const uint32_t stride = items[i].stride > 0 ? (uint32_t)items[i].stride : 8;
+        const BufferRef args = gpu_buffer_bind(items[i].indirect, (uint64_t)(k - 1) * stride + 4 * (word + 1), false);
+        if (args) copies.push_back({args, k, stride, 0, 0, items[i].op});   // (one not bound: its draw tries again, as before)
+    }
+    if (copies.empty()) return;
+    {
+        std::lock_guard lk(mesh_ring_mu);
+        for (Copy& c : copies) c.off = mesh_conv::take(mesh_ring_at, kMeshRing, c.n, &c.start);
+        mesh_ring_pos.store(mesh_ring_at, std::memory_order_relaxed);
+    }
+    end_pass(cmd);   // (ended by the game's barrier already)
+    GprofSpan gp(cmd, "meshconv batch (the indirect mesh draws' arguments after a barrier of the game's, with its barrier)");
+    full_barrier(cmd, "barrier (before the indirect mesh draws' arguments)");   // (left out: the game's is right before it)
+    thread_local std::vector<VkBufferCopy> regions;
+    for (const Copy& c : copies) {
+        regions.resize(c.n);
+        for (uint32_t i = 0; i < c.n; i++)
+            regions[i] = {c.args.offset + (uint64_t)i * c.stride + 4 * word, c.off + (uint64_t)i * mesh_conv::kRecord, 4};
+        vkCmdCopyBuffer(cmd, c.args.buffer, mesh_ring, c.n, regions.data());
+        mesh_batch.e.push_back({c.op, c.off, c.start});
+    }
+    full_barrier(cmd, "barrier (after the indirect mesh draws' arguments)");
+    mesh_batch.cmd = cmd;
+    st_mc[kMcBatches].fetch_add(1, std::memory_order_relaxed);
+    st_mc[kMcBatchItems].fetch_add((int64_t)copies.size(), std::memory_order_relaxed);
+}
+/// (vk_replay.cpp's log) out[7]: draws converted one by one, from a batch, batches, draws in them, batch draws converted again
+/// after a write (dropped), after the ring came round (stale), 0 (the layout's seventh); since the last call
+void mesh_conv_stats(int64_t out[7]) {
+    for (int i = 0; i < kMcCount; i++) out[i] = st_mc[i].exchange(0, std::memory_order_relaxed);
+}
 // (hookshot) NVN's indirect mesh draws hold (count, first) and Vulkan's (x, y, z): given as they were, every one drew y = first = 0 workgroups,
 // with no error. They are most of the game's vegetation: the forest's trees, ferns and grass (GPU culling writes their counts, so they can only
 // be moved on the GPU): each count is copied into this buffer of (count, 1, 1) just before its draw. The GPU runs the copies and draws in
@@ -6995,8 +7275,54 @@ bool fallback_pipelines_ready(Program& p) {
     return !p.fallback_compute.empty();
 }
 
+/// (hookshot 9f8d336d, issue 640, RX_VK_LOG_FALLBACK=1, off by default) What the fallback's mesh draws ask for against what it runs:
+/// task workgroups (or mesh workgroups without a task) asked, and the most one dispatch holds here (the slots: capacity, over a task's
+/// threads), the draws that ask for more, the indirect ones and their entries past the first. The indirect counts are read from
+/// guest memory as the CPU sees them (the GPU's culling may have written others since). 30 draws that ask for more are named, then
+/// a line every 4000 fallback draws. Upstream's slots held 1024: its Kokiri Forest cut 3149 of 192000 draws; here, 65535
+void fallback_note(const Program& p, const DrawArgs& d, uint32_t capacity) {
+    static const bool on = getenv("RX_VK_LOG_FALLBACK") && atoi(getenv("RX_VK_LOG_FALLBACK")) != 0;
+    if (!on) return;
+    const uint32_t threads = p.fallback_task ? std::max(1u, p.fallback_task_threads) : 1u;
+    const uint32_t most = p.fallback_task ? std::max(1u, capacity / threads) : capacity;   // (workgroups one dispatch runs)
+    uint64_t asked = 0, run = 0;
+    uint32_t entries = 1;
+    if (d.indirect) {
+        entries = (uint32_t)std::max(d.max, 1);
+        const uint32_t stride = d.stride > 0 ? (uint32_t)d.stride : 8;
+        for (uint32_t i = 0; i < std::min(entries, 64u); i++) {
+            uint32_t count = 0;
+            host->gpu_read(d.indirect + (uint64_t)i * stride, &count, 4);
+            asked += count;
+            if (i == 0) run = std::min(count, most);
+        }
+    } else {
+        asked = (uint32_t)std::max(d.groups[0], 0);
+        run = std::min<uint64_t>(asked, most);
+    }
+    static std::atomic<uint64_t> draws{0}, cut{0}, indirect{0}, multi{0}, asked_all{0}, run_all{0}, most_asked{0};
+    const uint64_t n = ++draws;
+    indirect += d.indirect != 0, multi += entries > 1, asked_all += asked, run_all += run;
+    uint64_t was = most_asked.load();
+    while (asked > was && !most_asked.compare_exchange_weak(was, asked)) {}
+    if (asked > run) {
+        static std::atomic<int> told{0};
+        cut++;
+        if (told++ < 30)
+            logf("vk: fallback: draw of %016llx cut: %s%s, %llu %s workgroups asked in %u entr%s, %llu run (a dispatch holds %u; groups word %d)",
+                 (unsigned long long)p.key, d.indirect ? "indirect" : "direct", p.fallback_task ? ", task" : "", (unsigned long long)asked,
+                 p.fallback_task ? "task" : "mesh", entries, entries == 1 ? "y" : "ies", (unsigned long long)run, most, d.groups[0]);
+    }
+    if (n % 4000 == 0)
+        logf("vk: fallback: %llu mesh draws, %llu cut, %llu indirect (%llu with more than one entry); workgroups asked %llu, run %llu, "
+             "largest draw %llu", (unsigned long long)n, (unsigned long long)cut.load(), (unsigned long long)indirect.load(),
+             (unsigned long long)multi.load(), (unsigned long long)asked_all.load(), (unsigned long long)run_all.load(),
+             (unsigned long long)most_asked.load());
+}
+
 /// The dispatches of a mesh draw, outside any render pass, and the vertex count its graphics draw then covers.
 bool fallback_record(VkCommandBuffer cmd, Program& p, const DrawArgs& d) {
+    fallback_note(p, d, Shader::Backend::SPIRV::MESH_FALLBACK_CAPACITY);
     if (d.count_addr) {   // (more than one draw in the records: each its own dispatch, not one)
         static std::atomic<int> told{0};
         if (told++ < 2) logf("vk: fallback: a mesh draw with a count buffer is left out (issue 640)");
@@ -7285,6 +7611,21 @@ static void hdr_find(const NvnState& s, const Program& p, const Targets& at) {
     logf("%s", line);
 }
 
+// (longshot 9027e7374) a program that may write buffer memory (a storage buffer, an image, global memory): RX_VK_MESH_CONV=2's batch
+// counts, read before it, may not be the later draws' once it has run
+static bool writes_memory(const Program& p) {
+    for (const Stage& st : p.stages) {
+        const auto& info = st.info;
+        const auto written = [](const auto& ds) {
+            return std::any_of(ds.begin(), ds.end(), [](const auto& d) { return d.is_written; });
+        };
+        if (info.stores_global_memory || written(info.storage_buffers_descriptors) ||
+            written(info.image_buffer_descriptors) || written(info.image_descriptors))
+            return true;
+    }
+    return false;
+}
+
 void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
     Pass& ps = pass();   // (hookshot, once: the accessor is a call and a thread-local read at each use (__tls_get_addr in the shared library). The same object for the thread's life: draw_begin_recording resets it in place)
     if (par_stats_on) par_stats_draw();
@@ -7449,35 +7790,28 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
         if (shader) st_shader_wait_ms += ms;
         return fresh;
     };
-    // (hookshot) The storm hold: while the translation queue is still hundreds deep — a cold area's arrival, its fade
-    // rewriting the texture handles every game frame, each frame's state its own variant — this thread's draws are
-    // left out, and the frames show the area's earlier picture, as a draw left out always does. The frames the storm
-    // itself drew sampled the fade's transient words (white/cyan blowouts, green bands — the picture regression that
-    // 9c42f5e7's render-instead-of-stall unmasked); the queue's depth is the churn's own clock, so the first presents
-    // past the hold sample the state by then settled. The waits below still run, and still steal: it is what drains
-    // the queue at the pace the storm always had. Engaged above RX_VK_STORM_HOLD jobs (200), released below half of
-    // that: the queue saws with each frame's pushes, and a hold that flickered with it drew the churn's transient
-    // frames anyway. 0: off, drawn as before
-    static const int hold_deep = getenv("RX_VK_STORM_HOLD") ? atoi(getenv("RX_VK_STORM_HOLD")) : 0;   // (off by default since v0.4.3: the steal it covers for is off; RX_VK_STORM_HOLD=200 with RX_VK_JOB_STEAL=1)
-    static const int64_t hold_off = (int64_t)std::max(1, hold_deep / 2);
-    thread_local bool hold_on = false;
-    const int64_t pending_jobs = jobs_pending();
-    if (hold_deep <= 0) hold_on = false;
-    else if (hold_on) {
-        if (pending_jobs < hold_off) hold_on = false;
-    } else if (pending_jobs >= (int64_t)hold_deep) hold_on = true;
-    static std::atomic<int64_t> st_storm_holds{0};
-    if (hold_on && cp->ready.load(std::memory_order_acquire)) {
+    // (hookshot) The storm hold (storm_hold.h; ticked once a present in vk_replay.cpp's do_present). By default the hold
+    // withholds the *present*: the frames go on being drawn — the game's state, its upload stream and its exposure meter
+    // stay live, so the release has nothing to re-adapt and no upload burst to meet — and present_image() shows nothing,
+    // so the compositor keeps the last good picture while the churn's frames (white/cyan blowouts, green bands: the fade's
+    // transient words that #1714's render-instead-of-stall unmasked) never reach the screen. RX_VK_STORM_HOLD_PRESENT=0:
+    // the draws are left out instead, as the hold's first version did — the frame shows the area's earlier picture (or the
+    // teleport's black) and the waits below still run and still steal, which drains the queue at the storm's own pace.
+    // RX_VK_STORM_HOLD=0: no hold at all, drawn and shown as before.
+    if (storm_hold_draws_held() && cp->ready.load(std::memory_order_acquire)) {
         st_pending_skips++;
+        static std::atomic<int64_t> st_storm_holds{0};
         st_storm_holds.fetch_add(1, std::memory_order_relaxed);
         if (st_storm_holds.load(std::memory_order_relaxed) < 8 ||
             st_storm_holds.load(std::memory_order_relaxed) % 2000 == 0)
-            logf("vk: a translation storm: %d jobs queued, the frame's draws left out until it drains",
-                 jobs_pending());
+            logf("vk: a translation storm: %d jobs queued, the frame's draws left out until it drains", jobs_pending());
         return;
     }
     if (!cp->ready.load(std::memory_order_acquire)) {
-        if (may_skip) return void(st_pending_skips++);
+        if (may_skip) {
+            jobs_demand(cp->ready);   // (RX_VK_JOB_DEMAND: this frame's draw wants it: ahead of what no draw wants lately)
+            return void(st_pending_skips++);
+        }
         // (hookshot) The translation finished in this draw's own wait: stolen to run here (9c42f5e7) or a worker seen
         // finishing it just then. Its variant's answers were read mid-storm — a cold area's arrival fades textures in and
         // out and rewrites the handles every frame — and what the frames of the storm drew from them showed as white/cyan
@@ -7518,6 +7852,7 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
         // first visit). RX_VK_PIPE_WAIT_FRESH=0: those are left out too (counted: st_pipe_fresh_skips); RX_VK_PIPE_SKIP=0: every draw waits
         static const bool wait_fresh = !getenv("RX_VK_PIPE_WAIT_FRESH") || strcmp(getenv("RX_VK_PIPE_WAIT_FRESH"), "0") != 0;
         if (may_skip || !(always_wait || wait_fresh)) {
+            jobs_demand(pe->ready);   // (RX_VK_JOB_DEMAND, as the program's above)
             st_pending_skips++;
             if (!may_skip) st_pipe_fresh_skips.fetch_add(1, std::memory_order_relaxed);
             return;
@@ -7632,6 +7967,21 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
         FINE_N(FC_BUILDS, 1);
         trace_tex_hit = nullptr, trace_tex_mask = 0;
         build_descriptors(s, p);   // (textures first used here are uploaded by the recording's upload command buffer)
+        // (hookshot) A draw whose build held a sampled texture back: it would sample the placeholder, and the descriptor
+        // set it built would keep doing so for the presents it is reused over — a storm hold's release drew the market
+        // with the crowd's upload burst behind the budget, and the sky behind that stayed a washed placeholder for tens
+        // of presents, long after the churn itself was over. The draw is left out of this frame (the picture keeps what
+        // it had where it drew, as a draw whose pipeline is not ready always has), and the set is not reused: the next
+        // frame's build meets the texture with the budget fresh and uploads it. RX_VK_DEFER_SKIP=0: drawn as before
+        if (defer_skip_on() && texture_sample_deferred_take()) {
+            static std::atomic<int64_t> st_defer_skips{0};
+            if (st_defer_skips.fetch_add(1, std::memory_order_relaxed) < 8 ||
+                st_defer_skips.load(std::memory_order_relaxed) % 2000 == 0)
+                logf("vk: a draw left out: its texture is held back for a later frame (program %016llx)",
+                     (unsigned long long)p.key);
+            last_desc_valid = false;   // (the set it built names the placeholder: the next draw builds its own)
+            return;
+        }
         FINE_N(FC_WRITES, (int64_t)dw().writes.size());
         static std::string last_logged;
         if (dump_on()) {
@@ -7664,10 +8014,10 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
     }
     static const bool barrier_every = getenv("RX_VK_BARRIER_EVERY_DRAW") != nullptr;   // (an experiment: a pass each)
     if (barrier_every) end_pass(cmd);
-    uint16_t writes;
+    uint16_t writes, samples;
     {
         FINE_SCOPE(FT_HAZARD);
-        writes = draw_hazards(cmd, p, s, at);
+        writes = draw_hazards(cmd, p, s, at, samples);
     }
     BufferRef mesh_args{};
     uint32_t mesh_args_at = 0;
@@ -7733,6 +8083,9 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
             mesh_args = {mesh_args_buffer, (VkDeviceSize)mesh_args_at * 16, (VkDeviceSize)n * 16, 0};
         }
     }
+    // (RX_VK_MESH_CONV=2: a draw that may write memory comes before the batch's later draws: their counts are read again. A
+    // compute-fallback mesh draw runs compute work of its own)
+    if (mesh_batch.live() && (writes_memory(p) || p.fallback)) mesh_batch_drop();
     if (p.fallback && d.mesh && !fallback_record(cmd, p, d)) SKIP_HERE();
     {
         FINE_SCOPE(FT_HAZARD);
@@ -7742,14 +8095,25 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
     gprof_run(cmd, p.key);   // (RX_VK_PASS_TIMING=2)
     ps.prog = p.key;
     if (!ps.first_prog) ps.first_prog = p.key;
-    for (const Texture* t : gfx_sampled()) {
-        if (std::find(ps.sampled.begin(), ps.sampled.end(), t) != ps.sampled.end()) continue;
-        ps.sampled.push_back(t);
-        int slot = -1;
-        for (int i = 0; i < at.n; i++)
-            if (at.color[i] == t) { slot = i; break; }
-        if (slot < 0 && at.depth == t) slot = 8;
-        if (slot >= 0) ps.sampled_targets |= (uint16_t)(1u << slot);
+    // (longshot 7daafa7a, #1553; RX_VK_PASS_SAMPLE_MASK=0: the list of every distinct texture the pass sampled, searched for each
+    // sampled texture of each draw, as before) The pass keeps the sampled targets as a mask; the list of textures is kept only for
+    // the traces that print it (RX_VK_PASS_TRACE, the pass timing's label)
+    static const bool mask_on = !getenv("RX_VK_PASS_SAMPLE_MASK") || atoi(getenv("RX_VK_PASS_SAMPLE_MASK")) != 0;
+    if (mask_on) {
+        ps.sampled_targets |= samples;
+        if (pass_trace_on() || gprof_on())
+            for (const Texture* t : gfx_sampled())
+                if (t && std::find(ps.sampled.begin(), ps.sampled.end(), t) == ps.sampled.end()) ps.sampled.push_back(t);
+    } else {
+        for (const Texture* t : gfx_sampled()) {
+            if (std::find(ps.sampled.begin(), ps.sampled.end(), t) != ps.sampled.end()) continue;
+            ps.sampled.push_back(t);
+            int slot = -1;
+            for (int i = 0; i < at.n; i++)
+                if (at.color[i] == t) { slot = i; break; }
+            if (slot < 0 && at.depth == t) slot = 8;
+            if (slot >= 0) ps.sampled_targets |= (uint16_t)(1u << slot);
+        }
     }
     ps.written |= writes;
     if (pl != last_pipeline) {
@@ -8035,7 +8399,8 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
     }
     if (g_fine) fine_ns[FT_VERTEX] += prof_now() - fine_vertex_t0;
     const VkIndexType itype = d.itype == 0 ? VK_INDEX_TYPE_UINT8_EXT : d.itype == 1 ? VK_INDEX_TYPE_UINT16 : VK_INDEX_TYPE_UINT32;
-    if (d.indexed && d.itype == 0 && !dev.index_uint8) SKIP_HERE();
+    // (longshot f121b9e9: quads read their indices on the CPU and draw with 32-bit ones: they need no uint8 index support)
+    if (d.indexed && d.itype == 0 && !dev.index_uint8 && d.prim != NVN_DRAW_PRIMITIVE_QUADS) SKIP_HERE();
     if (d.prim == NVN_DRAW_PRIMITIVE_QUADS) {   // (quads as two triangles each: indices made in the stream)
         if (d.indirect || d.count < 4) SKIP_HERE();
         if (d.count > (1 << 24)) SKIP_HERE();   // (hookshot: 4M quads at most; the game's count sized host vectors of up to 16 GB)
@@ -9395,7 +9760,7 @@ bool prepare_run(void (*progress)(size_t done, size_t total), bool background) {
         ci.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
         ci.stage.module = p.stages[0].module;
         ci.stage.pName = "main";
-        pin_subgroup(ci.stage, p.workgroup[0]);
+        pin_subgroup(ci.stage, p.workgroup[0], uint64_t(p.workgroup[0]) * p.workgroup[1] * p.workgroup[2]);
         ci.layout = p.layout;
         struct Timed {
             PrepKind& k;
@@ -9567,6 +9932,20 @@ void state_list_run() {
     if (getenv("RX_VK_NO_STATE_LIST") || !seed_open()) return;
     state_list_prepare(nullptr);
     if (!getenv("RX_VK_SEED_CHECK")) seed_close();
+}
+/// (test only, RX_VK_TEST_PREDICT_PLAY=<seconds>) The prediction in play, as a lazy update's end starts it, <seconds> after the game's
+/// start, whatever the caches hold: a run that is two minutes long can see what it does to the game (hookshot_compiled.bin
+/// taken away first, so that every predicted pipeline is made)
+void predict_play_test() {
+    const char* e = getenv("RX_VK_TEST_PREDICT_PLAY");
+    if (!e || !*e) return;
+    const int after = atoi(e);
+    std::thread([after] {
+        SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_IDLE);
+        Sleep((DWORD)std::max(0, after) * 1000);
+        logf("vk: test: the prediction in play starts now (RX_VK_TEST_PREDICT_PLAY)");
+        if (prepare_run(nullptr, true) && !prepare_stopped()) predict_run(nullptr, true);   // (as prepare_background's end: the programs are read in first)
+    }).detach();
 }
 void prepare_background() {
     std::thread([] {
@@ -9796,7 +10175,7 @@ void precompile_run(void (*progress)(size_t done, size_t total), bool wait) {
                     ci.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
                     ci.stage.module = p.stages[0].module;
                     ci.stage.pName = "main";
-                    pin_subgroup(ci.stage, p.workgroup[0]);
+                    pin_subgroup(ci.stage, p.workgroup[0], uint64_t(p.workgroup[0]) * p.workgroup[1] * p.workgroup[2]);
                     ci.layout = p.layout;
                     VkPipeline made = VK_NULL_HANDLE;
                     const bool quick = precompile_compute_quick(ci);
@@ -9997,6 +10376,13 @@ void predict_run(void (*progress)(size_t done, size_t total), bool background, b
     // status line, never ended the step. After the wait the program is left to play, noted in hookshot_predict_slow.txt so the
     // next prediction leaves it out, and its worker is let go on its own)
     static const int wait_s = getenv("RX_VK_PREDICT_WAIT_S") ? atoi(getenv("RX_VK_PREDICT_WAIT_S")) : 60;
+    // (v0.4.3.1, RX_VK_PREDICT_PLAY_GENTLE=0 for what it was: the prediction in play, behind a lazy update's game, is made small and
+    // polite: RX_VK_PREDICT_PLAY_WORKERS workers (2) at the idle priority, each waiting for its next program while the PC has less than
+    // RX_VK_PREDICT_PLAY_FREE_MB (6144) of memory available. With the ledger short of the ~41000 pipelines it predicts, four workers
+    // below normal priority took the game from 95 fps to 30, frames of 1.2 s, on a 32 GB PC already holding 28 GB private)
+    static const bool gentle = !getenv("RX_VK_PREDICT_PLAY_GENTLE") || atoi(getenv("RX_VK_PREDICT_PLAY_GENTLE")) != 0;
+    static const unsigned long long play_free_mb = getenv("RX_VK_PREDICT_PLAY_FREE_MB") ? strtoull(getenv("RX_VK_PREDICT_PLAY_FREE_MB"), nullptr, 10) : predictlimits::kDefaultPlayFreeMB;
+    const bool soft = background && !noted && gentle;
     // (test only, RX_VK_TEST_SLOW_PIPELINE=<program key in hex>:<seconds>: that program's predicted builds sleep, as a hung driver would)
     static const std::pair<uint64_t, int> test_slow = [] {
         const char* e = getenv("RX_VK_TEST_SLOW_PIPELINE");
@@ -10004,7 +10390,7 @@ void predict_run(void (*progress)(size_t done, size_t total), bool background, b
         int s = 0;
         return e && sscanf(e, "%llx:%d", &k, &s) == 2 ? std::make_pair((uint64_t)k, s) : std::make_pair((uint64_t)0, 0);
     }();
-    const auto worker = [shared, t0, noted, background] {
+    const auto worker = [shared, t0, noted, background, soft] {
         Shared& S = *shared;
         auto& next = S.next;
         auto& done = S.done;
@@ -10024,7 +10410,7 @@ void predict_run(void (*progress)(size_t done, size_t total), bool background, b
         auto& by_program = S.by_program;
         auto& keys = S.keys;
         ub_thread_off();   // (a background thread: see ub_thread_off)
-        SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);   // (as prepare_run's: these are the driver's compiles, see DriverTurn)
+        SetThreadPriority(GetCurrentThread(), soft ? THREAD_PRIORITY_IDLE : THREAD_PRIORITY_BELOW_NORMAL);   // (as prepare_run's: these are the driver's compiles, see DriverTurn)
         driver_cache_only = !noted;
         const unsigned me = worker_n++ % 32;
         std::atomic<uint64_t>& mine = in_flight[me];
@@ -10040,6 +10426,18 @@ void predict_run(void (*progress)(size_t done, size_t total), bool background, b
                     logf("vk: predict: %llu MB of commit left (RX_VK_PREDICT_RESERVE_MB %llu): the prediction stops here, the rest are built in play",
                          commit_left_mb(), reserve_mb);
                 return;
+            }
+            if (soft && play_free_mb) {   // (in play: the game's pages are not pushed out for a speculative build; it waits)
+                bool told = false;
+                while (!prepare_stopped() && !S.abandoned.load() && predictlimits::low_memory(memory_available_mb(), play_free_mb)) {
+                    static std::atomic<bool> said{false};
+                    if (!told && !said.exchange(true))
+                        logf("vk: predict (in play): %llu MB of memory available, under RX_VK_PREDICT_PLAY_FREE_MB %llu: it waits for the PC to have more",
+                             (unsigned long long)memory_available_mb(), play_free_mb);
+                    told = true;
+                    Sleep(500);
+                }
+                if (prepare_stopped() || S.abandoned.load()) return;
             }
             const size_t i = next++;
             if (i >= keys.size()) return;
@@ -10104,7 +10502,8 @@ void predict_run(void (*progress)(size_t done, size_t total), bool background, b
     std::vector<std::thread> threads;
     const unsigned cpus = std::max(1u, std::thread::hardware_concurrency());
     // (in play: a quarter of the CPUs, two to four, below normal priority, and no time budget: with the ledger it builds only what changed)
-    const unsigned workers = background ? std::clamp(cpus / 4, 2u, 4u) : std::clamp(cpus / 2, 1u, 32u);
+    const unsigned workers = soft ? predictlimits::play_workers(cpus, getenv("RX_VK_PREDICT_PLAY_WORKERS"))
+                                  : background ? std::clamp(cpus / 4, 2u, 4u) : std::clamp(cpus / 2, 1u, 32u);
     for (unsigned i = 0; i < workers; i++) threads.emplace_back(worker);
     auto stat_at = std::chrono::steady_clock::now();
     // (a line every 10 s with the programs the workers have in hand and the process's memory, and at once when its commit jumps:
@@ -10192,7 +10591,7 @@ void compute_optimize(Program& q) {
     ci.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
     ci.stage.module = q.stages[0].module;
     ci.stage.pName = "main";
-    pin_subgroup(ci.stage, q.workgroup[0]);
+    pin_subgroup(ci.stage, q.workgroup[0], uint64_t(q.workgroup[0]) * q.workgroup[1] * q.workgroup[2]);
     ci.layout = q.layout;
     const auto t0 = std::chrono::steady_clock::now();
     VkPipeline made = VK_NULL_HANDLE;
@@ -10254,6 +10653,7 @@ static void hdr_find_dispatch(const NvnState& s, uint64_t key) {
 void dispatch(VkCommandBuffer cmd, NvnState& s, uint32_t x, uint32_t y, uint32_t z, uint64_t indirect) {
     if (par_stats_on) par_stats_draw();
     PROF(PROF_DISPATCH);
+    mesh_batch_drop();   // (RX_VK_MESH_CONV=2: it may write the counts of the draws after it)
     DispatchClock dclock;
     s.grid[0] = indirect ? 1 : x, s.grid[1] = indirect ? 1 : y, s.grid[2] = indirect ? 1 : z;
     if (indirect) {   // (the program may read its grid from c0: the counts as the GPU will see them, best effort)
@@ -10382,7 +10782,7 @@ void dispatch(VkCommandBuffer cmd, NvnState& s, uint32_t x, uint32_t y, uint32_t
                 ci.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
                 ci.stage.module = q.stages[0].module;
                 ci.stage.pName = "main";
-                pin_subgroup(ci.stage, q.workgroup[0]);
+                pin_subgroup(ci.stage, q.workgroup[0], uint64_t(q.workgroup[0]) * q.workgroup[1] * q.workgroup[2]);
                 ci.layout = q.layout;
                 static const bool noopt = getenv("RX_VK_NOOPT") != nullptr;
                 if (noopt) ci.flags |= VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT;
@@ -10449,7 +10849,7 @@ void dispatch(VkCommandBuffer cmd, NvnState& s, uint32_t x, uint32_t y, uint32_t
         ci.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
         ci.stage.module = p.stages[0].module;
         ci.stage.pName = "main";
-        pin_subgroup(ci.stage, p.workgroup[0]);
+        pin_subgroup(ci.stage, p.workgroup[0], uint64_t(p.workgroup[0]) * p.workgroup[1] * p.workgroup[2]);
         ci.layout = p.layout;
         {   // (local) RX_VK_NOOPT=1, as for graphics pipelines above
             static const bool noopt = getenv("RX_VK_NOOPT") != nullptr;

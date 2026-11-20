@@ -1414,7 +1414,9 @@ static void vc_take(HosThread *t, int c) {
 static void vc_dequeue(HosThread *t) {
     for (int i = 0; i < vc_nq; i++)
         if (vc_queue[i] == t) {
-            vc_queue[i] = vc_queue[--vc_nq];
+            const int last = vc_nq - 1;
+            vc_queue[i] = vc_queue[last];
+            __atomic_store_n(&vc_nq, last, __ATOMIC_RELEASE);
             break;
         }
     t->vc_queued = 0;
@@ -1667,7 +1669,10 @@ static void vc_acquire(HosThread *t) {
 #endif
     t->vc_since = t0;
     t->vc_queued = 1;
-    if (vc_nq < 1024) vc_queue[vc_nq++] = t;
+    if (vc_nq < 1024) {
+        vc_queue[vc_nq] = t;
+        __atomic_store_n(&vc_nq, vc_nq + 1, __ATOMIC_RELEASE);
+    }
     vc_st.waits++;
     for (;;) {
         /* the worst holder worse than t on a core t may use gives it up at its next checkpoint; after
@@ -1766,19 +1771,37 @@ static void vc_acquire(HosThread *t) {
 #endif
     HOS_JT(JT_VC_WAIT_E, 0, 0);
 }
-static void vc_release(HosThread *t) {
-    if (!t->vc_held) return;
-    AcquireSRWLockExclusive(&vc_lock);
+static void vc_release_locked(HosThread *t) {   /* (holding vc_lock) */
     const int c = t->vc_held - 1;
     vc_owner[c] = NULL;
     t->vc_held = 0;
     t->vc_kick = 0;
     vc_grant(c);
+}
+static void vc_release(HosThread *t) {
+    if (!t->vc_held) return;
+    AcquireSRWLockExclusive(&vc_lock);
+    vc_release_locked(t);
     ReleaseSRWLockExclusive(&vc_lock);
+}
+/* (longshot 7daafa7a, #1553) HOS_VC_YIELD_FAST=0: a yield always takes vc_lock, twice when it gives the core up, as before.
+   By default a thread that holds a core with nobody queued and no kick pending returns without the lock (a waiter that
+   comes later asks for a checkpoint itself, vc_acquire; a kick left over goes through the lock below, which clears it
+   without losing a newer one), and a yield that gives the core up releases it in the same hold that found the waiter */
+static int vc_yield_fast(void) {
+    static int v = -1;
+    int on = __atomic_load_n(&v, __ATOMIC_RELAXED);
+    if (on < 0) {
+        const char *e = getenv("HOS_VC_YIELD_FAST");
+        __atomic_store_n(&v, on = !(e && !strcmp(e, "0")), __ATOMIC_RELAXED);
+    }
+    return on;
 }
 /* gives the core to a waiter allowed on it that is better than t (strict) or as good (a yield), or starved */
 static void vc_yield(HosThread *t, int strict) {
     if (!t->vc_held) return;
+    const int fast = vc_yield_fast();
+    if (fast && !__atomic_load_n(&vc_nq, __ATOMIC_ACQUIRE) && !__atomic_load_n(&t->vc_kick, __ATOMIC_RELAXED)) return;
     AcquireSRWLockExclusive(&vc_lock);
     const int c = t->vc_held - 1;
     int any = 0;
@@ -1787,10 +1810,13 @@ static void vc_yield(HosThread *t, int strict) {
         any = (vc_allowed(w) >> c & 1) && (w->vc_starved || (strict ? w->priority < t->priority : w->priority <= t->priority));
     }
     t->vc_kick = 0;
-    if (any) vc_st.yields++;
+    if (any) {
+        vc_st.yields++;
+        if (fast) vc_release_locked(t);
+    }
     ReleaseSRWLockExclusive(&vc_lock);
     if (!any) return;
-    vc_release(t);
+    if (!fast) vc_release(t);
     vc_acquire(t);
 }
 /* 1 when the caller is to take a core again after its block (hos_vcore_back): it gave its core up, or it has run without

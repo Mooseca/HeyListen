@@ -1136,6 +1136,78 @@ bool cap_fit() {
 uint64_t cap_now_ms() {
     return (uint64_t)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
 }
+// (longshot 8f462db52, SadTransGirl; RX_VK_CAP_FREE_ASYNC, on; =0: as before) A capture buffer let go past the spares is destroyed on a
+// thread of its own, not on the thread that retired it (the replay's take, holding pools_mu): freeing a 64-256 MB host-cached memory
+// object is the driver unmapping and releasing every page of it. Only buffers the GPU is done with get here (a retire waits for that),
+// and nothing else holds them; the memory goes back a moment later. At the process's exit (an atexit hook) what is queued is left.
+// (Longshot's second half, RX_VK_LATE_STAMPS_AHEAD, needs its stamp blocks, which this fork's late fix does not have: not taken)
+bool cap_free_async_on() {
+    static const bool on = [] {
+        const char* e = getenv("RX_VK_CAP_FREE_ASYNC");
+        const bool v = !e || atoi(e) != 0;
+        if (!v) logf("vk: capture buffers past the spares destroyed on the replay's thread, as before (RX_VK_CAP_FREE_ASYNC=0)");
+        return v;
+    }();
+    return on;
+}
+// (never destroyed: the thread waits on them for the life of the process)
+struct CapGone {
+    std::mutex mu;                  // (a leaf: the queue alone)
+    std::condition_variable cv;
+    std::vector<std::pair<VkBuffer, VmaAllocation>> queue;
+    bool started = false;
+    std::mutex destroying;          // (held while the thread destroys a batch: the exit hook waits for it)
+    std::atomic<bool> exiting{false};
+};
+CapGone& cap_gone() {
+    static CapGone* g = new CapGone;
+    return *g;
+}
+void destroy_buffer_later(VkBuffer buffer, VmaAllocation alloc) {
+    CapGone& g = cap_gone();
+    {
+        std::lock_guard lk(g.mu);
+        g.queue.push_back({buffer, alloc});
+        if (!g.started) {
+            g.started = true;
+            try {
+                std::thread([] {
+                    CapGone& g = cap_gone();
+                    std::vector<std::pair<VkBuffer, VmaAllocation>> batch;
+                    for (;;) {
+                        {
+                            std::unique_lock lk(g.mu);
+                            g.cv.wait(lk, [&g] { return !g.queue.empty(); });
+                            batch.swap(g.queue);
+                        }
+                        {
+                            std::lock_guard dk(g.destroying);
+                            for (const auto& [b, a] : batch)
+                                if (!g.exiting.load()) destroy_buffer(b, a);
+                        }
+                        batch.clear();
+                    }
+                }).detach();
+                // (registered after the renderer's own statics exist: it runs before they are destroyed)
+                std::atexit([] {
+                    CapGone& g = cap_gone();
+                    g.exiting = true;
+                    std::lock_guard dk(g.destroying);
+                });
+            } catch (...) {   // (no thread: destroyed here, as before)
+                g.started = false;
+                g.queue.pop_back();
+                destroy_buffer(buffer, alloc);
+                return;
+            }
+        }
+    }
+    g.cv.notify_one();
+}
+void cap_destroy(VkBuffer buffer, VmaAllocation alloc) {
+    if (cap_free_async_on() && !cap_gone().exiting.load()) return destroy_buffer_later(buffer, alloc);
+    destroy_buffer(buffer, alloc);
+}
 void cap_buf_free(VkBuffer buffer, VmaAllocation alloc, void* map, uint64_t size) {
     FreeBuf old[12];
     int n_old = 0;
@@ -1180,8 +1252,8 @@ void cap_buf_free(VkBuffer buffer, VmaAllocation alloc, void* map, uint64_t size
             buffer = VK_NULL_HANDLE;
         }
     }
-    if (buffer) destroy_buffer(buffer, alloc);
-    for (int i = 0; i < n_old; i++) destroy_buffer(old[i].buffer, old[i].alloc);
+    if (buffer) cap_destroy(buffer, alloc);   // (after the spare list was offered it: a spare is never destroyed)
+    for (int i = 0; i < n_old; i++) cap_destroy(old[i].buffer, old[i].alloc);
 }
 void cap_buf_retire(std::map<uint32_t, CapBuf>::iterator it) {
     if (it->second.hash && cap_hash_free.size() < 32) cap_hash_free.push_back(std::move(it->second.hash));
@@ -1216,7 +1288,13 @@ uint64_t cap_bufs_made = 0;   // (TICK-038: capture buffers made, for the log: a
 // and the fewest spares left after a take
 uint64_t cap_need_max = 0, cap_taken_over = 0, cap_free_low = ~0ull;
 bool cap_buf_get(uint64_t need, VkBuffer& buffer, VmaAllocation& alloc, void*& map, uint64_t& size) {
-    std::lock_guard lk(cap_free_mu);
+    // (longshot 7daafa7a, #1553, 4ef972c6 and d87dd600; RX_VK_CAP_GET_FALLBACK=0: the lock is held through the driver's allocation
+    // and a refused buffer fails the capture, as before) The driver's allocation can block for ~100 ms (AMD's vkAllocateMemory), and
+    // a replay retiring its capture buffers (cap_buf_free) must be able to give a spare back meanwhile: the lock is let go before it.
+    // A refused size class then takes any spare that fits, however large (one may have been given back while the driver refused),
+    // and last the need's exact size, without the class's round-up and without a memory object of its own
+    static const bool fallback = !getenv("RX_VK_CAP_GET_FALLBACK") || atoi(getenv("RX_VK_CAP_GET_FALLBACK")) != 0;
+    std::unique_lock lk(cap_free_mu);
     cap_gets++;
     cap_need_max = std::max(cap_need_max, need);
     size_t best = cap_free.size();
@@ -1237,8 +1315,34 @@ bool cap_buf_get(uint64_t need, VkBuffer& buffer, VmaAllocation& alloc, void*& m
     map = nullptr;
     cap_bufs_made++;
     MemKindScope mem_kind_(MemKind::Capture);   // (TICK-038: RX_VK_RES_LOG)
-    const bool ok = create_buffer_cached(size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, buffer, alloc, &map,
-                                         size >= (16ull << 20) && !getenv("RX_VK_CAP_BLOCKS")) && map;
+    if (fallback) lk.unlock();
+    constexpr VkBufferUsageFlags kUsage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+    bool ok = create_buffer_cached(size, kUsage, buffer, alloc, &map, size >= (16ull << 20) && !getenv("RX_VK_CAP_BLOCKS")) && map;
+    if (!ok && fallback) {
+        map = nullptr;
+        size_t best = 0;
+        {
+            std::lock_guard lk2(cap_free_mu);
+            for (size_t i = 0; i < cap_free.size(); i++)
+                if (cap_free[i].size >= need && cap_free[i].map && (!best || cap_free[i].size < cap_free[best - 1].size)) best = i + 1;
+            if (best) {
+                const FreeBuf f = cap_free[best - 1];
+                buffer = f.buffer, alloc = f.alloc, map = f.map, size = f.size;
+                cap_free_bytes -= size;
+                cap_free.erase(cap_free.begin() + (ptrdiff_t)(best - 1));
+                cap_free_low = std::min<uint64_t>(cap_free_low, cap_free.size());
+                ok = true;
+            }
+        }
+        if (!ok && size != need) {
+            size = need;
+            map = nullptr;
+            ok = create_buffer_cached(size, kUsage, buffer, alloc, &map, false) && map;
+        }
+        static int told;
+        if (told++ < 6) logf("vk: a capture buffer of %llu MB was refused: %s (RX_VK_CAP_GET_FALLBACK)", (unsigned long long)(cap_buf_size(need) >> 20),
+                             ok ? "a spare or the exact size took its place" : "none to take, the capture goes without");
+    }
     static int logged;   // (TICK-019: the mirror syncs copy from these)
     if (ok && logged++ < 1) log_alloc_where("a capture buffer (the mirror syncs' source)", alloc);
     return ok;
@@ -1328,27 +1432,46 @@ std::vector<std::pair<uint64_t, uint64_t>> ranges_clip(const std::vector<std::pa
     }
     return out;
 }
+// (longshot 7daafa7a, #1553, 6156d57b) RX_VK_CAP_RANGES_REUSE=0: every refresh bumps the range lists' version and keeps the
+// pools' first-seen table, as before. By default the version (cap_ranges_ver: each consumer rebuilds its union of the three
+// range lists when it moves, under cap_ranges_mu, on the submitting threads) moves only when a list changed, the first-seen
+// table is kept only when RX_VK_CAPTURE_EAGER can expire a pool by it, and without RX_VK_CAP_ONLY_GPU (whose list the periodic
+// rebuild also reconciles with the live pools) and without expiry the periodic rebuild is not made: the lists change only
+// with the mappings' generation
+bool cap_ranges_reuse() {
+    static const bool v = !getenv("RX_VK_CAP_RANGES_REUSE") || atoi(getenv("RX_VK_CAP_RANGES_REUSE")) != 0;
+    return v;
+}
 void refresh_pool_ranges_locked() {   // (cap_ranges_mu held)
     if (!capture_pool_max() && !cap_only_gpu()) return;
     const uint32_t g = host->maps_generation();
-    if (g == pool_cap_gen && captures_made - pool_cap_built < 64) return;   // (and every 64: the old ones out)
+    const bool reuse = cap_ranges_reuse();
+    const uint64_t expiry = eager_captures();
+    static bool built_once = false;
+    const bool periodic = !reuse || expiry || cap_only_gpu();
+    if (g == pool_cap_gen && (!reuse || built_once) && (!periodic || captures_made - pool_cap_built < 64)) return;   // (and every 64: the old ones out)
+    built_once = true;
     pool_cap_gen = g, pool_cap_built = captures_made;
     static std::vector<std::array<uint64_t, 2>> list(8192);
     const int n = host->gpu_pools(reinterpret_cast<uint64_t(*)[2]>(list.data()), (int)list.size());
     std::vector<std::pair<uint64_t, uint64_t>> v, every;
     std::unordered_map<uint64_t, uint64_t, PoolStartHash> seen;
-    seen.reserve((size_t)std::max(n, 0));
+    const bool track = !reuse || expiry;
+    if (track) seen.reserve((size_t)std::max(n, 0));
+    v.reserve((size_t)std::max(n, 0));
     for (int i = 0; i < n; i++) {
         if (list[i][1] && list[i][0] < (1ull << 40))
             every.push_back({list[i][0] & ~4095ull, (list[i][0] + list[i][1] + 4095) & ~4095ull});
         if (!list[i][1] || list[i][1] > capture_pool_max() || list[i][0] >= (1ull << 40)) continue;
-        auto it = pool_first_seen.find(list[i][0]);
-        const uint64_t first = it != pool_first_seen.end() ? it->second : captures_made;
-        seen[list[i][0]] = first;
-        if (!eager_captures() || captures_made - first < eager_captures())
-            v.push_back({list[i][0] & ~4095ull, (list[i][0] + list[i][1] + 4095) & ~4095ull});
+        if (track) {
+            auto it = pool_first_seen.find(list[i][0]);
+            const uint64_t first = it != pool_first_seen.end() ? it->second : captures_made;
+            seen[list[i][0]] = first;
+            if (expiry && captures_made - first >= expiry) continue;
+        }
+        v.push_back({list[i][0] & ~4095ull, (list[i][0] + list[i][1] + 4095) & ~4095ull});
     }
-    pool_first_seen.swap(seen);
+    if (track) pool_first_seen.swap(seen);
     {   // (RX_VK_CAP_ONLY_GPU: the host's live pools, which hos_gpu_pools' mapping list can lose: see cap_pool_born)
         using LivePools = int (*)(uint64_t (*)[2], int);
         static const LivePools live = (LivePools)(void*)GetProcAddress(GetModuleHandleA(nullptr), "hos_gpu_live_pools");
@@ -1359,15 +1482,22 @@ void refresh_pool_ranges_locked() {   // (cap_ranges_mu held)
                 if (lp[i][1] > lp[i][0] && lp[i][0] < (1ull << 40)) every.push_back({lp[i][0] & ~4095ull, (lp[i][1] + 4095) & ~4095ull});
         }
     }
-    all_pool_ranges = ranges_merged(std::move(every));
-    cap_ranges_ver++;
+    bool changed = !reuse;
+    {
+        auto all = ranges_merged(std::move(every));
+        if (all != all_pool_ranges) all_pool_ranges = std::move(all), changed = true;
+    }
     std::sort(v.begin(), v.end());
     std::vector<std::pair<uint64_t, uint64_t>> m;
     for (const auto& r : v) {
         if (!m.empty() && r.first <= m.back().second) m.back().second = std::max(m.back().second, r.second);
         else m.push_back(r);
     }
-    pool_cap_ranges.swap(m);
+    if (!reuse || m != pool_cap_ranges) {
+        pool_cap_ranges.swap(m);
+        changed = true;
+    }
+    if (changed) cap_ranges_ver++;
 }
 bool capture_on() {
     static const bool on = [] {
@@ -1739,6 +1869,7 @@ bool memory_read_as_submitted(uint64_t gpu, void* dst, uint64_t n) {
     {
         std::lock_guard lk(pools_mu);
         bool late_read = false;
+        auto overlay = [&](const uint64_t guest, uint8_t* const dst, const uint64_t n) {   // (the capture's pages over [guest, guest + n) of guest memory, into dst)
         for (uint64_t page = guest >> kPageShift; page < (guest + n + 4095) >> kPageShift; page++) {
             const CapEntry e = cap_entry(page);
             if (!e.gen || e.gen != page_gen(page)) continue;
@@ -1775,7 +1906,25 @@ bool memory_read_as_submitted(uint64_t gpu, void* dst, uint64_t n) {
             std::memcpy((uint8_t*)dst + (a - guest), (const uint8_t*)b->second.map + (uint64_t)e.slot * 4096 + (a - (page << kPageShift)), z - a);
             from++;
         }
-        if (page0 == page1 && !late_read && from == 0) {   // (in no capture: guest memory stands for its next words too)
+        };
+        // (longshot 7daafa7a, #1553, d87dd600; RX_VK_READ_MAPPED=0: as before) A read of a virtual GPU address (1 TB and up: a
+        // sparse mapping) across a page boundary takes the page after the first from wherever that page maps, not from the
+        // guest page after the first one: neighbours in a virtual range can be unrelated physical pages, and the capture's copy
+        // of the wrong one was laid over the live bytes the read had already made
+        static const bool mapped_on = !getenv("RX_VK_READ_MAPPED") || atoi(getenv("RX_VK_READ_MAPPED")) != 0;
+        const bool segmented = mapped_on && gpu >= (1ull << 40) && n > 4096 - (gpu & 4095);
+        if (segmented) {
+            const uint64_t limit = host->guest_size();
+            for (uint64_t at = 0; at < n;) {
+                const uint64_t bytes = std::min<uint64_t>(n - at, 4096 - ((gpu + at) & 4095));
+                const uint64_t physical = at ? host->gpu_guest(gpu + at) : guest;
+                if (physical && physical < limit && bytes <= limit - physical) overlay(physical, (uint8_t*)dst + at, bytes);
+                at += bytes;
+            }
+        } else {
+            overlay(guest, (uint8_t*)dst, n);
+        }
+        if (!segmented && page0 == page1 && !late_read && from == 0) {   // (in no capture: guest memory stands for its next words too)
             SubmittedPage& submitted_page = submitted_page_for(page0);
             submitted_page.page = page0;
             submitted_page.pgen = page_gen(page0);
@@ -1792,8 +1941,9 @@ bool memory_read_as_submitted(uint64_t gpu, void* dst, uint64_t n) {
 uint64_t memory_capture_view() { return cap_view_gen.load(std::memory_order_acquire); }
 uint32_t memory_page_stamp(uint64_t gpu) {
     const uint64_t guest = gpu < (1ull << 40) ? gpu : host->gpu_guest(gpu);
-    if (!guest) return 0;
-    return page_gen(guest >> kPageShift);
+    const uint64_t page = guest >> kPageShift;
+    if (!guest || page >= kPages || guest >= host->guest_size()) return 0;   // (longshot 7daafa7a, #1553: not past the generation table)
+    return page_gen(page);
 }
 
 bool memory_has_shadow(uint64_t guest, uint64_t n) {
@@ -4112,7 +4262,14 @@ Pool* pool_lookup(uint64_t guest, uint64_t size) {
         // write-back: the instances of a frame before or older, objects popping in and out, one-frame flashes.)
         uint64_t lo = 0, hi = 0;
         std::vector<uint64_t> overlapped;
+        // (longshot 7daafa7a, #1553, 02db5963 and b2a33789; RX_VK_IMPORT_NEIGHBOUR=0: as before) plan answers whether a live
+        // import was reached by the span's padding alone: it lies wholly outside what this binding needs. A larger span
+        // anticipates later bindings; when only that padding reaches a live import, the neighbour is kept and the range
+        // planned is the chunks this binding needs. A real crossing still merges the imports and inherits what the GPU
+        // wrote into them. If the driver refuses the range first tried, the other one (narrow or spanned) is tried
+        static const bool neighbour_on = !getenv("RX_VK_IMPORT_NEIGHBOUR") || atoi(getenv("RX_VK_IMPORT_NEIGHBOUR")) != 0;
         auto plan = [&](bool spanned) {   // (the range, the imported pools it takes in; spanned: span_game_pools's chunks too)
+            bool touches_neighbour = false;
             lo = want_lo, hi = std::max(want_hi, imp != imported.end() ? imp->second.hi : 0);
             if (spanned && chunk) span_game_pools(lo, hi, chunk);
             if (chunk) clip_noaccess(lo, hi, range.lo, range.hi);   // (HOS_NOACCESS_RAM)
@@ -4129,6 +4286,7 @@ Pool* pool_lookup(uint64_t guest, uint64_t size) {
                         if (import_reach::beyond(live_reach, it->second.lo, lo)) break;   // (none further down reaches lo)
                         continue;
                     }
+                    if (neighbour_on && spanned && (it->second.hi <= want_lo || it->second.lo >= want_hi)) touches_neighbour = true;
                     overlapped.push_back(it->first);
                     if (it->second.lo < lo) lo = it->second.lo, grew = true;
                     if (it->second.hi > hi) hi = it->second.hi, grew = true;
@@ -4142,16 +4300,19 @@ Pool* pool_lookup(uint64_t guest, uint64_t size) {
                 lo = want_lo, hi = std::max(want_hi, imp != imported.end() ? imp->second.hi : 0);
                 overlapped.clear();
                 if (imp != imported.end()) overlapped.push_back(imp->first);
+                touches_neighbour = false;
             }
+            return touches_neighbour;
         };
-        plan(true);
-        const uint64_t spanned_lo = lo, spanned_hi = hi;
+        const bool prefer_narrow = plan(true);
+        if (prefer_narrow) plan(false);
+        const uint64_t first_lo = lo, first_hi = hi;
         Pool p;
         bool ok = false;
         for (int pass = 0; pass < 2 && !ok; pass++) {
-            if (pass) {   // (a spanned import that failed: the range without the span, as imported before)
-                plan(false);
-                if (lo == spanned_lo && hi == spanned_hi) break;
+            if (pass) {   // (an import that failed: the other range: without the span as before, or the spanned one when the narrow one failed)
+                plan(prefer_narrow);
+                if (lo == first_lo && hi == first_hi) break;
             }
             const auto t0 = std::chrono::steady_clock::now();
             if (pool_mirror_on()) {   // (a table entry with no import: its mirror is made at the binding, filled through staging)

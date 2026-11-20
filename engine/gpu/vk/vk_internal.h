@@ -33,6 +33,8 @@ extern const MkwVkHost* host;
 void logf(const char* fmt, ...);
 void queue_flush_locked();   // (vk_replay.cpp, RX_VK_BATCH: held submits out; dev.present_mu held)
 void queue_flush();          // (the same, taking dev.present_mu)
+bool replay_flush_upload(VkCommandBuffer cur);   // (longshot d12ddf69b, vk_replay.cpp: submits, waits on and re-begins the recording's upload command buffer)
+bool upload_chunk_flush(VkCommandBuffer cmd);    // (vk_texture.cpp: replay_flush_upload, and this thread's barrier state for the buffer re-begun in place)
 // (hookshot) held submits out, then vkDeviceWaitIdle with the present queue's lock taken too (dev.present_mu held): the device's
 // every queue is synchronized by the host around it
 void device_wait_idle_locked();
@@ -86,8 +88,9 @@ struct Device {
     // (hookshot, issue 996, d1d6caa7) the GPU has mesh shaders but the draws that have a task stage run through the compute fallback
     // (AMD's Windows driver times out on them on RDNA 2, Navi 21 to 23; RX_VK_TASK_MESH_FALLBACK): mesh_mode.h. Mesh-only draws stay native
     bool task_mesh_fallback = false;
+    bool mesh_only_fallback = false;   // (longshot 3228cb5f: the Windows RDNA 2 workaround includes mesh-only programs)
     bool uses_mesh_fallback(bool has_task) const {
-        return mesh_fallback || (task_mesh_fallback && has_task);
+        return mesh_fallback || (task_mesh_fallback && (has_task || mesh_only_fallback));
     }
     // (hookshot) the float controls the device reports, a bit a width (1: 16 bits, 2: 32, 4: 64): a program declaring a denorm mode the
     // device lacks is invalid (vkCreateShaderModule's validation error), and an older driver need not ignore it (strip_float_controls)
@@ -100,6 +103,10 @@ struct Device {
     // them at 32 lanes, so those GPUs translate exactly as they did: vk_main.cpp, vk_shader.cpp make_profile)
     VkShaderStageFlags warp_wide_stages = 0;
     uint32_t warp_lanes = 32;
+    uint32_t max_workgroup_subgroups = 0;   // (maxComputeWorkgroupSubgroups: a workgroup held to 32 lanes has at most 32 times this)
+    // (a GPU whose pinned compute stage cannot hold the largest guest workgroup (32 * max_workgroup_subgroups < 1024) while its default
+    // subgroup is wider than 32: a compute program too big to be pinned is translated for warp_lanes, as an unpinned stage: pins_32)
+    bool compute_unpinned_wide = false;
     uint32_t max_push_descriptors = 0;
     uint32_t max_vertex_divisor = 0;   // (maxVertexAttribDivisor, with dev.vertex_divisor)
     // no window (HOS_HEADLESS): presents go to an image of their own, which RX_VK_SHOTS can write out
@@ -137,6 +144,17 @@ extern Device dev;
 /// Mesa ANV's) 4 bytes an aligned access could start at any word of the binding and the view read the vector before it: OoT's
 /// light colours shifted (green lighting, cyan sky). Found for Lichii (zortos293/Lichii#295, Fritchii 57ed438cd, from Matt
 /// Artist and sharkiix); NVIDIA's own alignment is 16 already. RX_VK_SSBO_DEVICE_ALIGN=1: the device's own, as before
+/// (longshot c4e8e2ea) Whether a stage of this many invocations runs at 32 lanes (pin_subgroup, translated profile): one the GPU
+/// pins, and for a stage with a workgroup (compute, task, mesh) 32-lane subgroups that cover it, at most requiredSubgroupSize *
+/// maxComputeWorkgroupSubgroups invocations (VUID-VkPipelineShaderStageCreateInfo-pNext-02756), a limit the spec sets no minimum
+/// for. The default, 64: a task or mesh workgroup has 63 threads at most (a 6-bit count), and the mesh fallback runs the same
+/// workgroups as compute shaders
+inline bool pins_32(VkShaderStageFlags stage, uint64_t invocations = 64) {
+    if (!(dev.sg32_stages & stage)) return false;
+    const VkShaderStageFlags workgroup = VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_TASK_BIT_EXT | VK_SHADER_STAGE_MESH_BIT_EXT;
+    return !(stage & workgroup) || invocations <= 32ull * dev.max_workgroup_subgroups;
+}
+
 inline uint64_t storage_binding_align() {
     static const bool device_own = [] {
         const char* e = getenv("RX_VK_SSBO_DEVICE_ALIGN");
@@ -522,6 +540,7 @@ double prepare_progress_by_cost();
 bool prepare_is_update();
 bool prepare_is_lazy_update();                 // (the update prepare_is_update found is lazy: nothing is made before the game)
 void prepare_background();
+void predict_play_test();                      // (test only, RX_VK_TEST_PREDICT_PLAY=<s>: the prediction in play, started <s> seconds in)
 void state_list_run();                        // (an update: the state list's pipelines noted before precompile_run)
 /// (HL_SHIPPED_STATES, on unless 0) the shipped pipeline state list changed since state_list_prepare last went through it: the
 /// start calls state_list_run when the shaders needed no preparing, so that precompile_run builds its pipelines
@@ -540,6 +559,13 @@ namespace mkwvk {
 enum ProfPhase { PROF_SUBMIT, PROF_PRESENT, PROF_DRAW, PROF_DESC, PROF_TEXGET, PROF_UPLOAD, PROF_PIPE, PROF_PROGRAM,
                  PROF_CMDS, PROF_DISPATCH, PROF_MEMSYNC, PROF_QSUBMIT, PROF_SLOTWAIT, PROF_COUNT };
 extern SplitCount prof_ns[PROF_COUNT];   // (TICK-052: a cache line a thread, split_count.h)
+/// (HeyListen, v0.4.4) What PROF_DESC is made of, for the performance summary's descriptors cause: PROF_DESC also holds the exact scopes
+/// timed inside the build (a texture's upload, its slow path's image and views), which made a zone's texture work read as
+/// "descriptors" hitches (a Radeon 780M's Kakariko: 23 of them, 3.8 s). PD_SELF the build's own time (sampled as PROF_DESC is),
+/// PD_TEX the texture work inside it that has no phase of its own (PROF_EXACT: texture_get's slow path), PD_POOL the descriptor
+/// pools: sets allocated, written and pools made, reset or destroyed (exact, here and where a recording begins)
+enum DescPart { PD_SELF, PD_TEX, PD_POOL, PD_COUNT };
+extern SplitCount prof_desc[PD_COUNT];
 /// Nanoseconds from a performance-counter reading. An integer number of nanoseconds per tick is a multiply, so a
 /// reading past 2^53 does not lose its low bits the way the double divide does.
 inline int64_t perf_ticks_to_ns(int64_t ticks, int64_t freq) {
@@ -586,16 +612,18 @@ struct ProfThread {
     uint32_t rng;    // (xorshift32, seeded at the thread's first pick)
     int open, k;     // (the PROF_HOT scopes open, and the outermost one's weight: 0 not timed)
     int64_t exact;   // (the nanoseconds PROF / PROF_EXACT timed on this thread so far)
+    int64_t anon;    // (and of those, the PROF_EXACT ones not inside a phase's PROF: prof_desc's PD_TEX)
 };
 inline thread_local ProfThread prof_t;
 struct ProfScope {
     int phase;   // (-1: PROF_EXACT, no phase of its own)
-    int64_t t0, x0;
-    explicit ProfScope(int p) : phase(p), t0(prof_now()), x0(prof_t.exact) {}
+    int64_t t0, x0, a0;
+    explicit ProfScope(int p) : phase(p), t0(prof_now()), x0(prof_t.exact), a0(prof_t.anon) {}
     ~ProfScope() {
         const int64_t dt = prof_now() - t0;
         if (phase >= 0) prof_ns[phase] += dt;
         prof_t.exact = x0 + dt;   // (what was exact inside is part of dt: not counted twice)
+        prof_t.anon = phase < 0 ? a0 + dt : a0;   // (a phase's own scope holds what is inside it: not anonymous work any more)
     }
 };
 /// A thread's first state: splitmix64 of a counter, so the threads' sequences are unrelated; never 0, xorshift's fixed point
@@ -614,17 +642,22 @@ inline int prof_pick(ProfThread& t) {   // (the weight: 8 one time in eight, els
 }
 struct ProfScopeHot {
     int phase, k;
-    int64_t t0, x0;
+    int64_t t0, x0, a0;
     explicit ProfScopeHot(int p) : phase(p) {
         ProfThread& t = prof_t;
         if (!t.open++) t.k = prof_pick(t);
-        k = t.k, x0 = t.exact, t0 = k ? prof_now() : 0;
+        k = t.k, x0 = t.exact, a0 = t.anon, t0 = k ? prof_now() : 0;
     }
     ~ProfScopeHot() {
         ProfThread& t = prof_t;
         const int64_t x = t.exact - x0;   // (timed exactly inside: once, as it is)
-        if (k) prof_ns[phase] += (prof_now() - t0 - x) * k + x;
+        const int64_t own = k ? (prof_now() - t0 - x) * k : 0;
+        if (k) prof_ns[phase] += own + x;
         else if (x) prof_ns[phase] += x;
+        if (phase == PROF_DESC) {   // (v0.4.4: the build's own time and the texture work inside it, apart: DescPart)
+            if (k) prof_desc[PD_SELF] += own;
+            if (const int64_t a = t.anon - a0) prof_desc[PD_TEX] += a;
+        }
         t.open--;
     }
 };

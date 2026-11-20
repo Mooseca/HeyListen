@@ -66,6 +66,7 @@ struct Texture {
     uint32_t gpu_gen = 0;     // (the memory generation when the GPU last wrote it: CPU writes after it are taken)
     bool released = false;    // its texture was finalized after the GPU wrote it: CPU writes count again
     uint32_t release_gen = 0;
+    uint64_t gpu_draw_value = 0, gpu_draw_segment = 0, gpu_draw_records = 0;   // (the last draw noted into the write history: its submission, segment, and the buffer writes recorded by then: RX_VK_WRITE_HISTORY)
     uint64_t gpu_wrote_seen = 0;   // (the newest finished GPU write into its storage it was uploaded after)
     uint64_t last_written = 0;     // (the frame the GPU last wrote it: a render target, each frame it is used)
     uint64_t first_written = 0;    // (the frame its GPU contents began: written in that frame alone, a table the game baked)
@@ -177,6 +178,8 @@ void texture_written(Texture* tex, const char* why = "?");   // (why: who wrote 
 /// The GPU writes [gpu, gpu + size) in the submission being recorded (a storage buffer, a buffer copy): textures over
 /// it are uploaded again from guest memory once that submission is done
 void texture_gpu_wrote(uint64_t gpu, uint64_t size);
+/// The GPU buffer writes of the submissions up to `completed` are done: a texture over their bytes is uploaded again (RX_VK_WRITE_HISTORY)
+void texture_complete_writes(uint64_t completed);
 /// The program the replay draws or dispatches with next (RX_VK_WATCH_TEX / RX_VK_WATCH_DIM logs name it)
 void texture_watch_prog(uint64_t prog);
 /// A pass renders into it (first_render_frame)
@@ -222,6 +225,11 @@ void barrier_stats(int64_t* made, int64_t* left_out);
 /// (hookshot) Set around a draw's sampled-texture lookups (vk_draw.cpp): a new ASTC texture there may wait for a later frame
 /// once this frame's uploads passed their budget (texture_touch). Never for compute: a dispatch may bake what it reads once
 extern thread_local bool upload_defer_ok;
+/// (hookshot) Whether this thread's last texture_touch held a sampled texture back (upload_defer): the draw whose descriptor
+/// build looked it up is left out of the frame rather than sampling the placeholder. Only set inside a draw's lookups
+bool texture_sample_deferred();
+/// The same, and clear it: the draw asks once, after its descriptors are built
+bool texture_sample_deferred_take();
 /// A draw pass just ended on cmd (end_pass): pass_start_barrier knows nothing else ran after it
 void note_pass_end(VkCommandBuffer cmd);
 /// The barrier a draw pass starts with. Full, unless RX_VK_PASS_BARRIER=game and the last thing on cmd was a draw pass with no

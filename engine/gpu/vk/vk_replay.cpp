@@ -39,6 +39,7 @@
 #include "status_line.h"
 #include "vk_reflex.h"
 #include "vk_draw.h"
+#include "mesh_conv.h"   // (RX_VK_MESH_CONV=2: the indirect mesh draws after a barrier of the game's, scanned there)
 #include "vk_dump.h"
 #include "vk_paths.h"   // (game_module_path: the frame trace beside the game)
 #include "vk_gprof.h"
@@ -50,6 +51,7 @@
 #include "vk_perf.h"
 #include "segment_plan.h"   // (TICK-050: the parallel replay's segment count)
 #include "vk_jobs.h"
+#include "storm_hold.h"
 #include "vk_shader.h"
 #include "vk_state.h"
 #include "vk_texture.h"
@@ -61,7 +63,9 @@
 #include "vk_tl_clock.h"   // (RX_VK_TL: the timeline's host time domain)
 #include "vk_lag.h"   // (RX_VK_LAG_LOG)
 #include "readback_late.h"   // (RX_VK_READBACK_LATE)
+#include "readback_wait.h"   // (the hitch rows' labels of a read's wait, RX_VK_STRICT_BOUND)
 #include "exe_base.h"   // (RX_VK_RB_PROF's call sites: offsets in the exe)
+#include "wait_own.h"   // (RX_VK_WAIT_OWN)
 #include "perf_parts.h"   // (the frame's parts for the performance summary: submit/present scopes, the waits)
 #include "vk_work.h"   // (after the others: counts the commands that do GPU work, for full_barrier)
 
@@ -1005,7 +1009,12 @@ Recording& begin_recording(uint64_t value) {
     gpu_time_begin(r);
     gprof_begin_recording(r.slot, r.cmd, r.upload);
     r.value = value;
-    memory_recording_value(value, completed());
+    const uint64_t done = completed();
+    memory_recording_value(value, done);
+    {   // (longshot 7daafa7a, #1553; RX_VK_WRITE_HISTORY) loads submit for many seconds between presents: the writes the GPU has finished are published every 32 recordings too
+        static std::atomic<uint32_t> recordings{0};
+        if ((recordings.fetch_add(1, std::memory_order_relaxed) & 31) == 31) texture_complete_writes(done);
+    }
     texture_begin_recording(r.upload, value);
     draw_begin_recording(r.slot, r.cmd, value);
     return r;
@@ -1776,10 +1785,50 @@ void op_cost_report(double frames) {
 
 void ubo_check_refs(uint32_t op, const uint8_t* a, uint32_t avail);   // (HL_UBO_CHECK: below)
 
+// (longshot 9027e7374) RX_VK_MESH_CONV=2: the scans after the game's barriers, by why each ended (mesh_conv.h Stop), and the ops that ended
+// them (kStopOp), for the log's line every 120 frames
+std::atomic<int64_t> st_mc_stops[mesh_conv::kStops];
+std::atomic<int64_t> st_mc_stop_ops[64];
+thread_local const uint8_t* mesh_rescan_at = nullptr;   // (the op the last scan ended at, with mesh draws after it: replay())
+/// Right after a barrier of the game's (the pass ended, a full barrier recorded), or right after the op that ended the scan
+/// before with indirect mesh draws after it (a counter's report, an event's wait, a dispatch, a copy: replay() once the op is
+/// recorded): the indirect mesh draws from next up to the next barrier, the first op that may write buffer memory or the
+/// stream's end, converted here at once (vk_draw.cpp mesh_conv_batch: after a full barrier, which leaves out itself after the
+/// game's)
+void mesh_conv_at_barrier(VkCommandBuffer cmd, const uint8_t* next, const uint8_t* end, bool after_op = false) {
+    mesh_rescan_at = nullptr;
+    if (!mesh_conv_batching()) return mesh_conv_batch(cmd, nullptr, 0);
+    // (records no GPU write to buffer memory in stream order: state, binds, draws (one whose program writes memory drops the
+    // batch as it is drawn: vk_draw.cpp), attachment clears (images), uniform updates (kept in the replay's list, written to
+    // memory at the recording's end), counters' resets, render conditions (read on the CPU))
+    static const uint32_t pass_ops[] = {NOP_BEGIN, NOP_JUMP, NOP_CALL, NOP_UPDATE_UB, NOP_SET_RT, NOP_CLEAR_COLOR, NOP_CLEAR_DS,
+                                        NOP_VIEWPORTS, NOP_SCISSOR, NOP_DEPTH_RANGE, NOP_BIND_PROGRAM, NOP_BIND_STATE,
+                                        NOP_BIND_VATTR, NOP_BIND_VSTREAM, NOP_BIND_VBUF, NOP_BIND_UBO, NOP_BIND_SSBO, NOP_BIND_TEX,
+                                        NOP_BIND_SAMP, NOP_STENCIL, NOP_POLY_OFFSET, NOP_DRAW, NOP_DRAW_IDX, NOP_SET_TEX_POOL,
+                                        NOP_SET_SAMP_POOL, NOP_COPY_STRIDE, NOP_BLEND_COLOR, NOP_BIND_IMG, NOP_RESET_COUNTER,
+                                        NOP_DEPTH_CLAMP, NOP_RENDER_ENABLE, NOP_RASTER_DISCARD, NOP_RENDER_COND,
+                                        NOP_PRIMITIVE_RESTART, NOP_BIND_BUFS, NOP_DRAW_INDIRECT, NOP_PUSH_CONST,
+                                        NOP_UBO_CHECK, NOP_UBO_INLINE};
+    static const mesh_conv::Ops ops{NOP_END, NOP_BARRIER, NOP_DRAW_MESH, pass_ops, sizeof pass_ops / sizeof pass_ops[0]};
+    thread_local std::vector<mesh_conv::Item> items;
+    thread_local uint32_t cut_by = 0;   // (the op the scan before this one ended at, for the log)
+    uint32_t stop_op = 0;
+    const uint8_t* at = nullptr;
+    // (at most 1 MB of slots and 256 draws a batch: a quarter of the ring, so the batch never comes round onto itself)
+    const mesh_conv::Stop why = mesh_conv::scan(ops, next, end, items, 1ull << 20, 256, &stop_op, &at);
+    st_mc_stops[why].fetch_add(1, std::memory_order_relaxed);
+    if (after_op && !items.empty()) st_mc_stop_ops[cut_by & 63].fetch_add((int64_t)items.size(), std::memory_order_relaxed);
+    // (an op that may write memory ended it: scanned again once the op is recorded, from the op after it. Each op of the
+    // stretch is walked once, however many such ops it has: the occlusion pass's counter reports, ~200 a frame)
+    if (why == mesh_conv::kStopOp) mesh_rescan_at = at, cut_by = stop_op;
+    mesh_conv_batch(cmd, items.data(), items.size());
+}
+
 void replay(VkCommandBuffer& cmd, NvnState& s, const uint8_t* p, const uint8_t* end = nullptr) {
     const Mode mode = rmode;
     const bool dry = mode == Mode::Dry, worker = mode == Mode::Worker;
     OpTimer op_timer(dry, worker);
+    if (!dry) mesh_rescan_at = nullptr, mesh_conv_batch(cmd, nullptr, 0);   // (RX_VK_MESH_CONV=2: no batch or rescan carries over from another stretch)
     for (;;) {
         if (p == end) return;
         nvn_op_hdr h;
@@ -2304,7 +2353,10 @@ void replay(VkCommandBuffer& cmd, NvnState& s, const uint8_t* p, const uint8_t* 
             {
                 const int32_t bits = payload<int32_t>(a, avail);   // (TICK-057: ORDER_FRAGMENTS(_TILED) and INVALIDATE_TEXTURE only)
                 if (game_barrier_narrow_on() && (bits & 0x6) && !(bits & ~0x16)) game_fragment_barrier(cmd);
-                else full_barrier(cmd, "barrier (the game's nvnCommandBufferBarrier)");
+                else {
+                    full_barrier(cmd, "barrier (the game's nvnCommandBufferBarrier)");
+                    mesh_conv_at_barrier(cmd, p + h.size, end);   // (RX_VK_MESH_CONV=2)
+                }
             }
             st_barriers++;
             break;
@@ -2377,6 +2429,7 @@ void replay(VkCommandBuffer& cmd, NvnState& s, const uint8_t* p, const uint8_t* 
                 da.groups[0] = d.y, da.groups[1] = 1, da.groups[2] = 1;
                 if (d.kind == 0) da.first_task = d.x;   // (hookshot: the task programs add it, vk_draw.cpp's mesh_args)
                 da.indirect = d.indirect, da.count_addr = d.count_addr, da.max = d.max, da.stride = d.stride;
+                da.op = p;   // (RX_VK_MESH_CONV=2: mesh_conv_at_barrier's scan named it by this)
                 OccSlot os(worker ? occ_wserial : occ_serial);
                 draw(cmd, s, da);
             }
@@ -2422,6 +2475,9 @@ void replay(VkCommandBuffer& cmd, NvnState& s, const uint8_t* p, const uint8_t* 
                 maybe_split(cmd);
             }
         }
+        // (RX_VK_MESH_CONV=2: the op that ended the last scan, with indirect mesh draws after it before the next barrier, is
+        // recorded, and the part's end if any: those draws converted here at once, after a full barrier of their own)
+        if (p == mesh_rescan_at) mesh_conv_at_barrier(cmd, p + h.size, end, true);
         p += h.size;
     }
 }
@@ -4699,6 +4755,54 @@ RbScope::~RbScope() {
 // frame: the summary's readback cause and its gpu_wait part). The wait the CPU pays for its reads of GPU results — the
 // exposure meter's page is the one a frame always waits for — was measured only into the log's counters before
 std::atomic<int64_t> st_rb_wait_ns{0};
+// (v0.4.4) the longest single read's wait since the performance summary last asked, and its label (readback_wait.h): the hitch rows
+// of the readback cause say which read it was. Only waits of 1 ms or more are noted, so the lock is taken a few times a second
+std::mutex rb_worst_mu;
+int64_t rb_worst_ns = 0;
+char rb_worst_label[64] = "";
+void rb_worst_note(int64_t ns, const char* label) {
+    std::lock_guard lk(rb_worst_mu);
+    if (ns <= rb_worst_ns) return;
+    rb_worst_ns = ns;
+    snprintf(rb_worst_label, sizeof rb_worst_label, "%s", label);
+}
+/// (the exe's function that asked for the read: the first frame in the exe past the renderer's own two, as RbScope's site; 0: none)
+unsigned rb_caller_site() {
+    void* bt[14];
+    const USHORT n = CaptureStackBackTrace(1, 14, bt, nullptr);
+    static const uintptr_t base = exe_base();
+    int seen = 0;
+    for (USHORT i = 0; i < n; i++) {
+        const uintptr_t a = (uintptr_t)bt[i];
+        if (a < base || a >= base + 0x30000000) continue;
+        if (seen++ >= 2) return (unsigned)(a - base);
+    }
+    return 0;
+}
+// (v0.4.4, RX_VK_STRICT_BOUND=0 off, 2 the 0xc0 ranges too; RX_VK_STRICT_BOUND_MS, 4) the strict wait on a light meter page that the
+// exposure meter's own zeroing and hold cover (RX_VK_METER_ZERO / RX_VK_METER_HOLD, vk_internal.h) goes on for at most that long: the read of a
+// GPU far behind (the RX 6600's 885 ms and 1.34 s readback hitches, v0.4.3 telemetry) no longer stops the frame for the whole wait.
+// What a read that gave up sees is the frame before's sums (the GPU clears them before each program) or zeros, which the hold answers
+// with the last result: no doubled sum, no white flash
+bool strict_bounded_for(uint64_t size, uint64_t gpu) {
+    static const int mode = readback_wait::bound_mode(getenv("RX_VK_STRICT_BOUND"));
+    static const double ms = readback_wait::bound_limit_ms(getenv("RX_VK_STRICT_BOUND_MS"));
+    if (mode <= 0 || ms <= 0) return false;
+    const bool known = size == 0x1040 && memory_is_meter(host->gpu_guest(gpu));
+    return readback_wait::strict_bounded(mode, ms, meter_zero_on(), meter_hold_on(), size, known);
+}
+/// True: the value was reached within the bound
+bool wait_value_bounded(uint64_t v) {
+    static const double ms = readback_wait::bound_limit_ms(getenv("RX_VK_STRICT_BOUND_MS"));
+    queue_flush_for(FR_VALUE);
+    VkSemaphoreWaitInfo wi{VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO};
+    wi.semaphoreCount = 1;
+    wi.pSemaphores = &timeline;
+    wi.pValues = &v;
+    const VkResult r = vkWaitSemaphores(dev.device, &wi, (uint64_t)(ms * 1e6));
+    (void)completed();   // (RX_VK_POOL_MIRROR: its staged write-backs applied)
+    return r == VK_SUCCESS;
+}
 void invalidate(uint64_t gpu, uint64_t size) {
     static const bool rb_prof = getenv("RX_VK_RB_PROF") != nullptr || getenv("RX_VK_TL") != nullptr || getenv("RX_VK_TL_S") != nullptr;
     RbScope rbs(rb_prof, gpu, size);
@@ -4804,20 +4908,41 @@ void invalidate(uint64_t gpu, uint64_t size) {
             const bool late = pend && readback_late_wanted(size, v >= f0);
             if (pend) rbs.pending = true, rbs.newest = v >= f0, rbs.late = late;
             rbs.skip();
+            int64_t phase_ns[readback_wait::kPhases] = {};   // (v0.4.4: where this read waited, for the hitch rows' label)
+            bool cut = false;
+            const auto steady = [] { return std::chrono::steady_clock::now(); };
+            const auto ns_since = [](std::chrono::steady_clock::time_point a, std::chrono::steady_clock::time_point b) {
+                return (int64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(b - a).count();
+            };
             if (pend && !late) {
                 int ok = 0;
+                const auto p0 = steady();
                 if (!(unforced && wait_recorded(v, UINT64_MAX, &ok))) {
                     rbs.mark(2);
                     if (unforced && replay_behind()) wait_queue_empty();   // (not recorded whole: as before)
                     rbs.mark(1);
+                    const auto p1 = steady();
                     wait_value(v);
                     rbs.mark(3);
-                } else
+                    phase_ns[readback_wait::kRecorded] += ns_since(p0, p1), phase_ns[readback_wait::kGpu] += ns_since(p1, steady());
+                } else {
                     rbs.mark(2);
+                    phase_ns[readback_wait::kRecorded] += ns_since(p0, steady());
+                }
                 // (sprint 5, RX_VK_READBACK_STRICT: the value itself reached on the GPU's timeline before the CPU reads)
-                static std::atomic<int64_t> st_strict{0};
+                static std::atomic<int64_t> st_strict{0}, st_cut{0};
                 if ((readback_strict_wanted(size) || readback_strict_slow(size)) && v > completed()) {
-                    wait_value(v);
+                    const auto s0 = steady();
+                    if (strict_bounded_for(size, gpu)) {   // (v0.4.4: the light meter's page, zeroed and held on the GPU's side: a bounded wait)
+                        if (!wait_value_bounded(v)) {
+                            cut = true;
+                            if (st_cut.fetch_add(1) % 500 == 0)
+                                logf("vk: readback strict: %lld waits on the light meter ran out of RX_VK_STRICT_BOUND_MS and read on", (long long)st_cut.load());
+                        }
+                    } else {
+                        wait_value(v);
+                    }
+                    phase_ns[readback_wait::kStrict] += ns_since(s0, steady());
                     rbs.mark(4);
                     if (st_strict.fetch_add(1) % 500 == 0) logf("vk: readback strict: %lld waits for the value past the recordings' timeline", (long long)st_strict.load());
                 }
@@ -4828,6 +4953,16 @@ void invalidate(uint64_t gpu, uint64_t size) {
                 const int64_t d = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - w0).count();
                 ns += d;
                 st_rb_wait_ns.fetch_add(d, std::memory_order_relaxed);
+                if (d >= 1000000) {   // (v0.4.4: a wait of 1 ms or more: its label for the frame's hitch row)
+                    char lab[64];
+                    const int ph = readback_wait::longest(phase_ns, cut);
+                    uint64_t plo = 0, phi = 0;
+                    uint32_t pflags = 0;
+                    if (!memory_nvn_pool_of(host->gpu_guest(gpu), &plo, &phi, &pflags)) plo = 0;
+                    readback_wait::label(lab, sizeof lab, ph, size, size == 0x1040 && memory_is_meter(host->gpu_guest(gpu)),
+                                         d >= 4000000 ? rb_caller_site() : 0, plo);
+                    rb_worst_note(d, lab);
+                }
                 static const bool log_each = getenv("RX_VK_LOG_READBACK_WAITS") != nullptr;
                 static std::atomic<int> logged{0};
                 if (log_each && presents_now > 4000 && logged++ < 300)
@@ -5417,6 +5552,26 @@ void log_frame_stats() {
             logf("vk: a frame: the game's barriers by their NVN flags:%s", fl.c_str());
             st_barrier_flags.clear();
         }
+        {   // (longshot 9027e7374, RX_VK_MESH_CONV: the indirect mesh draws' arguments, vk_draw.cpp mesh_indirect_convert and mesh_conv_batch)
+            int64_t mc[7];
+            mesh_conv_stats(mc);
+            int64_t stops[mesh_conv::kStops];
+            for (int i = 0; i < mesh_conv::kStops; i++) stops[i] = st_mc_stops[i].exchange(0, std::memory_order_relaxed);
+            std::string cut;
+            for (int o = 0; o < 64; o++)
+                if (const int64_t n = st_mc_stop_ops[o].exchange(0, std::memory_order_relaxed)) {
+                    char b[32];
+                    snprintf(b, sizeof b, " %d: %.1f;", o, n / 120.0);
+                    cut += b;
+                }
+            logf("vk: a frame: indirect mesh draws' arguments (RX_VK_MESH_CONV=%d): %.1f converted one by one, %.1f from %.1f batches "
+                 "at the game's barriers (%.1f converted in them; %.1f dropped after a write, %.1f the ring came round); scans ended at "
+                 "a barrier %.1f, an op %.1f, the end %.1f, full %.1f; the draws batched by a scan right after an op that ended the one "
+                 "before, by op:%s",
+                 mesh_conv_mode(), mc[0] / 120.0, mc[1] / 120.0, mc[2] / 120.0, mc[3] / 120.0, mc[4] / 120.0, mc[5] / 120.0,
+                 stops[mesh_conv::kStopBarrier] / 120.0, stops[mesh_conv::kStopOp] / 120.0, stops[mesh_conv::kStopEnd] / 120.0,
+                 stops[mesh_conv::kStopFull] / 120.0, cut.empty() ? " none" : cut.c_str());
+        }
         static int64_t l_gpu;
         static uint64_t l_made;
         static int64_t l_gpu_up, l_gpu_gap;
@@ -5588,6 +5743,23 @@ std::shared_ptr<std::vector<uint8_t>> shot_pixels(uint64_t at_value, int64_t at_
 }
 void do_present(const nvn_tex* t, const int crop[4]) {
     static PendingShot pending;
+    // (hookshot) The storm hold's one tick a present (storm_hold.h), before this frame is drawn or shown: the present's
+    // number is the game's frame clock (texture_frame_no, one a present), and noting it here keeps the jobs' quiet clock
+    // running whether the frames are drawn or their draws are held out. present_held: the hold latches and it is the
+    // presents that it withholds (the default; RX_VK_STORM_HOLD_PRESENT=0 holds the draws instead).
+    const uint64_t storm_frame = texture_frame_no();
+    jobs_frame_note(storm_frame);
+    // (the draws and dispatches left out since the last present, the frame just drawn's: a hold ends on whole frames)
+    static int64_t storm_skips_was = 0;
+    int64_t storm_skips_now = 0, storm_w = 0;
+    double storm_wms = 0;
+    draw_stats3(&storm_skips_now, &storm_w, &storm_wms);
+    const int64_t storm_skips = storm_skips_now - storm_skips_was;
+    storm_skips_was = storm_skips_now;
+    storm_hold_tick(jobs_pending(), (int64_t)jobs_last_push_age_frames(), storm_frame, storm_skips,
+                    storm_hold_rules().live_frames > 0 ? jobs_pending_live(storm_hold_rules().live_frames) : -1);
+    const bool present_held = storm_hold_presents_held();
+
     // (hookshot) NVIDIA Reflex (vk_reflex.cpp): this frame's simulation ended, its submission starts; on the way out (after the
     // present) the driver's sleep until the next frame should begin
     temporal_idle();   // (DLSS, FSR: their video memory let go once not used for a while)
@@ -5711,6 +5883,10 @@ void do_present(const nvn_tex* t, const int crop[4]) {
                 struct stat sb;
                 shot = stat(shot_go, &sb) == 0;
             }
+            // (the storm hold's present: this frame is drawn but not shown — present_image() shows nothing and the
+            // compositor keeps the last picture — so it is not written as a shot. The shots stay what went to the screen,
+            // and an acceptance counts only what a player saw)
+            if (present_held) shot = false;
             // (RX_VK_SHOT_MENU=1, a debug aid: without a window the Insert menu is neither ticked nor drawn; this ticks it
             // at each present and draws it into the shots, for pictures of it from a headless run)
             static const bool shot_menu = getenv("RX_VK_SHOT_MENU") != nullptr;
@@ -5751,8 +5927,11 @@ void do_present(const nvn_tex* t, const int crop[4]) {
                                            sw, sh, crop, present_native_pq.load(std::memory_order_relaxed));
             submit_recording(g, false);
         }
-        if (interpolated) framegen_queue(value);
+        if (interpolated) framegen_queue(value, present_held);
         else menu_note_frame(true);   // (the FPS counter's, as frame generation's thread counts what it shows)
+        // (and the built-in interpolation's and FSR 3.1's images, off for a while: after the queue, so a set this present recorded
+        // is the display thread's to show and free before any drain waits for it; and counted as on, whatever the row says now)
+        framegen_idle(interpolated);
         {   // (RX_VK_WAIT_GPU=<frames>: the replay no further ahead of the GPU than that)
             static uint64_t values[8];
             static const int ahead = [] {
@@ -5773,14 +5952,28 @@ void do_present(const nvn_tex* t, const int crop[4]) {
             // its HUD's records before a pass read them: icons flashing mid-screen, the minimap drawn with another texture whenever the
             // camera moved, gone with the wait (48-56 fps there). RX_VK_WAIT_OWN=1 / 0 turns the wait on / off on any GPU; setting
             // RX_VK_WAIT_GPU (a ring of frames, above) leaves the default off
-            static const bool own = [] {
-                if (const char* e = getenv("RX_VK_WAIT_OWN")) return atoi(e) != 0;
-                if (getenv("RX_VK_WAIT_GPU")) return false;
-                const bool amd_igpu = dev.props.vendorID == 0x1002 && dev.props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU;
-                if (amd_igpu) logf("vk: an AMD integrated GPU: each present waits for its frame's GPU work (RX_VK_WAIT_OWN=0: not)");
-                return amd_igpu;
+            // (v0.4.4: RX_VK_WAIT_OWN=3, the default on an AMD integrated GPU: the frame before's work, the frame's own when it uploaded
+            // textures: the game one frame ahead as the console's two frames in flight, the GPU busy while it builds the next; =2 the
+            // frame before's always; =1: the rule of v0.4.3, the frame's own; =0 off. wait_own.h)
+            static const int own = [] {
+                const int m = wait_own::mode(getenv("RX_VK_WAIT_OWN"), getenv("RX_VK_WAIT_GPU") != nullptr,
+                                             dev.props.vendorID == 0x1002 && dev.props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU);
+                if (m && !getenv("RX_VK_WAIT_OWN"))
+                    logf("vk: an AMD integrated GPU: each present waits for the GPU's work of the frame before, of its own frame when textures were uploaded (RX_VK_WAIT_OWN=1: its own frame's always, =2: the frame before's always, =0: not)");
+                else if (m)
+                    logf("vk: RX_VK_WAIT_OWN=%d: each present waits for the GPU's work of %s", m, m == 1 ? "its own frame" : m == 2 ? "the frame before" : "the frame before (its own when textures were uploaded)");
+                return m;
             }();
-            if (own) wait_value(value);
+            static uint64_t own_prev = 0;
+            static int64_t own_uploads = 0;
+            if (own) {
+                int64_t uploads = 0, astc = 0, bytes = 0;
+                texture_stats(&uploads, &astc, &bytes);   // (mode 3: did this frame upload textures)
+                const bool uploaded = uploads != own_uploads;
+                own_uploads = uploads;
+                const uint64_t t = wait_own::target(own, value, own_prev, uploaded);
+                if (t) wait_value(t);
+            }
         }
         if (presents % 300 == 0) pipeline_cache_save(false), shader_key_commit();
         {   // (RX_VK_DUMP_KEY: F9 dumps the next frame, 8 times at most)
@@ -5981,6 +6174,77 @@ void do_present(const nvn_tex* t, const int crop[4]) {
 }
 
 } // namespace
+
+// (hookshot) The storm hold (storm_hold.h): one latch, ticked once a present here — the present path is where the
+// game's frame clock is, and where its queue's quiet is measured (jobs_frame_note, jobs_last_push_age_frames) — and read
+// by the draw path (vk_draw.cpp, draws held) and present_image() (presents held). One atomic mirror for the readers on
+// the replay, the present and the display threads.
+namespace {
+
+StormHold storm_hold_state;
+std::atomic<bool> storm_held{false};
+
+} // namespace
+
+const StormHoldRules& storm_hold_rules() {
+    static const StormHoldRules rules = [] {
+        StormHoldRules r;
+        if (const char* e = getenv("RX_VK_STORM_HOLD")) r.deep = atoi(e);
+        if (const char* e = getenv("RX_VK_STORM_MIN_FRAMES")) r.min_frames = atoll(e);
+        if (const char* e = getenv("RX_VK_STORM_QUIET_FRAMES")) r.quiet_frames = atoll(e);
+        if (const char* e = getenv("RX_VK_STORM_OFF_DEPTH")) r.off_depth = std::max<int64_t>(1, atoll(e));
+        if (const char* e = getenv("RX_VK_STORM_WHOLE")) r.whole_frames = atoi(e) != 0;
+        if (const char* e = getenv("RX_VK_STORM_SETTLE")) r.settle = std::max<int64_t>(1, atoll(e));
+        if (const char* e = getenv("RX_VK_STORM_LIVE")) r.live_frames = std::max<int64_t>(0, atoll(e));
+        if (const char* e = getenv("RX_VK_STORM_LIVE_DEPTH")) r.live_off_depth = std::max<int64_t>(1, atoll(e));
+        r.hold_present = !getenv("RX_VK_STORM_HOLD_PRESENT") || atoi(getenv("RX_VK_STORM_HOLD_PRESENT")) != 0;
+        return r;
+    }();
+    return rules;
+}
+
+bool storm_hold_on() {
+    return storm_held.load(std::memory_order_relaxed);
+}
+
+bool storm_hold_draws_held() {
+    return storm_hold_on() && !storm_hold_rules().hold_present;
+}
+
+bool storm_hold_presents_held() {
+    return storm_hold_on() && storm_hold_rules().hold_present;
+}
+
+StormHoldEvent storm_hold_tick(int64_t pending, int64_t push_age, uint64_t frame, int64_t skips, int64_t live) {
+    const StormHoldRules& r = storm_hold_rules();
+    static std::chrono::steady_clock::time_point engaged_at;
+    const StormHoldEvent ev = storm_hold_state.tick(r, pending, push_age, frame, skips, live);
+    storm_held.store(storm_hold_state.on, std::memory_order_relaxed);
+    if (ev == StormHoldEvent::Engaged) jobs_set_boost(true);
+    else if (ev == StormHoldEvent::Released) jobs_set_boost(false);
+    if (ev == StormHoldEvent::Engaged) {
+        engaged_at = std::chrono::steady_clock::now();
+        logf("vk: a translation storm: %d jobs queued, the %s held until it drains (from present %llu)",
+             (int)pending, r.hold_present ? "presents" : "frame's draws", (unsigned long long)frame);
+    } else if (ev == StormHoldEvent::Released) {
+        const double sec = std::chrono::duration<double>(std::chrono::steady_clock::now() - engaged_at).count();
+        logf("vk: the storm drained: held %.1f s, %lld presents, %d jobs left (%d asked for lately), none pushed for %lld presents",
+             sec, (long long)(frame - storm_hold_state.since_frame), (int)pending, (int)live, (long long)push_age);
+    }
+    // (hookshot, a test) RX_VK_STORM_TRACE=1: while held, the queue's depth and its quiet clock every 2 s, to see the
+    // band the churn rides and what the release waited out. Tick-driven, so the present hold traces as the draw hold does
+    static const bool trace = getenv("RX_VK_STORM_TRACE") && atoi(getenv("RX_VK_STORM_TRACE")) != 0;
+    if (trace && storm_hold_state.on) {
+        static std::chrono::steady_clock::time_point last;
+        const auto now = std::chrono::steady_clock::now();
+        if (ev == StormHoldEvent::Engaged || now - last >= std::chrono::seconds(2)) {
+            last = now;
+            logf("vk: storm trace: %d jobs queued (%d asked for lately), quiet for %lld presents, held %lld presents", (int)pending,
+                 (int)live, (long long)push_age, (long long)(frame - storm_hold_state.since_frame));
+        }
+    }
+    return ev;
+}
 
 // (hookshot) RX_VK_FRAMELOG=<file>: every frame shown, the game's and the made ones, as they go to the screen, 320x180, while
 // <file>.go exists (scripts/framelog.py finds the flashes). Taken at the last step and written on a thread of its own, so
@@ -6208,6 +6472,16 @@ void present_image(VkImage src, uint32_t sw, uint32_t sh, const int crop[4], VkI
                                 dev.swap_extent.height);
     }
     menu_tick();
+    // (hookshot, the storm hold's present: RX_VK_STORM_HOLD_PRESENT, on by default; storm_hold.h, ticked in do_present) A
+    // cold area's arrival is still translating: this frame was drawn, its submits and its frame log all ran, but its
+    // picture is one of the churn's — so the swapchain is not touched, and the last image the compositor was given keeps
+    // the screen. Nothing is acquired, so no image's semaphore (f.acquired) or fence (f.acq) is waited for, reset or left
+    // in flight; the frame slots' fences stay signalled, as the last present left them, so the first present past the
+    // release waits on f.done exactly as any present does and acquires whichever image the swapchain offers next. Frame
+    // pacing is not this blit's: the game's own frame clock and the present queue's presents_ahead set it, and presents and
+    // texture_frame_no (the hold's clock, the frame log, the shots' numbering) ran in do_present before this. A resize or
+    // HDR change above still made the swapchain again, so the window can be resized while the picture is held.
+    if (storm_hold_presents_held()) return;
     Frame& f = frames[frame_index];
     const int log_slot = frame_index;
     frame_index = (frame_index + 1) % 3;
@@ -6991,6 +7265,68 @@ bool init_pools_make(const VkCommandPoolCreateInfo& pi) {
 
 } // namespace
 
+/// (longshot d12ddf69b, Jer9, #1833) A recording's upload command buffer ended, submitted, waited for and begun again in place (vk_texture.cpp
+/// upload_chunk_flush, RX_VK_ASTC_CHUNK_MPX): a big ASTC upload goes to the GPU in bounded submissions, none of them past Windows' 2 s TDR.
+/// false: cur is not the upload buffer of a recording not yet submitted (a segment's init, say): nothing was done. The submit takes the
+/// queue as the early pre-sync one does (held submits first); it signals nothing, and the recording's own fence, reset after the wait,
+/// is its. The pool is the recording's own upload pool, which only this recording's recording thread uses
+bool replay_flush_upload(VkCommandBuffer cur) {
+    if (!cur) return false;
+    Recording* r = nullptr;
+    if (rec_cur && rec_cur->upload == cur && !rec_cur->submitted) {
+        r = rec_cur;
+    } else {
+        for (Recording& slot : recordings) {
+            if (slot.upload == cur && !slot.submitted) {
+                r = &slot;
+                break;
+            }
+        }
+    }
+    if (!r) return false;
+    full_barrier(cur, "barrier (upload chunk)");
+    const VkResult end_res = vkEndCommandBuffer(cur);
+    if (end_res != VK_SUCCESS) {
+        static int failures;
+        if (failures++ < 8) logf("vk: upload chunk end failed (%d)", (int)end_res);
+        if (end_res == VK_ERROR_DEVICE_LOST) device_lost();
+    } else {
+        VkCommandBufferSubmitInfo cbi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO};
+        cbi.commandBuffer = cur;
+        VkSubmitInfo2 si{VK_STRUCTURE_TYPE_SUBMIT_INFO_2};
+        si.commandBufferInfoCount = 1;
+        si.pCommandBufferInfos = &cbi;
+        late_fix_wait_unlocked();   // (TICK-060: as the other senders)
+        VkResult sub_res = VK_SUCCESS;
+        {
+            std::lock_guard lk(dev.present_mu);
+            queue_flush_locked();
+            PROF(PROF_QSUBMIT);
+            sub_res = vkQueueSubmit2(dev.queue, 1, &si, r->fence);
+        }
+        if (sub_res != VK_SUCCESS) {
+            static int failures;
+            if (failures++ < 8) logf("vk: upload chunk submit failed (%d)", (int)sub_res);
+            if (sub_res == VK_ERROR_DEVICE_LOST) device_lost();
+        } else {
+            const VkResult w = vkWaitForFences(dev.device, 1, &r->fence, VK_TRUE, UINT64_MAX);
+            if (w != VK_SUCCESS) {
+                static int failures;
+                if (failures++ < 8) logf("vk: upload chunk wait failed (%d)", (int)w);
+                if (w == VK_ERROR_DEVICE_LOST) device_lost();
+                std::lock_guard lk(dev.present_mu);
+                vkQueueWaitIdle(dev.queue);
+            }
+            if (vkResetFences(dev.device, 1, &r->fence) == VK_ERROR_DEVICE_LOST) device_lost();
+        }
+    }
+    if (vkResetCommandPool(dev.device, r->upload_pool, 0) == VK_ERROR_DEVICE_LOST) device_lost();
+    VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+    bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    if (vkBeginCommandBuffer(r->upload, &bi) == VK_ERROR_DEVICE_LOST) device_lost();
+    return true;
+}
+
 bool replay_start() {
     menu_init();
     if (!memory_init() || !vma_init(instance_proc())) return false;
@@ -7069,7 +7405,24 @@ int jitter_option(int id) {
     return (int)(d ? d : fsr3_inputs::jitter_size(axis));
 }
 
+/// (HeyListen, v0.4.4, RX_VK_RELEASE_HINT=0 turns the hint off: the host gives its core up for every release) Whether a texture's or a
+/// program's release called now would wait: the replay not asynchronous (its release drains the stopped queues under sync_order_mu
+/// and takes replay_mu, behind a whole submission being replayed) and one of the two locks held at this moment. The host
+/// (host/rx_backend.c release_gives_core) gives its thread's virtual core up around the call only then: with an RX 580's slow pipeline
+/// compiles OptimizeChangeBanc held a core for 2-2.5 s inside these (issue 67), and releases are thousands a load, so a call
+/// with the locks free must not pay a give-up. A best-effort look: a lock taken just after it is waited for with the core held
+static int release_may_wait() {
+    static const bool hint = !getenv("RX_VK_RELEASE_HINT") || atoi(getenv("RX_VK_RELEASE_HINT")) != 0;
+    if (!hint) return 1;
+    if (async_on()) return 0;   // (a job queued: nothing waited for here)
+    if (!sync_order_mu.mu.try_lock()) return 1;
+    sync_order_mu.mu.unlock();
+    if (!replay_mu.try_lock()) return 1;
+    replay_mu.unlock();
+    return 0;
+}
 void fill_replay_table(MkwVkRenderer& t) {
+    t.nvn_release_may_wait = release_may_wait;
     t.stats = stats;
     t.nvn_submit = submit;
     t.nvn_submit_q = submit_q;
@@ -7293,5 +7646,12 @@ int64_t gpu_time_ns() { return st_gpu_ns; }
 /// (heylisten) the read-backs' waits for the GPU so far, ns (the summary's readback cause and its gpu_wait part,
 /// perf_report.cpp): the CPU reads of GPU results waiting for their write-back, invalidate above
 int64_t readback_wait_ns() { return st_rb_wait_ns.load(std::memory_order_relaxed); }
+int64_t readback_worst_take(char* label, size_t cap) {
+    std::lock_guard lk(rb_worst_mu);
+    const int64_t ns = rb_worst_ns;
+    if (label && cap) snprintf(label, cap, "%s", ns ? rb_worst_label : "");
+    rb_worst_ns = 0;
+    return ns;
+}
 
 } // namespace mkwvk
