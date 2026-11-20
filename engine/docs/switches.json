@@ -2,7 +2,7 @@
  "schema": 1,
  "generated_by": "engine/scripts/list_switches.py",
  "scope": "C, C++ and headers under engine/ (engine/tests and vendored trees other than a64-kit excluded) and the Python the builder, the lifter and the scripts run: getenv, std::getenv, _wgetenv, the code's own env helpers and table-driven reads, and os.environ.",
- "count": 1288,
+ "count": 1289,
  "switches": [
   {
    "name": "A64_DEVIRT",
@@ -2962,7 +2962,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_main.cpp",
-     "line": 1002
+     "line": 1068
     }
    ],
    "default": "off (unset)",
@@ -4619,6 +4619,10 @@
    "audience": "developer",
    "files": [
     {
+     "path": "gpu/vk/vk_main.cpp",
+     "line": 171
+    },
+    {
      "path": "host/display.c",
      "line": 380
     },
@@ -4663,8 +4667,8 @@
      "line": 292
     }
    ],
-   "default": "off (unset)",
-   "values": "on or off (0, false, off, no and empty are off)",
+   "default": "unset",
+   "values": "text (`1` named)",
    "explanation": "No window: the renderer draws offscreen, for screenshots and frame dumps.",
    "comment": "(Heylisten, version 16) the Vulkan back end found only a software renderer (llvmpipe, lavapipe, SwiftShader): the game cannot run on it, and the GPU's own driver is missing. The window (a message box: Windows', on Linux SDL's, through host/posix's MessageBoxA, which also writes it to stderr; none for HOS_HEADLESS), then the game ends with 3, the code of no usable Vulkan in a --prepare-shaders run (hos_main.c). A clean end: the crash window has nothing to say about it.",
    "documented_in": "development.md",
@@ -13913,7 +13917,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_main.cpp",
-     "line": 249
+     "line": 314
     }
    ],
    "default": "off (unset)",
@@ -15414,11 +15418,11 @@
     },
     {
      "path": "gpu/vk/vk_main.cpp",
-     "line": 383
+     "line": 448
     },
     {
      "path": "gpu/vk/vk_main.cpp",
-     "line": 386
+     "line": 451
     }
    ],
    "default": "on (unless set to 0, false, off or no)",
@@ -15951,7 +15955,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_main.cpp",
-     "line": 277
+     "line": 342
     }
    ],
    "default": "unset",
@@ -17455,11 +17459,11 @@
    "files": [
     {
      "path": "gpu/vk/vk_main.cpp",
-     "line": 859
+     "line": 925
     },
     {
      "path": "gpu/vk/vk_main.cpp",
-     "line": 1488
+     "line": 1554
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
@@ -17886,7 +17890,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_main.cpp",
-     "line": 357
+     "line": 422
     }
    ],
    "default": "unset",
@@ -18930,11 +18934,11 @@
    "files": [
     {
      "path": "gpu/vk/vk_main.cpp",
-     "line": 860
+     "line": 926
     },
     {
      "path": "gpu/vk/vk_main.cpp",
-     "line": 1488
+     "line": 1554
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
@@ -20795,7 +20799,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_main.cpp",
-     "line": 357
+     "line": 422
     }
    ],
    "default": "off (unset)",
@@ -21311,7 +21315,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_main.cpp",
-     "line": 394
+     "line": 459
     }
    ],
    "default": "unset",
@@ -22010,11 +22014,11 @@
    "files": [
     {
      "path": "gpu/vk/vk_main.cpp",
-     "line": 668
+     "line": 733
     },
     {
      "path": "gpu/vk/vk_main.cpp",
-     "line": 676
+     "line": 741
     }
    ],
    "default": "unset",
@@ -22035,13 +22039,34 @@
    "files": [
     {
      "path": "gpu/vk/vk_main.cpp",
-     "line": 1361
+     "line": 1427
     }
    ],
    "default": "unset",
    "values": "text",
    "explanation": "(The crash report's facts: host/hos_crash_dialog.h reads \"vk: driver:\" and \"report:\" lines).",
    "comment": "(The crash report's facts: host/hos_crash_dialog.h reads \"vk: driver:\" and \"report:\" lines).",
+   "documented_in": null,
+   "source": "comment at gpu/vk/vk_main.cpp",
+   "documented": true,
+   "set_via": "In `hookshot_env.txt`, or in the environment.",
+   "use": null
+  },
+  {
+   "name": "RX_VK_NO_MODULE_GUARD",
+   "area": "renderer",
+   "group": "Rendering and GPU",
+   "audience": "developer",
+   "files": [
+    {
+     "path": "gpu/vk/vk_main.cpp",
+     "line": 195
+    }
+   ],
+   "default": "off (unset)",
+   "values": "on or off (0, false, off, no and empty are off); the description names `1`",
+   "explanation": "(Hookshot b9b48dfd, pixl27; issue 43) A driver that faults in vkCreateShaderModule. On an RX 570 (Polaris, AMD's driver 2.0.220 and 2.0.279) the game closed with no message during its first shader preparation, one crash line per preparation worker. The shader translator calls vkCreateShaderModule (vk_shader.cpp), which no guard covered (pipelines have guarded_graphics / guarded_compute, vk_draw.cpp's own calls have guarded_shader_module). Its pointer goes through this guard now: a fault is that shader failing (the translator takes a null module for a failed program), logged with the SPIR-V kept beside the game (the first two), and said once in a box. RX_VK_NO_MODULE_GUARD=1: the driver's pointer as before.",
+   "comment": "(Hookshot b9b48dfd, pixl27; issue 43) A driver that faults in vkCreateShaderModule. On an RX 570 (Polaris, AMD's driver 2.0.220 and 2.0.279) the game closed with no message during its first shader preparation, one crash line per preparation worker. The shader translator calls vkCreateShaderModule (vk_shader.cpp), which no guard covered (pipelines have guarded_graphics / guarded_compute, vk_draw.cpp's own calls have guarded_shader_module). Its pointer goes through this guard now: a fault is that shader failing (the translator takes a null module for a failed program), logged with the SPIR-V kept beside the game (the first two), and said once in a box. RX_VK_NO_MODULE_GUARD=1: the driver's pointer as before.",
    "documented_in": null,
    "source": "comment at gpu/vk/vk_main.cpp",
    "documented": true,
@@ -22211,7 +22236,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_main.cpp",
-     "line": 162
+     "line": 227
     }
    ],
    "default": "unset",
@@ -22336,12 +22361,12 @@
    "files": [
     {
      "path": "gpu/vk/vk_main.cpp",
-     "line": 639
+     "line": 704
     }
    ],
    "default": "unset",
    "values": "text",
-   "explanation": "undocumented: gpu/vk/vk_main.cpp:639 (in `create_device()`) reads it as a text value: `const bool pin = f13.subgroupSizeControl && sc.minSubgroupSize <= 32 && sc.maxSubgroupSize >= 32 && !getenv(\"RX_VK_NO...`. No comment in the source says what it changes.",
+   "explanation": "undocumented: gpu/vk/vk_main.cpp:704 (in `create_device()`) reads it as a text value: `const bool pin = f13.subgroupSizeControl && sc.minSubgroupSize <= 32 && sc.maxSubgroupSize >= 32 && !getenv(\"RX_VK_NO...`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -23925,7 +23950,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_main.cpp",
-     "line": 478
+     "line": 543
     }
    ],
    "default": "0 (unset)",
@@ -24327,12 +24352,12 @@
    "files": [
     {
      "path": "gpu/vk/vk_main.cpp",
-     "line": 454
+     "line": 519
     }
    ],
    "default": "off (unset)",
    "values": "on or off (0, false, off, no and empty are off)",
-   "explanation": "undocumented: gpu/vk/vk_main.cpp:454 (in `create_device()`) reads it as an on/off switch: `const float priorities[2] = {getenv(\"RX_VK_QUEUE_PRIO\") ? (float)atof(getenv(\"RX_VK_QUEUE_PRIO\")) : 1.0f, 1.0f};`. No comment in the source says what it changes.",
+   "explanation": "undocumented: gpu/vk/vk_main.cpp:519 (in `create_device()`) reads it as an on/off switch: `const float priorities[2] = {getenv(\"RX_VK_QUEUE_PRIO\") ? (float)atof(getenv(\"RX_VK_QUEUE_PRIO\")) : 1.0f, 1.0f};`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -24855,7 +24880,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_main.cpp",
-     "line": 577
+     "line": 642
     }
    ],
    "default": "0 (unset)",
@@ -25571,12 +25596,12 @@
    "files": [
     {
      "path": "gpu/vk/vk_main.cpp",
-     "line": 685
+     "line": 750
     }
    ],
    "default": "off (unset)",
    "values": "on or off (0, false, off, no and empty are off)",
-   "explanation": "undocumented: gpu/vk/vk_main.cpp:685 (in `create_device()`) reads it as an on/off switch: `f.features.sparseResidencyImage2D && !(getenv(\"RX_VK_SPARSE\") && !atoi(getenv(\"RX_VK_SPARSE\")));`. No comment in the source says what it changes.",
+   "explanation": "undocumented: gpu/vk/vk_main.cpp:750 (in `create_device()`) reads it as an on/off switch: `f.features.sparseResidencyImage2D && !(getenv(\"RX_VK_SPARSE\") && !atoi(getenv(\"RX_VK_SPARSE\")));`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -25613,7 +25638,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_main.cpp",
-     "line": 495
+     "line": 560
     }
    ],
    "default": "0 (unset)",
@@ -25827,7 +25852,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_main.cpp",
-     "line": 1027
+     "line": 1093
     }
    ],
    "default": "unset",
@@ -25848,7 +25873,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_main.cpp",
-     "line": 1130
+     "line": 1196
     }
    ],
    "default": "0 (unset)",
@@ -26335,7 +26360,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_main.cpp",
-     "line": 675
+     "line": 740
     }
    ],
    "default": "unset",
@@ -26612,7 +26637,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_main.cpp",
-     "line": 410
+     "line": 475
     },
     {
      "path": "gpu/vk/vk_replay.cpp",
@@ -26687,7 +26712,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_main.cpp",
-     "line": 456
+     "line": 521
     },
     {
      "path": "gpu/vk/vk_replay.cpp",
@@ -26716,7 +26741,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_main.cpp",
-     "line": 410
+     "line": 475
     },
     {
      "path": "gpu/vk/vk_replay.cpp",
@@ -27114,7 +27139,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_main.cpp",
-     "line": 222
+     "line": 287
     }
    ],
    "default": "off (unset)",
@@ -27340,7 +27365,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_main.cpp",
-     "line": 648
+     "line": 713
     }
    ],
    "default": "off (unset)",
@@ -28527,11 +28552,11 @@
    "files": [
     {
      "path": "gpu/vk/vk_main.cpp",
-     "line": 404
+     "line": 469
     },
     {
      "path": "gpu/vk/vk_main.cpp",
-     "line": 406
+     "line": 471
     }
    ],
    "default": "unset",
