@@ -559,6 +559,13 @@ namespace mkwvk {
 enum ProfPhase { PROF_SUBMIT, PROF_PRESENT, PROF_DRAW, PROF_DESC, PROF_TEXGET, PROF_UPLOAD, PROF_PIPE, PROF_PROGRAM,
                  PROF_CMDS, PROF_DISPATCH, PROF_MEMSYNC, PROF_QSUBMIT, PROF_SLOTWAIT, PROF_COUNT };
 extern SplitCount prof_ns[PROF_COUNT];   // (TICK-052: a cache line a thread, split_count.h)
+/// (HeyListen, v0.4.4) What PROF_DESC is made of, for the performance summary's descriptors cause: PROF_DESC also holds the exact scopes
+/// timed inside the build (a texture's upload, its slow path's image and views), which made a zone's texture work read as
+/// "descriptors" hitches (a Radeon 780M's Kakariko: 23 of them, 3.8 s). PD_SELF the build's own time (sampled as PROF_DESC is),
+/// PD_TEX the texture work inside it that has no phase of its own (PROF_EXACT: texture_get's slow path), PD_POOL the descriptor
+/// pools: sets allocated, written and pools made, reset or destroyed (exact, here and where a recording begins)
+enum DescPart { PD_SELF, PD_TEX, PD_POOL, PD_COUNT };
+extern SplitCount prof_desc[PD_COUNT];
 /// Nanoseconds from a performance-counter reading. An integer number of nanoseconds per tick is a multiply, so a
 /// reading past 2^53 does not lose its low bits the way the double divide does.
 inline int64_t perf_ticks_to_ns(int64_t ticks, int64_t freq) {
@@ -605,16 +612,18 @@ struct ProfThread {
     uint32_t rng;    // (xorshift32, seeded at the thread's first pick)
     int open, k;     // (the PROF_HOT scopes open, and the outermost one's weight: 0 not timed)
     int64_t exact;   // (the nanoseconds PROF / PROF_EXACT timed on this thread so far)
+    int64_t anon;    // (and of those, the PROF_EXACT ones not inside a phase's PROF: prof_desc's PD_TEX)
 };
 inline thread_local ProfThread prof_t;
 struct ProfScope {
     int phase;   // (-1: PROF_EXACT, no phase of its own)
-    int64_t t0, x0;
-    explicit ProfScope(int p) : phase(p), t0(prof_now()), x0(prof_t.exact) {}
+    int64_t t0, x0, a0;
+    explicit ProfScope(int p) : phase(p), t0(prof_now()), x0(prof_t.exact), a0(prof_t.anon) {}
     ~ProfScope() {
         const int64_t dt = prof_now() - t0;
         if (phase >= 0) prof_ns[phase] += dt;
         prof_t.exact = x0 + dt;   // (what was exact inside is part of dt: not counted twice)
+        prof_t.anon = phase < 0 ? a0 + dt : a0;   // (a phase's own scope holds what is inside it: not anonymous work any more)
     }
 };
 /// A thread's first state: splitmix64 of a counter, so the threads' sequences are unrelated; never 0, xorshift's fixed point
@@ -633,17 +642,22 @@ inline int prof_pick(ProfThread& t) {   // (the weight: 8 one time in eight, els
 }
 struct ProfScopeHot {
     int phase, k;
-    int64_t t0, x0;
+    int64_t t0, x0, a0;
     explicit ProfScopeHot(int p) : phase(p) {
         ProfThread& t = prof_t;
         if (!t.open++) t.k = prof_pick(t);
-        k = t.k, x0 = t.exact, t0 = k ? prof_now() : 0;
+        k = t.k, x0 = t.exact, a0 = t.anon, t0 = k ? prof_now() : 0;
     }
     ~ProfScopeHot() {
         ProfThread& t = prof_t;
         const int64_t x = t.exact - x0;   // (timed exactly inside: once, as it is)
-        if (k) prof_ns[phase] += (prof_now() - t0 - x) * k + x;
+        const int64_t own = k ? (prof_now() - t0 - x) * k : 0;
+        if (k) prof_ns[phase] += own + x;
         else if (x) prof_ns[phase] += x;
+        if (phase == PROF_DESC) {   // (v0.4.4: the build's own time and the texture work inside it, apart: DescPart)
+            if (k) prof_desc[PD_SELF] += own;
+            if (const int64_t a = t.anon - a0) prof_desc[PD_TEX] += a;
+        }
         t.open--;
     }
 };

@@ -63,7 +63,9 @@
 #include "vk_tl_clock.h"   // (RX_VK_TL: the timeline's host time domain)
 #include "vk_lag.h"   // (RX_VK_LAG_LOG)
 #include "readback_late.h"   // (RX_VK_READBACK_LATE)
+#include "readback_wait.h"   // (the hitch rows' labels of a read's wait, RX_VK_STRICT_BOUND)
 #include "exe_base.h"   // (RX_VK_RB_PROF's call sites: offsets in the exe)
+#include "wait_own.h"   // (RX_VK_WAIT_OWN)
 #include "perf_parts.h"   // (the frame's parts for the performance summary: submit/present scopes, the waits)
 #include "vk_work.h"   // (after the others: counts the commands that do GPU work, for full_barrier)
 
@@ -4753,6 +4755,54 @@ RbScope::~RbScope() {
 // frame: the summary's readback cause and its gpu_wait part). The wait the CPU pays for its reads of GPU results — the
 // exposure meter's page is the one a frame always waits for — was measured only into the log's counters before
 std::atomic<int64_t> st_rb_wait_ns{0};
+// (v0.4.4) the longest single read's wait since the performance summary last asked, and its label (readback_wait.h): the hitch rows
+// of the readback cause say which read it was. Only waits of 1 ms or more are noted, so the lock is taken a few times a second
+std::mutex rb_worst_mu;
+int64_t rb_worst_ns = 0;
+char rb_worst_label[64] = "";
+void rb_worst_note(int64_t ns, const char* label) {
+    std::lock_guard lk(rb_worst_mu);
+    if (ns <= rb_worst_ns) return;
+    rb_worst_ns = ns;
+    snprintf(rb_worst_label, sizeof rb_worst_label, "%s", label);
+}
+/// (the exe's function that asked for the read: the first frame in the exe past the renderer's own two, as RbScope's site; 0: none)
+unsigned rb_caller_site() {
+    void* bt[14];
+    const USHORT n = CaptureStackBackTrace(1, 14, bt, nullptr);
+    static const uintptr_t base = exe_base();
+    int seen = 0;
+    for (USHORT i = 0; i < n; i++) {
+        const uintptr_t a = (uintptr_t)bt[i];
+        if (a < base || a >= base + 0x30000000) continue;
+        if (seen++ >= 2) return (unsigned)(a - base);
+    }
+    return 0;
+}
+// (v0.4.4, RX_VK_STRICT_BOUND=0 off, 2 the 0xc0 ranges too; RX_VK_STRICT_BOUND_MS, 4) the strict wait on a light meter page that the
+// exposure meter's own zeroing and hold cover (RX_VK_METER_ZERO / RX_VK_METER_HOLD, vk_internal.h) goes on for at most that long: the read of a
+// GPU far behind (the RX 6600's 885 ms and 1.34 s readback hitches, v0.4.3 telemetry) no longer stops the frame for the whole wait.
+// What a read that gave up sees is the frame before's sums (the GPU clears them before each program) or zeros, which the hold answers
+// with the last result: no doubled sum, no white flash
+bool strict_bounded_for(uint64_t size, uint64_t gpu) {
+    static const int mode = readback_wait::bound_mode(getenv("RX_VK_STRICT_BOUND"));
+    static const double ms = readback_wait::bound_limit_ms(getenv("RX_VK_STRICT_BOUND_MS"));
+    if (mode <= 0 || ms <= 0) return false;
+    const bool known = size == 0x1040 && memory_is_meter(host->gpu_guest(gpu));
+    return readback_wait::strict_bounded(mode, ms, meter_zero_on(), meter_hold_on(), size, known);
+}
+/// True: the value was reached within the bound
+bool wait_value_bounded(uint64_t v) {
+    static const double ms = readback_wait::bound_limit_ms(getenv("RX_VK_STRICT_BOUND_MS"));
+    queue_flush_for(FR_VALUE);
+    VkSemaphoreWaitInfo wi{VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO};
+    wi.semaphoreCount = 1;
+    wi.pSemaphores = &timeline;
+    wi.pValues = &v;
+    const VkResult r = vkWaitSemaphores(dev.device, &wi, (uint64_t)(ms * 1e6));
+    (void)completed();   // (RX_VK_POOL_MIRROR: its staged write-backs applied)
+    return r == VK_SUCCESS;
+}
 void invalidate(uint64_t gpu, uint64_t size) {
     static const bool rb_prof = getenv("RX_VK_RB_PROF") != nullptr || getenv("RX_VK_TL") != nullptr || getenv("RX_VK_TL_S") != nullptr;
     RbScope rbs(rb_prof, gpu, size);
@@ -4858,20 +4908,41 @@ void invalidate(uint64_t gpu, uint64_t size) {
             const bool late = pend && readback_late_wanted(size, v >= f0);
             if (pend) rbs.pending = true, rbs.newest = v >= f0, rbs.late = late;
             rbs.skip();
+            int64_t phase_ns[readback_wait::kPhases] = {};   // (v0.4.4: where this read waited, for the hitch rows' label)
+            bool cut = false;
+            const auto steady = [] { return std::chrono::steady_clock::now(); };
+            const auto ns_since = [](std::chrono::steady_clock::time_point a, std::chrono::steady_clock::time_point b) {
+                return (int64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(b - a).count();
+            };
             if (pend && !late) {
                 int ok = 0;
+                const auto p0 = steady();
                 if (!(unforced && wait_recorded(v, UINT64_MAX, &ok))) {
                     rbs.mark(2);
                     if (unforced && replay_behind()) wait_queue_empty();   // (not recorded whole: as before)
                     rbs.mark(1);
+                    const auto p1 = steady();
                     wait_value(v);
                     rbs.mark(3);
-                } else
+                    phase_ns[readback_wait::kRecorded] += ns_since(p0, p1), phase_ns[readback_wait::kGpu] += ns_since(p1, steady());
+                } else {
                     rbs.mark(2);
+                    phase_ns[readback_wait::kRecorded] += ns_since(p0, steady());
+                }
                 // (sprint 5, RX_VK_READBACK_STRICT: the value itself reached on the GPU's timeline before the CPU reads)
-                static std::atomic<int64_t> st_strict{0};
+                static std::atomic<int64_t> st_strict{0}, st_cut{0};
                 if ((readback_strict_wanted(size) || readback_strict_slow(size)) && v > completed()) {
-                    wait_value(v);
+                    const auto s0 = steady();
+                    if (strict_bounded_for(size, gpu)) {   // (v0.4.4: the light meter's page, zeroed and held on the GPU's side: a bounded wait)
+                        if (!wait_value_bounded(v)) {
+                            cut = true;
+                            if (st_cut.fetch_add(1) % 500 == 0)
+                                logf("vk: readback strict: %lld waits on the light meter ran out of RX_VK_STRICT_BOUND_MS and read on", (long long)st_cut.load());
+                        }
+                    } else {
+                        wait_value(v);
+                    }
+                    phase_ns[readback_wait::kStrict] += ns_since(s0, steady());
                     rbs.mark(4);
                     if (st_strict.fetch_add(1) % 500 == 0) logf("vk: readback strict: %lld waits for the value past the recordings' timeline", (long long)st_strict.load());
                 }
@@ -4882,6 +4953,16 @@ void invalidate(uint64_t gpu, uint64_t size) {
                 const int64_t d = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - w0).count();
                 ns += d;
                 st_rb_wait_ns.fetch_add(d, std::memory_order_relaxed);
+                if (d >= 1000000) {   // (v0.4.4: a wait of 1 ms or more: its label for the frame's hitch row)
+                    char lab[64];
+                    const int ph = readback_wait::longest(phase_ns, cut);
+                    uint64_t plo = 0, phi = 0;
+                    uint32_t pflags = 0;
+                    if (!memory_nvn_pool_of(host->gpu_guest(gpu), &plo, &phi, &pflags)) plo = 0;
+                    readback_wait::label(lab, sizeof lab, ph, size, size == 0x1040 && memory_is_meter(host->gpu_guest(gpu)),
+                                         d >= 4000000 ? rb_caller_site() : 0, plo);
+                    rb_worst_note(d, lab);
+                }
                 static const bool log_each = getenv("RX_VK_LOG_READBACK_WAITS") != nullptr;
                 static std::atomic<int> logged{0};
                 if (log_each && presents_now > 4000 && logged++ < 300)
@@ -5871,14 +5952,28 @@ void do_present(const nvn_tex* t, const int crop[4]) {
             // its HUD's records before a pass read them: icons flashing mid-screen, the minimap drawn with another texture whenever the
             // camera moved, gone with the wait (48-56 fps there). RX_VK_WAIT_OWN=1 / 0 turns the wait on / off on any GPU; setting
             // RX_VK_WAIT_GPU (a ring of frames, above) leaves the default off
-            static const bool own = [] {
-                if (const char* e = getenv("RX_VK_WAIT_OWN")) return atoi(e) != 0;
-                if (getenv("RX_VK_WAIT_GPU")) return false;
-                const bool amd_igpu = dev.props.vendorID == 0x1002 && dev.props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU;
-                if (amd_igpu) logf("vk: an AMD integrated GPU: each present waits for its frame's GPU work (RX_VK_WAIT_OWN=0: not)");
-                return amd_igpu;
+            // (v0.4.4: RX_VK_WAIT_OWN=3, the default on an AMD integrated GPU: the frame before's work, the frame's own when it uploaded
+            // textures: the game one frame ahead as the console's two frames in flight, the GPU busy while it builds the next; =2 the
+            // frame before's always; =1: the rule of v0.4.3, the frame's own; =0 off. wait_own.h)
+            static const int own = [] {
+                const int m = wait_own::mode(getenv("RX_VK_WAIT_OWN"), getenv("RX_VK_WAIT_GPU") != nullptr,
+                                             dev.props.vendorID == 0x1002 && dev.props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU);
+                if (m && !getenv("RX_VK_WAIT_OWN"))
+                    logf("vk: an AMD integrated GPU: each present waits for the GPU's work of the frame before, of its own frame when textures were uploaded (RX_VK_WAIT_OWN=1: its own frame's always, =2: the frame before's always, =0: not)");
+                else if (m)
+                    logf("vk: RX_VK_WAIT_OWN=%d: each present waits for the GPU's work of %s", m, m == 1 ? "its own frame" : m == 2 ? "the frame before" : "the frame before (its own when textures were uploaded)");
+                return m;
             }();
-            if (own) wait_value(value);
+            static uint64_t own_prev = 0;
+            static int64_t own_uploads = 0;
+            if (own) {
+                int64_t uploads = 0, astc = 0, bytes = 0;
+                texture_stats(&uploads, &astc, &bytes);   // (mode 3: did this frame upload textures)
+                const bool uploaded = uploads != own_uploads;
+                own_uploads = uploads;
+                const uint64_t t = wait_own::target(own, value, own_prev, uploaded);
+                if (t) wait_value(t);
+            }
         }
         if (presents % 300 == 0) pipeline_cache_save(false), shader_key_commit();
         {   // (RX_VK_DUMP_KEY: F9 dumps the next frame, 8 times at most)
@@ -7310,7 +7405,24 @@ int jitter_option(int id) {
     return (int)(d ? d : fsr3_inputs::jitter_size(axis));
 }
 
+/// (HeyListen, v0.4.4, RX_VK_RELEASE_HINT=0 turns the hint off: the host gives its core up for every release) Whether a texture's or a
+/// program's release called now would wait: the replay not asynchronous (its release drains the stopped queues under sync_order_mu
+/// and takes replay_mu, behind a whole submission being replayed) and one of the two locks held at this moment. The host
+/// (host/rx_backend.c release_gives_core) gives its thread's virtual core up around the call only then: with an RX 580's slow pipeline
+/// compiles OptimizeChangeBanc held a core for 2-2.5 s inside these (issue 67), and releases are thousands a load, so a call
+/// with the locks free must not pay a give-up. A best-effort look: a lock taken just after it is waited for with the core held
+static int release_may_wait() {
+    static const bool hint = !getenv("RX_VK_RELEASE_HINT") || atoi(getenv("RX_VK_RELEASE_HINT")) != 0;
+    if (!hint) return 1;
+    if (async_on()) return 0;   // (a job queued: nothing waited for here)
+    if (!sync_order_mu.mu.try_lock()) return 1;
+    sync_order_mu.mu.unlock();
+    if (!replay_mu.try_lock()) return 1;
+    replay_mu.unlock();
+    return 0;
+}
 void fill_replay_table(MkwVkRenderer& t) {
+    t.nvn_release_may_wait = release_may_wait;
     t.stats = stats;
     t.nvn_submit = submit;
     t.nvn_submit_q = submit_q;
@@ -7534,5 +7646,12 @@ int64_t gpu_time_ns() { return st_gpu_ns; }
 /// (heylisten) the read-backs' waits for the GPU so far, ns (the summary's readback cause and its gpu_wait part,
 /// perf_report.cpp): the CPU reads of GPU results waiting for their write-back, invalidate above
 int64_t readback_wait_ns() { return st_rb_wait_ns.load(std::memory_order_relaxed); }
+int64_t readback_worst_take(char* label, size_t cap) {
+    std::lock_guard lk(rb_worst_mu);
+    const int64_t ns = rb_worst_ns;
+    if (label && cap) snprintf(label, cap, "%s", ns ? rb_worst_label : "");
+    rb_worst_ns = 0;
+    return ns;
+}
 
 } // namespace mkwvk
