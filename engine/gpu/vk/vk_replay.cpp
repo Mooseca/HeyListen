@@ -367,6 +367,19 @@ bool readback_strict_wanted(uint64_t size) {
 // (TICK-060, RX_VK_LATE_DEFER) the highest timeline value a submit sent to the queue signals: a capture's late value at or below it
 // is reached with nothing more submitted, so its wait can move to the queue (vk_memory.cpp take_capture)
 std::atomic<uint64_t> tl_signal_sent{0};
+// (w1, white flashes under load) RX_VK_STRICT_SLOW_MS (default 22, 0: off): while the presents run slower than that (the machine is
+// loaded: other games, a busy CPU), the light meter's ranges wait for their write-back whatever RX_VK_READBACK_STRICT says. The
+// recordings' timeline a read waits for is signalled by the heavy submission's FIRST recording; with the GPU or the replay late
+// the meter's write-back (its last piece) lands after it and the CPU reads the stale or reset sums: the exposure pulses, the
+// picture goes white for ~16 frames. At full speed the pulse is 1 in 10,000 frames and the wait costs ~10-18%, so it is not
+// always on
+std::atomic<double> present_ms_ema{0.0};
+std::atomic<int64_t> present_last_ns{0};
+bool readback_strict_slow(uint64_t size) {
+    static const double limit = getenv("RX_VK_STRICT_SLOW_MS") ? atof(getenv("RX_VK_STRICT_SLOW_MS")) : 22.0;
+    static const readback_late::Rules meter = readback_late::parse("1040,c0");
+    return limit > 0 && present_ms_ema.load(std::memory_order_relaxed) > limit && readback_late::wanted(meter, size, false);
+}
 void note_signal_sent(uint64_t v) {
     uint64_t cur = tl_signal_sent.load(std::memory_order_relaxed);
     while (v > cur && !tl_signal_sent.compare_exchange_weak(cur, v, std::memory_order_release, std::memory_order_relaxed)) {}
@@ -4785,7 +4798,7 @@ void invalidate(uint64_t gpu, uint64_t size) {
                     rbs.mark(2);
                 // (sprint 5, RX_VK_READBACK_STRICT: the value itself reached on the GPU's timeline before the CPU reads)
                 static std::atomic<int64_t> st_strict{0};
-                if (readback_strict_wanted(size) && v > completed()) {
+                if ((readback_strict_wanted(size) || readback_strict_slow(size)) && v > completed()) {
                     wait_value(v);
                     rbs.mark(4);
                     if (st_strict.fetch_add(1) % 500 == 0) logf("vk: readback strict: %lld waits for the value past the recordings' timeline", (long long)st_strict.load());
@@ -5636,6 +5649,15 @@ void do_present(const nvn_tex* t, const int crop[4]) {
         full_barrier(r.cmd);
         presents++;
         presents_now = presents;
+        {   // (w1, white flashes under load) the smoothed interval of the presents, for readback_strict_slow
+            const int64_t now = std::chrono::steady_clock::now().time_since_epoch().count();
+            const int64_t before = present_last_ns.exchange(now, std::memory_order_relaxed);
+            if (before) {
+                const double ms = (double)(now - before) / 1e6;
+                present_ms_ema.store(present_ms_ema.load(std::memory_order_relaxed) * 0.9 + std::min(ms, 500.0) * 0.1,
+                                     std::memory_order_relaxed);
+            }
+        }
         occ_present(presents, occ_serial, completed());
         if (presents == 1) hang_watch_start();
         {   // (EvilBoyce, diagnostics) RX_VK_WATCH_CPU=<present>:<gpu address>[,...] (hex addresses): from that present on, the
