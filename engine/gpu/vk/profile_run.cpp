@@ -64,7 +64,6 @@ struct TSlot {
 };
 TSlot* slots = nullptr;
 std::atomic<int64_t> passes_timed{0}, passes_dropped{0};
-std::atomic<uint64_t> out_pixels{0};
 constexpr uint64_t kGpuLagFrames = 1;   // (a pass recorded in frame f runs while f + 1 is shown: its time counts there)
 
 int slot_of(VkCommandBuffer cmd) {
