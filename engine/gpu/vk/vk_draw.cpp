@@ -9967,7 +9967,6 @@ void predict_run(void (*progress)(size_t done, size_t total), bool background, b
                             continue;
                         }
                         const auto t_build = std::chrono::steady_clock::now();
-                        const auto t_build = std::chrono::steady_clock::now();
                         if (test_slow.first && test_slow.first == p.key) Sleep((DWORD)test_slow.second * 1000);
                         {
                             // (Longshot c392df3a: the same driver compiles, before the game: a turn at the gate, weighed by
