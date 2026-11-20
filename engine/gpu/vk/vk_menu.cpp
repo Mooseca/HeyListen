@@ -71,9 +71,8 @@ enum MenuTab {
     TAB_CONTROLS = 2,
     TAB_DEBUG = 3,   // (the OoT debug tools of #785, a tab of their own)
     TAB_COUNT = 4,
-    TAB_MOTION = TAB_COUNT,   // (hookshot: not a tab of the strip, the Motion page that the Controls tab's Motion row
+    TAB_MOTION = TAB_COUNT    // (hookshot: not a tab of the strip, the Motion page that the Controls tab's Motion row
                               // opens: one past the strip's tabs, so a tab added before TAB_COUNT moves it along)
-    TAB_PAGE = TAB_MOTION + 1   // (hookshot: the Controls page's rows, above its grid; no tab shows them)
 };
 
 namespace fgr = framegen_rows;   // (the Frame generation rows' modes, and the Frame rate limit's values)
@@ -951,12 +950,18 @@ Row rows[] = {
      "Bounds-checked buffer reads: a read past a buffer's end is dropped instead of stopping the GPU. Applies after a "
      "restart.", hn_robust, true},
 
-    // Gameplay (3 rows)
+    // Gameplay
     {TAB_GAMEPLAY, "FPS counter", &opts.show_fps, 0, 2, 1, tx_perf,
      "FPS: frames per second and the frame time in the top right corner. Full: a panel with the GPU, VRAM, CPU and RAM load "
      "and a frame-time graph. F10 cycles Off, FPS and Full.", hn_fps, false, true},
     {TAB_GAMEPLAY, "Menu size", &opts.menu_size, 0, 3, 1, tx_menu_size,
      "How large this menu and the start-up screen are drawn.", hn_menu_size, false, true},
+    // (hookshot) the input rows, together here so they are easy to find; the Controls page shows the same two above its grid
+    {TAB_GAMEPLAY, "Layout preset", &opts.pad_layout, 0, 3, 1, tx_pad_layout,
+     "Which face button is which. Binding one yourself on the Controls page makes it Custom.", hn_pad_layout},
+    {TAB_GAMEPLAY, "Button prompts", &opts.prompts, 0, HOS_PROMPT_N, 1, tx_prompts,
+     "The button icons the game shows, in its texts and menus: those of this controller, for the buttons your controls "
+     "put each action on.", hn_prompts, true, true},
     {TAB_GAMEPLAY, "Game speed", &opts.realtime, 0, 1, 1, tx_speed, "How the game keeps time when it runs below 60 fps.",
      hn_speed},
     {TAB_GAMEPLAY, "Text speed", &opts.text_speed, 0, 3, 1, tx_text_speed,
@@ -991,7 +996,7 @@ Row rows[] = {
      "that offers to update, keep your version or skip that version. Nothing is asked when you are offline, and when the launcher "
      "starts the game it looks for updates itself. Applies after a restart.", nullptr, true, true},
 
-    // Controls (11 rows; Motion opens the 6 TAB_MOTION rows, Controls its page with the 2 TAB_PAGE rows)
+    // Controls (11 rows; Motion opens the 6 TAB_MOTION rows, Controls its page, which shows the Gameplay tab's Layout preset and Button prompts rows too)
     {TAB_CONTROLS, "Controller in background", &opts.pad_background, 0, 1, 1, tx_onoff,
      "Whether the controller plays the game while another window has the focus.", hn_background},
     {TAB_CONTROLS, "Mouse camera", &opts.mouse_native, 0, 1, 1, tx_mousecam, "How the captured mouse turns the camera.",
@@ -1029,12 +1034,6 @@ Row rows[] = {
      "when held still; Low keeps the smallest movements.", nullptr, false, true},
     {TAB_CONTROLS, "Motion", nullptr, 0, 0, 0, nullptr,   // (hookshot: opens the Motion page, the TAB_MOTION rows)
      "Motion controls: aiming with the controller's gyroscope, its sensitivity and its inverts."},
-    // (hookshot) the Controls page's own rows, above its grid (TAB_PAGE: no tab shows them)
-    {TAB_PAGE, "Layout preset", &opts.pad_layout, 0, 3, 1, tx_pad_layout,
-     "Which face button is which. Binding one yourself on the Controls page makes it Custom.", hn_pad_layout},
-    {TAB_PAGE, "Button prompts", &opts.prompts, 0, HOS_PROMPT_N, 1, tx_prompts,
-     "The button icons the game shows, in its texts and menus: those of this controller, for the buttons your controls "
-     "put each action on.", hn_prompts, true, true},
     {TAB_CONTROLS, "Controls", nullptr, 0, 0, 0, nullptr,   // (hookshot: opens its page)
      "The layout preset, the button prompts, and which gamepad button and which keys press each of the Switch's "
      "buttons."},
@@ -1656,7 +1655,13 @@ int page = 0;          // 0 the options, 1 the controls, 3 the teleport list, 4 
                        // debug tools' own page, now on the Debug tab)
 int csel = 0, ccol = 0;   // the page's row (kTop first: its own rows, then the controls, then reset) and column (0 the
                           // gamepad, 1 the keyboard)
-const int kTop = tab_row_count(TAB_PAGE);   // (Layout preset and Button prompts: a preset shows in the grid at once)
+constexpr int kTop = 2;   // (Layout preset and Button prompts, rows of the Gameplay tab that the page shows above its grid too: a preset shows in the grid at once)
+/// The global row of the page's own row j (0 the layout preset, 1 the button prompts)
+int page_row_global(int j) {
+    const int* want = j == 0 ? &opts.pad_layout : &opts.prompts;
+    for (int i = 0; i < kRows; i++) if (rows[i].value == want) return i;
+    return 0;
+}
 int listening = 0;     // waiting for the new input: 1 a gamepad's, 2 a key
 bool listen_armed = false;   // (once what started it was let go)
 int64_t listen_end = 0;
@@ -2060,7 +2065,7 @@ void draw_controls(ui::Ctx& c) {
     const ui::Prompt option[] = {{ui::kUpDown, "Choose"}, {ui::kLeftRight, "Change"}, {ui::kBack, "Back"}};
     const ui::Prompt wait[] = {{ui::kBack, "Cancel"}};
     const float bar_top = ui::prompt_bar_top(c);   // (the strip itself drawn last, over all: below)
-    const Row* page_row = sel_i < 0 ? &rows[tab_row_to_global(TAB_PAGE, csel)] : nullptr;
+    const Row* page_row = sel_i < 0 ? &rows[page_row_global(csel)] : nullptr;
     const char* title = page_row ? page_row->name : sel_i < kControls ? controls[sel_i].name : "Reset to defaults";
     const char* help = listening ? (listening == 1 ? "Press the gamepad button to use. Esc cancels." : "Press the key to use. Esc cancels.")
                        : page_row ? page_row->help
@@ -2104,7 +2109,7 @@ void draw_controls(ui::Ctx& c) {
         const int i = j - kTop;
         const float y0 = std::max(y, top - 8 * s), y1 = std::min(y + rh, bottom + 8 * s);
         if (i < 0) {   // (one of the page's own rows: a name and a choice, as on the tabs)
-            const Row& r = rows[tab_row_to_global(TAB_PAGE, j)];
+            const Row& r = rows[page_row_global(j)];
             // (their names wider than a control's, as wide as the tabs' rows': "Button prompts" whole at any size)
             const float opt_x = rx0 + (rx1 - rx0) * 0.5f;
             name_cell(c, ImVec2(rx0, y), ImVec2(opt_x, y + rh), r.name, sel, restart_changed(r), 17);
@@ -2951,7 +2956,7 @@ void menu_tick() {
             if (press[1]) csel = (csel + n - 1) % n, changed = true;
             if (press[2]) csel = (csel + 1) % n, changed = true;
             if (i < 0 && (press[3] || press[4] || press[7])) {   // (the page's own rows: Enter as Right)
-                Row& r = rows[tab_row_to_global(TAB_PAGE, csel)];   // (Custom is only what the bindings are: set_row skips it)
+                Row& r = rows[page_row_global(csel)];   // (Custom is only what the bindings are: set_row skips it)
                 change_row(r, *r.value + (press[3] ? -r.step : r.step), press[3] ? -1 : 1);
                 changed = true;
             } else if (i >= 0) {
