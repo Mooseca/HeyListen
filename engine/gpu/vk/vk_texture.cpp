@@ -1099,6 +1099,8 @@ LevelGeo level_geo(const Texture& tex, uint32_t level) {   // (level: the image'
 /// (issue 66) set by upload() around a texture's first upload: its storage as of the submit takes only the recorded
 /// submission's own copies (vk_memory.cpp, first_upload_own_on)
 thread_local bool tl_first_upload = false;
+/// (issue 66) and around a re-upload: the same, RX_VK_REUPLOAD_OWN (vk_memory.cpp, reupload_own_on)
+thread_local bool tl_reupload = false;
 /// The guest bytes [gpu, gpu + n) in host memory: in place when contiguous, else copied into scratch
 const uint8_t* guest_bytes(uint64_t gpu, uint64_t n, std::vector<uint8_t>& scratch) {
     uint64_t avail = 0;
@@ -1107,7 +1109,7 @@ const uint8_t* guest_bytes(uint64_t gpu, uint64_t n, std::vector<uint8_t>& scrat
     if (gpu < (1ull << 40)) memory_late_fix_wait_range(gpu, n);
     // (below 1 TB the GPU address is the guest's: the storage as it was at the submit being replayed, where the game has
     // rewritten it since (vk_memory.cpp, "texture storage in the capture"))
-    if (p && avail >= n) return gpu < (1ull << 40) ? memory_as_submitted(gpu, p, n, scratch, tl_first_upload) : p;
+    if (p && avail >= n) return gpu < (1ull << 40) ? memory_as_submitted(gpu, p, n, scratch, tl_first_upload, tl_reupload) : p;
     if (n >= (32u << 20)) {   // (a big sparse texture's pages, gathered on several threads: the course maps' 349 MB)
         scratch.resize(n);
         const uint32_t nt = std::clamp(std::thread::hardware_concurrency() / 2, 1u, 6u);
@@ -1986,8 +1988,9 @@ bool upload(Texture& tex, const Ranges* dirty) {
     up_route = UP_CPU;
     const int kind = tex.uploaded ? UK_AGAIN : tex.astc ? UK_ASTC_NEW : UK_OTHER_NEW;
     tl_first_upload = !tex.uploaded;
+    tl_reupload = tex.uploaded;
     const bool ok = upload_inner(tex, dirty);
-    tl_first_upload = false;
+    tl_first_upload = tl_reupload = false;
     const int64_t ns = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - t0).count();
     frame_upload_ns.fetch_add(ns, std::memory_order_relaxed);
     frame_kind_ns[kind].fetch_add(ns, std::memory_order_relaxed);
@@ -3198,7 +3201,10 @@ bool upload_defer(Texture& tex) {
     static const bool summed = getenv("RX_VK_UPLOAD_BUDGET_SUM") && atoi(getenv("RX_VK_UPLOAD_BUDGET_SUM")) != 0;
     if (!budget_ns || !upload_defer_ok || tex.uploaded || !tex.astc || tex.gpu_written) return false;
     const int64_t spent = summed ? frame_upload_ns.load(std::memory_order_relaxed) : tl_upload_frame == frame_no ? tl_upload_ns : 0;
-    if (spent < budget_ns) return false;
+    // (STUT1, RX_VK_UPLOAD_BUDGET_FRAME_MS=<ms>, 0 (off) by default: also once every thread's uploads this present summed reach this,
+    // whichever thread looks up: the per-thread budget alone lets each of the parallel replay's workers spend its own 40 ms)
+    static const int64_t frame_ns = (int64_t)((getenv("RX_VK_UPLOAD_BUDGET_FRAME_MS") ? atof(getenv("RX_VK_UPLOAD_BUDGET_FRAME_MS")) : 0.0) * 1e6);
+    if (spent < budget_ns && (!frame_ns || frame_upload_ns.load(std::memory_order_relaxed) < frame_ns)) return false;
     st_deferred.fetch_add(1, std::memory_order_relaxed), st_deferred_frame.fetch_add(1, std::memory_order_relaxed);
     tex.defer_asks++;
     if (tex.defer_seen != frame_no) {   // (the deferral's age: the distinct textures, and when each was first held back)
