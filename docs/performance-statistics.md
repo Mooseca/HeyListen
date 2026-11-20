@@ -403,6 +403,7 @@ driver and the two build stamps. No shader code, no game code, no game data, no 
 | `HL_TELEMETRY_PROFILE=0` | on (with the row) | Turns off only the detailed profile: nothing is sampled, queued or sent, the rest goes as the row says |
 | `HL_PROFILE_LOCAL=1` | off | Takes the detailed profile with no address and with the row off, and writes it into `profile_local/` in the game folder, never sent |
 | `HL_PROFILE_HZ` | `250` | The CPU sampler's rate, 50 to 1000 |
+| `HL_PROFILE_BATCH_S` | `300` | Seconds of play between two profile batches, 10 to 3600 (a short test run wants one before it ends) |
 | `RX_VK_PERF_INTERVAL` | `300` s | Seconds of play between two summaries (60 to 840) |
 | `HL_PERF_MAX_SENDS` | `12` | Summaries sent at one start (1 to 48) |
 | `HL_PERF_TIMEOUT` | `10` s | A request's time limit (2 to 60) |

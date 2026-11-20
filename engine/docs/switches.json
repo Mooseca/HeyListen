@@ -2,7 +2,7 @@
  "schema": 1,
  "generated_by": "engine/scripts/list_switches.py",
  "scope": "C, C++ and headers under engine/ (engine/tests and vendored trees other than a64-kit excluded) and the Python the builder, the lifter and the scripts run: getenv, std::getenv, _wgetenv, the code's own env helpers and table-driven reads, and os.environ.",
- "count": 1281,
+ "count": 1282,
  "switches": [
   {
    "name": "A64_DEVIRT",
@@ -1754,6 +1754,27 @@
    "use": null
   },
   {
+   "name": "HL_PROFILE_BATCH_S",
+   "area": "native",
+   "group": "Native engine diagnostics",
+   "audience": "diagnostic",
+   "files": [
+    {
+     "path": "gpu/vk/perf_report.cpp",
+     "line": 400
+    }
+   ],
+   "default": "off (unset)",
+   "values": "on or off (0, false, off, no and empty are off)",
+   "explanation": "Seconds of play between two detailed-profile batches, 10 to 3600 (300 by default).",
+   "comment": null,
+   "documented_in": "development.md",
+   "source": "development.md",
+   "documented": true,
+   "set_via": "In `hookshot_env.txt`, or in the environment.",
+   "use": null
+  },
+  {
    "name": "HL_PROFILE_HZ",
    "area": "native",
    "group": "Native engine diagnostics",
@@ -2055,7 +2076,7 @@
    "files": [
     {
      "path": "gpu/vk/perf_report.cpp",
-     "line": 505
+     "line": 506
     },
     {
      "path": "host/hos_crash_dialog.c",
@@ -2171,11 +2192,11 @@
    "files": [
     {
      "path": "gpu/vk/perf_report.cpp",
-     "line": 559
+     "line": 560
     },
     {
      "path": "gpu/vk/perf_report.cpp",
-     "line": 719
+     "line": 720
     },
     {
      "path": "host/hos_crash_dialog.c",
@@ -3693,7 +3714,7 @@
    "files": [
     {
      "path": "host/nn_audio.c",
-     "line": 1660
+     "line": 1661
     }
    ],
    "default": "unset",
@@ -6697,7 +6718,7 @@
    "files": [
     {
      "path": "gpu/vk/perf_report.cpp",
-     "line": 695
+     "line": 696
     }
    ],
    "default": "unset",
@@ -23162,7 +23183,7 @@
    "files": [
     {
      "path": "gpu/vk/perf_report.cpp",
-     "line": 727
+     "line": 728
     }
    ],
    "default": "off (unset)",

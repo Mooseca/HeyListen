@@ -10,7 +10,7 @@ python -I engine/scripts/list_switches.py
 
 and commit both files. A test (`engine/tests/test_switches_documented.py`) fails when a switch read in the source is missing here or the data file is out of date.
 
-1281 switches: 49 players may be told to use, 347 diagnostic, 885 developer-only; 1079 have a real explanation and 202 are marked `undocumented`.
+1282 switches: 49 players may be told to use, 348 diagnostic, 885 developer-only; 1080 have a real explanation and 202 are marked `undocumented`.
 
 ## How to set a switch
 
@@ -69,7 +69,7 @@ The entries below say what each one does, its values and default, and when it is
 | [Memory and textures](#memory-and-textures) | 176 | 9 | 0 | 167 |
 | [Audio](#audio) | 14 | 5 | 9 | 0 |
 | [Input and controllers](#input-and-controllers) | 13 | 1 | 12 | 0 |
-| [Native engine (`HL_*`)](#native-engine-hl_) | 64 | 1 | 24 | 39 |
+| [Native engine (`HL_*`)](#native-engine-hl_) | 65 | 1 | 25 | 39 |
 | [Host and OS (`HOS_*` and the system's variables)](#host-and-os-hos_-and-the-systems-variables) | 119 | 8 | 0 | 111 |
 | [Telemetry and crash reports](#telemetry-and-crash-reports) | 12 | 0 | 12 | 0 |
 | [Diagnostics and logging](#diagnostics-and-logging) | 277 | 0 | 277 | 0 |
@@ -7145,7 +7145,7 @@ HOS_AUDIO_WB_DUMP=<dir>: the first 40 wave buffers' data and the voice's coeffic
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/nn_audio.c:1660`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/nn_audio.c:1661`.
 
 #### `HOS_MIC_LOG` - player
 
@@ -7309,7 +7309,7 @@ As above; the last lets every device count while the window is behind another on
 
 ## Native engine (`HL_*`)
 
-64 switches of the native engine (`HL_*`).
+65 switches of the native engine (`HL_*`).
 
 ### Main loop
 
@@ -7578,6 +7578,16 @@ HL_MEM_DROP=0 off (the default): nothing here runs, as before HL_MEM_DROP=1 on H
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
 **Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hl_drop.c:327`.
+
+#### `HL_PROFILE_BATCH_S` - diagnostic
+
+Seconds of play between two detailed-profile batches, 10 to 3600 (300 by default).
+
+**Values:** on or off (0, false, off, no and empty are off). **Default:** off (unset).
+
+**When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
+
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/perf_report.cpp:400`.
 
 #### `HL_PROFILE_HZ` - diagnostic
 
@@ -9179,7 +9189,7 @@ Turns off, alone, the sending of the pipeline state records (`gpu/vk/state_repor
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/perf_report.cpp:505` and 2 more places.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/perf_report.cpp:506` and 2 more places.
 
 #### `HL_TELEMETRY_PROFILE` - diagnostic
 
@@ -9219,7 +9229,7 @@ Turns off, alone, the per-zone shader and pipeline usage (`gpu/vk/zone_report.h`
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/perf_report.cpp:559` and 3 more places.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/perf_report.cpp:560` and 3 more places.
 
 ### Crash reports and crash window
 
@@ -11661,7 +11671,7 @@ With `send_performance_stats=1`, the performance summaries are measured and writ
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/perf_report.cpp:695`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/perf_report.cpp:696`.
 
 #### `HOS_PROFILE` - diagnostic
 
@@ -11891,7 +11901,7 @@ Seconds of play between two performance summaries (60 to 840, 300 by default).
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/perf_report.cpp:727`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/perf_report.cpp:728`.
 
 #### `RX_VK_PRESYNC_STATS` - diagnostic
 

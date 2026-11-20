@@ -432,6 +432,13 @@ inline std::vector<std::vector<size_t>> batch_groups(const std::vector<std::stri
 
 /// HL_TELEMETRY_PROFILE: on unless exactly "0" (hos_telemetry.h's rule for the other two)
 inline bool profile_switch_on(const char* env) { return !(env && env[0] == '0' && env[1] == 0); }
+/// HL_PROFILE_BATCH_S: seconds between batches, a whole number 10 to 3600, else 300 (a short run of ours wants one before it ends)
+inline int batch_seconds(const char* env) {
+    char* end = nullptr;
+    const long v = env ? strtol(env, &end, 10) : 0;
+    if (!env || end == env || *end) return kBatchSeconds;
+    return (int)std::clamp<long>(v, 10, 3600);
+}
 /// HL_PROFILE_LOCAL=1 (any non-zero whole number): the local copy
 inline bool local_on(const char* env) {
     char* end = nullptr;

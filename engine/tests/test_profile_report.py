@@ -112,7 +112,7 @@ def wiring():
           "the payload's meta is the version, the release flag, the build id, the vendor, the driver and the plain names")
     check("profile_queue(true)" in function(cpp, "void at_exit() {") and "profile_queue(true)" in function(cpp, "void perf_report_final(int event) {"),
           "the last batch is queued at the exit and at the window's close")
-    check("pf::kBatchSeconds" in cpp, "a batch every five minutes")
+    check('pf::batch_seconds(getenv("HL_PROFILE_BATCH_S"))' in cpp and "kBatchSeconds = 300" in source("gpu/vk/profile_report.h"), "a batch every five minutes (HL_PROFILE_BATCH_S)")
     off = function(cpp, "void switch_off() {")
     check('"profile_pending"' in off, "turning the row off deletes the profile batches too")
     check("kMaxProfilePending = 8" in cpp and re.search(r"HOS_PROFILE_MAX_PENDING = 8,", source("host/hos_perf_send.h")),

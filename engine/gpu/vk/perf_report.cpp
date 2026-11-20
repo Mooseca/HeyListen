@@ -397,7 +397,8 @@ void profile_feed(const std::string& map_name, double ms, bool hitch) {
     if (map_name != profile_map_name) profile_map_name = map_name, profile_map(map_name);
     profile_frame(ms, hitch);
     since_profile += ms / 1000.0;
-    if (since_profile >= pf::kBatchSeconds) profile_queue(false);
+    static const int batch_s = pf::batch_seconds(getenv("HL_PROFILE_BATCH_S"));
+    if (since_profile >= batch_s) profile_queue(false);
 }
 
 /// HL_PROFILE_LOCAL with the performance summary off: the profile alone, from the presenting thread's frames (mu held)

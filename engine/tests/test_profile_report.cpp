@@ -89,6 +89,9 @@ int main(int argc, char** argv) {
     CHECK("the default", pf::sample_hz(nullptr) == 250 && pf::sample_hz("") == 250 && pf::sample_hz("abc") == 250);
     CHECK("clamped", pf::sample_hz("1") == 50 && pf::sample_hz("100000") == 1000 && pf::sample_hz("400") == 400);
 
+    CHECK("the batch interval", pf::batch_seconds(nullptr) == 300 && pf::batch_seconds("x") == 300 && pf::batch_seconds("1") == 10 &&
+          pf::batch_seconds("60") == 60 && pf::batch_seconds("999999") == 3600);
+
     // a pass's kind and key
     CHECK("depth only is a shadow", pf::pass_kind(0, true, 2048, 2048, 100, 1920 * 1080) == pf::kShadow);
     CHECK("colour and depth is main", pf::pass_kind(3, true, 1920, 1080, 500, 1920 * 1080) == pf::kMain);
