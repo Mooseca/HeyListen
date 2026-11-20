@@ -4812,6 +4812,25 @@ void invalidate(uint64_t gpu, uint64_t size) {
             }
         }
     }
+    {   // (ported from hookshot 53eb0441, pixl27, RX_VK_METER_HOLD=0 turns it off) OoT's exposure sums read before a new result
+        // has landed are the zeros the game wrote after its last read: it is given the last result again
+        if (meter_hold_on() && size == 0x1040 && memory_is_meter(host->gpu_guest(gpu))) {
+            static std::mutex mu;
+            static std::unordered_map<uint64_t, std::array<uint32_t, 4>> last;
+            static std::atomic<int64_t> st_reads{0}, st_given{0};
+            std::array<uint32_t, 4> w{};
+            host->gpu_read(gpu, w.data(), 16);
+            std::lock_guard lk(mu);
+            if (w[0] | w[1] | w[2] | w[3]) {
+                last[gpu] = w;
+            } else if (auto it = last.find(gpu); it != last.end()) {
+                host->gpu_write(gpu, it->second.data(), 16);
+                st_given++;
+            }
+            if (++st_reads % 2000 == 0)
+                logf("vk: exposure sums: 2000 reads, %lld of them given the last result again (RX_VK_METER_HOLD)", (long long)st_given.exchange(0));
+        }
+    }
     {   // (sprint 5, RX_VK_LOG_READBACK2=<present>: what the CPU is about to read, after the waits: 400 ranges of 0x1000 bytes or more)
         static const int64_t from = getenv("RX_VK_LOG_READBACK2") ? atoll(getenv("RX_VK_LOG_READBACK2")) : -1;
         static std::atomic<int> n{0};

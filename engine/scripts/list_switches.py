@@ -700,6 +700,10 @@ PLAYER_USE = [
                                 "split ends only before a plain draw."),
     ("RX_VK_READBACK_STRICT", "The picture pulses brighter for a moment (auto-exposure) on RADV or another driver: "
                               "`=1040,c0` (or `=1`) waits for the light meter's write-back to land."),
+    ("RX_VK_METER_ZERO", "White flashes or the exposure stepping brighter and darker in dark scenes: `=0` stops clearing "
+                         "the light meter's sums on the GPU before they are added to (on by default)."),
+    ("RX_VK_METER_HOLD", "White flashes or the exposure stepping in dark scenes: `=0` stops giving the game the light "
+                         "meter's last result again when it reads zeros (on by default)."),
     ("RX_VK_NO_PROGRAM_CACHE", "Shaders are translated wrongly after a driver or card change (a bad cache): reads "
                                "and writes no program cache for one run."),
     ("RX_VK_NO_DRAWN_PAGE_MAP", "HUD labels go blank after a zone change, or black surfaces flicker in Zora's Domain: "

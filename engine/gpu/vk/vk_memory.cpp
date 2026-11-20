@@ -5359,6 +5359,21 @@ int64_t mirror_sync(Pool& p) {
 } // namespace
 std::atomic<int64_t> st_import_texel_views{0}, st_import_texel_bytes{0}, st_import_unswizzle_bytes{0};
 
+// (ported from hookshot 53eb0441, pixl27: RX_VK_METER_ZERO / RX_VK_METER_HOLD) the starts of the exposure meter's blocks
+namespace {
+std::mutex meter_mu;
+std::unordered_map<uint64_t, uint32_t> meter_bases;
+}
+bool memory_is_meter(uint64_t guest) {
+    std::lock_guard lk(meter_mu);
+    return meter_bases.count(guest) != 0;
+}
+void memory_meter_range(uint64_t guest, uint64_t size) {
+    if (!size || !guest || !(meter_hold_on() || meter_zero_on())) return;
+    std::lock_guard lk(meter_mu);
+    if (meter_bases.size() > 64) meter_bases.clear();
+    meter_bases.emplace(guest, 1);
+}
 // ---- (from PR 430, YunaraDebugs) Readback pages: GPU results the CPU reads (invalidate) and then writes, as OoT's exposure meter (a
 // sum the GPU adds into each frame; the CPU reads it and stores 0 back). On the console the GPU adds into that memory as it is when
 // its work runs, the CPU's 0 included. Here it adds into the pool's mirror, which takes the CPU's 0 only at a mirror sync of a submit
