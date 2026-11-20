@@ -63,6 +63,7 @@
 #include "readback_late.h"   // (RX_VK_READBACK_LATE)
 #include "exe_base.h"   // (RX_VK_RB_PROF's call sites: offsets in the exe)
 #include "perf_parts.h"   // (the frame's parts for the performance summary: submit/present scopes, the waits)
+#include "wait_own.h"   // (RX_VK_WAIT_OWN)
 #include "vk_work.h"   // (after the others: counts the commands that do GPU work, for full_barrier)
 
 namespace mkwvk {
@@ -5773,14 +5774,23 @@ void do_present(const nvn_tex* t, const int crop[4]) {
             // its HUD's records before a pass read them: icons flashing mid-screen, the minimap drawn with another texture whenever the
             // camera moved, gone with the wait (48-56 fps there). RX_VK_WAIT_OWN=1 / 0 turns the wait on / off on any GPU; setting
             // RX_VK_WAIT_GPU (a ring of frames, above) leaves the default off
-            static const bool own = [] {
-                if (const char* e = getenv("RX_VK_WAIT_OWN")) return atoi(e) != 0;
-                if (getenv("RX_VK_WAIT_GPU")) return false;
-                const bool amd_igpu = dev.props.vendorID == 0x1002 && dev.props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU;
-                if (amd_igpu) logf("vk: an AMD integrated GPU: each present waits for its frame's GPU work (RX_VK_WAIT_OWN=0: not)");
-                return amd_igpu;
+            // (v0.4.4: RX_VK_WAIT_OWN=2, the default on an AMD integrated GPU: the frame before's work, not this frame's own: the game
+            // one frame ahead as the console's two frames in flight, the GPU busy while it builds the next; =1: the rule of v0.4.3,
+            // the frame's own; =0 off. wait_own.h)
+            static const int own = [] {
+                const int m = wait_own::mode(getenv("RX_VK_WAIT_OWN"), getenv("RX_VK_WAIT_GPU") != nullptr,
+                                             dev.props.vendorID == 0x1002 && dev.props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU);
+                if (m && !getenv("RX_VK_WAIT_OWN"))
+                    logf("vk: an AMD integrated GPU: each present waits for the GPU's work of the frame before (RX_VK_WAIT_OWN=1: its own frame's, =0: not)");
+                else if (m)
+                    logf("vk: RX_VK_WAIT_OWN=%d: each present waits for the GPU's work of %s", m, m == 1 ? "its own frame" : "the frame before");
+                return m;
             }();
-            if (own) wait_value(value);
+            static uint64_t own_prev = 0;
+            if (own) {
+                const uint64_t t = wait_own::target(own, value, own_prev);
+                if (t) wait_value(t);
+            }
         }
         if (presents % 300 == 0) pipeline_cache_save(false), shader_key_commit();
         {   // (RX_VK_DUMP_KEY: F9 dumps the next frame, 8 times at most)
