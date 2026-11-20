@@ -9595,6 +9595,7 @@ struct Pre {
     std::vector<Program*> fallbacks;  // the programs translated for the mesh fallback: their compute pipelines (a GPU without mesh shaders)
     std::atomic<size_t> next{0}, done{0}, made{0}, failed{0};
     std::atomic<unsigned> running{0};
+    std::atomic<bool> abandoned{false};   // (Hookshot 4ae22a7a: the game went on without them: no worker takes a new pipeline)
     size_t total = 0;
     size_t carried = 0, missing = 0;
     bool background = false;
@@ -9774,7 +9775,7 @@ void precompile_run(void (*progress)(size_t done, size_t total), bool wait) {
         if (!wait) SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
         ub_thread_off();   // (a background thread: see ub_thread_off)
         for (;;) {
-            if (prepare_stopped()) break;
+            if (prepare_stopped() || pre->abandoned.load(std::memory_order_relaxed)) break;
             const size_t i = pre->next++;
             if (i >= total) break;
             if (i < pre->computes.size()) {
@@ -9857,9 +9858,14 @@ void precompile_run(void (*progress)(size_t done, size_t total), bool wait) {
         Sleep(100);
         const auto now = std::chrono::steady_clock::now();
         if (pre->done.load() != last_done) last_done = pre->done.load(), last_change = now;
-        else if (stall_s > 0 && pre->next.load() >= total && now - last_change > std::chrono::seconds(stall_s)) {
-            logf("vk: precompile: %zu of %zu done, nothing finished for %d s: the game starts, the rest go on behind it", pre->done.load(),
-                 total, stall_s);
+        // (Hookshot 4ae22a7a, NotRexed: whether or not every pipeline was handed out. With every worker inside the driver on a pipeline
+        // it never returns from, none was, and the start waited for good on AMD's RX 6600 / 6600 XT, the CPU idle. Not every one
+        // handed out: the workers take no new pipeline, the rest are made in play)
+        else if (stall_s > 0 && now - last_change > std::chrono::seconds(stall_s)) {
+            const bool all_out = pre->next.load() >= total;
+            if (!all_out) pre->abandoned = true;
+            logf("vk: precompile: %zu of %zu done, nothing finished for %d s: the game starts, the rest %s", pre->done.load(), total,
+                 stall_s, all_out ? "go on behind it" : "are made in play");
             pre->background = true;
             break;
         }
