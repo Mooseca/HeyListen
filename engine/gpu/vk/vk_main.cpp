@@ -1237,6 +1237,7 @@ bool started_up() {
         remove(skipped_path().c_str());
         return true;
     }
+    predict_play_test();   // (test only: RX_VK_TEST_PREDICT_PLAY)
     if (FILE* f = fopen(skipped_path().c_str(), "rb")) {
         fclose(f);
         logf("vk: the shaders' preparation was skipped at the build: left to when each is first drawn");

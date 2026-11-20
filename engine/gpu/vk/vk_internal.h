@@ -522,6 +522,7 @@ double prepare_progress_by_cost();
 bool prepare_is_update();
 bool prepare_is_lazy_update();                 // (the update prepare_is_update found is lazy: nothing is made before the game)
 void prepare_background();
+void predict_play_test();                      // (test only, RX_VK_TEST_PREDICT_PLAY=<s>: the prediction in play, started <s> seconds in)
 void state_list_run();                        // (an update: the state list's pipelines noted before precompile_run)
 /// (HL_SHIPPED_STATES, on unless 0) the shipped pipeline state list changed since state_list_prepare last went through it: the
 /// start calls state_list_run when the shaders needed no preparing, so that precompile_run builds its pipelines

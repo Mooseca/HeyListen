@@ -9568,6 +9568,20 @@ void state_list_run() {
     state_list_prepare(nullptr);
     if (!getenv("RX_VK_SEED_CHECK")) seed_close();
 }
+/// (test only, RX_VK_TEST_PREDICT_PLAY=<seconds>) The prediction in play, as a lazy update's end starts it, <seconds> after the game's
+/// start, whatever the caches hold: a run that is two minutes long can see what it does to the game (hookshot_compiled.bin
+/// taken away first, so that every predicted pipeline is made)
+void predict_play_test() {
+    const char* e = getenv("RX_VK_TEST_PREDICT_PLAY");
+    if (!e || !*e) return;
+    const int after = atoi(e);
+    std::thread([after] {
+        SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_IDLE);
+        Sleep((DWORD)std::max(0, after) * 1000);
+        logf("vk: test: the prediction in play starts now (RX_VK_TEST_PREDICT_PLAY)");
+        if (prepare_run(nullptr, true) && !prepare_stopped()) predict_run(nullptr, true);   // (as prepare_background's end: the programs are read in first)
+    }).detach();
+}
 void prepare_background() {
     std::thread([] {
         SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_IDLE);
@@ -9997,6 +10011,13 @@ void predict_run(void (*progress)(size_t done, size_t total), bool background, b
     // status line, never ended the step. After the wait the program is left to play, noted in hookshot_predict_slow.txt so the
     // next prediction leaves it out, and its worker is let go on its own)
     static const int wait_s = getenv("RX_VK_PREDICT_WAIT_S") ? atoi(getenv("RX_VK_PREDICT_WAIT_S")) : 60;
+    // (v0.4.3.1, RX_VK_PREDICT_PLAY_GENTLE=0 for what it was: the prediction in play, behind a lazy update's game, is made small and
+    // polite: RX_VK_PREDICT_PLAY_WORKERS workers (2) at the idle priority, each waiting for its next program while the PC has less than
+    // RX_VK_PREDICT_PLAY_FREE_MB (6144) of memory available. With the ledger short of the ~41000 pipelines it predicts, four workers
+    // below normal priority took the game from 95 fps to 30, frames of 1.2 s, on a 32 GB PC already holding 28 GB private)
+    static const bool gentle = !getenv("RX_VK_PREDICT_PLAY_GENTLE") || atoi(getenv("RX_VK_PREDICT_PLAY_GENTLE")) != 0;
+    static const unsigned long long play_free_mb = getenv("RX_VK_PREDICT_PLAY_FREE_MB") ? strtoull(getenv("RX_VK_PREDICT_PLAY_FREE_MB"), nullptr, 10) : predictlimits::kDefaultPlayFreeMB;
+    const bool soft = background && !noted && gentle;
     // (test only, RX_VK_TEST_SLOW_PIPELINE=<program key in hex>:<seconds>: that program's predicted builds sleep, as a hung driver would)
     static const std::pair<uint64_t, int> test_slow = [] {
         const char* e = getenv("RX_VK_TEST_SLOW_PIPELINE");
@@ -10004,7 +10025,7 @@ void predict_run(void (*progress)(size_t done, size_t total), bool background, b
         int s = 0;
         return e && sscanf(e, "%llx:%d", &k, &s) == 2 ? std::make_pair((uint64_t)k, s) : std::make_pair((uint64_t)0, 0);
     }();
-    const auto worker = [shared, t0, noted, background] {
+    const auto worker = [shared, t0, noted, background, soft] {
         Shared& S = *shared;
         auto& next = S.next;
         auto& done = S.done;
@@ -10024,7 +10045,7 @@ void predict_run(void (*progress)(size_t done, size_t total), bool background, b
         auto& by_program = S.by_program;
         auto& keys = S.keys;
         ub_thread_off();   // (a background thread: see ub_thread_off)
-        SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);   // (as prepare_run's: these are the driver's compiles, see DriverTurn)
+        SetThreadPriority(GetCurrentThread(), soft ? THREAD_PRIORITY_IDLE : THREAD_PRIORITY_BELOW_NORMAL);   // (as prepare_run's: these are the driver's compiles, see DriverTurn)
         driver_cache_only = !noted;
         const unsigned me = worker_n++ % 32;
         std::atomic<uint64_t>& mine = in_flight[me];
@@ -10040,6 +10061,18 @@ void predict_run(void (*progress)(size_t done, size_t total), bool background, b
                     logf("vk: predict: %llu MB of commit left (RX_VK_PREDICT_RESERVE_MB %llu): the prediction stops here, the rest are built in play",
                          commit_left_mb(), reserve_mb);
                 return;
+            }
+            if (soft && play_free_mb) {   // (in play: the game's pages are not pushed out for a speculative build; it waits)
+                bool told = false;
+                while (!prepare_stopped() && !S.abandoned.load() && predictlimits::low_memory(memory_available_mb(), play_free_mb)) {
+                    static std::atomic<bool> said{false};
+                    if (!told && !said.exchange(true))
+                        logf("vk: predict (in play): %llu MB of memory available, under RX_VK_PREDICT_PLAY_FREE_MB %llu: it waits for the PC to have more",
+                             (unsigned long long)memory_available_mb(), play_free_mb);
+                    told = true;
+                    Sleep(500);
+                }
+                if (prepare_stopped() || S.abandoned.load()) return;
             }
             const size_t i = next++;
             if (i >= keys.size()) return;
@@ -10104,7 +10137,8 @@ void predict_run(void (*progress)(size_t done, size_t total), bool background, b
     std::vector<std::thread> threads;
     const unsigned cpus = std::max(1u, std::thread::hardware_concurrency());
     // (in play: a quarter of the CPUs, two to four, below normal priority, and no time budget: with the ledger it builds only what changed)
-    const unsigned workers = background ? std::clamp(cpus / 4, 2u, 4u) : std::clamp(cpus / 2, 1u, 32u);
+    const unsigned workers = soft ? predictlimits::play_workers(cpus, getenv("RX_VK_PREDICT_PLAY_WORKERS"))
+                                  : background ? std::clamp(cpus / 4, 2u, 4u) : std::clamp(cpus / 2, 1u, 32u);
     for (unsigned i = 0; i < workers; i++) threads.emplace_back(worker);
     auto stat_at = std::chrono::steady_clock::now();
     // (a line every 10 s with the programs the workers have in hand and the process's memory, and at once when its commit jumps:

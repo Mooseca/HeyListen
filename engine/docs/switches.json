@@ -2,7 +2,7 @@
  "schema": 1,
  "generated_by": "engine/scripts/list_switches.py",
  "scope": "C, C++ and headers under engine/ (engine/tests and vendored trees other than a64-kit excluded) and the Python the builder, the lifter and the scripts run: getenv, std::getenv, _wgetenv, the code's own env helpers and table-driven reads, and os.environ.",
- "count": 1303,
+ "count": 1307,
  "switches": [
   {
    "name": "A64_DEVIRT",
@@ -8816,12 +8816,12 @@
    "files": [
     {
      "path": "gpu/vk/vk_draw.cpp",
-     "line": 9620
+     "line": 9634
     }
    ],
    "default": "unset",
    "values": "text",
-   "explanation": "undocumented: gpu/vk/vk_draw.cpp:9620 (in `precompile_finished()`) reads it as a text value: `const char* prepare_only = getenv(\"LONGSHOT_PREPARE_ONLY\");`. No comment in the source says what it changes.",
+   "explanation": "undocumented: gpu/vk/vk_draw.cpp:9634 (in `precompile_finished()`) reads it as a text value: `const char* prepare_only = getenv(\"LONGSHOT_PREPARE_ONLY\");`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -15883,7 +15883,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_draw.cpp",
-     "line": 10367
+     "line": 10401
     }
    ],
    "default": "off (unset)",
@@ -17664,7 +17664,7 @@
     },
     {
      "path": "gpu/vk/vk_main.cpp",
-     "line": 1567
+     "line": 1568
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
@@ -17823,7 +17823,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_draw.cpp",
-     "line": 10731
+     "line": 10765
     }
    ],
    "default": "unset",
@@ -18116,7 +18116,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_draw.cpp",
-     "line": 10318
+     "line": 10352
     }
    ],
    "default": "0",
@@ -18640,7 +18640,7 @@
     },
     {
      "path": "gpu/vk/vk_draw.cpp",
-     "line": 10613
+     "line": 10647
     }
    ],
    "default": "off (unset)",
@@ -18971,7 +18971,7 @@
     },
     {
      "path": "gpu/vk/vk_draw.cpp",
-     "line": 10218
+     "line": 10252
     }
    ],
    "default": "off (unset)",
@@ -19164,7 +19164,7 @@
     },
     {
      "path": "gpu/vk/vk_main.cpp",
-     "line": 1567
+     "line": 1568
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
@@ -19633,7 +19633,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_draw.cpp",
-     "line": 9686
+     "line": 9700
     }
    ],
    "default": "1",
@@ -19654,7 +19654,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_draw.cpp",
-     "line": 9696
+     "line": 9710
     }
    ],
    "default": "off (unset)",
@@ -20316,7 +20316,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_draw.cpp",
-     "line": 10345
+     "line": 10379
     }
    ],
    "default": "unset",
@@ -21712,11 +21712,11 @@
     },
     {
      "path": "gpu/vk/vk_draw.cpp",
-     "line": 10387
+     "line": 10421
     },
     {
      "path": "gpu/vk/vk_draw.cpp",
-     "line": 10455
+     "line": 10489
     }
    ],
    "default": "off (unset)",
@@ -21825,7 +21825,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_draw.cpp",
-     "line": 10517
+     "line": 10551
     }
    ],
    "default": "off (unset)",
@@ -21955,7 +21955,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_draw.cpp",
-     "line": 10677
+     "line": 10711
     }
    ],
    "default": "off (unset)",
@@ -22097,7 +22097,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_draw.cpp",
-     "line": 10483
+     "line": 10517
     }
    ],
    "default": "off (unset)",
@@ -22181,7 +22181,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_draw.cpp",
-     "line": 11071
+     "line": 11105
     }
    ],
    "default": "unset",
@@ -22269,7 +22269,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_main.cpp",
-     "line": 1440
+     "line": 1441
     }
    ],
    "default": "unset",
@@ -22374,12 +22374,12 @@
    "files": [
     {
      "path": "gpu/vk/vk_draw.cpp",
-     "line": 9959
+     "line": 9973
     }
    ],
    "default": "unset",
    "values": "text",
-   "explanation": "undocumented: gpu/vk/vk_draw.cpp:9959 reads it as a text value: `if (notes.empty() || (!noted && getenv(\"RX_VK_NO_PREDICT\"))) return;`. No comment in the source says what it changes.",
+   "explanation": "undocumented: gpu/vk/vk_draw.cpp:9973 reads it as a text value: `if (notes.empty() || (!noted && getenv(\"RX_VK_NO_PREDICT\"))) return;`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -22570,7 +22570,7 @@
     },
     {
      "path": "gpu/vk/vk_draw.cpp",
-     "line": 9665
+     "line": 9679
     }
    ],
    "default": "unset",
@@ -23408,7 +23408,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_draw.cpp",
-     "line": 10849
+     "line": 10883
     }
    ],
    "default": "on (unless set to 0, false, off or no)",
@@ -23450,7 +23450,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_draw.cpp",
-     "line": 10922
+     "line": 10956
     }
    ],
    "default": "unset",
@@ -23471,7 +23471,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_draw.cpp",
-     "line": 10940
+     "line": 10974
     }
    ],
    "default": "off (unset)",
@@ -23815,7 +23815,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_draw.cpp",
-     "line": 9691
+     "line": 9705
     }
    ],
    "default": "unset",
@@ -23857,7 +23857,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_draw.cpp",
-     "line": 9618
+     "line": 9632
     }
    ],
    "default": "off (unset)",
@@ -23878,7 +23878,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_draw.cpp",
-     "line": 9857
+     "line": 9871
     }
    ],
    "default": "30",
@@ -23899,7 +23899,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_draw.cpp",
-     "line": 9583
+     "line": 9597
     }
    ],
    "default": "off (unset)",
@@ -23966,17 +23966,80 @@
    "files": [
     {
      "path": "gpu/vk/vk_draw.cpp",
-     "line": 9720
+     "line": 9734
     },
     {
      "path": "gpu/vk/vk_draw.cpp",
-     "line": 9984
+     "line": 9998
     }
    ],
    "default": "the engine's own value",
    "values": "a whole number",
    "explanation": "The others, up to 133k words, take 25 s and a few hundred MB. Over RX_VK_PREDICT_MAX_KWORDS (100: 100k words, v0.4.3; 0: no limit) a program is left to the draw that needs it, as it was before the prediction. And the prediction stops, the rest left to play, when the system has less than RX_VK_PREDICT_RESERVE_MB (3072) of commit left).",
    "comment": "The others, up to 133k words, take 25 s and a few hundred MB. Over RX_VK_PREDICT_MAX_KWORDS (100: 100k words, v0.4.3; 0: no limit) a program is left to the draw that needs it, as it was before the prediction. And the prediction stops, the rest left to play, when the system has less than RX_VK_PREDICT_RESERVE_MB (3072) of commit left).",
+   "documented_in": null,
+   "source": "comment at gpu/vk/vk_draw.cpp",
+   "documented": true,
+   "set_via": "In `hookshot_env.txt`, or in the environment.",
+   "use": null
+  },
+  {
+   "name": "RX_VK_PREDICT_PLAY_FREE_MB",
+   "area": "renderer",
+   "group": "Rendering and GPU",
+   "audience": "developer",
+   "files": [
+    {
+     "path": "gpu/vk/vk_draw.cpp",
+     "line": 10019
+    }
+   ],
+   "default": "the engine's own value",
+   "values": "a whole number (`0` in the description)",
+   "explanation": "(V0.4.3.1, RX_VK_PREDICT_PLAY_GENTLE=0 for what it was: the prediction in play, behind a lazy update's game, is made small and polite: RX_VK_PREDICT_PLAY_WORKERS workers (2) at the idle priority, each waiting for its next program while the PC has less than RX_VK_PREDICT_PLAY_FREE_MB (6144) of memory available. With the ledger short of the ~41000 pipelines it predicts, four workers below normal priority took the game from 95 fps to 30, frames of 1.2 s, on a 32 GB PC already holding 28 GB private).",
+   "comment": "(V0.4.3.1, RX_VK_PREDICT_PLAY_GENTLE=0 for what it was: the prediction in play, behind a lazy update's game, is made small and polite: RX_VK_PREDICT_PLAY_WORKERS workers (2) at the idle priority, each waiting for its next program while the PC has less than RX_VK_PREDICT_PLAY_FREE_MB (6144) of memory available. With the ledger short of the ~41000 pipelines it predicts, four workers below normal priority took the game from 95 fps to 30, frames of 1.2 s, on a 32 GB PC already holding 28 GB private).",
+   "documented_in": null,
+   "source": "comment at gpu/vk/vk_draw.cpp",
+   "documented": true,
+   "set_via": "In `hookshot_env.txt`, or in the environment.",
+   "use": null
+  },
+  {
+   "name": "RX_VK_PREDICT_PLAY_GENTLE",
+   "area": "renderer",
+   "group": "Rendering and GPU",
+   "audience": "developer",
+   "files": [
+    {
+     "path": "gpu/vk/vk_draw.cpp",
+     "line": 10018
+    }
+   ],
+   "default": "on (unless set to 0, false, off or no)",
+   "values": "on or off (0, false, off, no and empty are off); the description names `0`",
+   "explanation": "(V0.4.3.1, RX_VK_PREDICT_PLAY_GENTLE=0 for what it was: the prediction in play, behind a lazy update's game, is made small and polite: RX_VK_PREDICT_PLAY_WORKERS workers (2) at the idle priority, each waiting for its next program while the PC has less than RX_VK_PREDICT_PLAY_FREE_MB (6144) of memory available. With the ledger short of the ~41000 pipelines it predicts, four workers below normal priority took the game from 95 fps to 30, frames of 1.2 s, on a 32 GB PC already holding 28 GB private).",
+   "comment": "(V0.4.3.1, RX_VK_PREDICT_PLAY_GENTLE=0 for what it was: the prediction in play, behind a lazy update's game, is made small and polite: RX_VK_PREDICT_PLAY_WORKERS workers (2) at the idle priority, each waiting for its next program while the PC has less than RX_VK_PREDICT_PLAY_FREE_MB (6144) of memory available. With the ledger short of the ~41000 pipelines it predicts, four workers below normal priority took the game from 95 fps to 30, frames of 1.2 s, on a 32 GB PC already holding 28 GB private).",
+   "documented_in": null,
+   "source": "comment at gpu/vk/vk_draw.cpp",
+   "documented": true,
+   "set_via": "In `hookshot_env.txt`, or in the environment.",
+   "use": null
+  },
+  {
+   "name": "RX_VK_PREDICT_PLAY_WORKERS",
+   "area": "renderer",
+   "group": "Rendering and GPU",
+   "audience": "developer",
+   "files": [
+    {
+     "path": "gpu/vk/vk_draw.cpp",
+     "line": 10140
+    }
+   ],
+   "default": "unset",
+   "values": "text (`0` named)",
+   "explanation": "(V0.4.3.1, RX_VK_PREDICT_PLAY_GENTLE=0 for what it was: the prediction in play, behind a lazy update's game, is made small and polite: RX_VK_PREDICT_PLAY_WORKERS workers (2) at the idle priority, each waiting for its next program while the PC has less than RX_VK_PREDICT_PLAY_FREE_MB (6144) of memory available. With the ledger short of the ~41000 pipelines it predicts, four workers below normal priority took the game from 95 fps to 30, frames of 1.2 s, on a 32 GB PC already holding 28 GB private).",
+   "comment": "(V0.4.3.1, RX_VK_PREDICT_PLAY_GENTLE=0 for what it was: the prediction in play, behind a lazy update's game, is made small and polite: RX_VK_PREDICT_PLAY_WORKERS workers (2) at the idle priority, each waiting for its next program while the PC has less than RX_VK_PREDICT_PLAY_FREE_MB (6144) of memory available. With the ledger short of the ~41000 pipelines it predicts, four workers below normal priority took the game from 95 fps to 30, frames of 1.2 s, on a 32 GB PC already holding 28 GB private).",
    "documented_in": null,
    "source": "comment at gpu/vk/vk_draw.cpp",
    "documented": true,
@@ -23991,7 +24054,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_draw.cpp",
-     "line": 9985
+     "line": 9999
     }
    ],
    "default": "the engine's own value",
@@ -24012,7 +24075,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_draw.cpp",
-     "line": 9975
+     "line": 9989
     }
    ],
    "default": "90",
@@ -24033,7 +24096,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_draw.cpp",
-     "line": 9999
+     "line": 10013
     }
    ],
    "default": "60",
@@ -24402,7 +24465,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_internal.h",
-     "line": 584
+     "line": 585
     }
    ],
    "default": "unset",
@@ -24850,7 +24913,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_draw.cpp",
-     "line": 10777
+     "line": 10811
     }
    ],
    "default": "0",
@@ -25742,7 +25805,7 @@
     },
     {
      "path": "gpu/vk/vk_draw.cpp",
-     "line": 10330
+     "line": 10364
     }
    ],
    "default": "unset",
@@ -25805,7 +25868,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_internal.h",
-     "line": 584
+     "line": 585
     },
     {
      "path": "gpu/vk/vk_replay.cpp",
@@ -26692,6 +26755,27 @@
    "use": null
   },
   {
+   "name": "RX_VK_TEST_PREDICT_PLAY",
+   "area": "renderer",
+   "group": "Rendering and GPU",
+   "audience": "developer",
+   "files": [
+    {
+     "path": "gpu/vk/vk_draw.cpp",
+     "line": 9575
+    }
+   ],
+   "default": "unset",
+   "values": "text",
+   "explanation": "(Test only, RX_VK_TEST_PREDICT_PLAY=<seconds>) The prediction in play, as a lazy update's end starts it, <seconds> after the game's start, whatever the caches hold: a run that is two minutes long can see what it does to the game (hookshot_compiled.bin taken away first, so that every predicted pipeline is made).",
+   "comment": "(Test only, RX_VK_TEST_PREDICT_PLAY=<seconds>) The prediction in play, as a lazy update's end starts it, <seconds> after the game's start, whatever the caches hold: a run that is two minutes long can see what it does to the game (hookshot_compiled.bin taken away first, so that every predicted pipeline is made).",
+   "documented_in": null,
+   "source": "comment at gpu/vk/vk_draw.cpp",
+   "documented": true,
+   "set_via": "In `hookshot_env.txt`, or in the environment.",
+   "use": null
+  },
+  {
    "name": "RX_VK_TEST_SLOW_PIPELINE",
    "area": "renderer",
    "group": "Rendering and GPU",
@@ -26699,7 +26783,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_draw.cpp",
-     "line": 10002
+     "line": 10023
     }
    ],
    "default": "unset",
