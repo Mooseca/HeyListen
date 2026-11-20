@@ -2,7 +2,7 @@
  "schema": 1,
  "generated_by": "engine/scripts/list_switches.py",
  "scope": "C, C++ and headers under engine/ (engine/tests and vendored trees other than a64-kit excluded) and the Python the builder, the lifter and the scripts run: getenv, std::getenv, _wgetenv, the code's own env helpers and table-driven reads, and os.environ.",
- "count": 1322,
+ "count": 1323,
  "switches": [
   {
    "name": "A64_DEVIRT",
@@ -4192,7 +4192,7 @@
     },
     {
      "path": "host/nn_vi.c",
-     "line": 326
+     "line": 327
     }
    ],
    "default": "off (unset)",
@@ -4213,13 +4213,13 @@
    "files": [
     {
      "path": "host/hl_step.c",
-     "line": 175
+     "line": 177
     }
    ],
    "default": "off (unset)",
    "values": "on or off (0, false, off, no and empty are off); the description names `0`",
-   "explanation": "A cap of 60 (hos_frame_seconds_bits 0) leaves both as the game has them. HOS_FPS_LOOP=0: the game's, both places.",
-   "comment": "A cap of 60 (hos_frame_seconds_bits 0) leaves both as the game has them. HOS_FPS_LOOP=0: the game's, both places.",
+   "explanation": "A cap of 60 (hos_frame_seconds_bits 0) leaves both as the game has them, unless its step is not a whole frame (HOS_FRAME_CARRY: hos_frame_carry_step, below 60 fps). HOS_FPS_LOOP=0: the game's, both places.",
+   "comment": "A cap of 60 (hos_frame_seconds_bits 0) leaves both as the game has them, unless its step is not a whole frame (HOS_FRAME_CARRY: hos_frame_carry_step, below 60 fps). HOS_FPS_LOOP=0: the game's, both places.",
    "documented_in": null,
    "source": "comment at host/hl_step.c",
    "documented": true,
@@ -4263,7 +4263,7 @@
    "files": [
     {
      "path": "host/hl_step.c",
-     "line": 58
+     "line": 59
     }
    ],
    "default": "off (unset)",
@@ -4347,7 +4347,7 @@
    "files": [
     {
      "path": "host/nn_vi.c",
-     "line": 398
+     "line": 400
     }
    ],
    "default": "off (unset)",
@@ -4368,7 +4368,7 @@
    "files": [
     {
      "path": "host/nn_vi.c",
-     "line": 326
+     "line": 327
     }
    ],
    "default": "off (unset)",
@@ -4389,7 +4389,7 @@
    "files": [
     {
      "path": "host/hl_step.c",
-     "line": 146
+     "line": 147
     }
    ],
    "default": "off (unset)",
@@ -4410,11 +4410,11 @@
    "files": [
     {
      "path": "host/hl_step.c",
-     "line": 129
+     "line": 130
     },
     {
      "path": "host/hl_step.c",
-     "line": 145
+     "line": 146
     }
    ],
    "default": "off (unset)",
@@ -4428,6 +4428,27 @@
    "use": null
   },
   {
+   "name": "HOS_FRAME_CARRY",
+   "area": "renderer",
+   "group": "Rendering and GPU",
+   "audience": "developer",
+   "files": [
+    {
+     "path": "host/nn_vi.c",
+     "line": 444
+    }
+   ],
+   "default": "off (unset)",
+   "values": "on or off (0, false, off, no and empty are off)",
+   "explanation": "HOS_FRAME_CARRY (default on): at a cap of 60 with a rate under 60 that is not a whole step, the game's whole-frame counters keep their fractions; 0 cuts them as the game does (46 whole frames a second at 46 fps).",
+   "comment": "HOS_FRAME_CARRY (default on): at a cap of 60 with a rate under 60 that is not a whole step, the game's whole-frame counters keep their fractions; 0 cuts them as the game does (46 whole frames a second at 46 fps).",
+   "documented_in": null,
+   "source": "comment at host/nn_vi.c",
+   "documented": true,
+   "set_via": "In `hookshot_env.txt`, or in the environment.",
+   "use": null
+  },
+  {
    "name": "HOS_FRAME_SLEEP_MS",
    "area": "renderer",
    "group": "Rendering and GPU",
@@ -4435,7 +4456,7 @@
    "files": [
     {
      "path": "host/nn_vi.c",
-     "line": 495
+     "line": 509
     }
    ],
    "default": "0",
@@ -5703,7 +5724,7 @@
    "files": [
     {
      "path": "host/nn_vi.c",
-     "line": 519
+     "line": 533
     }
    ],
    "default": "1",
@@ -7200,7 +7221,7 @@
    "files": [
     {
      "path": "host/nn_vi.c",
-     "line": 443
+     "line": 457
     }
    ],
    "default": "unset",
@@ -7359,7 +7380,7 @@
    "files": [
     {
      "path": "host/nn_vi.c",
-     "line": 378
+     "line": 380
     }
    ],
    "default": "5",
@@ -7422,7 +7443,7 @@
    "files": [
     {
      "path": "host/nn_vi.c",
-     "line": 309
+     "line": 310
     }
    ],
    "default": "off (unset)",
@@ -7443,11 +7464,11 @@
    "files": [
     {
      "path": "host/nn_vi.c",
-     "line": 293
+     "line": 294
     },
     {
      "path": "host/nn_vi.c",
-     "line": 302
+     "line": 303
     }
    ],
    "default": "unset",
@@ -7811,11 +7832,11 @@
    "files": [
     {
      "path": "host/nn_vi.c",
-     "line": 422
+     "line": 424
     },
     {
      "path": "host/nn_vi.c",
-     "line": 472
+     "line": 486
     }
    ],
    "default": "off (unset)",
@@ -8008,7 +8029,7 @@
    "files": [
     {
      "path": "host/nn_vi.c",
-     "line": 286
+     "line": 287
     }
    ],
    "default": "unset",

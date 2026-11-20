@@ -10,7 +10,7 @@ python -I engine/scripts/list_switches.py
 
 and commit both files. A test (`engine/tests/test_switches_documented.py`) fails when a switch read in the source is missing here or the data file is out of date.
 
-1322 switches: 52 players may be told to use, 352 diagnostic, 918 developer-only; 1120 have a real explanation and 202 are marked `undocumented`.
+1323 switches: 52 players may be told to use, 352 diagnostic, 919 developer-only; 1121 have a real explanation and 202 are marked `undocumented`.
 
 ## How to set a switch
 
@@ -64,7 +64,7 @@ The entries below say what each one does, its values and default, and when it is
 
 | Area | Switches | Player | Diagnostic | Developer |
 |---|---:|---:|---:|---:|
-| [Renderer](#renderer-upscaling-frame-generation-hdr-v-sync-and-presentation) | 430 | 22 | 14 | 394 |
+| [Renderer](#renderer-upscaling-frame-generation-hdr-v-sync-and-presentation) | 431 | 22 | 14 | 395 |
 | [Shaders and pipelines](#shaders-and-pipelines) | 115 | 6 | 0 | 109 |
 | [Memory and textures](#memory-and-textures) | 178 | 9 | 0 | 169 |
 | [Audio](#audio) | 14 | 5 | 9 | 0 |
@@ -77,7 +77,7 @@ The entries below say what each one does, its values and default, and when it is
 
 ## Renderer: upscaling, frame generation, HDR, V-Sync and presentation
 
-430 switches of the renderer: the upscaler, frame generation, HDR, V-Sync and what reaches the screen.
+431 switches of the renderer: the upscaler, frame generation, HDR, V-Sync and what reaches the screen.
 
 ### Upscaling (DLSS, FSR, TAAU)
 
@@ -99,7 +99,7 @@ The entries below say what each one does, its values and default, and when it is
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/nn_vi.c:293` and 1 more place.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/nn_vi.c:294` and 1 more place.
 
 #### `RX_FSR` - developer
 
@@ -623,7 +623,7 @@ Over the options file: the output resolution (0 2048x1152, 1 2560x1440, 2 3840x2
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/nn_vi.c:378`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/nn_vi.c:380`.
 
 #### `HOS_SDL_VERSION` - diagnostic
 
@@ -917,6 +917,16 @@ Registers read before any write are zero rather than OpUndef, as NVIDIA hardware
 
 **Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/eden/shader_recompiler/backend/spirv/emit_spirv_undefined.cpp:20`.
 
+#### `HOS_FRAME_CARRY` - developer
+
+HOS_FRAME_CARRY (default on): at a cap of 60 with a rate under 60 that is not a whole step, the game's whole-frame counters keep their fractions; 0 cuts them as the game does (46 whole frames a second at 46 fps).
+
+**Values:** on or off (0, false, off, no and empty are off). **Default:** off (unset).
+
+**When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
+
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/nn_vi.c:444`.
+
 #### `HOS_FRAME_SLEEP_MS` - developer
 
 HOS_FRAME_SLEEP_MS (diagnostic): slower frames, for game speed against frame rate.
@@ -925,7 +935,7 @@ HOS_FRAME_SLEEP_MS (diagnostic): slower frames, for game speed against frame rat
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/nn_vi.c:495`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/nn_vi.c:509`.
 
 #### `HOS_VIDEO_AHEAD` - developer
 
@@ -8319,13 +8329,13 @@ The Frame rate limit for the run, over the row and Unlimited: the rate presented
 
 #### `HOS_FPS_LOOP` - developer
 
-A cap of 60 (hos_frame_seconds_bits 0) leaves both as the game has them. HOS_FPS_LOOP=0: the game's, both places.
+A cap of 60 (hos_frame_seconds_bits 0) leaves both as the game has them, unless its step is not a whole frame (HOS_FRAME_CARRY: hos_frame_carry_step, below 60 fps). HOS_FPS_LOOP=0: the game's, both places.
 
 **Values:** on or off (0, false, off, no and empty are off); the description names `0`. **Default:** off (unset).
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hl_step.c:175`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hl_step.c:177`.
 
 #### `HOS_FPS_MAX` - developer
 
@@ -8345,7 +8355,7 @@ The movie's picture and sound follow the clock, so above 60 fps the count ran fp
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hl_step.c:58`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hl_step.c:59`.
 
 #### `HOS_FPS_SOLVER` - developer
 
@@ -8385,7 +8395,7 @@ HOS_FPS_LEDGE=0 and HOS_FPS_SONG=0 leave the game's. HOS_FPS_SOUND=0: the sound 
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/nn_vi.c:398`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/nn_vi.c:400`.
 
 #### `HOS_FPS_TARGET` - developer
 
@@ -8395,7 +8405,7 @@ HOS_FPS_LEDGE=0 and HOS_FPS_SONG=0 leave the game's. HOS_FPS_SOUND=0: the sound 
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/nn_vi.c:326`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/nn_vi.c:327`.
 
 #### `HOS_FPS_WATER` - developer
 
@@ -8405,7 +8415,7 @@ The water's ripple simulation's whole substeps (hl_gates' "t8" of the water hook
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hl_step.c:146`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hl_step.c:147`.
 
 #### `HOS_FPS_WHOLE` - developer
 
@@ -8415,7 +8425,7 @@ The water's ripple simulation's whole substeps (hl_gates' "t8" of the water hook
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hl_step.c:129` and 1 more place.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hl_step.c:130` and 1 more place.
 
 ### Threads and scheduling
 
@@ -9133,7 +9143,7 @@ HOS_MKW_INTERVAL=<0|1|2>: the interval MKW's pacer is held at, through its own o
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/nn_vi.c:519`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/nn_vi.c:533`.
 
 #### `HOS_MW_WAKE` - developer
 
@@ -9433,7 +9443,7 @@ Over the options file: Resolution 100% (non-zero: Auto), Game speed Per frame (1
 
 **When a player would use it:** Text is too slow or too fast for one run: `0` to `3`.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/nn_vi.c:286`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/nn_vi.c:287`.
 
 #### `HOS_THP` - developer
 
@@ -9877,7 +9887,7 @@ The game's frame limiter, VRR flags and nominal rate every 300 presents; a CSV l
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In the process environment (or in a file named by `HOS_ENV_FILE`); `hookshot_env.txt` refuses this one. **Read at:** `host/nn_vi.c:443`.
+**Set it:** In the process environment (or in a file named by `HOS_ENV_FILE`); `hookshot_env.txt` refuses this one. **Read at:** `host/nn_vi.c:457`.
 
 #### `HOS_QUEUE_TRACE` - diagnostic
 
@@ -9907,7 +9917,7 @@ HOS_RES_LOG=1: the 3D's scale every 300 presents. +0xe20: flags (bit 3: 0.75, bi
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/nn_vi.c:309`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/nn_vi.c:310`.
 
 #### `HOS_SIZE_TRACE` - diagnostic
 
@@ -9937,7 +9947,7 @@ HOS_SLEEP_LOG=1 (diagnostic): guest sleeps by caller (LR) every 5 s: count, aske
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/nn_vi.c:422` and 1 more place.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/nn_vi.c:424` and 1 more place.
 
 #### `HOS_SYNC_TRACE` - diagnostic
 
