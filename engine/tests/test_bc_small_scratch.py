@@ -4,7 +4,7 @@ An ASTC array kept as BC3 is decoded into a scratch image and encoded from it on
 encode, a copy and three full barriers. The 2048 x 2048 scratch has one layer (RX_VK_BC_LAYERS), so the terrain's
 material arrays (1365 x 1365 x 90, 11 levels) made ~990 runs, and at Hyrule Field's entry on an RX 9070 XT the GPU took
 51 ms an array, most of it between runs (#1720). Levels no larger than 1024 x 1024 now go through a small scratch of
-bc_small_layers() layers (8; RX_VK_BC_SMALL_LAYERS=1: none): 15 ms an array, for 36 MB more, not made on a small-VRAM
+bc_small_layers() layers (1, off, by default; RX_VK_BC_SMALL_LAYERS=8: the opt-in): 15 ms an array, for 36 MB more, not made on a small-VRAM
 card or out of VRAM. One layer a run (ec89f92e) was for Hyrule Field's grid lines on an RX 6600, whose cause was not
 found; runs still never hold a repacked level (`!repack`), and a run is no longer than the upload chunk holds.
 
@@ -80,7 +80,7 @@ def main():
         src, exe = Path(temp) / "small.cpp", Path(temp) / "small.exe"
         src.write_text(FIXTURE, encoding="utf-8")
         subprocess.run([cxx, "-std=c++20", "-O1", "-Wall", "-Wextra", "-Werror", "-I", temp, str(src), "-o", str(exe)], check=True)
-        for value, want in ((None, "8"), ("1", "1"), ("4", "4"), ("99", "8"), ("0", "1")):
+        for value, want in ((None, "1"), ("1", "1"), ("8", "8"), ("4", "4"), ("99", "8"), ("0", "1")):
             env = {k: v for k, v in os.environ.items() if k != "RX_VK_BC_SMALL_LAYERS"}
             if value is not None:
                 env["RX_VK_BC_SMALL_LAYERS"] = value

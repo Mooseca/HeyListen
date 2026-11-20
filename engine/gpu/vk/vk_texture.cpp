@@ -724,12 +724,12 @@ uint32_t bc_layers() {
 /// three full barriers: an array of 90 layers and 11 levels made ~990 of them, and the GPU spent most of the time between them (Hyrule
 /// Field's entry on an RX 9070 XT: 51 ms an array at one layer a run, 15 ms at 8). 32 MB for the image beside the 2048 x 2048 scratch's
 /// 20 MB a layer; not made on a card of small VRAM (bc_layers() is 1 there) or where it would land in system memory.
-/// RX_VK_BC_SMALL_LAYERS=<n>: its layers (8; 1: no small scratch, every run one layer). One layer a run was for grid lines on the far
-/// ground, layers after a run's first wrong at the small levels on an RX 6600; no cause was found. Multi-layer runs showed no grid
-/// lines on RDNA4 RADV, other GPUs are still to be seen
+/// RX_VK_BC_SMALL_LAYERS=<n>: its layers (1 by default: off, no small scratch, every run one layer; 8: the opt-in). One layer a run was
+/// for grid lines on the far ground, layers after a run's first wrong at the small levels on an RX 6600; no cause was found. Multi-layer
+/// runs showed no grid lines on RDNA4 RADV, but upstream warned of them on RX 6600-class GPUs, so the default is off here
 constexpr uint32_t kBcSmallDim = 1024;
 uint32_t bc_small_layers() {
-    static const uint32_t n = getenv("RX_VK_BC_SMALL_LAYERS") ? std::clamp<uint32_t>((uint32_t)atoi(getenv("RX_VK_BC_SMALL_LAYERS")), 1u, kBcLayers) : kBcLayers;
+    static const uint32_t n = getenv("RX_VK_BC_SMALL_LAYERS") ? std::clamp<uint32_t>((uint32_t)atoi(getenv("RX_VK_BC_SMALL_LAYERS")), 1u, kBcLayers) : 1u;
     return n;
 }
 VkImage bc_scratch = VK_NULL_HANDLE;
