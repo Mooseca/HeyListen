@@ -110,7 +110,24 @@ int hos_profile_pc(uintptr_t pc, uint64_t *key) {
 
 /* (MkwVkHost build_id) the executable's build id: the PE fields' hash that the symbol tables carry too (nx2/symtab.py pe_identity) */
 uint64_t hos_profile_build_id(void) { return hos_crash_module_identity((uintptr_t)GetModuleHandleA(NULL)); }
+/* (MkwVkHost profile_threads) the OS ids of the guest's threads (hos_thread.c keeps their handles) */
+int hos_thread_handles(HANDLE *out, const char **names, int max);
+int hos_profile_threads(uint32_t *tids, int max) {
+    static HANDLE handles[256];
+    static const char *names[256];
+    const int n = hos_thread_handles(handles, names, max < 256 ? max : 256);
+    int k = 0;
+    for (int i = 0; i < n; i++) {
+        const DWORD id = GetThreadId(handles[i]);
+        if (id) tids[k++] = (uint32_t)id;
+    }
+    return k;
+}
 #else
+int hos_profile_threads(uint32_t *tids, int max) {
+    (void)tids, (void)max;
+    return 0;
+}
 int hos_profile_pc(uintptr_t pc, uint64_t *key) {   /* (Linux: the sampler is not built: nothing asks) */
     (void)pc;
     *key = 0;

@@ -36,9 +36,9 @@ std::atomic<bool> running{false};
 int run_hz = pf::kHzDefault;
 bool gpu_ok = false;   // (the timestamp pool exists: maps say so in their gpu flag)
 
-void fresh_map(pf::MapProfile& m, const std::string& name) {
+void fresh_map(pf::MapProfile& m, std::string name) {   // (by value: the name may be the map's own, which the reset clears)
     m = pf::MapProfile();
-    m.name = name, m.hz = run_hz, m.gpu = gpu_ok;
+    m.name = std::move(name), m.hz = run_hz, m.gpu = gpu_ok;
 }
 
 // ---- the GPU's pass timestamps ----
@@ -136,7 +136,10 @@ std::string thread_name(HANDLE h) {
     return name;
 }
 
+std::vector<uint32_t> guest_tids;   // (the guest's own threads, from the host once a refresh: their names are the game's)
+
 int role_for(DWORD tid, HANDLE h) {
+    if (std::find(guest_tids.begin(), guest_tids.end(), (uint32_t)tid) != guest_tids.end()) return pf::kRoleGame;
     const int n = registered_n.load(std::memory_order_acquire);
     for (int i = 0; i < n && i < 16; i++)
         if (registered_tid[i].load(std::memory_order_relaxed) == tid) return registered_role[i].load(std::memory_order_relaxed);
@@ -198,6 +201,8 @@ Where classify(uintptr_t pc) {
 
 void refresh_threads(std::vector<ThreadRec>& threads) {
     const DWORD me = GetCurrentThreadId(), pid = GetCurrentProcessId();
+    guest_tids.assign(256, 0);
+    guest_tids.resize(host && host->profile_threads ? (size_t)std::max(0, host->profile_threads(guest_tids.data(), 256)) : 0);
     HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
     if (snap == INVALID_HANDLE_VALUE) return;
     std::vector<DWORD> alive;

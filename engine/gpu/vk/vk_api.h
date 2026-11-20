@@ -166,6 +166,9 @@ typedef struct MkwVkHost {
     int (*profile_pc)(uintptr_t pc, uint64_t *key);
     /* (version 18) the executable's build id (the symbol tables' identity: PE fields hashed), 0 when unknown */
     uint64_t (*build_id)(void);
+    /* (version 18) the thread ids (the OS's) of the guest's own threads, at most max: their names are the game's, so the profile
+       tells their role (the game) from this. Returns how many */
+    int (*profile_threads)(uint32_t *tids, int max);
 } MkwVkHost;
 enum {
     MKWVK_TRACE_WRITEBACK = 1,     /* a mirror's GPU writes copied into guest memory (in a submission) */
