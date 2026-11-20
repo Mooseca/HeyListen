@@ -8447,7 +8447,7 @@ The first matching entry wins. (2026-10-20: the castle's MainThread and ModuleSy
 
 **When a player would use it:** Freezes while a zone loads: `=1` keeps the thread's virtual core through a texture or program release even when the renderer would make it wait (v0.4.3's behaviour).
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/rx_backend.c:585`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/rx_backend.c:592` and 1 more place.
 
 #### `HOS_RESERVE_CORE` - developer
 
@@ -8507,7 +8507,7 @@ undocumented: host/hos_svc.c:118 (in `spin_for_release()`) reads it as a text va
 
 **When a player would use it:** Freezes at area changes: `=1` keeps the thread's virtual core while a CPU read or write of texels waits for the GPU (the behaviour before Longshot #1827).
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/rx_backend.c:574`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/rx_backend.c:581`.
 
 #### `HOS_THREAD_OF_CACHE` - developer
 

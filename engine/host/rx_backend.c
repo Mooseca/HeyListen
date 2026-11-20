@@ -384,14 +384,21 @@ static void flush_early(void) {
 
 /* (TICK-015) the back end's second export: a game pool's NVN flags (which pools the CPU may read back) */
 static void (*vk_pool_flags)(uint64_t gpu, uint64_t size, uint32_t flags);
+static int pool_call_gives_core(void);   /* (below) */
 void rx_nvn_pool_flags(uint64_t gpu, uint64_t size, uint32_t flags) {
-    if (vk && vk_pool_flags) vk_pool_flags(gpu, size, flags);
+    if (!vk || !vk_pool_flags) return;
+    const int away = pool_call_gives_core() ? hos_vcore_away() : 0;
+    vk_pool_flags(gpu, size, flags);
+    if (away) hos_vcore_back();
 }
 /* (HeyListen, RX_VK_POOL_FINALIZE) and a live pool's finalize (only a pool object still live: nvn_native.c checks its magic), so the
    back end can retire the import chunks no live pool is left in */
 static void (*vk_pool_finalized)(uint64_t gpu, uint64_t size);
 void rx_nvn_pool_finalized(uint64_t gpu, uint64_t size) {
-    if (vk && vk_pool_finalized) vk_pool_finalized(gpu, size);
+    if (!vk || !vk_pool_finalized) return;
+    const int away = pool_call_gives_core() ? hos_vcore_away() : 0;
+    vk_pool_finalized(gpu, size);
+    if (away) hos_vcore_back();
 }
 
 /* dll: mkw_vk.dll (our Vulkan back end) or mkw_eden.dll (Eden's renderer driven natively, gpu/eden): one export */
@@ -669,6 +676,18 @@ void rx_nvn_vmap_changing(uint64_t gpu, uint64_t size) {
     if (vk && vk->nvn_vmap_changing) vk->nvn_vmap_changing(gpu, size);
     if (away) hos_vcore_back();
 }
+/* (HeyListen, v0.4.4) The memory pool calls (a pool made, its flags, its finalize: a few hundred a boot, none in the frames) take the
+   back end's pool locks, which an import or a replay in progress holds: BootupBackgroundWorkThread sat in a futex inside the renderer
+   for 165 s holding core 2 at the start of an Arc B580's boot on Linux (issue 88; every other game thread "ran without a core after
+   2000 ms"). The core is given up for them. HOS_RELEASE_KEEP_CORE=1: kept, as before */
+static int pool_call_gives_core(void) {
+    static int off = -1;
+    if (off < 0) off = env_on("HOS_RELEASE_KEEP_CORE");
+    return !off;
+}
 void rx_nvn_pool_created(uint64_t gpu, uint64_t size) {
-    if (vk && vk->nvn_pool_created) vk->nvn_pool_created(gpu, size);
+    if (!vk || !vk->nvn_pool_created) return;
+    const int away = pool_call_gives_core() ? hos_vcore_away() : 0;
+    vk->nvn_pool_created(gpu, size);
+    if (away) hos_vcore_back();
 }

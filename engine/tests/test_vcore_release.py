@@ -121,6 +121,13 @@ def main():
         keep = subprocess.run([str(exe2)], capture_output=True, text=True, timeout=30)
         # (every case that expects a give-up fails with the switch on: the core is kept, never given up)
         assert keep.returncode != 0 and "FAIL: would wait" in keep.stdout, "HOS_RELEASE_KEEP_CORE=1 does not keep the core"
+    # (the memory pool calls: a pool made, its flags, its finalize: the core given up around the back end's call, once each)
+    for name in ("void rx_nvn_pool_flags(uint64_t gpu, uint64_t size, uint32_t flags) {",
+                 "void rx_nvn_pool_finalized(uint64_t gpu, uint64_t size) {", "void rx_nvn_pool_created(uint64_t gpu, uint64_t size) {"):
+        body = block(src, name)
+        assert "pool_call_gives_core() ? hos_vcore_away() : 0" in body and body.count("hos_vcore_back()") == 1, name + " does not give the core up"
+        assert body.index("hos_vcore_away()") < body.index("hos_vcore_back()")
+    assert 'env_on("HOS_RELEASE_KEEP_CORE")' in block(src, "static int pool_call_gives_core(void) {")
     rp = (ROOT / "gpu/vk/vk_replay.cpp").read_text(encoding="utf-8")
     hint = block(rp, "static int release_may_wait() {")
     assert "sync_order_mu.mu.try_lock()" in hint and "replay_mu.try_lock()" in hint and hint.count("unlock()") == 2, \
