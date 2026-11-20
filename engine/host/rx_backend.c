@@ -559,6 +559,21 @@ void rx_nvn_set_texture_pool_size(int n) {
     }
     vk ? vk->nvn_set_texture_pool_size(n) : wgr_nvn_set_texture_pool_size(n);
 }
+/* (1 when the variable is set to anything but "" or "0") */
+static int env_on(const char *name) {
+    const char *e = getenv(name);
+    return e && e[0] && e[0] != '0';
+}
+/* (Longshot 1780fbe0c by SadTransGirl, #1827, by hand: the give-up itself came earlier, Mooseca's 77bd2f86d; this adds its off
+   switch) A texture's texels read or written by the CPU wait in the Vulkan back end for the GPU to finish everything submitted
+   before, and that work can itself wait for a signal the game's main thread makes later. The thread gives its virtual core up
+   for the call (a worker on that core waited ~1 s behind it at an area change). HOS_TEXELS_KEEP_CORE=1: kept through the wait,
+   as before */
+static int texels_keep_core(void) {
+    static int keep = -1;
+    if (keep < 0) keep = env_on("HOS_TEXELS_KEEP_CORE");
+    return keep;
+}
 void rx_nvn_texture_released(const nvn_tex *t) {
     if (!started && t) {
         early_call c = {3, 0};
@@ -580,7 +595,7 @@ void rx_nvn_read_texels(const nvn_tex *t, unsigned level, unsigned layer0, const
                         size_t row, size_t img) {
     /* (the back end's texel copies take replay_mu, which the replay holds through a whole submission: hundreds of ms while
        pipelines compile at boot or a zone's load. No virtual core held meanwhile, as rx_nvn_invalidate) */
-    const int away = hos_vcore_away();
+    const int away = texels_keep_core() ? 0 : hos_vcore_away();
     vk ? vk->nvn_read_texels(t, level, layer0, r, dst, row, img) : wgr_nvn_read_texels(t, level, layer0, r, dst, row, img);
     if (away) hos_vcore_back();
 }
@@ -604,7 +619,7 @@ void rx_nvn_write_texels(const nvn_tex *t, unsigned level, unsigned layer0, cons
             }
         }
     }
-    const int away = hos_vcore_away();   /* (replay_mu: as rx_nvn_read_texels) */
+    const int away = texels_keep_core() ? 0 : hos_vcore_away();   /* (replay_mu: as rx_nvn_read_texels) */
     vk ? vk->nvn_write_texels(t, level, layer0, r, src, row, img)
        : wgr_nvn_write_texels(t, level, layer0, r, src, row, img);
     if (away) hos_vcore_back();
