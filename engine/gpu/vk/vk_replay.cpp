@@ -5843,6 +5843,9 @@ void do_present(const nvn_tex* t, const int crop[4]) {
         }
         if (interpolated) framegen_queue(value, present_held);
         else menu_note_frame(true);   // (the FPS counter's, as frame generation's thread counts what it shows)
+        // (and the built-in interpolation's and FSR 3.1's images, off for a while: after the queue, so a set this present recorded
+        // is the display thread's to show and free before any drain waits for it; and counted as on, whatever the row says now)
+        framegen_idle(interpolated);
         {   // (RX_VK_WAIT_GPU=<frames>: the replay no further ahead of the GPU than that)
             static uint64_t values[8];
             static const int ahead = [] {

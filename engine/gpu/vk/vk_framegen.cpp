@@ -20,6 +20,7 @@
 #include <cmath>
 
 #include "vk_framegen.h"
+#include "framegen_idle.h"   // (longshot 382a3d675: when its images are let go, framegen_idle)
 #include "framegen_rows.h"   // (the multiplier each Frame generation by makes, the limit's share)
 #include "vk_dlss.h"   // (NVIDIA DLSS Frame Generation: vk_dlss.cpp)
 #include "vk_temporal.h"   // (temporal_wanted: DLSS FG's inputs)
@@ -553,6 +554,27 @@ bool framegen_wanted(int menu_value, int allow) {
 bool framegen_on() {
     static const int allow = !getenv("RX_VK_FRAMEGEN") || atoi(getenv("RX_VK_FRAMEGEN")) != 0;
     return framegen_wanted(opts.framegen, allow) && !dev.offscreen && !fg.failed;
+}
+
+void framegen_idle(bool recorded) {
+    using namespace framegen_idle_rule;
+    static uint32_t off = 0, fsr_off = 0;
+    const bool on = framegen_on();
+    fsr_off = next_off(fsr_off, on && fsr3fi::frames_wanted(), recorded);
+    if (fsr_off >= kIdlePresents) fsr3fi::release();
+    off = next_off(off, on, recorded);
+    if (!release_due(off, fg.w != 0)) return;
+    {   // (as ensure_size: the display thread done with the sets, then every queue idle)
+        std::unique_lock lk(fg.mu);
+        fg.cv.wait(lk, [] { return fg.jobs.empty() && !fg.sets[0].busy && !fg.sets[1].busy && !fg.sets[2].busy; });
+    }
+    {
+        std::lock_guard qk(dev.present_mu);
+        device_wait_idle_locked();
+    }
+    const uint64_t mb = ((uint64_t)fg.w * fg.h * 4 * (2 + 3 * (uint64_t)fg.mult)) >> 20;   // (the RGBA8 frames; lumas and flows are small)
+    logf("vk: frame interpolation off: its images (%ux%u, %dx) let go, about %llu MB", fg.w, fg.h, fg.mult, (unsigned long long)mb);
+    drop_size();
 }
 
 int framegen_engine(int* mult, bool* automatic) {
