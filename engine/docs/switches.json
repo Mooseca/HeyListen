@@ -2,7 +2,7 @@
  "schema": 1,
  "generated_by": "engine/scripts/list_switches.py",
  "scope": "C, C++ and headers under engine/ (engine/tests and vendored trees other than a64-kit excluded) and the Python the builder, the lifter and the scripts run: getenv, std::getenv, _wgetenv, the code's own env helpers and table-driven reads, and os.environ.",
- "count": 1303,
+ "count": 1304,
  "switches": [
   {
    "name": "A64_DEVIRT",
@@ -3462,7 +3462,7 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 1718
+     "line": 1762
     }
    ],
    "default": "unset",
@@ -4037,7 +4037,7 @@
     },
     {
      "path": "host/hos_main.c",
-     "line": 1547
+     "line": 1591
     }
    ],
    "default": "off (unset)",
@@ -4121,7 +4121,7 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 1742
+     "line": 1786
     }
    ],
    "default": "unset",
@@ -4820,7 +4820,11 @@
     },
     {
      "path": "host/hos_main.c",
-     "line": 1505
+     "line": 1516
+    },
+    {
+     "path": "host/hos_main.c",
+     "line": 1549
     },
     {
      "path": "host/mkw_glue.c",
@@ -6680,7 +6684,7 @@
     },
     {
      "path": "host/hos_main.c",
-     "line": 1539
+     "line": 1583
     }
    ],
    "default": "unset",
@@ -7376,7 +7380,7 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 1555
+     "line": 1599
     }
    ],
    "default": "unset",
@@ -7431,6 +7435,27 @@
    "comment": "(The Insert menu's Resolution: the fixed path's scale in 1/10000, live; HOS_RES_SCALE below stays over it).",
    "documented_in": null,
    "source": "comment at host/nn_vi.c",
+   "documented": true,
+   "set_via": "In `hookshot_env.txt`, or in the environment.",
+   "use": null
+  },
+  {
+   "name": "HOS_ROMFS_CHECK",
+   "area": "logging",
+   "group": "Checks and validation",
+   "audience": "diagnostic",
+   "files": [
+    {
+     "path": "host/hos_main.c",
+     "line": 1512
+    }
+   ],
+   "default": "unset",
+   "values": "text (`0` named)",
+   "explanation": "(HeyListen, #55: seven \"Title and intro\" crashes since v0.4.1, \"exception 0xc0000005 (write 0x100000000000, guest 0)\" in the guest's memset, from the module system's set-up (f_83b797e0), on RTX 3060, RX 580, RX 6700 XT.) The game sizes the heap of each of its modules from a file of its own, System/HeapSize/Product.Nin_Ounce_NVN2.HeapDef.byml.zs, which it opens first of all. Where the game's files do not hold it (an incomplete or another version's romfs folder), nothing says so: the game reads no sizes, creates no heap for its third module, and its first allocation there returns null and is written through. A run with that file taken out crashes with the same address and the same eleven guest frames. The file's absence (or an empty one) is told before the boot instead, and the game does not start. HOS_ROMFS_CHECK=0: not checked (as before).",
+   "comment": "(HeyListen, #55: seven \"Title and intro\" crashes since v0.4.1, \"exception 0xc0000005 (write 0x100000000000, guest 0)\" in the guest's memset, from the module system's set-up (f_83b797e0), on RTX 3060, RX 580, RX 6700 XT.) The game sizes the heap of each of its modules from a file of its own, System/HeapSize/Product.Nin_Ounce_NVN2.HeapDef.byml.zs, which it opens first of all. Where the game's files do not hold it (an incomplete or another version's romfs folder), nothing says so: the game reads no sizes, creates no heap for its third module, and its first allocation there returns null and is written through. A run with that file taken out crashes with the same address and the same eleven guest frames. The file's absence (or an empty one) is told before the boot instead, and the game does not start. HOS_ROMFS_CHECK=0: not checked (as before).",
+   "documented_in": null,
+   "source": "comment at host/hos_main.c",
    "documented": true,
    "set_via": "In `hookshot_env.txt`, or in the environment.",
    "use": null
@@ -7581,7 +7606,7 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 1741
+     "line": 1785
     }
    ],
    "default": "off (unset)",
@@ -8117,7 +8142,7 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 1672
+     "line": 1716
     }
    ],
    "default": "off (unset)",
