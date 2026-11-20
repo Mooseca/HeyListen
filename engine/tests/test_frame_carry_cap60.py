@@ -48,7 +48,7 @@ typedef int SRWLOCK;   /* (one thread here) */
 #define AcquireSRWLockExclusive(l) ((void)(l))
 #define ReleaseSRWLockExclusive(l) ((void)(l))
 static uint8_t guest[0x4000];
-#define GP(a) ((void *)(guest + (a)))
+#define GP(a) ((void *)(guest + ((uintptr_t)(a) & 0x3fffu)))   /* (fixed game addresses like 0x84d61fc8 wrap into it: gcc's -Wstringop-overread) */
 #define MOD 0x1000u
 static int64_t now = 1000000000LL;
 static void hos_log(const char *fmt, ...) { (void)fmt; }

@@ -218,6 +218,8 @@ std::atomic<bool> bc_have{false};
 constexpr uint32_t kBcLayers = 8;
 uint32_t bc_layers() { return kBcLayers; }   // (vk_texture.cpp: 1 under 8 GB; the scratch at its full size here)
 VkImage bc_scratch = VK_NULL_HANDLE, bc_scratch2 = VK_NULL_HANDLE;
+VkImage bc_small = VK_NULL_HANDLE;   // (vk_texture.cpp: the small scratch, none at RX_VK_BC_SMALL_LAYERS=1, the default)
+uint32_t bc_small_layers() { return 1; }
 bool bc_scratch_fresh = false, bc_scratch2_fresh = false;
 bool bc_scratch_make() {
     bc_scratch = kScratch, bc_scratch_fresh = true, bc_have = true;
