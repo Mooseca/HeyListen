@@ -42,6 +42,7 @@
 #include "vk_work.h"   // (after the others: counts the commands that do GPU work, for full_barrier)
 #include "vk_dlss.h"
 #include "vk_framegen.h"   // (framegen_on: the V-Sync mode row's hint when frame generation needs more images)
+#include "shader_recompiler/ir_opt/psychov35.h"   // (PsychoV35's grading bank: psychov35_bank)
 #include "vk_fsr3.h"      // (the Upscaler row: whether AMD FSR 3.1 runs on this GPU)
 #include "vk_fsr3fi.h"    // (the Frame generation row: whether FSR 3.1 makes the frame)
 #include "vk_framegen.h"  // (the Frame generation row: the multiplier as it runs, who makes the frames)
@@ -126,8 +127,15 @@ const char* tx_menu_shortcut(int v) {
     static const char* const names[] = {"Insert or F1", "Insert only", "F1 only"};
     return names[v];
 }
-const char* tx_hdr(int v) {
-    return v == 1 ? "Expanded" : v == 2 ? "Native (the game's)" : v == 3 ? "Native + our tone mapper" : "Off";
+const char* tx_hdr(int v) { return v == 1 ? "Expanded" : v == 2 ? "Native (the game's)" : "Off"; }
+// (HeyListen, after Longshot ddb156df and 79a34381: the HDR tone mapper and PsychoV35's rows)
+const char* tx_tonemap(int v) { return v == 1 ? "PsychoV35" : "Vanilla"; }
+const char* tx_midgray(int v) { return v == 1 ? "Vanilla" : "Render"; }
+const char* tx_color_space(int v) { return v == 2 ? "DCI-P3" : v == 1 ? "BT.709" : "Vanilla"; }
+const char* tx_grade(int v) {   // (PsychoV35's grading rows: RenoDX's 0 to 100)
+    static char b[8];
+    snprintf(b, sizeof b, "%d", v);
+    return b;
 }
 const char* tx_nits(int v) {
     static char b[24];
@@ -285,6 +293,27 @@ const char* hn_dlss_model(int v, int variant) {
     if (variant == 2) return env;
     return variant == 0 ? t[std::clamp(v, 0, ur::kModels - 1)] : nullptr;
 }
+/// (HeyListen, after Longshot 83b161e3) The DLAA before the bloom row (opts.dlss_pre_bloom; vk_temporal.cpp pre_bloom_wanted):
+/// RX_VK_DLSS_PRE_BLOOM set for this run wins over it
+bool pre_bloom_env() {
+    static const char* const e = getenv("RX_VK_DLSS_PRE_BLOOM");
+    return e && *e;
+}
+/// Its line: the value chosen; variant 1: DLSS at a Render resolution below Native (the row waits for DLAA); variant 2: set
+/// for this run by RX_VK_DLSS_PRE_BLOOM
+const char* hn_dlss_pre_bloom(int v, int variant) {
+    static const char* const t[] = {
+        "Off: DLAA smooths the finished picture, after the game's bloom and tone map.",
+        "On: DLAA smooths the 3D before the game's bloom and tone map, so the glow is made from a smooth picture.",
+    };
+    static const char* const not_dlaa = "DLAA only: set the Render resolution to Native. DLSS's other modes draw the 3D smaller "
+                                        "than the picture, which this cannot go back into.";
+    static const char* const env = "Set for this run by RX_VK_DLSS_PRE_BLOOM.";
+    if (variant < 0) variant = pre_bloom_env() ? 2 : upscaler() != ur::DLAA ? 1 : 0;
+    if (variant == 1) return not_dlaa;
+    if (variant == 2) return env;
+    return variant == 0 ? t[std::clamp(v, 0, 1)] : nullptr;
+}
 const char* tx_percent(int v) {
     static char b[8];
     snprintf(b, sizeof b, "%d%%", v);
@@ -386,7 +415,8 @@ bool row_fixed(const int* value) {
     return row_inactive(value) || ((value == &opts.send_perf || value == &opts.send_crash) && !telemetry_available()) || (value == &opts.reflex && !reflex_available()) ||
            (value == &opts.upscale && !filter_needed()) ||
            (value == &opts.hud_layout && getenv("HOS_WIDE_UI") && *getenv("HOS_WIDE_UI")) ||   // (host/hos_wide_ui.c's, first)
-           (value == &opts.dlss_model && ur::model_fixed(upscaler(), dlss_preset_env() != nullptr));
+           (value == &opts.dlss_model && ur::model_fixed(upscaler(), dlss_preset_env() != nullptr)) ||
+           (value == &opts.dlss_pre_bloom && ur::pre_bloom_fixed(upscaler(), pre_bloom_env()));
 }
 /// (heylisten) The two telemetry rows: Off or On, and "Not available in this build" when the build has no address to send to
 /// (nx2/addresses.ini's telemetry= is empty), where nothing can be sent whatever the row says
@@ -798,6 +828,9 @@ Row rows[] = {
      "The share of the output the 3D is drawn at; the Upscaler fills in the rest.", hn_resolution},
     {TAB_GRAPHICS, "DLSS model", &opts.dlss_model, 0, ur::kModels - 1, 1, tx_dlss_model,
      "Which of NVIDIA's DLSS networks draws the picture.", hn_dlss_model, false, true},
+    {TAB_GRAPHICS, "DLAA before the bloom", &opts.dlss_pre_bloom, 0, 1, 1, tx_onoff,
+     "Where NVIDIA DLAA smooths the picture: after the game's bloom and tone map, or before them. Changes at once.",
+     hn_dlss_pre_bloom, false, true},
     {TAB_GRAPHICS, "Frame generation by", &opts.framegen_by, 0, fgr::kBy - 1, 1, tx_framegen_by,
      "Who makes the made frames, and so how many the Frame generation row offers. NVIDIA DLSS Frame Generation (RTX 40 and newer, "
      "with a temporal Upscaler) is off unless chosen here. Changing it keeps the multiplier within what the new mode makes.",
@@ -808,18 +841,58 @@ Row rows[] = {
      "(6x on an RTX 50, 2x on an RTX 40), AMD FSR 3.1 2x, the built-in one Auto and 2x to 8x. The Frame rate limit is the rate shown: "
      "the game runs at the limit over the multiplier.", hn_framegen, false, true},
     {TAB_GRAPHICS, "Frame pacing", &opts.pace, 0, 1, 1, tx_onoff, "When each frame is shown.", hn_pace},
-    {TAB_GRAPHICS, "HDR", &opts.hdr, 0, 3, 1, tx_hdr,
+    {TAB_GRAPHICS, "HDR", &opts.hdr, 0, 2, 1, tx_hdr,
      "HDR10 out on an HDR display (Windows: Use HDR on in the display settings). Expanded: the game's SDR picture, its white at "
      "the paper white and its highlights up to the peak. Native: the game's own HDR, told the display's peak and paper white. "
-     "Native + our tone mapper: the same, with the game's tone mapping step swapped for ours, which keeps the highlights' range up "
-     "to the peak and has a saturation of its own.",
+     "With Native, the HDR tone mapper row below chooses the game's own curve or PsychoV35.",
      nullptr, false, true},
     {TAB_GRAPHICS, "HDR paper white", &opts.hdr_white, 80, 400, 10, tx_nits,
      "How bright the picture's white is with HDR on. Around 200 for a normal room; higher in a bright one.", nullptr, false, true},
     {TAB_GRAPHICS, "HDR peak brightness", &opts.hdr_peak, 400, 4000, 100, tx_nits,
      "The brightest highlights with HDR on: set it to your display's peak brightness.", nullptr, false, true},
-    {TAB_GRAPHICS, "HDR saturation", &opts.hdr_saturation, 50, 150, 5, tx_percent,
-     "How vivid the colours are with our tone mapper. 100% is the scene's own.", nullptr, false, true},
+    {TAB_GRAPHICS, "HDR contrast", &opts.hdr_contrast, 50, 200, 5, tx_percent,
+     "The HDR picture's contrast around mid grey, as the RenoDX HDR mods grade it: above 100% deeper shadows and brighter "
+     "highlights, which ease into the peak brightness; below it flatter. With Native the game's own HDR picture is graded too, "
+     "under the peak brightness the game is told. Hidden with PsychoV35, which has its own Contrast.",
+     nullptr, false, true},
+    // (HeyListen, after Longshot ddb156df: shown with HDR set to Native)
+    {TAB_GRAPHICS, "HDR tone mapper", &opts.hdr_tonemap, 0, 1, 1, tx_tonemap,
+     "With Native, how the game's scene meets the peak brightness. Vanilla: the game's own curve. PsychoV35: RenoDX's "
+     "tone mapper, the same mid grey with highlights that roll off into the peak and keep their colour. Every Upscaler "
+     "takes its scene: DLSS, DLAA, FSR, TAAU and Off.",
+     nullptr, false, true},
+    // (after Longshot 79a34381: PsychoV35's grading, RenoDX's zelda-oot-oz settings: shown with it, read by the scene each draw,
+    // psychov35_bank)
+    {TAB_GRAPHICS, "PsychoV35 UI brightness", &opts.pv35_ui_white, 80, 500, 1, tx_nits,
+     "PsychoV35: how bright the menus and the HUD's white is. The scene keeps the paper white.", nullptr, false, true},
+    {TAB_GRAPHICS, "PsychoV35 color space", &opts.pv35_color_space, 0, 2, 1, tx_color_space,
+     "PsychoV35: the picture's colours on the display. BT.709: as made, RenoDX's default; Vanilla: through the game's own "
+     "matrix; DCI-P3: read as P3, more vivid.",
+     nullptr, false, true},
+    {TAB_GRAPHICS, "PsychoV35 midgray", &opts.pv35_midgray, 0, 1, 1, tx_midgray,
+     "PsychoV35: Vanilla keeps mid grey where the game's own curve puts it; Render keeps the scene's own.", nullptr, false,
+     true},
+    {TAB_GRAPHICS, "PsychoV35 match tone slope", &opts.pv35_match_slope, 0, 1, 1, tx_onoff,
+     "PsychoV35: On follows the game's own curve's slope at mid grey; Off a neutral one.", nullptr, false, true},
+    {TAB_GRAPHICS, "PsychoV35 tone slope", &opts.pv35_tone_slope, 0, 100, 1, tx_grade,
+     "PsychoV35: how steeply the tones rise through mid grey. 50 is the game's.", nullptr, false, true},
+    {TAB_GRAPHICS, "PsychoV35 hue clip emulation", &opts.pv35_hue_clip, 0, 100, 1, tx_grade,
+     "PsychoV35: how much of the game's own colour shift in its brightest parts is kept. 50 is RenoDX's.", nullptr, false,
+     true},
+    {TAB_GRAPHICS, "PsychoV35 exposure", &opts.pv35_exposure, 0, 200, 5, tx_percent,
+     "PsychoV35: the scene's brightness at mid grey. 100% is the game's.", nullptr, false, true},
+    {TAB_GRAPHICS, "PsychoV35 highlights", &opts.pv35_highlights, 0, 100, 1, tx_grade,
+     "PsychoV35: above 50 brighter highlights, below it softer ones. 50 leaves them as they are.", nullptr, false, true},
+    {TAB_GRAPHICS, "PsychoV35 shadows", &opts.pv35_shadows, 0, 100, 1, tx_grade,
+     "PsychoV35: above 50 deeper shadows, below it lifted ones. 50 leaves them as they are.", nullptr, false, true},
+    {TAB_GRAPHICS, "PsychoV35 contrast", &opts.pv35_contrast, 0, 100, 1, tx_grade,
+     "PsychoV35: the contrast around mid grey. 50 is the game's.", nullptr, false, true},
+    {TAB_GRAPHICS, "PsychoV35 saturation", &opts.pv35_saturation, 0, 100, 1, tx_grade,
+     "PsychoV35: the colours' strength. 50 is the game's.", nullptr, false, true},
+    {TAB_GRAPHICS, "PsychoV35 bloom", &opts.pv35_bloom, 0, 100, 1, tx_grade,
+     "PsychoV35: the glow around bright things. 50 is the game's; 0 none.", nullptr, false, true},
+    {TAB_GRAPHICS, "PsychoV35 reset all", nullptr, 0, 0, 0, nullptr,
+     "PsychoV35: every row above back to RenoDX's defaults.", nullptr, false, true},
     {TAB_GRAPHICS, "NVIDIA Reflex", &opts.reflex, 0, 2, 1, tx_reflex,
      "NVIDIA GPUs: each frame starts as late as it can, for less input delay. Not used with frame generation.", hn_reflex},
     {TAB_GRAPHICS, "Frame rate limit", &opts.fps_limit, 0, fgr::kLimits - 1, 1, tx_fps_limit,   // (HeyListen: HL_OPT_FPS_LIMIT, vk_opt_ids.h, host/nn_vi.c)
@@ -1095,6 +1168,18 @@ constexpr int kRows = sizeof rows / sizeof rows[0];
 int cur_tab = TAB_GRAPHICS;
 int tab_selected[TAB_COUNT + 1] = {0, 0, 0, 0, 0};   // (and the Motion page's)
 bool is_motion_row(const Row& r) { return r.tab == TAB_CONTROLS && !r.value && !strcmp(r.name, "Motion"); }
+// (HeyListen, after Longshot 79a34381) the Graphics tab's PsychoV35 reset all: an action, not a page
+bool is_psychov35_reset_row(const Row& r) { return !r.value && r.tab == TAB_GRAPHICS && !strcmp(r.name, "PsychoV35 reset all"); }
+/// PsychoV35's grading back to RenoDX's defaults (the Options' own)
+void psychov35_reset() {
+    const Options defaults;
+    opts.pv35_exposure = defaults.pv35_exposure, opts.pv35_highlights = defaults.pv35_highlights;
+    opts.pv35_shadows = defaults.pv35_shadows, opts.pv35_contrast = defaults.pv35_contrast;
+    opts.pv35_saturation = defaults.pv35_saturation, opts.pv35_tone_slope = defaults.pv35_tone_slope;
+    opts.pv35_hue_clip = defaults.pv35_hue_clip, opts.pv35_midgray = defaults.pv35_midgray;
+    opts.pv35_match_slope = defaults.pv35_match_slope, opts.pv35_bloom = defaults.pv35_bloom;
+    opts.pv35_ui_white = defaults.pv35_ui_white, opts.pv35_color_space = defaults.pv35_color_space;
+}
 
 // ---- the rows that take a restart: their values at the start (menu_init, the GPU's at menu_set_gpu_count) ----
 namespace mr = menu_restart;
@@ -1147,10 +1232,16 @@ bool row_shown(int i) {
         return false;
 #endif
     }
+    const int* v = rows[i].value;
     return (rows[i].cheat < 0 || cheats_on()) &&
            (rows[i].value != &opts.dlss_model || ur::model_shown(dlss_built())) &&
            (rows[i].value != &opts.framegen_by || dlss_built() || fsr3fi::capable()) &&   // (a build with DLSS, or a GPU AMD FSR 3.1's frame interpolation runs on: the row has a choice)
-           (rows[i].value != &opts.hdr_saturation || opts.hdr == 3);   // (the saturation is our tone mapper's)
+           (rows[i].value != &opts.dlss_pre_bloom || ur::pre_bloom_shown(dlss_why() == DLSS_OK, upscaler())) &&
+           // (HeyListen, after Longshot ddb156df / 79a34381: the tone mapper with Native HDR, PsychoV35's rows with it on PsychoV35)
+           (v != &opts.hdr_tonemap || opts.hdr == 2) &&
+           // (HeyListen, after Longshot a0dfd28b / 79a34381: HDR contrast with HDR on, and not with PsychoV35, which has its own)
+           (v != &opts.hdr_contrast || (opts.hdr != 0 && (opts.hdr != 2 || opts.hdr_tonemap != 1))) &&
+           (strncmp(rows[i].name, "PsychoV35 ", 10) || (opts.hdr == 2 && opts.hdr_tonemap == 1));
 }
 int tab_row_count(int t) {
     int c = 0;
@@ -1181,9 +1272,9 @@ constexpr int64_t kMarqueeStep = 150000000LL, kMarqueeRest = 1200000000LL;   // 
 int hover_tab = -1;
 int drag_row = -1;
 bool mouse_read = false;   // (the menu has read the mouse since it opened)
-bool is_slider(const Row& r) { return r.value == &opts.sharpness || r.value == &opts.mouse_sens || r.value == &opts.gyro_sens_x || r.value == &opts.gyro_sens_y; }
+bool is_slider(const Row& r) { return (!strncmp(r.name, "PsychoV35 ", 10) && r.hi > 2) || r.value == &opts.sharpness || r.value == &opts.mouse_sens || r.value == &opts.gyro_sens_x || r.value == &opts.gyro_sens_y; }
 /// (a scale: the arrows and a click stop at its ends; Rumble strength would go from Off to its strongest)
-bool stops_at_ends(const Row& r) { return r.value == &opts.mouse_sens || r.value == &opts.rumble || r.value == &opts.gyro_sens_x || r.value == &opts.gyro_sens_y; }
+bool stops_at_ends(const Row& r) { return (!strncmp(r.name, "PsychoV35 ", 10) && r.hi > 2) || r.value == &opts.mouse_sens || r.value == &opts.rumble || r.value == &opts.gyro_sens_x || r.value == &opts.gyro_sens_y; }
 /// (the ini's Rumble strength on the menu's steps: 0 to 150, the nearest 25)
 int rumble_step(int v) { return (std::min(std::max(v, 0), 150) + 12) / 25 * 25; }
 std::string ini_path() {
@@ -1198,6 +1289,7 @@ const char* ini_key(const Row& r) {
     if (r.value == &opts.resolution) return "resolution";
     if (r.value == &opts.upscale) return "upscaling";
     if (r.value == &opts.dlss) return "dlss";   // (as opts.dlss and RX_VK_DLSS)
+    if (r.value == &opts.dlss_pre_bloom) return "dlss_pre_bloom";   // (as RX_VK_DLSS_PRE_BLOOM)
     if (r.value == &opts.send_perf) return "send_performance_stats";   // (host/hos_telemetry.h reads both of these)
     if (r.value == &opts.send_crash) return "send_crash_reports";
     if (r.value == &opts.vsync) return "vsync";
@@ -1875,6 +1967,7 @@ void draw_options(ui::Ctx& c) {
             choice_cell(c, va, vb, tool, selected, cheat_chooses(r.cheat), cheat_chooses(r.cheat));
         } else if (!r.value) {   // (a page, or Restart and Quit: Confirm until the second press)
             if (pending == &r) choice_cell(c, va, vb, "Press again to confirm", selected, false, false);
+            else if (is_psychov35_reset_row(r)) choice_cell(c, va, vb, "Reset", selected, false, false);   // (an action, not a page)
             else {
                 choice_cell(c, va, vb, "", selected, false, false);
                 ui::triangle(c, ImVec2(vb.x - 15 * s, y + rh * 0.5f), 10 * s, 1, selected ? ui::kGoldInk : ui::kInk);
@@ -2293,6 +2386,7 @@ void menu_init() {
         int old_dynres = -1;   // (the row before Resolution: 0, the full scale, is its 100%; 1 is Auto)
         int saved_vsync = -1;  // (the last vsync= line: 2 was the old Adaptive, now On with FIFO (triple buffering))
         bool has_vsync_mode = false;
+        bool saved_hdr_ours = false;   // (the HDR row saved as 3: "Native + our tone mapper", from before PsychoV35 replaced it)
         while (fgets(line, sizeof line, f)) {
             char* eq = strchr(line, '=');
             if (!eq) continue;
@@ -2302,6 +2396,7 @@ void menu_init() {
                 const int v = atoi(eq + 1);
                 *r.value = r.value == &opts.output_res ? output_choice_text(eq + 1) : std::min(std::max(v, r.lo), r.hi);
                 if (r.value == &opts.dlss_model) dlss_model_saved = true;   // (a saved model is the player's: menu_first_run_model)
+                if (r.value == &opts.hdr && v == 3) saved_hdr_ours = true;   // (clamped to Native above: the old fourth value, below)
             }
             has_resolution |= !strcmp(line, "resolution");
             v2 |= !strcmp(line, "options_version");
@@ -2324,6 +2419,12 @@ void menu_init() {
             if (opts.mic >= 2) opts.mic = 1;
             mic_tell_host();
         }
+        // (HDR saved as "Native + our tone mapper", the fourth value of the row in v0.4.3's work: that tone mapper is gone, the
+        // PsychoV35 one is the HDR tone mapper row's now, and the nearest to it: Native with the tone mapper row on PsychoV35)
+        if (saved_hdr_ours) {
+            opts.hdr = 2, opts.hdr_tonemap = 1;
+            logf("vk: options: the saved HDR was Native + our tone mapper: now Native with the HDR tone mapper PsychoV35");
+        }
         if (!has_resolution && old_dynres >= 0) opts.resolution = old_dynres ? 0 : 1;
         // (an Upscaler saved as DLAA or FSR 4's native AA, which are the Render resolution's native choice now: DLSS or FSR 4 with
         // it. The 3D was at full size with them, whatever the Render resolution row kept)
@@ -2345,7 +2446,11 @@ void menu_init() {
     if (opts.preset > 0) sync_preset_budgets(opts.preset);
     if (const char* e = getenv("RX_VK_FRAMEGEN_MULT")) opts.framegen = std::min(std::max(atoi(e), 2), 8);
     if (const char* e = getenv("RX_VK_PACE")) opts.pace = atoi(e) != 0;
-    if (const char* e = getenv("RX_VK_HDR")) opts.hdr = std::min(std::max(atoi(e), 0), 3);   // (for one run: the HDR row's value)
+    if (const char* e = getenv("RX_VK_HDR")) {   // (for one run: the HDR row's value; 3, the old Native + our tone mapper, is Native with PsychoV35)
+        opts.hdr = std::min(std::max(atoi(e), 0), 3);
+        if (opts.hdr == 3) opts.hdr = 2, opts.hdr_tonemap = 1;
+    }
+    if (const char* e = getenv("RX_VK_DLSS_PRE_BLOOM"); e && *e) opts.dlss_pre_bloom = atoi(e) != 0;   // (after Longshot 83b161e3)
     if (const char* e = getenv("RX_VK_UPSCALE"))
         for (Row& r : rows)
             if (r.value == &opts.upscale) *r.value = std::min(std::max(atoi(e), r.lo), r.hi);
@@ -2391,6 +2496,28 @@ void menu_set_gpu_count(int count) {
 }
 
 bool menu_is_open() { return open_now.load(std::memory_order_relaxed); }
+// (HeyListen, after Longshot ddb156df and 79a34381)
+bool scene_tonemap_on() { return hdr_game_native() && opts.hdr_tonemap == 1; }   // (RX_VK_HDR_FORCE too: the game is told HDR10)
+void psychov35_bank(float* out) {
+    namespace pv = Shader::Optimization::PsychoV35;
+    const Options& o = opts;
+    out[pv::kSettingHueClip] = o.pv35_hue_clip * 0.01f;
+    out[pv::kSettingHighlights] = o.pv35_highlights * 0.02f;
+    out[pv::kSettingShadows] = o.pv35_shadows * 0.02f;
+    out[pv::kSettingContrast] = o.pv35_contrast * 0.02f;
+    out[pv::kSettingPurity] = o.pv35_saturation * 0.02f;
+    out[pv::kSettingConeExponent] = (o.pv35_match_slope ? pv::kConeExponent : 1.0f) * (o.pv35_tone_slope * 0.02f);
+    out[pv::kSettingAnchorScale] = (o.pv35_midgray ? pv::kReferenceExposure : 1.0f) * (o.pv35_exposure * 0.01f);
+    // (the mod's Peak and Game brightness are the HDR rows': the peak brightness over the paper white)
+    const float white = (float)std::clamp(o.hdr_white, 80, 500);
+    out[pv::kSettingPeak] = std::max((float)std::clamp(o.hdr_peak, 400, 10000), white) / white;
+    out[pv::kSettingBloom] = o.pv35_bloom * 0.02f;
+    // (the mod's UI Brightness: the scene in its units, the encoder scaling by it)
+    const float ui = (float)std::clamp(o.pv35_ui_white, 80, 500);
+    out[pv::kSettingSceneScale] = white / ui;
+    out[pv::kSettingColorSpace] = (float)std::clamp(o.pv35_color_space, 0, 2);
+    out[pv::kSettingOutputScale] = ui / 10000.0f;
+}
 // (the tools off on the Debug tab: flight, the free camera and heart protection put away; -1, heart protection never set, is the
 // host's own HOS_OOT_PROTECT_HEARTS)
 int menu_heart_protection() {
@@ -2954,6 +3081,7 @@ void menu_tick() {
             }
         } else if (r.cheat >= 0) cheat_press(r.cheat, press, changed);   // (a debug tool: on the Debug tab itself)
         else if (press[7] && is_motion_row(r)) cur_tab = TAB_MOTION, tab_selected[TAB_MOTION] = 0, press[7] = false, changed = true;
+        else if (press[7] && is_psychov35_reset_row(r)) psychov35_reset(), save(), press[7] = false, changed = true;
         else if (press[7] && !r.value && can_bind()) page = 1, csel = 0, ccol = 0, changed = true;
         if ((press[3] || press[4] || press[7]) && r.value) {   // (Enter, or A, as Right)
             if (press[7]) press[4] = true;

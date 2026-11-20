@@ -566,6 +566,29 @@
       }
     },
     {
+      "id": "hdr_tone_mapper",
+      "label": "HDR tone mapper",
+      "help": "With HDR set to The game's own: the game's curve, or PsychoV35 (RenoDX's tone mapper for this game, with highlights that roll off into your screen's peak and keep their colour, and its own grading rows in the game's menu). Every upscaler takes it.",
+      "group": "Video",
+      "choices": [
+        {
+          "label": "The game's own",
+          "set": {
+            "hdr_tone_mapper": "0"
+          }
+        },
+        {
+          "label": "PsychoV35",
+          "set": {
+            "hdr_tone_mapper": "1"
+          }
+        }
+      ],
+      "defaults": {
+        "hdr_tone_mapper": "0"
+      }
+    },
+    {
       "id": "upscaler",
       "label": "Upscaler",
       "help": "What scales the 3D picture up to the output. DLSS needs an NVIDIA RTX card and its tick at setup; FSR 4 needs an AMD card with FSR 4 and its tick at setup; FSR 3.1 works on any card. Off runs no upscaling network at all (the 3D stretched to the output, no anti-aliasing), for a GPU where the game's own network shows glitches. DLAA (DLSS) and Native AA (FSR 4) are choices of Render resolution, with DLSS or FSR 4.",

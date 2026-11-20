@@ -70,6 +70,32 @@ true, and dead code elimination removes the grid walk, so every meshlet is drawn
 screen. It costs some GPU time on cards that cull quickly, so it is off unless set. The log says
 "culling off, every meshlet drawn" for each task shader it changed.
 
+NVIDIA DLAA before the game's bloom and tone map (HeyListen, after Longshot a7621bd7, 5e33d3b7, 83b161e3): the Graphics
+tab's DLAA before the bloom row (off by default; `RX_VK_DLSS_PRE_BLOOM=1` / `0` over it for one run) runs DLAA on the scene's
+linear colour at the first draw that reads the scene after its last draw into it (the bloom's first, learned from the frame
+before: `gpu/vk/pre_bloom.h`), with an HDR DLSS feature, and writes its picture back into the scene; the gameplay upscale
+then only copies its input. A frame with no learned place, or one that does not match, runs DLAA at the gameplay upscale as
+before, the reason in the log (`vk: NVIDIA DLAA: not before the bloom this frame`). DLAA only (DLSS's other modes draw the
+scene smaller than the output), and not with the parallel replay (`RX_VK_PARALLEL=2` and more). With PsychoV35, its RGBA16F
+scene is taken the same way, linear. `RX_VK_DLSS_HDR=0` keeps it at the gameplay upscale (it needs the HDR feature).
+
+Native HDR PsychoV35 takes the RGBA16F scene path by default (HeyListen, after Longshot b80a68f1, #608) with DLSS/DLAA, AMD
+FSR 4 (and its Native AA) and FSR 3.1, which goes on the temporal chain while PsychoV35 is on (`RX_VK_FSR3_CHAIN`).
+`RX_VK_PSYCHOV35_DLSS=0` turns that route off for troubleshooting; unset, empty or nonzero leaves it on. It is read once per
+run. It needs the engine's native-HDR context: DLSS's HDR feature (`RX_VK_DLSS_HDR=0` prevents this path), FSR 4's HDR context
+(`RX_VK_FSR4_HDR=0` prevents it), or FSR 3.1's HDR-capable passes. Without PsychoV35, FSR 3.1 keeps its own inputs and colour path.
+The RGBA16F output shader is regenerated with `python -I -B tests/test_psychov35_dlss.py --write --glslang glslangValidator`.
+
+Upscaler Off takes PsychoV35's RGBA16F scene whatever that switch says: the typed upscale's RGBA16F shader (`off_stand_in`,
+`shaders/taau_upscale.comp` with `TAAU_RGBA16F`) draws the network's input into its output, decoding its perceptual colour once,
+with no temporal anti-aliasing. The gameplay TAAU replacement (where the game's network cannot run) takes it the same way, with
+its history in RGBA16F; `RX_VK_TAAU_KEYS=fd029a317a9a4b94` runs that replacement on a GPU that runs the network, to test it.
+
+For FSR 3.1 frame generation (Frame generation 2x, `RX_VK_FSR_FG=1`), PsychoV35's RGBA16F scene feeds its own depth and motion
+inputs too (unless `RX_VK_PSYCHOV35_DLSS=0`); this does not turn on FSR 3.1 upscaling. The captured present's encoding (the game's
+PQ under Native HDR, else sRGB) and the HDR peak go to both AMD interpolation and optical flow, and a change of either resets
+their history.
+
 ### Running a test
 
 | Switch | What it does |
@@ -137,7 +163,6 @@ case-sensitive, and an unknown one is ignored.
 | `RX_VK_HDR=<0..3>` | The Insert menu's HDR row for one run (the ini keeps the player's choice) |
 | `RX_VK_HDR_FORCE=1` | The game is told its display is HDR10 although the swapchain is SDR: its own HDR path runs where it can be looked at in the dumps and the shots (what the window shows is then not meant to look right) |
 | `RX_VK_HDR_FIND=1` | The game's tone-mapping pass, found: the first draw (and dispatch) of each program that samples a floating-point scene image and writes an 8- or 10-bit one, said once with its target, what it samples and the sizes of its uniform buffers — the key and the inputs, all that is kept of it |
-| `RX_VK_HDR_TM_KEYS=<key prefix>,...` | The programs our tone-mapping pass replaces (the HDR row's "Native + our tone mapper"; default the key RX_VK_HDR_FIND finds, `-`: none, the game's pass kept) |
 | `RX_VK_READBACK_STRICT=0`, `1` or `<hex size>,...` | Whether reads of GPU results (the light meter) wait for their write-back to land, not only for the recordings' timeline. A list of sizes makes only ranges of exactly those sizes wait: `1040,c0` is the light meter's, which stopped the pulses on RADV as `1` does (0 in 2 runs each against 52 and 23 with `0`) while waiting a few times less often. With RADV the default is `1040,c0` (without it the auto-exposure pulses, the whole picture brighter for ~16 frames, when the CPU is busy; `1` waited mostly on two 0x1b580 ranges that are not the meter: 69 fps against 81 in Kokiri on an RX 9070 XT); off elsewhere (on NVIDIA it cost ~18% and no pulses were seen). Set `=1040,c0` (or `=1`) in `hookshot_env.txt` if the picture pulses on another driver. `RX_VK_FRAMELOG` shows the pulses; `RX_VK_EXPOSURE_LOG`'s factor does not |
 | `RX_VK_PASS_TRACE=1` | The passes of the last frames, logged at a flash or a dark frame (`RX_VK_PASS_TRACE_AT=<n>`: every n-th present) |
 | `RX_VK_PROBE=1` or `2` | The centre texel after every pass: `probe_<frame>.txt` at a flash (1), or `probe_all_<n>.txt` at speed (2); `python -I scripts/probe.py` reads them |
@@ -212,6 +237,8 @@ case-sensitive, and an unknown one is ignored.
 | `RX_VK_DLSS=0/1/2`, `RX_VK_DLSS_PRESET=<letter>` (over the DLSS model row, whose first-run default is by the GPU's PCI device id, upscaler_rows.h `fp8_gpu`), `RX_VK_DLSS_LOG=1`, `RX_VK_REFLEX`, `RX_VK_REFLEX_LOG=1` | NVIDIA DLSS and Reflex for one run: the readme's NVIDIA DLSS section. `RX_VK_DLSS_TRACE=<frames>` logs one frame's large draws every that many frames, `RX_VK_DLSS_DEBUG=motion` shows the motion vectors, `=alternate` the game's own upscale every other frame. `RX_VK_DLSS_PREWARM=0`: NGX is started at the first gameplay upscale (the replay thread's 1.8 s, an RTX 4090, "slow submit: 1870 ms: dispatch 1866"), not at the first present with DLSS chosen on a thread of its own (the default; the log says `NVIDIA DLSS: started ahead of the first upscale`) |
 
 | `RX_VK_FSR4=0/1/2`, `RX_VK_FSR_DIR=<folder>` | AMD FSR 4 for one run (0 never, 1 FSR 4, 2 its Native AA), and another folder for AMD's DLLs (not from `hookshot_env.txt`): the readme's AMD FSR 4 section. `RX_VK_FSR4=1/2` and `RX_VK_DLSS=1/2` go over the Upscaler row, a saved FSR 3.1 or Off (`dlss=6`: no upscaling network, `off_stand_in` in `gpu/vk/vk_draw.cpp`) too where the engine they ask for runs; `RX_VK_FSR=1` goes over them (one upscaler at a time). The DLSS trace and debug switches above apply to FSR 4 too, on the frame chain they share |
+| `RX_VK_DLSS_HDR=0` | NVIDIA DLSS with HDR on Native keeps the LDR feature and the colour clamped to 1, as before the HDR feature (for comparisons; after Longshot a0dfd28b) |
+| `RX_VK_FSR3_CHAIN=0/1` | AMD FSR 3.1 as an engine of `vk_temporal.cpp`'s chain (the skinned draws' own motion, as DLSS and FSR 4 have, and PsychoV35's RGBA16F scene) or with inputs of its own (`vk_fsr3_inputs.cpp`: the camera's motion alone). Unset: on the chain only while the PsychoV35 tone mapper is on (HeyListen; after Longshot 579c6d48) |
 | `RX_VK_ASYNC=1` | The replay on a thread of its own instead of the game's submitting thread |
 | `HOS_VCORES=0`, `HOS_CORES=<1..8>`, `HOS_RESERVE_CORE=0` | No virtual cores; the cores the game sees (6); no core kept for the replay (one is, with 8 or more logical processors) |
 | `HOS_VCORE_STARVE_US=<microseconds>` | A game thread that has waited this long for a virtual core (default 1000000, 1 s; 0: never) goes before every other waiter at the next release of a core it may use, and asks the holder to give the core up at its next checkpoint whatever the holder's priority, so a wait that better threads keep winning ends in a grant, not in the escape after 2 s (`HOS_VCORE_ESCAPE_US`, `HOS_VCORE_ESCAPE_EQ_US`). The `vcores:` line every 5 s counts these grants (`starved grants`) |

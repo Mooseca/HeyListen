@@ -105,12 +105,12 @@ HeyListen's `engine/` is Hookshot's source imported with its history and kept in
 - Castle Town ground fixed while walking (no more flat mint, white or teal ground), and the teal-ground regression after evictions fixed.
 
 *Picture*
-- Native HDR (HDR10): a fourth value of the Insert menu's HDR row, **Native + our tone mapper**, replaces the game's own
-  tone-mapping pass (found by its program key) with our own shader — the game's light and paper white as they are, its
-  highlights rolled off to the display's peak brightness (ITU-R BT.2390's EETF) instead of running past what the display
-  shows, with a saturation row of its own. The approach (replacing the game's tone-mapping step rather than expanding its
-  SDR picture) is [RenoDX](https://github.com/clshortfuse/renodx)'s; the code is our own, from the published curves, with
-  no RenoDX code in this repository.
+- Native HDR (HDR10), the **HDR tone mapper** row: with HDR on Native, **PsychoV35**, [RenoDX](https://github.com/clshortfuse/renodx)'s
+  zelda-oot-oz tone mapper (highlights rolled off into the display's peak, colours kept), with its grading rows, the game's scene
+  in 16-bit floats (no banding in the sky and the dark), every Upscaler (DLSS and DLAA, FSR 3.1, FSR 4, the game's own, Off) and
+  frame generation at 10 bits, an HDR contrast row, and **DLAA before the bloom** (Graphics tab). Ported by Duck912 (PR #101) from
+  Hookshot and Longshot; it replaces the HDR row's earlier fourth value, "Native + our tone mapper" (an options file that had it
+  loads as Native with PsychoV35).
 
 *Tooling and packaging*
 - **HeyListen Builder**: its own releases, updates and work folder, so it never touches a Hookshot install; **emulator save import and export** with backup.
@@ -174,8 +174,14 @@ It stands on the work of many people. Everything below is credit due to Hookshot
 - **[Kenney](https://kenney.nl/assets/input-prompts)** (Input Prompts, CC0): the Xbox, PlayStation and Steam Deck button icons of the Button prompts setting. The builder draws them into the game's icon font on your PC, so nothing of the game is shipped.
 - **[sostenesfreitas/ocarina-recomp](https://github.com/sostenesfreitas/ocarina-recomp)**: Hookshot's README layout, and notes that confirmed the mesh stage's control section.
 - **[MythosOfs/Orchid](https://github.com/MythosOfs/Orchid)**: the fog and exposure workaround for Ocarina of Time.
-- **[clshortfuse/renodx](https://github.com/clshortfuse/renodx)** (MIT): the approach of native HDR tone mapping (replacing
-  the game's tone-mapping step, not expanding its SDR picture). No RenoDX code is in this repository.
+- **[clshortfuse/renodx](https://github.com/clshortfuse/renodx)** (RenoDX, by ShortFuse, Carlos Lopez Jr., MIT): the native HDR
+  approach (replacing the game's tone-mapping step, not expanding its SDR picture) and **PsychoV35**, its zelda-oot-oz tone mapper,
+  whose code is ported here (`engine/gpu/vk/eden/shader_recompiler/ir_opt/psychov35.h`); RenoDX's MIT licence is kept beside it
+  (`LICENSE-renodx.md`).
+- **PsychoV35, the HDR tone mapper and its routes** (#101): **Duck912** (the port to HeyListen, with every upscaler and 10-bit frame
+  generation), from Hookshot's #2481 (Joey Magnus) and Longshot's #400 (futondestroyer), #1393 (LRF17), #2342 (unixman69 and
+  j64esatxzdrhfg), #2305 (unixman69), #108 and #608 (futondestroyer), #247 (MustardTiger) and #1652, #1675 and #1678 (pmwork-personal:
+  DLAA before the bloom).
 - **Mesa (NAK)**: the reference for Ampere's instruction encoding.
 - Everyone who sent fixes to Hookshot: SkippySteve (Linux and the AppImage, and many more), monsterlag, klimovich008, hckrman101 (the exposure flicker and fog fixes, build speed, CI), shayderrr, gab9281, Wpaif, nicholasgower, ZurielAtr, Joey-Magnus, Zorkats, d3zessete, chrispository, vzeol, leonidasmark, Segmentree, ShyVortex, hiKareeem and i900gaming, among others.
 

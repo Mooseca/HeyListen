@@ -24,8 +24,9 @@ int framegen_now();
 /// refresh over 30, 2 to 4: how many are made depends on the game's rate)
 int framegen_engine(int* mult, bool* automatic);
 /// Records the frame's processing into the present's recording (src: the window texture's view, sw x sh, the crop
-/// x, y, w, h); false when interpolation cannot run (the present goes to the window as without it)
-bool framegen_record(VkCommandBuffer cmd, VkImageView src, uint32_t sw, uint32_t sh, const int crop[4]);
+/// x, y, w, h; native_pq: the encoding of that captured present, the game's PQ (Native HDR)); false when interpolation cannot run
+/// (the present goes to the window as without it)
+bool framegen_record(VkCommandBuffer cmd, VkImageView src, uint32_t sw, uint32_t sh, const int crop[4], bool native_pq);
 /// The first frame the last framegen_record made (null when it made none), w x h, GENERAL
 VkImage framegen_made_image(uint32_t* w, uint32_t* h);
 /// After that recording's submit (value): the display thread shows its frames
@@ -35,10 +36,16 @@ void framegen_queue(uint64_t value);
 /// thread sets for the next game frame: the display thread shows frames a game frame late, and at a change (a loading screen
 /// in SDR, the play in HDR) a frame was taken for the other kind, a flash
 void present_image(VkImage src, uint32_t w, uint32_t h, const int crop[4], VkImageView view = VK_NULL_HANDLE, bool pq = false);
-/// The Insert menu's upscaling of a frame to the window (dw x dh), recorded: the image to show, or null when it is off
-VkImage framegen_scale(VkCommandBuffer cmd, VkImageView src, VkImage image, uint32_t sw, uint32_t sh, const int crop[4], uint32_t dw, uint32_t dh);
+/// The Insert menu's upscaling of a frame to the window (dw x dh), recorded: the image to show, or null when it is off.
+/// pq: src is the game's own HDR10 picture (Native HDR), scaled into an RGB10A2 image
+VkImage framegen_scale(VkCommandBuffer cmd, VkImageView src, VkImage image, uint32_t sw, uint32_t sh, const int crop[4], uint32_t dw, uint32_t dh,
+                       bool pq = false);
 VkImageView framegen_scaled_view();   // (hookshot) the view of framegen_scale's last image
-/// (hookshot) The HDR10 picture of src's crop at dw x dh (the Insert menu's HDR), GENERAL; null: none (the SDR picture then)
-VkImage framegen_hdr(VkCommandBuffer cmd, VkImageView src, uint32_t sw, uint32_t sh, const int crop[4], uint32_t dw, uint32_t dh);
+/// (hookshot) The HDR10 picture of src's crop at dw x dh (the Insert menu's HDR), GENERAL; null: none (the SDR picture then;
+/// Native's scaled picture, else black: present_image).
+/// pq: src is the game's own HDR10 picture (Native), its PQ codes as they are at 100% contrast, else graded and written again;
+/// else the SDR picture, expanded
+VkImage framegen_hdr(VkCommandBuffer cmd, VkImageView src, uint32_t sw, uint32_t sh, const int crop[4], uint32_t dw, uint32_t dh,
+                     bool pq = false);
 
 } // namespace mkwvk
