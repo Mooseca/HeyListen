@@ -61,8 +61,9 @@ class RecordingMemoryTests(unittest.TestCase):
         self.assertIn("div0 << std::min(shift, 4u)", make)
         begin = block(self.draw, "void draw_begin_recording(int slot, VkCommandBuffer cmd, uint64_t value)")
         self.assertIn("r.pool = make_pool(r.pool_shift);", begin)
-        grow = begin[begin.index("vkResetDescriptorPool"):begin.index("r.extra.clear();")]
-        self.assertIn("!r.extra.empty() && r.pool_shift > 0", grow)
+        grow = begin[begin.index("vkResetDescriptorPool"):begin.index("if (desc_pool_keep()) {")]
+        self.assertIn("desc_pool_keep() ? r.extra_used > 0 : !r.extra.empty()", grow)   # (v0.4.4 keeps extra pools: extra_used says one was needed)
+        self.assertIn("ran_out && r.pool_shift > 0", grow)
         self.assertIn("make_pool(0)", grow)
         # (the pools added when one ran out stay whole)
         self.assertIn("cur->extra.push_back(make_pool());", self.draw)
