@@ -859,8 +859,8 @@ Row rows[] = {
     // (HeyListen, after Longshot ddb156df: shown with HDR set to Native)
     {TAB_GRAPHICS, "HDR tone mapper", &opts.hdr_tonemap, 0, 1, 1, tx_tonemap,
      "With Native, how the game's scene meets the peak brightness. Vanilla: the game's own curve. PsychoV35: RenoDX's "
-     "tone mapper, the same mid grey with highlights that roll off into the peak and keep their colour. With PsychoV35 the "
-     "game's own upscale runs: DLSS, FSR and TAAU do not take its scene yet.",
+     "tone mapper, the same mid grey with highlights that roll off into the peak and keep their colour. Every Upscaler "
+     "takes its scene: DLSS, DLAA, FSR, TAAU and Off.",
      nullptr, false, true},
     // (after Longshot 79a34381: PsychoV35's grading, RenoDX's zelda-oot-oz settings: shown with it, read by the scene each draw,
     // psychov35_bank)
