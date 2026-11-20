@@ -38,7 +38,7 @@ import hl_gates  # noqa: E402
 SITES = {
     "80a87e50": (12, "c->x[19] + 864", False),   # the pick-up indicator's shown count
     "803edf70": (8, "c->x[19] + 60", True),      # the time of day's seconds added a frame (its cut once more elsewhere)
-    "800672e0": (9, "c->x[21]", False),          # the water's ripple steps a frame, per water object
+    # (the water's ripple substeps, f_800672e0: its hook hands out the substeps too ("t8"): tests/test_above60_ledge_zora_song.py)
     "80652cb0": (22, "c->x[19] + 2296", False),  # the floor web's simulation steps (tests/test_web_floor_steps.py)
 }
 HOST_ANCHOR = "uint32_t hos_frame_whole(uint64_t at, uint32_t amount_bits, uint32_t game) {"
