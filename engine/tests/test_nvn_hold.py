@@ -97,7 +97,7 @@ class NvnHoldTests(unittest.TestCase):
         self.assertIn("held_count() ? rx_nvn_fence() + held_count() : rx_nvn_fence_q(", fence)
 
     def test_sweep_keeps_held_recordings(self):
-        sweep = block(self.nvn, "static void sweep_overwritten_copies(void)")
+        sweep = block(self.nvn, "static size_t sweep_overwritten_copies(void)")
         self.assertIn("const uint64_t after = rx_nvn_pushed() + held_count();", sweep)
         self.assertIn("dead_copy_add(pre, after);", sweep)   # (Hookshot d1ce8a4cd: the dead list's add in one place)
         self.assertIn("dead[ndead].after = after;", block(self.nvn, "static void dead_copy_add("))

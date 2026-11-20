@@ -1007,7 +1007,12 @@ Recording& begin_recording(uint64_t value) {
     gpu_time_begin(r);
     gprof_begin_recording(r.slot, r.cmd, r.upload);
     r.value = value;
-    memory_recording_value(value, completed());
+    const uint64_t done = completed();
+    memory_recording_value(value, done);
+    {   // (longshot 7daafa7a, #1553; RX_VK_WRITE_HISTORY) loads submit for many seconds between presents: the writes the GPU has finished are published every 32 recordings too
+        static std::atomic<uint32_t> recordings{0};
+        if ((recordings.fetch_add(1, std::memory_order_relaxed) & 31) == 31) texture_complete_writes(done);
+    }
     texture_begin_recording(r.upload, value);
     draw_begin_recording(r.slot, r.cmd, value);
     return r;

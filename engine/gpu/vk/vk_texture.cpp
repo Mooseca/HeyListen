@@ -60,6 +60,7 @@
 #include "target_overlap.h"
 #include "target_pool.h"
 #include "dead_targets.h"
+#include "gpu_write_history.h"
 #include "host_shaders/block_linear_unswizzle_2d_comp_spv.h"
 #include "vk_work.h"   // (after the others: counts the commands that do GPU work, for full_barrier)
 
@@ -517,9 +518,22 @@ struct Staging {
 uint64_t completed_value = 0;
 // (GPU writes into guest memory by buffers: GPU address -> (end, the submission that wrote it last))
 std::map<uint64_t, std::pair<uint64_t, uint64_t>> gpu_wrote;
+// (longshot 7daafa7a, #1553, 4ef972c6 and its review fdee2857) RX_VK_WRITE_HISTORY=0: the map above, as before (it drops its
+// lowest-addressed range past 65,536 of them, losing a write a texture should have been uploaded again for, and a texture the
+// GPU drew counts any later write into its storage, wherever it lies in the submission, as one that replaces its pixels). By
+// default the writes are kept in gpu_write_history.h: pending ones by their submission, published as completed ranges when the
+// GPU is done (texture_complete_writes), at most 65,536 exact ranges of each, with a conservative floor beyond; and the images
+// the GPU draws are watched, so that only a write ordered after the draw, to the bytes of the image, replaces its pixels, and an
+// upload acknowledges the write only once it has succeeded (texture_touch)
+GpuWriteHistory gpu_hist;
+std::atomic<uint64_t> gpu_hist_records{0};   // (every record(): note_drawn_storage skips a draw already noted with none since)
 std::mutex gpu_wrote_mu;
+bool write_history_on() {
+    static const bool v = !getenv("RX_VK_WRITE_HISTORY") || atoi(getenv("RX_VK_WRITE_HISTORY")) != 0;
+    return v;
+}
 }  // namespace
-bool gpu_wrote_into(Texture& tex);
+uint64_t gpu_wrote_into(Texture& tex);
 namespace {
 Staging staging(uint64_t n, uint64_t align = 256) {
     for (Arena& a : arenas) {   // the current one first, then any whose readers completed
@@ -568,7 +582,17 @@ Staging staging(uint64_t n, uint64_t align = 256) {
 // ---- the GPU ASTC decoder (Eden's) ----
 struct AstcPush {
     uint32_t block_dims[2], layer_stride, block_size, x_shift, block_height, block_height_mask, native_tiling;
+    uint32_t blocks_x, blocks_y;   // (the mip's size in blocks: the decoder's threads past it return)
 };
+/// (longshot 7daafa7a, #1553) The decoder's dispatch is rounded up to its 8x8 groups, and the shared BC scratch it writes (bc_scratch_view)
+/// is much larger than the mip: a thread past the mip's blocks read ASTC bytes past the mip's own, or past the buffer's end (a read the
+/// driver may fault on), and wrote a texel of the scratch outside the mip. The shader (host_shaders/astc_decoder.comp, headers regenerated
+/// with glslang from the Longshot source) returns for a thread past blocks_x x blocks_y, and reads zero past the buffer's end.
+/// RX_VK_ASTC_BLOCKS=0: the limit is everything, so no thread returns early, as before (the read past the buffer's end stays clamped)
+uint32_t astc_blocks_limit(uint32_t blocks) {
+    static const bool on = !getenv("RX_VK_ASTC_BLOCKS") || atoi(getenv("RX_VK_ASTC_BLOCKS")) != 0;
+    return on ? blocks : UINT32_MAX;
+}
 VkDescriptorSetLayout astc_set = VK_NULL_HANDLE;
 VkPipelineLayout astc_layout = VK_NULL_HANDLE;
 VkPipeline astc_pipe = VK_NULL_HANDLE;
@@ -1463,11 +1487,19 @@ bool upload_astc_gpu(Texture& tex, uint64_t total, const Ranges* dirty) {
     uint64_t valid = 0;
     for (size_t k = 0; k < layers.size(); k++) {
         const uint64_t at = (uint64_t)layers[k] * layer_size + tail0;
-        if (at >= total) continue;
+        // (longshot 7daafa7a, #1553; RX_VK_ASTC_ZERO_FILL=0: left as it is) The staging memory is reused: what lies beyond the
+        // storage's end (a layer wholly past it, or the rest of the last one) is decoded all the same, and was whatever an earlier
+        // upload had left there. Now zero
+        static const bool zero_fill = !getenv("RX_VK_ASTC_ZERO_FILL") || atoi(getenv("RX_VK_ASTC_ZERO_FILL")) != 0;
+        if (at >= total) {
+            if (zero_fill) std::memset(s.data + k * tail, 0, tail);
+            continue;
+        }
         const uint64_t n = std::min(tail, total - at);
         const uint8_t* src = guest_bytes(tex.gpu + at, n, scratch);
         if (check_alpha && !alpha) alpha = astc_bytes_alpha(src, n, &valid) != 0;
         std::memcpy(s.data + k * tail, src, n);
+        if (zero_fill && n < tail) std::memset(s.data + k * tail + n, 0, tail - n);
     }
     const uint64_t staged = tail * layers.size();
     st_bytes += (int64_t)staged;
@@ -1524,7 +1556,7 @@ bool upload_astc_gpu(Texture& tex, uint64_t total, const Ranges* dirty) {
             AstcPush pc{};
             pc.block_dims[0] = (uint32_t)tex.block_w, pc.block_dims[1] = (uint32_t)tex.block_h;
             pc.layer_stride = (uint32_t)tail;
-            const uint32_t gobs_x = (g.tw * 16 + 63) >> 6;
+            const uint32_t gobs_x = (g.tw * 16 + 63) >> 6; pc.blocks_x = astc_blocks_limit(g.tw), pc.blocks_y = astc_blocks_limit(g.th);
             pc.x_shift = 9 + g.tile_h + g.tile_d;
             pc.block_size = gobs_x << pc.x_shift;
             pc.block_height = g.tile_h;
@@ -1573,7 +1605,7 @@ bool upload_astc_gpu(Texture& tex, uint64_t total, const Ranges* dirty) {
         AstcPush pc{};
         pc.block_dims[0] = (uint32_t)tex.block_w, pc.block_dims[1] = (uint32_t)tex.block_h;
         pc.layer_stride = (uint32_t)tail;
-        const uint32_t gobs_x = (g.tw * 16 + 63) >> 6;
+        const uint32_t gobs_x = (g.tw * 16 + 63) >> 6; pc.blocks_x = astc_blocks_limit(g.tw), pc.blocks_y = astc_blocks_limit(g.th);
         pc.x_shift = 9 + g.tile_h + g.tile_d;
         pc.block_size = gobs_x << pc.x_shift;
         pc.block_height = g.tile_h;
@@ -1615,7 +1647,7 @@ std::vector<AstcPiece> astc_pieces(const Texture& tex, const std::vector<uint32_
         AstcPush& pc = pc0.pc;
         pc.block_dims[0] = (uint32_t)tex.block_w, pc.block_dims[1] = (uint32_t)tex.block_h;
         pc.layer_stride = (uint32_t)tail;
-        const uint32_t gobs_x = (g.tw * 16 + 63) >> 6;
+        const uint32_t gobs_x = (g.tw * 16 + 63) >> 6; pc.blocks_x = astc_blocks_limit(g.tw), pc.blocks_y = astc_blocks_limit(g.th);
         pc.x_shift = 9 + g.tile_h + g.tile_d;
         pc.block_size = gobs_x << pc.x_shift;
         pc.block_height = g.tile_h;
@@ -2516,6 +2548,10 @@ void destroy_later(Texture& tex) {
 
 void vw_forget(const Texture& t);   // (below: a destroyed texture leaves the list of GPU-written ones)
 void forget_gpu(Texture* tex) {
+    if (write_history_on()) {
+        std::lock_guard lk(gpu_wrote_mu);
+        gpu_hist.forget(tex->id, tex->gpu, tex->gpu + tex->guest_size);
+    }
     vw_forget(*tex);
     auto [a, b] = by_gpu.equal_range(tex->gpu);
     for (auto it = a; it != b; ++it)
@@ -2910,6 +2946,10 @@ Texture* create(const Key& key, const nvn_tex* t, VkFormat vf, bool astc, int bw
     }
     textures.emplace(key, std::move(tex));
     by_gpu.emplace(p->gpu, p);
+    if (write_history_on()) {
+        std::lock_guard lk(gpu_wrote_mu);
+        gpu_hist.watch(p->id, p->gpu, p->gpu + p->guest_size);
+    }
     ledger_mark(p->gpu, p->guest_size, kUseSampled);   // (RX_VK_LEDGER: this storage held a texture)
     watch_tex(p, "made");
     if (remade_log_on()) {   // (one evicted not long ago, made again)
@@ -3481,7 +3521,7 @@ Texture* texture_touch(Texture* tex, bool for_sampling) {
     static const bool no_partial = getenv("RX_VK_NO_PARTIAL") != nullptr;   // (A/B: whole re-uploads)
     // (a buffer the GPU wrote over its storage, done since: all of it again; the tiles of MKW's terrain are filled so
     // and stayed the flat placeholder they were made with)
-    const bool gpu_dirty = tex->uploaded && gpu_wrote_into(*tex);
+    const uint64_t gpu_dirty = tex->uploaded ? gpu_wrote_into(*tex) : 0;   // (the newest such write's submission, 0: none)
     const bool partial = !no_partial && !gpu_dirty && tex->uploaded && !tex->gpu_written && !tex->released;
     // (a texture the GPU drew and the game finalized: only what the CPU wrote since then. Its memory never got the
     // GPU's texels, and a write before (another variable in the same page) re-uploaded garbage over a drawn LUT:
@@ -3629,6 +3669,7 @@ Texture* texture_touch(Texture* tex, bool for_sampling) {
         }
     }
     if (up_ok) {
+        if (gpu_dirty) tex->gpu_wrote_seen = gpu_dirty;   // (RX_VK_WRITE_HISTORY: seen once the upload took it; a failed one leaves it for the retry)
         tex->upload_value = rec_value, tex->upload_seg = tl_seg;
         // (its storage joins the submit-time capture: what the game writes into it after a submit is not taken for it)
         // (any size: the capture copies only the pages the CPU wrote, and the big CPU-streamed textures were read as the
@@ -4428,6 +4469,22 @@ int texture_flush_to_guest(uint64_t lo, uint64_t size) {
     return done;
 }
 
+// (RX_VK_WRITE_HISTORY) a draw into the texture's image: its storage's position in the submission, so that only a buffer write
+// ordered after it replaces the pixels. Skipped for a draw of the same submission and segment as the last one noted with no
+// buffer write recorded since
+static void note_drawn_storage(Texture* tex) {
+    if (!tex->id || !tex->guest_size || !write_history_on()) return;
+    const uint64_t end = tex->gpu + tex->guest_size;
+    const uint64_t records = gpu_hist_records.load(std::memory_order_relaxed);
+    if (tex->gpu_written && !tex->released && tex->gpu_draw_value == rec_value && tex->gpu_draw_segment == tl_seg &&
+        tex->gpu_draw_records == records)
+        return;
+    std::lock_guard lk(gpu_wrote_mu);
+    gpu_hist.drew(tex->id, tex->gpu, end, rec_value, tl_seg);
+    tex->gpu_draw_value = rec_value;
+    tex->gpu_draw_segment = tl_seg;
+    tex->gpu_draw_records = gpu_hist_records.load(std::memory_order_relaxed);
+}
 void texture_written(Texture* tex, const char* why) {
     if (!tex) return;
     ledger_mark(tex->gpu, tex->guest_size, kUseRendered);   // (RX_VK_LEDGER)
@@ -4462,6 +4519,7 @@ void texture_written(Texture* tex, const char* why) {
         if (logged++ < 20) logf("vk: sparse texture %#llx written by the GPU (#%u)", (unsigned long long)tex->gpu, tex->id);
     }
     watch_tex(tex, "written");
+    note_drawn_storage(tex);
     if (!tex->gpu_written || tex->released) tex->first_written = frame_no, drawn_writeback_note(tex);
     // (ported from Longshot 9fccd0fd, Hookshot #3004) A texture in a virtual pool that the GPU writes first is marked uploaded
     // below without the first upload, which notes its pages' mapping (texture_touch): its first check after the game finalized
@@ -4515,6 +4573,11 @@ void texture_gpu_wrote(uint64_t gpu, uint64_t size) {
                  (unsigned long long)frame_no, (unsigned long long)tl_watch_prog);
     }
     std::lock_guard lk(gpu_wrote_mu);
+    if (write_history_on()) {
+        gpu_hist.record(lo, hi, rec_value, tl_seg);
+        gpu_hist_records.fetch_add(1, std::memory_order_relaxed);
+        return;
+    }
     auto it = gpu_wrote.find(lo);
     if (it != gpu_wrote.end() && it->second.first >= hi) {
         it->second.second = rec_value;
@@ -4525,24 +4588,35 @@ void texture_gpu_wrote(uint64_t gpu, uint64_t size) {
     gpu_wrote[lo] = {hi, rec_value};
     if (gpu_wrote.size() > 65536) gpu_wrote.erase(gpu_wrote.begin());
 }
-/// A finished GPU write into the texture's storage it was not uploaded after (and notes it as seen)
-bool gpu_wrote_into(Texture& tex) {
+/// A finished GPU write into the texture's storage it was not uploaded after: its submission (0: none). The caller notes it as seen
+/// once the upload took it (RX_VK_WRITE_HISTORY=0: noted here, as before)
+uint64_t gpu_wrote_into(Texture& tex) {
     std::lock_guard lk(gpu_wrote_mu);
-    if (gpu_wrote.empty()) return false;
     const uint64_t lo = tex.gpu, hi = tex.gpu + std::max<uint64_t>(tex.guest_size, 1);
+    if (write_history_on()) {
+        // (a drawn image: only a write ordered after its draw to its own bytes; the others: any write since the last upload)
+        const uint64_t newest = gpu_hist.newest(lo, hi, tex.gpu_written ? tex.id : 0);
+        if (newest <= tex.gpu_wrote_seen) return 0;
+        static int logged;
+        if (logged++ < 40)
+            logf("vk: texture #%u %#llx %ux%u NVN %#x: the GPU wrote its storage (submission %llu): uploaded again", tex.id,
+                 (unsigned long long)tex.gpu, tex.width, tex.height, tex.nvn_format, (unsigned long long)newest);
+        return newest;
+    }
+    if (gpu_wrote.empty()) return 0;
     uint64_t newest = 0;
     auto it = gpu_wrote.upper_bound(lo);
     if (it != gpu_wrote.begin()) --it;
     for (; it != gpu_wrote.end() && it->first < hi; ++it)
         if (it->second.first > lo && it->second.second <= completed_value && it->second.second > tex.gpu_wrote_seen)
             newest = std::max(newest, it->second.second);
-    if (!newest) return false;
+    if (!newest) return 0;
     tex.gpu_wrote_seen = newest;
     static int logged;
     if (logged++ < 40)
         logf("vk: texture #%u %#llx %ux%u NVN %#x: the GPU wrote its storage (submission %llu): uploaded again", tex.id,
              (unsigned long long)tex.gpu, tex.width, tex.height, tex.nvn_format, (unsigned long long)newest);
-    return true;
+    return newest;
 }
 void texture_watch_prog(uint64_t prog) {
     tl_watch_prog = prog;
@@ -5031,6 +5105,13 @@ void dead_targets_sweep(uint64_t completed) {
     }
 }
 
+/// The writes of submissions the GPU has finished become the completed ones a texture is asked about (RX_VK_WRITE_HISTORY). Also
+/// from the replay, every 32 recordings: a load submits for many seconds between presents
+void texture_complete_writes(uint64_t completed) {
+    if (!write_history_on()) return;
+    std::lock_guard lk(gpu_wrote_mu);
+    gpu_hist.complete(completed);
+}
 void texture_frame(uint64_t completed) {
     ledger_frame();   // (RX_VK_LEDGER)
     upload_frame_report();
@@ -5058,6 +5139,7 @@ void texture_frame(uint64_t completed) {
                  (long long)st_deferred.load(std::memory_order_relaxed));
     }
     completed_value = completed;
+    texture_complete_writes(completed);
     frame_no++;
     drawn_writeback_frame();
     {   // (staging arenas the GPU is done with, beyond 256 MB of them, and any over 64 MB: freed. A scene change stages
