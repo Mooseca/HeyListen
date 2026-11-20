@@ -395,6 +395,11 @@ thread_local uint64_t rec_value = 0;
 struct RecordingRes {
     VkDescriptorPool pool = VK_NULL_HANDLE;
     std::vector<VkDescriptorPool> extra;   // (pools added when the first ran out)
+    // (v0.4.4, RX_VK_DESC_POOL_KEEP) the extra pools are kept from one recording to the next, reset, not destroyed and made again:
+    // extra_used of them are in use now (the one sets come from is the last of them, else `pool`), the rest idle; idle ones
+    // unused for kExtraIdle recordings go
+    size_t extra_used = 0;
+    uint32_t extra_idle = 0;
     // (the stream in use: the first, or one a recording that outgrew it was moved to. Descriptors written before the move hold
     // the old buffer's range, so the old ones stay until the slot's next recording, which the GPU's use of this one is done by)
     VkBuffer stream = VK_NULL_HANDLE;
@@ -426,6 +431,15 @@ std::atomic<uint64_t> stream_peak{0}, stream_extra{0}, stream_grown{0};
 std::deque<RecordingRes> res;   // (a deque: a recording thread keeps its own in place while another is added)
 thread_local RecordingRes* cur = nullptr;
 
+// (v0.4.4, RX_VK_DESC_POOL_KEEP=0: the extra pools destroyed at each recording's start and made again where one runs out, as before)
+// A scene with more than 8192 sets or 32768 descriptors in a recording (Hyrule Field, Kakariko) made a pool and destroyed it at every
+// recording: vkCreateDescriptorPool of that size on the render thread, in the middle of the draws, and vkDestroyDescriptorPool a
+// recording later. Kept, the pool is reset with the first one's (a reset is cheap) and the next recording finds it ready
+bool desc_pool_keep() {
+    static const bool v = !getenv("RX_VK_DESC_POOL_KEEP") || atoi(getenv("RX_VK_DESC_POOL_KEEP")) != 0;
+    return v;
+}
+constexpr uint32_t kExtraIdle = 120;   // (recordings of a slot that did not need its idle extra pools before they are destroyed)
 VkDescriptorPool make_pool() {
     // (each recording's pool: 8192 sets of up to 32768 descriptors a type, for the programs with more descriptors than the push limit,
     // 24 or 48 pools at once, and the driver may keep host memory for all of that. A pool that runs out is followed by another of the same
@@ -3976,17 +3990,30 @@ bool bind_descriptors(VkCommandBuffer cmd, VkPipelineBindPoint bp, const Program
         for (const VkWriteDescriptorSet& w : wr.writes) fine_n[FC_POOL_DESCS] += w.descriptorCount;
     }
     VkDescriptorSetAllocateInfo ai{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
-    ai.descriptorPool = cur->extra.empty() ? cur->pool : cur->extra.back();
+    const bool keep = desc_pool_keep();
+    const int64_t pool_t0 = prof_now();   // (v0.4.4: the pool's time, exact, for the descriptors cause: PD_POOL)
+    ai.descriptorPool = keep ? (cur->extra_used ? cur->extra[cur->extra_used - 1] : cur->pool)
+                             : (cur->extra.empty() ? cur->pool : cur->extra.back());
     ai.descriptorSetCount = 1;
     ai.pSetLayouts = &p.set_layout;
     VkDescriptorSet set = VK_NULL_HANDLE;
     if (vkAllocateDescriptorSets(dev.device, &ai, &set) != VK_SUCCESS) {
-        cur->extra.push_back(make_pool());
+        if (keep && cur->extra_used < cur->extra.size()) {   // (an idle one kept from an earlier recording: reset already)
+            cur->extra_used++;
+        } else {
+            cur->extra.push_back(make_pool());
+            if (keep) cur->extra_used = cur->extra.size();
+        }
         ai.descriptorPool = cur->extra.back();
-        if (vkAllocateDescriptorSets(dev.device, &ai, &set) != VK_SUCCESS) return false;
+        if (keep) ai.descriptorPool = cur->extra[cur->extra_used - 1];
+        if (vkAllocateDescriptorSets(dev.device, &ai, &set) != VK_SUCCESS) {
+            prof_desc[PD_POOL] += prof_now() - pool_t0;
+            return false;
+        }
     }
     for (auto& w : wr.writes) w.dstSet = set;
     vkUpdateDescriptorSets(dev.device, (uint32_t)wr.writes.size(), wr.writes.data(), 0, nullptr);
+    prof_desc[PD_POOL] += prof_now() - pool_t0;
     vkCmdBindDescriptorSets(cmd, bp, p.layout, 0, 1, &set, 0, nullptr);
     return true;
 }
@@ -5272,9 +5299,21 @@ void draw_begin_recording(int slot, VkCommandBuffer cmd, uint64_t value) {
         if (logged++ < 1) log_alloc_where("a recording stream", s.alloc);
         r.streams.push_back(s);
     } else {
+        const int64_t pool_t0 = prof_now();
         vkResetDescriptorPool(dev.device, r.pool, 0);
-        for (VkDescriptorPool p : r.extra) vkDestroyDescriptorPool(dev.device, p, nullptr);
-        r.extra.clear();
+        if (desc_pool_keep()) {   // (v0.4.4: the extra pools of the last recording reset and kept; idle ones for a long time go)
+            for (size_t i = 0; i < r.extra_used; i++) vkResetDescriptorPool(dev.device, r.extra[i], 0);
+            if (r.extra_used) r.extra_idle = 0;
+            else if (!r.extra.empty() && ++r.extra_idle >= kExtraIdle) {
+                for (VkDescriptorPool p : r.extra) vkDestroyDescriptorPool(dev.device, p, nullptr);
+                r.extra.clear(), r.extra_idle = 0;
+            }
+            r.extra_used = 0;
+        } else {
+            for (VkDescriptorPool p : r.extra) vkDestroyDescriptorPool(dev.device, p, nullptr);
+            r.extra.clear(), r.extra_used = 0;
+        }
+        prof_desc[PD_POOL] += prof_now() - pool_t0;
         // (the streams the last recording of the slot grew into: given back after 120 recordings that stayed in the first, the
         // slot's last one being done (recording_wait). RX_VK_STREAM_KEEP=1: kept)
         static const bool keep = getenv("RX_VK_STREAM_KEEP") != nullptr;

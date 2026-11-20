@@ -797,7 +797,14 @@ void perf_frame_shown() {
     }
     w.driver_compile = std::max(0.0, pipe_ms - l_pipe_ms) + std::max(0.0, link_ms - l_link_ms) +
                        std::max(0.0, lib_build_ms - l_lib_ms);
-    w.descriptors = dp(PROF_DESC);
+    // (v0.4.4: the descriptors cause is the build's own time and the pools', not the texture work inside the build, which PROF_DESC
+    // also held: that is texture work, and it goes to the upload cause. The label says which part of the descriptors was longest)
+    static int64_t l_desc[PD_COUNT];
+    double dd[PD_COUNT];
+    for (int i = 0; i < PD_COUNT; i++) dd[i] = std::max(0.0, (prof_desc[i].get() - l_desc[i]) / 1e6), l_desc[i] = prof_desc[i].get();
+    w.descriptors = dd[PD_SELF] + dd[PD_POOL];
+    w.upload += dd[PD_TEX];
+    w.descriptors_which = pr::descriptor_kind(dd[PD_SELF], dd[PD_POOL]);
     w.present = std::max(0.0, (present_in - l_present_ns) / 1e6);
     for (int i = 0; i < PROF_COUNT; i++) l_prof[i] = prof_ns[i];
     l_wait_ms = wait_ms_total, l_shader_ms = shader_ms, l_pipe_ms = pipe_ms, l_link_ms = link_ms, l_lib_ms = lib_build_ms;
