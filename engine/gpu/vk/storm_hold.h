@@ -29,9 +29,9 @@ struct StormHoldRules {
     int deep = 200;             ///< engage at this many queued jobs (<= 0: no hold)
     int64_t min_frames = 0;     ///< no release within this many presents of the engage
     int64_t quiet_frames = 0;   ///< none while a job was pushed in the last this many presents (<= 0: the depth rule)
-    int64_t off_depth = 4;      ///< (quiet_frames <= 0) release once fewer than this many jobs are queued ...
-    bool whole_frames = true;   ///< (quiet_frames <= 0) also released by settle whole frames running (RX_VK_STORM_WHOLE=0: off)
-    int64_t settle = 3;         ///< ... for this many presents running (the picture is partial while the queue is deep: draws whose
+    int64_t off_depth = 100;    ///< (quiet_frames <= 0) release once fewer than this many jobs are queued: half the engage depth ...
+    bool whole_frames = false;  ///< (quiet_frames <= 0) also released by settle whole frames running (RX_VK_STORM_WHOLE=1: on; not yet measured on the 3050)
+    int64_t settle = 1;         ///< ... for this many presents running (the picture is partial while the queue is deep: draws whose
                                 ///< programs are not built are left out, and it completes the moment the queue is drained)
     bool hold_present = true;   ///< withhold the present (the default), not the frame's draws
 };

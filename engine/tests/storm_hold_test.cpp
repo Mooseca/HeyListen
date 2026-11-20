@@ -30,8 +30,8 @@ StormHoldRules rules(int deep, int64_t min_frames, int64_t quiet_frames) {
 int main() {
     {   // (the defaults: the switches' numbers and the present held, not the draws)
         const StormHoldRules d;
-        expect(d.deep == 200 && d.min_frames == 0 && d.quiet_frames == 0 && d.off_depth == 4 && d.settle == 3,
-               "the defaults: engaged at 200 queued, released once the queue is drained (under 4) for 3 presents");
+        expect(d.deep == 200 && d.min_frames == 0 && d.quiet_frames == 0 && d.off_depth == 100 && d.settle == 1 && !d.whole_frames,
+               "the defaults: engaged at 200 queued, released as the queue drops under half of that");
         expect(d.hold_present, "the present is what is held by default");
     }
     {   // (RX_VK_STORM_HOLD=0: no latch, whatever the queue holds)
@@ -82,9 +82,10 @@ int main() {
         h2.tick(r, 300, 0, 0);
         expect(h2.tick(r, 0, 0, 399) == StormHoldEvent::None && h2.on, "the depth rule keeps the floor too");
     }
-    {   // (the drained-queue rule, the default: under the depth for settle presents running, a deep tick starts it again)
+    {   // (the drained-queue rule: under the depth for settle presents running, a deep tick starts it again)
         StormHold h;
-        const StormHoldRules d;
+        StormHoldRules d;
+        d.off_depth = 4, d.settle = 3;
         h.tick(d, 300, 0, 0);
         expect(h.tick(d, 3, 0, 10) == StormHoldEvent::None && h.on, "one present with the queue drained: still held");
         expect(h.tick(d, 3, 0, 11) == StormHoldEvent::None && h.on, "two: still held");
@@ -95,17 +96,18 @@ int main() {
     }
     {   // (whole frames end the hold whatever the queue holds; a frame that left a draw out starts the count again)
         StormHold h;
-        const StormHoldRules d;
+        StormHoldRules d;
+        d.whole_frames = true, d.settle = 3;
         h.tick(d, 300, 0, 0);
-        expect(h.tick(d, 97, 0, 10, 0) == StormHoldEvent::None && h.tick(d, 97, 0, 11, 0) == StormHoldEvent::None, "two whole frames");
-        expect(h.tick(d, 97, 0, 12, 5) == StormHoldEvent::None && h.on, "a frame with a draw left out restarts the count");
-        expect(h.tick(d, 97, 0, 13, 0) == StormHoldEvent::None && h.tick(d, 97, 0, 14, 0) == StormHoldEvent::None && h.on, "two again");
-        expect(h.tick(d, 97, 0, 15, 0) == StormHoldEvent::Released && !h.on, "the third whole frame running: released");
+        expect(h.tick(d, 150, 0, 10, 0) == StormHoldEvent::None && h.tick(d, 150, 0, 11, 0) == StormHoldEvent::None, "two whole frames");
+        expect(h.tick(d, 150, 0, 12, 5) == StormHoldEvent::None && h.on, "a frame with a draw left out restarts the count");
+        expect(h.tick(d, 150, 0, 13, 0) == StormHoldEvent::None && h.tick(d, 150, 0, 14, 0) == StormHoldEvent::None && h.on, "two again");
+        expect(h.tick(d, 150, 0, 15, 0) == StormHoldEvent::Released && !h.on, "the third whole frame running: released");
         StormHold h2;
         StormHoldRules off;
-        off.whole_frames = false;
+        off.whole_frames = false, off.settle = 3;
         h2.tick(off, 300, 0, 0);
-        for (int i = 1; i < 10; i++) expect(h2.tick(off, 97, 0, i, 0) == StormHoldEvent::None && h2.on, "whole frames off: the queue rules");
+        for (int i = 1; i < 10; i++) expect(h2.tick(off, 150, 0, i, 0) == StormHoldEvent::None && h2.on, "whole frames off: the queue rules");
     }
     {   // (re-engage: a second storm after a release starts its own clock)
         StormHold h;
