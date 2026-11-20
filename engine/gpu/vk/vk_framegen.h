@@ -18,10 +18,11 @@ int framegen_by_now();
 /// and is shown and run as the top
 int framegen_now();
 /// (longshot 382a3d675) Each present: frame generation off for 120 presents lets its images go (the built-in interpolation's two frames, its
-/// sets of made frames and their lumas and flows: about 150 MB at 2560x1440 2x, 800 MB at 4K 8x; FSR 3.1's frame interpolation's
+/// sets of made frames and their lumas and flows: about 112 MB at 2560x1440 2x, 823 MB at 4K 8x; FSR 3.1's frame interpolation's
 /// images too, also while another one is chosen). They were let go only when the window's size changed, so a player who tried it
 /// and turned it off kept them for the run. They are made again when it is turned on. recorded: this present recorded made frames
-/// (counted as on: framegen_idle.h). Called after framegen_queue, so a set this present filled is the display thread's by then
+/// (counted as on: framegen_idle.h); FSR 3.1's images are counted by this present's own use of FSR, not by recorded. Called after
+/// framegen_queue, so a set this present filled is the display thread's by then
 void framegen_idle(bool recorded);
 /// (the performance statistics, perf_report.cpp) what makes the frames now, as perf_report::FrameGen: 0 none (the row Off, or the
 /// interpolation not running: RX_VK_FRAMEGEN=0, no window, its images not made), 1 the renderer's own, 2 AMD FSR 3.1's frame
