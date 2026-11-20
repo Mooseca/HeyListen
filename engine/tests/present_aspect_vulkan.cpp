@@ -31,7 +31,7 @@ void full_barrier(VkCommandBuffer,const char* = nullptr) {}
 // @PRODUCTION_HELPERS@
 void record_actual(VkCommandBuffer command,VkImage src,uint32_t sw,uint32_t sh,const int* crop,VkImage dst) {
     struct { VkCommandBuffer cmd; } f{command};
-    VkImageView view=VK_NULL_HANDLE;
+    VkImageView view=VK_NULL_HANDLE; const bool pq=false;
 // @PRODUCTION_PRESENT@
 }
 uint32_t memory_type(uint32_t bits,VkMemoryPropertyFlags flags) {

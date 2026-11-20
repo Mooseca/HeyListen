@@ -80,6 +80,13 @@ the frame rate limit, the next frame's due time with no burst to catch up, the d
 rate) and the frame pacer in `engine/host/nvn_native.c`. This engine already owns the pacing there; a native loop that
 calls the present step leaves it as it is.
 
+The Frame rate limit is the rate presented, the game's frames and the frame generation's made ones. `fps_plan` in `nn_vi.c` asks the
+renderer for the limit (`HL_OPT_FPS_LIMIT`, 0 for Unlimited) and the fixed multiplier m that runs (`HL_OPT_FRAMEGEN_MULT`, 1 when
+none): the game's rate, which the display queue, the limiter and the real-time step all follow, is the limit over m, its period exact
+(165 over 4 is 24.24 ms), and the renderer has already lowered m where the game would run under 20 frames a second
+(`framegen_rows.h` `limited`). Unlimited paces nothing and puts the game's own limiter out of the way; Game speed Per frame ignores
+the limit (the game's steps are whole frames of 1/60 s).
+
 One OS-layer hook is keyed to a return address inside the frame function: the system tick read before the present (`lr
 0x8348c770`) tells `engine/host/hos_thread.c` the framework object (`hos_gfx_module`), which the real-time step needs
 (its nominal rate `+0x2c8`). A native loop reads that tick from elsewhere, so it tells the OS layer the object itself;

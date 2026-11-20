@@ -26,6 +26,7 @@ OS = "windows" if WINDOWS else "linux"
 # Arguments some tests need. {name} is a tool or folder found below (find_tools); a check whose tools are missing is
 # skipped, or fails with --strict. Tests not listed run with no arguments and their own defaults.
 ARGS = {
+    "tests/test_switches_documented.py": [],
     "tests/test_sampler_retirement.py": ["--cxx", "{cxx}", "--headers", "{vulkan_headers}"],
     "tests/test_texel_buffer_ownership.py": ["--cxx", "{cxx}", "--headers", "{vulkan_headers}"],
     "tests/test_staging_burst.py": ["--cxx", "{cxx}", "--headers", "{vulkan_headers}"],
@@ -34,9 +35,12 @@ ARGS = {
     "tests/test_dead_targets_sweep.py": ["--cxx", "{cxx}"],
     "tests/test_precompile_save.py": ["--cxx", "{cxx}"],
     "tests/test_prepare_speed.py": ["--cxx", "{cxx}"],
+    "tests/test_state_report.py": ["--cxx", "{cxx}"],
+    "tests/test_zone_report.py": ["--cxx", "{cxx}"],
     "tests/test_settings_atomic.py": ["--cc", "gcc"],
     "tests/test_host_alloc_wait.py": ["--cc", "gcc"],
     "tests/test_audio_speaker_layout.py": ["--cxx", "{cxx}"],
+    "tests/test_audio_centre_spread.py": ["--cxx", "{cxx}"],
     "tests/test_mma_software.py": ["--cxx", "{cxx}", "--headers", "{spirv_headers}", "--spirv-val", "{spirv_val}"],
     "tests/test_native_float_atomic_add.py": ["--cxx", "{cxx}", "--headers", "{spirv_headers}", "--spirv-val", "{spirv_val}"],
     "tests/test_compute_local_memory.py": ["--cxx", "{cxx}", "--headers", "{spirv_headers}", "--spirv-val", "{spirv_val}"],
@@ -77,6 +81,7 @@ ARGS = {
     "tests/test_astc_cpu.py": ["--cxx", "{cxx}"],
     "tests/test_capture_past_end.py": ["--cxx", "{cxx}"],
     "tests/test_target_pool_cap.py": ["--cxx", "{cxx}"],
+    "tests/test_present_mode.py": ["--cxx", "{cxx}"],
     "tests/test_shadow_fast.py": ["--cxx", "{cxx}"],
     "tests/test_collect_fast.py": ["--cc", "{cxx}"],
     "tests/test_late_fix_order.py": ["--cxx", "{cxx}"],
@@ -114,6 +119,7 @@ ARGS = {
     "tests/test_lower_depbar.py": ["--cxx", "clang++"],
     "tests/test_lower_register_markers.py": ["--cxx", "clang++"],
     "tests/test_text_speed.py": ["--cc", "gcc"],
+    "tests/test_oot_voice_option.py": ["--cc", "gcc"],
     "tests/test_movie_frame_count.py": ["--cc", "gcc"],
     "tests/test_high_fps_fixes.py": ["--cc", "gcc"],
     "tests/test_frame_whole.py": ["--cc", "gcc"],
@@ -210,6 +216,7 @@ ARGS = {
     "tests/test_jt_mark_export.py": ["--cxx", "{cxx}"],
     "tests/test_vcore_texels.py": ["--cxx", "{cxx}"],
     "tests/test_vcore_video_acquire.py": ["--cxx", "{cxx}"],
+    "tests/test_gpu_choice.py": ["--cxx", "{cxx}"],
 }
 
 # Python packages some tests import (CI installs them; the runner itself needs none)
@@ -310,9 +317,9 @@ def python_check(rel, tools, timeout):
 
 
 def cpp_checks(tools, timeout):
-    """gpu/vk/tests: the presentation rectangle (all of it), the lowering harness built and run over no programs
-    (the programs it reads are dumped from the game, so here it only shows the lowering still compiles), and the
-    lowering's register-marker regression"""
+    """gpu/vk/tests: the presentation rectangle (all of it), the mesh fallback's push constant offset rewrite, the lowering
+    harness built and run over no programs (the programs it reads are dumped from the game, so here it only shows the
+    lowering still compiles), and the lowering's register-marker regression"""
     cxx = tools["cxx"]
     out = []
 
@@ -329,6 +336,8 @@ def cpp_checks(tools, timeout):
         return run
     rect = "gpu/vk/tests/present_rect_test.cpp"
     out.append((rect, build_and_run(rect, ["-Wall", "-Wextra", "-Werror"], [])))
+    push = "gpu/vk/tests/push_fix_test.cpp"   # (the mesh fallback's push constant access chains: offset given as member index)
+    out.append((push, build_and_run(push, ["-O1", "-Wall", "-Wextra", "-Werror"], [])))
     lower = "gpu/vk/tests/lower_test.cpp"
     eden, compat = os.path.join(ROOT, "gpu", "vk", "eden"), os.path.join(ROOT, "gpu", "vk", "compat")
     out.append((lower, build_and_run(lower, ["-O1", "-Wno-everything", "-I" + eden, "-I" + compat], ["{tmp}"])))

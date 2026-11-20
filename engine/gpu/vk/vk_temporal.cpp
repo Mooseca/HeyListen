@@ -92,6 +92,8 @@ int temporal_mode() {
     int v = opts.dlss;
     if (dlss > 0) v = dlss >= 2 ? ur::DLAA : ur::DLSS;   // (2 and up: DLAA, as RX_VK_DLSS was clamped before)
     else if (fsr4 > 0) v = fsr4 >= 2 ? ur::FSR4_AA : ur::FSR4;
+    // (the Render resolution's native choice is DLAA with DLSS and Native AA with FSR 4: the chain's modes for them)
+    v = ur::mode_for(v, opts.resolution);
     // (FSR 3.1, the row's 3, is not an engine of this chain: the game's own as far as it is concerned. Nor anything while
     // FSR 3.1 upscales: one upscaler at a time, and one camera jitter. A switch above goes over the row's FSR 3.1 too
     // (fsr3_wanted asks temporal_env_chosen); RX_VK_FSR=1 goes over them)
