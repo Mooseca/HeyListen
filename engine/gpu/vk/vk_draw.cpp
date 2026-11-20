@@ -43,7 +43,6 @@
 #include "vk_temporal.h"
 #include "vk_fsr3.h"          // (AMD FSR 3.1 in the gameplay upscale's place)
 #include "vk_fsr3_inputs.h"
-#include "vk_hdr_tonemap.h"   // (heylisten: the native HDR mode's tone-mapping pass)
 #include "vk_dump.h"
 #include "vk_gprof.h"
 #include "vk_jobs.h"
@@ -7239,43 +7238,6 @@ static void hdr_find(const NvnState& s, const Program& p, const Targets& at) {
                               (unsigned long long)s.ubo[ns][i].size, (unsigned)st.info.constant_buffer_used_sizes[i + 3]);
     }
     logf("%s", line);
-}
-
-/// (heylisten, the HDR row's "Native + our tone mapper") The game's tone-mapping pass, a full-screen draw of its scene image into the
-/// HDR10 window image, done by our own pass (vk_hdr_tonemap.cpp) instead: the same image in, the same one out, the exposure read from
-/// the pass's own uniform buffer. true: it is done and the draw is left out. false: it cannot be (another kind of target, no
-/// pipeline), and the game's pass draws as it would
-static bool hdr_tonemap_draw(VkCommandBuffer cmd, NvnState& s, const Program& p, const Targets& at) {
-    if (p.stages.empty() || p.compute || p.mesh || at.n != 1 || !at.color[0] || at.depth || at.samples != VK_SAMPLE_COUNT_1_BIT ||
-        at.color_format[0] != VK_FORMAT_A2B10G10R10_UNORM_PACK32)
-        return false;
-    const Stage* fs = nullptr;
-    for (const Stage& st : p.stages)
-        if (st.vk_stage == VK_SHADER_STAGE_FRAGMENT_BIT) fs = &st;
-    if (!fs || fs->info.texture_descriptors.empty()) return false;
-    const uint32_t handle = handle_of(s, *fs, fs->info.texture_descriptors[0], 0);
-    Texture* scene = nullptr;
-    const VkImageView scene_view = handle ? texture_view_of(handle, VK_IMAGE_VIEW_TYPE_2D, ViewUse::Sample, VK_FORMAT_UNDEFINED, &scene) : VK_NULL_HANDLE;
-    // (the scene as the game's pass takes it: a float image. Anything else bound first is not our pass's scene, and the
-    // game's draw is kept)
-    if (scene && scene->format != VK_FORMAT_B10G11R11_UFLOAT_PACK32 && scene->format != VK_FORMAT_E5B9G9R9_UFLOAT_PACK32 &&
-        scene->format != VK_FORMAT_R16G16B16A16_SFLOAT)
-        return false;
-    VkFormat out_format = VK_FORMAT_UNDEFINED;
-    const VkImageView out_view = texture_view(at.color[0], s.rt.color[0], s.rt.has_cview[0] ? &s.rt.cview[0] : nullptr, VK_IMAGE_VIEW_TYPE_2D,
-                                              ViewUse::Storage, &out_format, VK_FORMAT_A2B10G10R10_UNORM_PACK32);
-    if (!scene || !scene_view || !out_view || out_format != VK_FORMAT_A2B10G10R10_UNORM_PACK32) return false;
-    const VkDescriptorBufferInfo ubo = uniform_range(s, *fs, 3);
-    end_pass(cmd);
-    full_barrier(cmd);
-    if (!hdr_tonemap_record(cmd, p.key, scene_view, out_view, at.width, at.height, ubo)) return false;
-    full_barrier(cmd);
-    // (no reason to texture_written: it notes a virtual-pool texture's page map, and this is the draw path with no ParLock of
-    // its own — the upscale stand-in's storage writes say nothing either)
-    texture_written(at.color[0]);
-    descriptors_disturbed();   // (the pass's own pushes are gone from the compute bind point)
-    if (dump_on()) dump_image(cmd, at.color[0], at.color_level[0], at.color_layer[0], "hdr tone mapping result");
-    return true;
 }
 
 void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {

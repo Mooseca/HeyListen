@@ -77,7 +77,7 @@ def check_sources():
     menu = (vk / "vk_menu.cpp").read_text(encoding="utf-8")
     assert '{TAB_GRAPHICS, "DLAA before the bloom", &opts.dlss_pre_bloom, 0, 1, 1, tx_onoff,' in menu, "vk_menu.cpp: the row"
     assert menu.index('"DLSS model", &opts.dlss_model') < menu.index('"DLAA before the bloom", &opts.dlss_pre_bloom') < \
-        menu.index('"Render resolution", &opts.resolution'), "the row under DLSS model, with the upscaler rows"
+        menu.index('"Frame generation by", &opts.framegen_by'), "the row under DLSS model, with the upscaler rows"
     assert "ur::pre_bloom_shown(dlss_why() == DLSS_OK, upscaler())" in block(menu, "bool row_shown(int i)"), "row_shown"
     assert "ur::pre_bloom_fixed(upscaler(), pre_bloom_env())" in block(menu, "bool row_fixed(const int* value)"), "row_fixed"
     assert 'if (r.value == &opts.dlss_pre_bloom) return "dlss_pre_bloom";' in menu, "ini_key: dlss_pre_bloom"

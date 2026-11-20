@@ -46,8 +46,8 @@ def main():
     if between.count('{TAB_') != 1:
         raise SystemExit("vk_menu.cpp: a row sits between the Upscaler and the Render resolution")
     between = menu[at[1]:at[3]]
-    if between.count('{TAB_') != 2:
-        raise SystemExit("vk_menu.cpp: rows other than the DLSS model sit between the Render resolution and Frame generation by")
+    if between.count('{TAB_') != 3:   # (Render resolution, DLSS model, DLAA before the bloom)
+        raise SystemExit("vk_menu.cpp: rows other than the DLSS model and DLAA before the bloom sit between the Render resolution and Frame generation by")
     if '"NVIDIA DLSS", &opts.' in menu or '"AMD FSR 4", &opts.' in menu:
         raise SystemExit("vk_menu.cpp: DLSS or FSR has a row of its own beside the Upscaler")
     # saved options: the renamed rows keep their keys (data, so read from the source)

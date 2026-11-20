@@ -841,11 +841,10 @@ Row rows[] = {
      "(6x on an RTX 50, 2x on an RTX 40), AMD FSR 3.1 2x, the built-in one Auto and 2x to 8x. The Frame rate limit is the rate shown: "
      "the game runs at the limit over the multiplier.", hn_framegen, false, true},
     {TAB_GRAPHICS, "Frame pacing", &opts.pace, 0, 1, 1, tx_onoff, "When each frame is shown.", hn_pace},
-    {TAB_GRAPHICS, "HDR", &opts.hdr, 0, 3, 1, tx_hdr,
+    {TAB_GRAPHICS, "HDR", &opts.hdr, 0, 2, 1, tx_hdr,
      "HDR10 out on an HDR display (Windows: Use HDR on in the display settings). Expanded: the game's SDR picture, its white at "
      "the paper white and its highlights up to the peak. Native: the game's own HDR, told the display's peak and paper white. "
-     "Native + our tone mapper: the same, with the game's tone mapping step swapped for ours, which keeps the highlights' range up "
-     "to the peak and has a saturation of its own.",
+     "With Native, the HDR tone mapper row below chooses the game's own curve or PsychoV35.",
      nullptr, false, true},
     {TAB_GRAPHICS, "HDR paper white", &opts.hdr_white, 80, 400, 10, tx_nits,
      "How bright the picture's white is with HDR on. Around 200 for a normal room; higher in a bright one.", nullptr, false, true},
@@ -2387,6 +2386,7 @@ void menu_init() {
         int old_dynres = -1;   // (the row before Resolution: 0, the full scale, is its 100%; 1 is Auto)
         int saved_vsync = -1;  // (the last vsync= line: 2 was the old Adaptive, now On with FIFO (triple buffering))
         bool has_vsync_mode = false;
+        bool saved_hdr_ours = false;   // (the HDR row saved as 3: "Native + our tone mapper", from before PsychoV35 replaced it)
         while (fgets(line, sizeof line, f)) {
             char* eq = strchr(line, '=');
             if (!eq) continue;
@@ -2396,6 +2396,7 @@ void menu_init() {
                 const int v = atoi(eq + 1);
                 *r.value = r.value == &opts.output_res ? output_choice_text(eq + 1) : std::min(std::max(v, r.lo), r.hi);
                 if (r.value == &opts.dlss_model) dlss_model_saved = true;   // (a saved model is the player's: menu_first_run_model)
+                if (r.value == &opts.hdr && v == 3) saved_hdr_ours = true;   // (clamped to Native above: the old fourth value, below)
             }
             has_resolution |= !strcmp(line, "resolution");
             v2 |= !strcmp(line, "options_version");
@@ -2418,6 +2419,12 @@ void menu_init() {
             if (opts.mic >= 2) opts.mic = 1;
             mic_tell_host();
         }
+        // (HDR saved as "Native + our tone mapper", the fourth value of the row in v0.4.3's work: that tone mapper is gone, the
+        // PsychoV35 one is the HDR tone mapper row's now, and the nearest to it: Native with the tone mapper row on PsychoV35)
+        if (saved_hdr_ours) {
+            opts.hdr = 2, opts.hdr_tonemap = 1;
+            logf("vk: options: the saved HDR was Native + our tone mapper: now Native with the HDR tone mapper PsychoV35");
+        }
         if (!has_resolution && old_dynres >= 0) opts.resolution = old_dynres ? 0 : 1;
         // (an Upscaler saved as DLAA or FSR 4's native AA, which are the Render resolution's native choice now: DLSS or FSR 4 with
         // it. The 3D was at full size with them, whatever the Render resolution row kept)
@@ -2439,7 +2446,10 @@ void menu_init() {
     if (opts.preset > 0) sync_preset_budgets(opts.preset);
     if (const char* e = getenv("RX_VK_FRAMEGEN_MULT")) opts.framegen = std::min(std::max(atoi(e), 2), 8);
     if (const char* e = getenv("RX_VK_PACE")) opts.pace = atoi(e) != 0;
-    if (const char* e = getenv("RX_VK_HDR")) opts.hdr = std::min(std::max(atoi(e), 0), 3);   // (for one run: the HDR row's value)
+    if (const char* e = getenv("RX_VK_HDR")) {   // (for one run: the HDR row's value; 3, the old Native + our tone mapper, is Native with PsychoV35)
+        opts.hdr = std::min(std::max(atoi(e), 0), 3);
+        if (opts.hdr == 3) opts.hdr = 2, opts.hdr_tonemap = 1;
+    }
     if (const char* e = getenv("RX_VK_DLSS_PRE_BLOOM"); e && *e) opts.dlss_pre_bloom = atoi(e) != 0;   // (after Longshot 83b161e3)
     if (const char* e = getenv("RX_VK_UPSCALE"))
         for (Row& r : rows)
@@ -2487,7 +2497,7 @@ void menu_set_gpu_count(int count) {
 
 bool menu_is_open() { return open_now.load(std::memory_order_relaxed); }
 // (HeyListen, after Longshot ddb156df and 79a34381)
-bool scene_tonemap_on() { return dev.hdr && opts.hdr == 2 && opts.hdr_tonemap == 1; }
+bool scene_tonemap_on() { return hdr_game_native() && opts.hdr_tonemap == 1; }   // (RX_VK_HDR_FORCE too: the game is told HDR10)
 void psychov35_bank(float* out) {
     namespace pv = Shader::Optimization::PsychoV35;
     const Options& o = opts;

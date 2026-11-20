@@ -44,6 +44,7 @@ int temporal_mode(){return mode;}
 bool upscaler_off(){return mode==ur::OFF;}
 int env_switch(const char* name){const char* s=std::getenv(name);return s && *s?std::atoi(s):-1;}
 namespace fsr3fi {int frames_wanted(){return fg;}}
+bool hdr_game_native(){return dev.hdr && opts.hdr==2;}   // (vk_replay.cpp's, without RX_VK_HDR_FORCE)
 /* TONE */
 /* HDR_CALLBACK */
 /* TEMPORAL */

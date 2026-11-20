@@ -163,7 +163,7 @@ def check_paths():
         sys.exit("FAIL: do_present does not tell Native HDR by the format the game presents alone")
     # (Native: never the game's image blitted in its image's format; the shot's scale pass told it is PQ as well)
     image = function(replay, "void present_image(")
-    if "} else if (src && !native_pq) {" not in image or \
+    if "} else if (src && (!native_pq || !dev.hdr)) {" not in image or \
             "framegen_scale(f.cmd, view, src, sw, sh, crop, rect.w, rect.h, native_pq)" not in image:
         sys.exit("FAIL: present_image can blit Native HDR's picture from its image, or scales it as SDR")
     # (HeyListen: no RX_VK_SHOT_FX shot through the scale pass, so upstream's check of its pq is not here)

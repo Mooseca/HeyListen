@@ -5215,9 +5215,9 @@ bool hdr_forced() {
     static const bool on = getenv("RX_VK_HDR_FORCE") && atoi(getenv("RX_VK_HDR_FORCE")) != 0;
     return on;
 }
-/// Whether the game is told it has an HDR10 display and its PQ picture is taken as it is (the HDR row on Native, or on our
-/// tone mapper: vk_hdr_tonemap.cpp's extern of this is why it is out of the unnamed namespace)
-bool hdr_game_native() { return (dev.hdr || hdr_forced()) && opts.hdr >= 2; }
+/// Whether the game is told it has an HDR10 display and its PQ picture is taken as it is (the HDR row on Native; out of the
+/// unnamed namespace for vk_menu.cpp's scene_tonemap_on)
+bool hdr_game_native() { return (dev.hdr || hdr_forced()) && opts.hdr == 2; }
 
 namespace {
 
@@ -6101,7 +6101,7 @@ std::mutex present_image_mu;
 void present_image(VkImage src, uint32_t sw, uint32_t sh, const int crop[4], VkImageView view, bool pq) {
     std::lock_guard lk(present_image_mu);
     static int hdr_was = -1;   // (the Insert menu's HDR, on or off, as the swapchain was made for it; -1: not yet looked at)
-    // (only on or off is the swapchain's format: Expanded to Native, or to our tone mapper, keeps it, and the picture does not go
+    // (only on or off is the swapchain's format: Expanded to Native keeps it, and the picture does not go
     // through a new swapchain for it)
     const bool hdr_changed = hdr_was >= 0 && hdr_was != (opts.hdr != 0);
     if (hdr_was < 0) hdr_was = opts.hdr != 0;

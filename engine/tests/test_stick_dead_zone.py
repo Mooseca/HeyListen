@@ -132,7 +132,8 @@ enum MenuTab { TAB_CONTROLS, TAB_GRAPHICS };
 namespace ur { enum { kModels = 5 }; }   // (upscaler_rows.h: the DLSS model row's top, the last the CNN)
 static const char* tx_dlss_model(int) { return ""; }   // (stubs: the row's own, cut by the regex, only names them)
 static const char* hn_dlss_model(int, int) { return nullptr; }
-struct Options { int output_res = 0, resolution = 0, upscale = 0, dlss = 0, dlss_pre_bloom = 0, dlss_model = 0, stick_dead_zone = 0, send_perf = 0, send_crash = 0, update_check = 1, vsync = 0, vsync_mode = 1, vrr = 0; } opts;
+struct Options { int output_res = 0, resolution = 0, upscale = 0, dlss = 0, dlss_pre_bloom = 0, hdr = 0, dlss_model = 0, stick_dead_zone = 0, send_perf = 0, send_crash = 0, update_check = 1, vsync = 0, vsync_mode = 1, vrr = 0; } opts;
+static bool saved_hdr_ours;   // (menu_init's: the HDR row saved as the old fourth value)
 static bool dlss_model_saved;   // (vk_menu.cpp's, set by menu_init's loop when the file has a dlss_model line: menu_first_run_model)
 bool telemetry_available() { return true; }   // (heylisten: the two telemetry rows' availability, perf_report.cpp)
 static int output_choice(int v) { return v; }
@@ -155,6 +156,7 @@ int main() {
     CHECK(parse("stick_dead_zone=9\n") == 5 && parse("stick_dead_zone=-4\n") == 0 && parse("stick_dead_zone=x\n") == 0);
     CHECK(parse("stick_deadzone=3\n") == 0);
     CHECK(!strcmp(ini_key(rows[1]), "dlss_model"));
+    CHECK(!saved_hdr_ours);   // (no hdr row among these two: the old fourth value is not seen)
     CHECK(!dlss_model_saved);   // (a stick_dead_zone line marks no saved DLSS model)
     CHECK(parse("dlss_model=3\n") == 0 && dlss_model_saved && opts.dlss_model == 3);   // (the loop marks it: menu_first_run_model)
     CHECK(parse("dlss_model=9\n") == 0 && opts.dlss_model == 4);   // (clamped to the row's top, as the menu does)

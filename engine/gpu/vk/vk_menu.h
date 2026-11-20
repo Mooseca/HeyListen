@@ -10,7 +10,7 @@ struct Options {
     int framegen = 0;     // made frames: 0 off, 1 Auto (to the display's refresh), or 2 to 8 times the game's frames
     int framegen_by = 0;  // who makes the frames at a fixed multiplier: 0 the renderer's own (AMD FSR 3.1 at 2x, else its block matching), 1 NVIDIA DLSS Frame Generation (vk_dlss.cpp; RTX 40 and newer, with its runtime; up to its runtime's most + 1), 2 AMD FSR 3.1's frame interpolation alone (2x); off by default. Saved as frame_generation_by (framegen_rows.h)
     int pace = 0;         // frames shown on an even line (vk_framegen.cpp)
-    int hdr = 0;          // (hookshot) HDR10 out (vk_framegen.cpp framegen_hdr): 0 off, 1 the SDR picture expanded, 2 the game's own (native) HDR, 3 the game's native HDR with the game's tone-mapping pass replaced by ours (vk_hdr_tonemap.cpp); when the display has it (the swapchain made again at once)
+    int hdr = 0;          // (hookshot) HDR10 out (vk_framegen.cpp framegen_hdr): 0 off, 1 the SDR picture expanded, 2 the game's own (native) HDR (its tone mapper: the hdr_tonemap row); when the display has it (the swapchain made again at once)
     int hdr_white = 200;  // HDR paper white, nits (the picture's white)
     int hdr_peak = 1000;  // HDR peak brightness, nits (its brightest highlights)
     int hdr_tonemap = 0;  // (HeyListen, after Longshot ddb156df) the scene's tone mapper with Native HDR: 0 the game's (Vanilla), 1 PsychoV35,
@@ -113,6 +113,8 @@ int menu_fps_limit();
 /// (HeyListen, after Longshot ddb156df) The game's scene tone mapped by PsychoV35: HDR set to Native on an HDR display, and the Tone
 /// mapper row so
 bool scene_tonemap_on();
+/// Whether the game is told it has an HDR10 display and its PQ picture is taken as it is (the HDR row on Native; RX_VK_HDR_FORCE: no HDR display needed). vk_replay.cpp
+bool hdr_game_native();
 /// (after Longshot 79a34381) PsychoV35's grading as the menu has it now, in ir_opt/psychov35.h's bank order (kSetting*, kSettingCount floats)
 void psychov35_bank(float* out);
 bool resolution_auto();       // (the game's dynamic resolution: Resolution Auto)
