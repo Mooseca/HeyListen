@@ -573,6 +573,9 @@ int MessageBoxA(HWND w, LPCSTR text, LPCSTR caption, UINT type);
 #ifndef MB_ICONWARNING
 #define MB_ICONWARNING 0x00000030L
 #endif
+#ifndef MB_SETFOREGROUND
+#define MB_SETFOREGROUND 0x00010000L
+#endif
 
 /* ---- (HeyListen) calls the performance overlay, the capture pre-copy and the replay workers make: /proc and clock_gettime ---- */
 static inline void GetSystemTimePreciseAsFileTime(FILETIME *ft) { GetSystemTimeAsFileTime(ft); }   /* (already clock_gettime) */
