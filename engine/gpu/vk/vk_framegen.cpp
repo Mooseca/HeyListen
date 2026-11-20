@@ -16,10 +16,12 @@
 #include <deque>
 #include <mutex>
 #include <thread>
+#include <utility>   // (std::exchange: framegen_idle)
 
 #include <cmath>
 
 #include "vk_framegen.h"
+#include "framegen_idle.h"   // (longshot 382a3d675: when its images are let go, framegen_idle)
 #include "framegen_rows.h"   // (the multiplier each Frame generation by makes, the limit's share)
 #include "vk_dlss.h"   // (NVIDIA DLSS Frame Generation: vk_dlss.cpp)
 #include "vk_temporal.h"   // (temporal_wanted: DLSS FG's inputs)
@@ -555,6 +557,33 @@ bool framegen_on() {
     return framegen_wanted(opts.framegen, allow) && !dev.offscreen && !fg.failed;
 }
 
+// (longshot 70d22cf1f) This present gave FSR 3.1 a frame (fsr3fi_frames, right before fsr3fi::generate): its own images were in use, whatever
+// came of it and whichever made frames were shown. framegen_idle takes it, and clears it for the next present: both on the replay
+// thread, framegen_record before framegen_idle in every present
+static bool fsr_given = false;
+
+void framegen_idle(bool recorded) {
+    using namespace framegen_idle_rule;
+    static Counts counts;
+    const bool on = framegen_on();
+    // (FSR's own images by this present's own use of them, not by `recorded`: a set the built-in or DLSS-G made leaves them unused)
+    const bool fsr_used = std::exchange(fsr_given, false);
+    const Release due = step(counts, {on, on && fsr3fi::frames_wanted(), recorded, fsr_used, fg.w != 0});
+    if (due.fsr) fsr3fi::release();
+    if (!due.shared) return;
+    {   // (as ensure_size: the display thread done with the sets, then every queue idle)
+        std::unique_lock lk(fg.mu);
+        fg.cv.wait(lk, [] { return fg.jobs.empty() && !fg.sets[0].busy && !fg.sets[1].busy && !fg.sets[2].busy; });
+    }
+    {
+        std::lock_guard qk(dev.present_mu);
+        device_wait_idle_locked();
+    }
+    const uint64_t mb = ((uint64_t)fg.w * fg.h * 4 * (2 + 3 * (uint64_t)fg.mult)) >> 20;   // (the RGBA8 frames; lumas and flows are small)
+    logf("vk: frame interpolation off: its images (%ux%u, %dx) let go, about %llu MB", fg.w, fg.h, fg.mult, (unsigned long long)mb);
+    drop_size();
+}
+
 int framegen_engine(int* mult, bool* automatic) {
     *mult = 1, *automatic = false;
     if (!framegen_on()) return 0;
@@ -747,6 +776,7 @@ int fsr3fi_frame(VkCommandBuffer cmd, OutSet& set, int cur, uint32_t uw, uint32_
     in.frame_time_ms = f.frame_ms;
     in.reset = f.reset;
     in.sequence = sequence;
+    fsr_given = true;   // (its images in use this present from here, whatever generate makes of it: a reset, none made)
     if (!fsr3fi::generate(cmd, in) || !fsr3fi::made_image()) return 0;
     const VkImageCopy c{{VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, {0, 0, 0}, {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, {0, 0, 0},
                         {uw, uh, 1}};

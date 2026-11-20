@@ -33,6 +33,8 @@ extern const MkwVkHost* host;
 void logf(const char* fmt, ...);
 void queue_flush_locked();   // (vk_replay.cpp, RX_VK_BATCH: held submits out; dev.present_mu held)
 void queue_flush();          // (the same, taking dev.present_mu)
+bool replay_flush_upload(VkCommandBuffer cur);   // (longshot d12ddf69b, vk_replay.cpp: submits, waits on and re-begins the recording's upload command buffer)
+bool upload_chunk_flush(VkCommandBuffer cmd);    // (vk_texture.cpp: replay_flush_upload, and this thread's barrier state for the buffer re-begun in place)
 // (hookshot) held submits out, then vkDeviceWaitIdle with the present queue's lock taken too (dev.present_mu held): the device's
 // every queue is synchronized by the host around it
 void device_wait_idle_locked();
