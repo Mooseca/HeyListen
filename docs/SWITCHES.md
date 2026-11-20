@@ -10,7 +10,7 @@ python -I engine/scripts/list_switches.py
 
 and commit both files. A test (`engine/tests/test_switches_documented.py`) fails when a switch read in the source is missing here or the data file is out of date.
 
-1288 switches: 52 players may be told to use, 344 diagnostic, 892 developer-only; 1086 have a real explanation and 202 are marked `undocumented`.
+1292 switches: 52 players may be told to use, 344 diagnostic, 896 developer-only; 1090 have a real explanation and 202 are marked `undocumented`.
 
 ## How to set a switch
 
@@ -70,7 +70,7 @@ The entries below say what each one does, its values and default, and when it is
 | [Audio](#audio) | 14 | 5 | 9 | 0 |
 | [Input and controllers](#input-and-controllers) | 13 | 1 | 12 | 0 |
 | [Native engine (`HL_*`)](#native-engine-hl_) | 62 | 1 | 22 | 39 |
-| [Host and OS (`HOS_*` and the system's variables)](#host-and-os-hos_-and-the-systems-variables) | 119 | 8 | 0 | 111 |
+| [Host and OS (`HOS_*` and the system's variables)](#host-and-os-hos_-and-the-systems-variables) | 123 | 8 | 0 | 115 |
 | [Telemetry and crash reports](#telemetry-and-crash-reports) | 11 | 0 | 11 | 0 |
 | [Diagnostics and logging](#diagnostics-and-logging) | 277 | 0 | 277 | 0 |
 | [Build and lift time (`A64_*`, `RX_*` and `HOOKSHOT_*` the builder reads)](#build-and-lift-time-a64_-rx_-and-hookshot_-the-builder-reads) | 91 | 0 | 0 | 91 |
@@ -503,7 +503,7 @@ Over the options file: the output resolution (0 2048x1152, 1 2560x1440, 2 3840x2
 
 **When a player would use it:** An ultrawide monitor: `HOS_ASPECT=2.3889` gives the wider 21:9 picture for one run.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_main.c:1715`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_main.c:1718`.
 
 #### `HOS_DPI_UNAWARE` - player
 
@@ -523,7 +523,7 @@ undocumented: host/display.c:111 (in `dpi_aware_thread()`) reads it as an on/off
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_main.c:1739`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_main.c:1742`.
 
 #### `HOS_FS_OVERLAY` - developer
 
@@ -8043,9 +8043,19 @@ HL_STREAM_PAGES=1: which decoded pages still hold the decoder's bytes, and the r
 
 ## Host and OS (`HOS_*` and the system's variables)
 
-119 switches of the Horizon OS layer, the window and the system.
+123 switches of the Horizon OS layer, the window and the system.
 
 ### Frame rate and timing
+
+#### `HOS_FPS_LEDGE` - developer
+
+Link's driven body's target (f_804f5030 on its path for a body driven to a target: host/oot_high_fps.h has why; Longshot d30b9479 by CraftyCorvid). HOS_FPS_LEDGE=0: the game's target.
+
+**Values:** text (`0` named). **Default:** unset.
+
+**When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
+
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hl_high_fps.c:217`.
 
 #### `HOS_FPS_LIMIT` - developer
 
@@ -8056,6 +8066,16 @@ The Frame rate limit for the run, over the row and Unlimited: the rate presented
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
 **Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2466` and 1 more place.
+
+#### `HOS_FPS_LOOP` - developer
+
+A cap of 60 (hos_frame_seconds_bits 0) leaves both as the game has them. HOS_FPS_LOOP=0: the game's, both places.
+
+**Values:** on or off (0, false, off, no and empty are off); the description names `0`. **Default:** off (unset).
+
+**When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
+
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hl_step.c:175`.
 
 #### `HOS_FPS_MAX` - developer
 
@@ -8075,27 +8095,37 @@ The movie's picture and sound follow the clock, so above 60 fps the count ran fp
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hl_step.c:57`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hl_step.c:58`.
 
 #### `HOS_FPS_SOLVER` - developer
 
-Both act only while the host publishes the frame's seconds (hos_frame_seconds_bits: a cap above 60 with the step hooks in). HOS_FPS_SOUND=0: the sound job every frame with the game's step; HOS_FPS_SOLVER=0: the game's solver count (comparisons; HeyListen's, upstream has no switch). HOS_FPS_LOG (set): what they do, every 600 calls.
+HOS_FPS_LEDGE=0 and HOS_FPS_SONG=0 leave the game's. HOS_FPS_SOUND=0: the sound job every frame with the game's step; HOS_FPS_SOLVER=0: the game's solver count (comparisons; HeyListen's, upstream has no switch). HOS_FPS_LOG (set): what they do, every 600 calls.
 
 **Values:** text (`0` named). **Default:** unset.
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hl_high_fps.c:44`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hl_high_fps.c:50`.
+
+#### `HOS_FPS_SONG` - developer
+
+After f_832b7b50 in a song's playback (site 0: f_832b2af0, the song just played; 1: f_832b2dc0, the ocarina's other melody playback): game, its result (bit 0: the note flag is set). Above a cap of 60, bit 0 cleared when the flag was read set before and the sound job has not run since (host/oot_high_fps.h). HOS_FPS_SONG=0: the game's.
+
+**Values:** text (`0` named). **Default:** unset.
+
+**When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
+
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hl_high_fps.c:102`.
 
 #### `HOS_FPS_SOUND` - developer
 
-Both act only while the host publishes the frame's seconds (hos_frame_seconds_bits: a cap above 60 with the step hooks in). HOS_FPS_SOUND=0: the sound job every frame with the game's step; HOS_FPS_SOLVER=0: the game's solver count (comparisons; HeyListen's, upstream has no switch). HOS_FPS_LOG (set): what they do, every 600 calls.
+HOS_FPS_LEDGE=0 and HOS_FPS_SONG=0 leave the game's. HOS_FPS_SOUND=0: the sound job every frame with the game's step; HOS_FPS_SOLVER=0: the game's solver count (comparisons; HeyListen's, upstream has no switch). HOS_FPS_LOG (set): what they do, every 600 calls.
 
 **Values:** text (`0` named). **Default:** unset.
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hl_high_fps.c:40`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hl_high_fps.c:46`.
 
 #### `HOS_FPS_STEP` - developer
 
@@ -8117,15 +8147,25 @@ Both act only while the host publishes the frame's seconds (hos_frame_seconds_bi
 
 **Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/nn_vi.c:326`.
 
-#### `HOS_FPS_WHOLE` - developer
+#### `HOS_FPS_WATER` - developer
 
-A whole hook (HL_WHOLE_HOOK below: the function, its text hash, the register the cut goes into, the guest address the remainder is kept for) is a line nx2/hl_gates.py puts after that cut, making the count hos_frame_whole(key, the amount, the game's count): the amount added to that counter's own remainder and its whole frames handed out (host/frame_whole.h) while the host publishes the frame's seconds; the game's own count, exactly, otherwise and with HOS_FPS_WHOLE=0 (comparisons; HeyListen's, upstream has no switch). A site is added once it is seen to misbehave in game: - f_80a87e50, the pick-up indicator above Link's head (a rupee, a Deku Stick): the count it shows (+864) moves toward the wallet's (+860) by (int)(step * max(distance / 50, 1)) and the indicator fades when they meet.
+The water's ripple simulation's whole substeps (hl_gates' "t8" of the water hook above): the count of its substeps a frame in `times`, game the game's whole frames, which the game multiplies by them. HOS_FPS_WATER=0, or no frame time published, the whole frames (carried while the frame time is published, HOS_FPS_WHOLE) times the substeps, as the game would.
 
 **Values:** on or off (0, false, off, no and empty are off); the description names `0`. **Default:** off (unset).
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hl_step.c:125`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hl_step.c:146`.
+
+#### `HOS_FPS_WHOLE` - developer
+
+The water's ripple simulation's whole substeps (hl_gates' "t8" of the water hook above): the count of its substeps a frame in `times`, game the game's whole frames, which the game multiplies by them. HOS_FPS_WATER=0, or no frame time published, the whole frames (carried while the frame time is published, HOS_FPS_WHOLE) times the substeps, as the game would.
+
+**Values:** on or off (0, false, off, no and empty are off); the description names `0`. **Default:** off (unset).
+
+**When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
+
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hl_step.c:129` and 1 more place.
 
 ### Threads and scheduling
 
@@ -9103,7 +9143,7 @@ Over the options file: Resolution 100% (non-zero: Auto), Game speed Per frame (1
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_main.c:1552`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_main.c:1555`.
 
 #### `HOS_SCAN_DT` - developer
 
@@ -9123,7 +9163,7 @@ HOS_SCAN_DT=<file prefix> (diagnostic): writes every float in guest memory betwe
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_main.c:1738`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_main.c:1741`.
 
 #### `HOS_TEXT_SPEED` - player
 
@@ -9377,7 +9417,7 @@ The game's frame limiter, VRR flags and nominal rate every 300 presents; a CSV l
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hl_high_fps.c:49` and 1 more place.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hl_high_fps.c:55` and 1 more place.
 
 #### `HOS_FS_TRACE` - diagnostic
 
@@ -9667,7 +9707,7 @@ Every Horizon call logged, as `--trace` does.
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_main.c:1669`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_main.c:1672`.
 
 #### `HOS_VCORE_LOG` - diagnostic
 
@@ -12571,7 +12611,7 @@ No look for a newer release at the start.
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `host/hos_main.c:1437`.
+**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `host/hos_main.c:1440`.
 
 #### `HOOKSHOT_OWN_APP` - developer
 

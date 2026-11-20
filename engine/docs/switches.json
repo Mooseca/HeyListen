@@ -2,7 +2,7 @@
  "schema": 1,
  "generated_by": "engine/scripts/list_switches.py",
  "scope": "C, C++ and headers under engine/ (engine/tests and vendored trees other than a64-kit excluded) and the Python the builder, the lifter and the scripts run: getenv, std::getenv, _wgetenv, the code's own env helpers and table-driven reads, and os.environ.",
- "count": 1288,
+ "count": 1292,
  "switches": [
   {
    "name": "A64_DEVIRT",
@@ -2920,7 +2920,7 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 1437
+     "line": 1440
     }
    ],
    "default": "unset",
@@ -3370,7 +3370,7 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 1715
+     "line": 1718
     }
    ],
    "default": "unset",
@@ -3945,7 +3945,7 @@
     },
     {
      "path": "host/hos_main.c",
-     "line": 1544
+     "line": 1547
     }
    ],
    "default": "off (unset)",
@@ -4029,7 +4029,7 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 1739
+     "line": 1742
     }
    ],
    "default": "unset",
@@ -4038,6 +4038,27 @@
    "comment": "(Nx2/oot_native_resolution.py's cached-scale refresh: HOS_FIX_RES=1; #849's fixed-scale patch does it by default).",
    "documented_in": null,
    "source": "comment at host/hos_main.c",
+   "documented": true,
+   "set_via": "In `hookshot_env.txt`, or in the environment.",
+   "use": null
+  },
+  {
+   "name": "HOS_FPS_LEDGE",
+   "area": "host",
+   "group": "Frame rate and timing",
+   "audience": "developer",
+   "files": [
+    {
+     "path": "host/hl_high_fps.c",
+     "line": 217
+    }
+   ],
+   "default": "unset",
+   "values": "text (`0` named)",
+   "explanation": "Link's driven body's target (f_804f5030 on its path for a body driven to a target: host/oot_high_fps.h has why; Longshot d30b9479 by CraftyCorvid). HOS_FPS_LEDGE=0: the game's target.",
+   "comment": "Link's driven body's target (f_804f5030 on its path for a body driven to a target: host/oot_high_fps.h has why; Longshot d30b9479 by CraftyCorvid). HOS_FPS_LEDGE=0: the game's target.",
+   "documented_in": null,
+   "source": "comment at host/hl_high_fps.c",
    "documented": true,
    "set_via": "In `hookshot_env.txt`, or in the environment.",
    "use": null
@@ -4075,7 +4096,7 @@
    "files": [
     {
      "path": "host/hl_high_fps.c",
-     "line": 49
+     "line": 55
     },
     {
      "path": "host/nn_vi.c",
@@ -4088,6 +4109,27 @@
    "comment": "(Hookshot) The frame limiter (f_8042cd20 sleeps to 1 / +0xfc). The engine's adaptive controller writes +0xfc when variable refresh is on (+0x231, f_804fc0f0), any rate from 40 up. HOS_FPS_TARGET=<fps>: that rate kept, 0: left alone; HOS_FPS_LOG=1: what the game asks for, every 300 presents.",
    "documented_in": "development.md",
    "source": "development.md",
+   "documented": true,
+   "set_via": "In `hookshot_env.txt`, or in the environment.",
+   "use": null
+  },
+  {
+   "name": "HOS_FPS_LOOP",
+   "area": "host",
+   "group": "Frame rate and timing",
+   "audience": "developer",
+   "files": [
+    {
+     "path": "host/hl_step.c",
+     "line": 175
+    }
+   ],
+   "default": "off (unset)",
+   "values": "on or off (0, false, off, no and empty are off); the description names `0`",
+   "explanation": "A cap of 60 (hos_frame_seconds_bits 0) leaves both as the game has them. HOS_FPS_LOOP=0: the game's, both places.",
+   "comment": "A cap of 60 (hos_frame_seconds_bits 0) leaves both as the game has them. HOS_FPS_LOOP=0: the game's, both places.",
+   "documented_in": null,
+   "source": "comment at host/hl_step.c",
    "documented": true,
    "set_via": "In `hookshot_env.txt`, or in the environment.",
    "use": null
@@ -4129,7 +4171,7 @@
    "files": [
     {
      "path": "host/hl_step.c",
-     "line": 57
+     "line": 58
     }
    ],
    "default": "off (unset)",
@@ -4150,13 +4192,34 @@
    "files": [
     {
      "path": "host/hl_high_fps.c",
-     "line": 44
+     "line": 50
     }
    ],
    "default": "unset",
    "values": "text (`0` named)",
-   "explanation": "Both act only while the host publishes the frame's seconds (hos_frame_seconds_bits: a cap above 60 with the step hooks in). HOS_FPS_SOUND=0: the sound job every frame with the game's step; HOS_FPS_SOLVER=0: the game's solver count (comparisons; HeyListen's, upstream has no switch). HOS_FPS_LOG (set): what they do, every 600 calls.",
-   "comment": "Both act only while the host publishes the frame's seconds (hos_frame_seconds_bits: a cap above 60 with the step hooks in). HOS_FPS_SOUND=0: the sound job every frame with the game's step; HOS_FPS_SOLVER=0: the game's solver count (comparisons; HeyListen's, upstream has no switch). HOS_FPS_LOG (set): what they do, every 600 calls.",
+   "explanation": "HOS_FPS_LEDGE=0 and HOS_FPS_SONG=0 leave the game's. HOS_FPS_SOUND=0: the sound job every frame with the game's step; HOS_FPS_SOLVER=0: the game's solver count (comparisons; HeyListen's, upstream has no switch). HOS_FPS_LOG (set): what they do, every 600 calls.",
+   "comment": "HOS_FPS_LEDGE=0 and HOS_FPS_SONG=0 leave the game's. HOS_FPS_SOUND=0: the sound job every frame with the game's step; HOS_FPS_SOLVER=0: the game's solver count (comparisons; HeyListen's, upstream has no switch). HOS_FPS_LOG (set): what they do, every 600 calls.",
+   "documented_in": null,
+   "source": "comment at host/hl_high_fps.c",
+   "documented": true,
+   "set_via": "In `hookshot_env.txt`, or in the environment.",
+   "use": null
+  },
+  {
+   "name": "HOS_FPS_SONG",
+   "area": "host",
+   "group": "Frame rate and timing",
+   "audience": "developer",
+   "files": [
+    {
+     "path": "host/hl_high_fps.c",
+     "line": 102
+    }
+   ],
+   "default": "unset",
+   "values": "text (`0` named)",
+   "explanation": "After f_832b7b50 in a song's playback (site 0: f_832b2af0, the song just played; 1: f_832b2dc0, the ocarina's other melody playback): game, its result (bit 0: the note flag is set). Above a cap of 60, bit 0 cleared when the flag was read set before and the sound job has not run since (host/oot_high_fps.h). HOS_FPS_SONG=0: the game's.",
+   "comment": "After f_832b7b50 in a song's playback (site 0: f_832b2af0, the song just played; 1: f_832b2dc0, the ocarina's other melody playback): game, its result (bit 0: the note flag is set). Above a cap of 60, bit 0 cleared when the flag was read set before and the sound job has not run since (host/oot_high_fps.h). HOS_FPS_SONG=0: the game's.",
    "documented_in": null,
    "source": "comment at host/hl_high_fps.c",
    "documented": true,
@@ -4171,13 +4234,13 @@
    "files": [
     {
      "path": "host/hl_high_fps.c",
-     "line": 40
+     "line": 46
     }
    ],
    "default": "unset",
    "values": "text (`0` named)",
-   "explanation": "Both act only while the host publishes the frame's seconds (hos_frame_seconds_bits: a cap above 60 with the step hooks in). HOS_FPS_SOUND=0: the sound job every frame with the game's step; HOS_FPS_SOLVER=0: the game's solver count (comparisons; HeyListen's, upstream has no switch). HOS_FPS_LOG (set): what they do, every 600 calls.",
-   "comment": "Both act only while the host publishes the frame's seconds (hos_frame_seconds_bits: a cap above 60 with the step hooks in). HOS_FPS_SOUND=0: the sound job every frame with the game's step; HOS_FPS_SOLVER=0: the game's solver count (comparisons; HeyListen's, upstream has no switch). HOS_FPS_LOG (set): what they do, every 600 calls.",
+   "explanation": "HOS_FPS_LEDGE=0 and HOS_FPS_SONG=0 leave the game's. HOS_FPS_SOUND=0: the sound job every frame with the game's step; HOS_FPS_SOLVER=0: the game's solver count (comparisons; HeyListen's, upstream has no switch). HOS_FPS_LOG (set): what they do, every 600 calls.",
+   "comment": "HOS_FPS_LEDGE=0 and HOS_FPS_SONG=0 leave the game's. HOS_FPS_SOUND=0: the sound job every frame with the game's step; HOS_FPS_SOLVER=0: the game's solver count (comparisons; HeyListen's, upstream has no switch). HOS_FPS_LOG (set): what they do, every 600 calls.",
    "documented_in": null,
    "source": "comment at host/hl_high_fps.c",
    "documented": true,
@@ -4227,6 +4290,27 @@
    "use": null
   },
   {
+   "name": "HOS_FPS_WATER",
+   "area": "host",
+   "group": "Frame rate and timing",
+   "audience": "developer",
+   "files": [
+    {
+     "path": "host/hl_step.c",
+     "line": 146
+    }
+   ],
+   "default": "off (unset)",
+   "values": "on or off (0, false, off, no and empty are off); the description names `0`",
+   "explanation": "The water's ripple simulation's whole substeps (hl_gates' \"t8\" of the water hook above): the count of its substeps a frame in `times`, game the game's whole frames, which the game multiplies by them. HOS_FPS_WATER=0, or no frame time published, the whole frames (carried while the frame time is published, HOS_FPS_WHOLE) times the substeps, as the game would.",
+   "comment": "The water's ripple simulation's whole substeps (hl_gates' \"t8\" of the water hook above): the count of its substeps a frame in `times`, game the game's whole frames, which the game multiplies by them. HOS_FPS_WATER=0, or no frame time published, the whole frames (carried while the frame time is published, HOS_FPS_WHOLE) times the substeps, as the game would.",
+   "documented_in": null,
+   "source": "comment at host/hl_step.c",
+   "documented": true,
+   "set_via": "In `hookshot_env.txt`, or in the environment.",
+   "use": null
+  },
+  {
    "name": "HOS_FPS_WHOLE",
    "area": "host",
    "group": "Frame rate and timing",
@@ -4234,13 +4318,17 @@
    "files": [
     {
      "path": "host/hl_step.c",
-     "line": 125
+     "line": 129
+    },
+    {
+     "path": "host/hl_step.c",
+     "line": 145
     }
    ],
    "default": "off (unset)",
    "values": "on or off (0, false, off, no and empty are off); the description names `0`",
-   "explanation": "A whole hook (HL_WHOLE_HOOK below: the function, its text hash, the register the cut goes into, the guest address the remainder is kept for) is a line nx2/hl_gates.py puts after that cut, making the count hos_frame_whole(key, the amount, the game's count): the amount added to that counter's own remainder and its whole frames handed out (host/frame_whole.h) while the host publishes the frame's seconds; the game's own count, exactly, otherwise and with HOS_FPS_WHOLE=0 (comparisons; HeyListen's, upstream has no switch). A site is added once it is seen to misbehave in game: - f_80a87e50, the pick-up indicator above Link's head (a rupee, a Deku Stick): the count it shows (+864) moves toward the wallet's (+860) by (int)(step * max(distance / 50, 1)) and the indicator fades when they meet.",
-   "comment": "A whole hook (HL_WHOLE_HOOK below: the function, its text hash, the register the cut goes into, the guest address the remainder is kept for) is a line nx2/hl_gates.py puts after that cut, making the count hos_frame_whole(key, the amount, the game's count): the amount added to that counter's own remainder and its whole frames handed out (host/frame_whole.h) while the host publishes the frame's seconds; the game's own count, exactly, otherwise and with HOS_FPS_WHOLE=0 (comparisons; HeyListen's, upstream has no switch). A site is added once it is seen to misbehave in game: - f_80a87e50, the pick-up indicator above Link's head (a rupee, a Deku Stick): the count it shows (+864) moves toward the wallet's (+860) by (int)(step * max(distance / 50, 1)) and the indicator fades when they meet.",
+   "explanation": "The water's ripple simulation's whole substeps (hl_gates' \"t8\" of the water hook above): the count of its substeps a frame in `times`, game the game's whole frames, which the game multiplies by them. HOS_FPS_WATER=0, or no frame time published, the whole frames (carried while the frame time is published, HOS_FPS_WHOLE) times the substeps, as the game would.",
+   "comment": "The water's ripple simulation's whole substeps (hl_gates' \"t8\" of the water hook above): the count of its substeps a frame in `times`, game the game's whole frames, which the game multiplies by them. HOS_FPS_WATER=0, or no frame time published, the whole frames (carried while the frame time is published, HOS_FPS_WHOLE) times the substeps, as the game would.",
    "documented_in": null,
    "source": "comment at host/hl_step.c",
    "documented": true,
@@ -4632,11 +4720,11 @@
     },
     {
      "path": "host/hos_main.c",
-     "line": 1475
+     "line": 1478
     },
     {
      "path": "host/hos_main.c",
-     "line": 1502
+     "line": 1505
     },
     {
      "path": "host/mkw_glue.c",
@@ -6496,7 +6584,7 @@
     },
     {
      "path": "host/hos_main.c",
-     "line": 1536
+     "line": 1539
     }
    ],
    "default": "unset",
@@ -7192,7 +7280,7 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 1552
+     "line": 1555
     }
    ],
    "default": "unset",
@@ -7397,7 +7485,7 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 1738
+     "line": 1741
     }
    ],
    "default": "off (unset)",
@@ -7912,7 +8000,7 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 1669
+     "line": 1672
     }
    ],
    "default": "off (unset)",
