@@ -791,6 +791,10 @@ void perf_frame_shown() {
     w.upload = dp(PROF_UPLOAD);
     w.memsync = dp(PROF_MEMSYNC);
     w.readback = std::max(0.0, (rb - l_rb) / 1e6);
+    {   // (v0.4.4: the read that waited longest this frame, for the readback hitches' row)
+        char label[64];
+        if (readback_worst_take(label, sizeof label) > 0 && w.readback > 0) w.readback_which = label;
+    }
     w.driver_compile = std::max(0.0, pipe_ms - l_pipe_ms) + std::max(0.0, link_ms - l_link_ms) +
                        std::max(0.0, lib_build_ms - l_lib_ms);
     w.descriptors = dp(PROF_DESC);

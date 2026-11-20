@@ -234,6 +234,44 @@ int main() {
         CHECK("sixteen maps most", pr::kMaxMaps == 16);
     }
 
+    // v0.4.4: the readback and descriptor hitches say what they waited on (hitch_detail's "which"), at most 8 labels a cause
+    {
+        pr::MapTotals m;
+        pr::Waits w;
+        w.readback = 45, w.readback_which = "strict:1040:meter pool 1000";
+        pr::add_frame(m, frame(60, 5, 5, 40, 2), w, 16.7, 16.6);
+        pr::add_frame(m, frame(70, 5, 5, 40, 2), w, 16.7, 16.6);
+        w.readback_which = "rec:2000@80364080";
+        pr::add_frame(m, frame(65, 5, 5, 40, 2), w, 16.7, 16.6);
+        CHECK("readback hitches counted", m.hitch[pr::kReadback] == 3 && m.hitch_detail[pr::kReadback].which.size() == 2);
+        CHECK("by label", m.hitch_detail[pr::kReadback].which.at("strict:1040:meter pool 1000") == 2 &&
+                          m.hitch_detail[pr::kReadback].which.at("rec:2000@80364080") == 1);
+        pr::Waits d;
+        d.descriptors = 30, d.descriptors_which = pr::descriptor_kind(5, 25);
+        pr::add_frame(m, frame(60, 5, 5, 1, 2), d, 16.7, 16.6);
+        CHECK("descriptor hitch by kind", m.hitch[pr::kDescriptors] == 1 && m.hitch_detail[pr::kDescriptors].which.at("pool") == 1);
+        CHECK("kinds", pr::descriptor_kind(25, 5) == "build" && pr::descriptor_kind(5, 25) == "pool");
+        pr::Waits o;   // (a hitch of another cause carries no label even when one was given)
+        o.pipeline = 30, o.readback_which = "gpu:40";
+        pr::add_frame(m, frame(60, 5, 35, 1, 2), o, 16.7, 16.6);
+        CHECK("another cause: no label", m.hitch_detail[pr::kPipelineWait].which.empty());
+        std::map<std::string, pr::MapTotals> maps;
+        maps["Hyrule Field (adult)"] = m;
+        const std::string j = pr::summary_json(pr::Machine{}, false, 1, "Hyrule Field (adult)", nullptr, maps);
+        CHECK("the readback row's which", j.find("\"readback\":{\"count\":3,") != std::string::npos &&
+                                          j.find("\"which\":{\"rec:2000@80364080\":1,\"strict:1040:meter pool 1000\":2}}") != std::string::npos);
+        CHECK("the descriptors row's which", j.find("\"which\":{\"pool\":1}}") != std::string::npos);
+        CHECK("none for pipeline_wait", j.find("\"pipeline_wait\":{\"count\":1,\"ms_sum\":60,\"ms_max\":60,\"load_count\":0,\"load_ms_sum\":0,\"load_ms_max\":0}") != std::string::npos);
+        CHECK("closed", std::count(j.begin(), j.end(), '{') == std::count(j.begin(), j.end(), '}'));
+        pr::HitchDetail many;   // (nine labels: eight kept, the ninth under "other")
+        for (int i = 0; i < 9; i++) pr::note_which(many, "l" + std::to_string(i));
+        pr::note_which(many, "l0");
+        pr::note_which(many, "");
+        CHECK("eight labels and other", many.which.size() == 9 && many.which.at("other") == 1 && many.which.at("l0") == 2);
+        pr::note_which(many, "l9");
+        CHECK("other keeps counting", many.which.size() == 9 && many.which.at("other") == 2);
+    }
+
     // what a frame costs (a player's): well under a microsecond, against a 16.7 ms frame
     {
         pr::MapTotals m;
