@@ -19,6 +19,7 @@
 #include <vector>
 
 #include "dlss_math.h"
+#include "vk_dlss.h"   // (dlss_fg_wanted)
 #include "vk_draw.h"   // (descriptors_disturbed)
 #include "vk_fsr3.h"
 #include "vk_fsr3fi.h"
@@ -208,7 +209,7 @@ VkImageView depth_view(Texture* t) {
 
 } // namespace
 
-bool wanted() { return fsr3_wanted() || fsr3fi::frames_wanted() != 0; }
+bool wanted() { return fsr3_wanted() || fsr3fi::frames_wanted() != 0 || dlss_fg_wanted(); }
 
 void note_scene_draw(const Texture* color0, uint32_t width, uint32_t height, Texture* depth, uint64_t camera,
                      uint64_t camera_size) {
@@ -313,9 +314,15 @@ bool prepare(VkCommandBuffer cmd, Texture* in, VkImageView in_view, Frame& out) 
     const auto t = std::chrono::steady_clock::now();
     Frame f;
     f.color = s.color.view, f.depth = s.depth.view, f.motion = s.motion.view;
+    f.depth_image = s.depth.image, f.motion_image = s.motion.image;
     f.width = rw, f.height = rh;
     dlss_math::jitter_to_pixels(cam.jitter, rw, rh, f.jitter);   // (in render pixels, x right and y down: FSR's, as DLSS's)
     f.camera = camera;
+    std::memcpy(f.projection, projection, sizeof projection);
+    std::memcpy(f.view_projection, cam.current, sizeof f.view_projection);
+    dlss_math::unjitter(f.view_projection, cam.jitter);
+    std::memcpy(f.prev_view_projection, previous, sizeof previous);   // (unjittered above)
+    f.have_prev = motion;
     f.reset = reset;
     f.frame_ms = s.last_time.time_since_epoch().count() && !reset
                      ? (float)std::min(250.0, std::chrono::duration<double, std::milli>(t - s.last_time).count())

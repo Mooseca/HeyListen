@@ -207,7 +207,8 @@ def hook_text():
         hl_gates.apply(str(gen), str(host), quiet=True, skip={first: "some_mod"})
         t = code.read_text(encoding="utf-8")
         check(lines[first] not in t and t.count("= hos_frame_whole(") == len(SITES) - 1, "a patched function was hooked")
-        other = LIFTED.replace("32,32,", "32,31,")   # (another game version's code)
+        other = LIFTED.replace("32,32,", "32,31,0,")   # (another game version's code: longer too, so a filesystem with a
+                                                          #  coarse mtime still reads the file again: hl_gates' stamp)
         code.write_text(other, encoding="utf-8", newline="")
         hl_gates.apply(str(gen), str(host), quiet=True)
         check(code.read_text(encoding="utf-8") == other, "a function whose cut differs was hooked")

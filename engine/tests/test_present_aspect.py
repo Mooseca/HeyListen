@@ -73,7 +73,7 @@ VkImage framegen_scale(int, VkImageView, VkImage, uint32_t, uint32_t, const int*
 void blit_crop_to_rect(int, VkImage src, uint32_t, uint32_t, const int* crop, VkImage, int, PresentRect rect) {
     ++blits; drawn = rect; drawn_crop = crop; drawn_source = src;
 }
-void actual_present(VkImage src, uint32_t sw, uint32_t sh, const int* crop, VkImageView view) {
+void actual_present(VkImage src, uint32_t sw, uint32_t sh, const int* crop, VkImageView view, bool pq) {
     struct { int cmd; } f{1};
     VkImage dst = 2;
 ''' + block + r'''
@@ -84,7 +84,7 @@ void expect(VkImage src, uint32_t sw, uint32_t sh, const int* crop, uint32_t dw,
     logical_aspect = aspect; filtered = filter;
     dev.swap_extent = {dw, dh};
     clears = blits = scales = barriers = hdr_calls = hdr_barriers = 0;
-    actual_present(src, sw, sh, crop, 7);
+    actual_present(src, sw, sh, crop, 7, present_native_pq.load());
     CHECK(blits == 1 && scales == 1);
     CHECK(drawn.x == want.x && drawn.y == want.y && drawn.w == want.w && drawn.h == want.h);
     CHECK(scale_w == want.w && scale_h == want.h);
@@ -124,7 +124,7 @@ int main() {
     // Startup has no game image: one full clear, then the window-sized overlay.
     Host h{aspect_callback}; host = &h; logical_aspect = wide;
     dev.swap_extent = {1600, 1000}; clears = blits = scales = barriers = 0;
-    actual_present(0, 1600, 1000, nullptr, 0);
+    actual_present(0, 1600, 1000, nullptr, 0, false);
     CHECK(clears == 1 && blits == 0 && scales == 0 && barriers == 0);
     std::puts("PASS: host aspect, crop, normal/generated frames, filter targets, bars and restore");
 }

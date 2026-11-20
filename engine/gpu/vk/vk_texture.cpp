@@ -1840,18 +1840,34 @@ void watch_tex(const Texture* tex, const char* what) {
 }
 /// Whether [gpu, gpu + n) is storage the GPU's images rendered last (covered by ranges render targets took), and the
 /// generation from which the CPU's writes would count (0: not the GPU's)
+/// (hookshot, issue 10) The targets' ranges may overlap one another: what they cover is measured as a union, a byte counted once.
+/// Added up range by range, an overlap counted twice could make up for a hole no target ever drew into, and the texture over
+/// that hole was taken for the GPU's and never uploaded.
 uint32_t gpu_owned_since(uint64_t gpu, uint64_t n) {
-    uint64_t covered = 0;
+    const uint64_t lo = gpu, hi = gpu + n;
+    uint64_t covered = 0, done_to = lo;   // (done_to: the bytes below it are counted; the map is in address order)
     uint32_t since = UINT32_MAX;
-    auto it = gpu_owned.upper_bound(gpu);
+    auto it = gpu_owned.upper_bound(lo);
     if (it != gpu_owned.begin()) --it;
-    for (; it != gpu_owned.end() && it->first < gpu + n; ++it) {
-        const uint64_t a = std::max(it->first, gpu), b = std::min(it->second.first, gpu + n);
-        if (b <= a) continue;
-        covered += b - a;
-        since = std::min(since, it->second.second);
+    for (; it != gpu_owned.end() && it->first < hi; ++it) {
+        const uint64_t from = std::max({it->first, lo, done_to}), to = std::min(it->second.first, hi);
+        if (it->second.first > lo && it->first < hi) since = std::min(since, it->second.second);
+        if (to <= from) continue;
+        covered += to - from;
+        done_to = to;
     }
     return covered >= n && since != UINT32_MAX ? std::max(since, 1u) : 0;
+}
+/// (hookshot, issue 10) Whether the GPU can draw into a texture's format at all. A block-compressed one (BC, ETC, ASTC, and the
+/// ASTC textures kept decoded or re-encoded) cannot be a render target, so storage targets used before tells nothing about it:
+/// its texels are the game's, in memory. Taken for the GPU's, such a texture was left empty: the Kokiri Emerald drawn as its
+/// sparkles alone, enemies without their texture on first sight.
+static bool drawable_format(const Texture& t) {
+    if (t.astc || t.bc) return false;
+    const int f = (int)t.format;
+    const bool block = (f >= VK_FORMAT_BC1_RGB_UNORM_BLOCK && f <= VK_FORMAT_ASTC_12x12_SRGB_BLOCK) ||
+                       (f >= VK_FORMAT_ASTC_4x4_SFLOAT_BLOCK && f <= VK_FORMAT_ASTC_12x12_SFLOAT_BLOCK);
+    return !block;
 }
 
 // (hookshot, smoothness) What a frame's uploads cost by the way they went: when a frame's uploads take over 50 ms (the stutters at
@@ -3311,7 +3327,16 @@ Texture* texture_touch(Texture* tex, bool for_sampling) {
     // was unswizzled from that memory: 55 MB for the 3072 x 3072 x 3 shadow map, frame after frame. Not "storage
     // the write watch never saw written": the game fills memory before it makes a pool of it.)
     static const bool upload_all = getenv("RX_VK_UPLOAD_ALL") != nullptr;   // (A/B: such storage uploaded too)
+    // (hookshot, issue 10) only for a format the GPU can draw into (drawable_format above); RX_VK_RT_SKIP_ANY_FORMAT=1: any, as before
+    static const bool any_format = getenv("RX_VK_RT_SKIP_ANY_FORMAT") && atoi(getenv("RX_VK_RT_SKIP_ANY_FORMAT")) != 0;
     uint32_t owned = !tex->uploaded && !upload_all ? gpu_owned_since(tex->gpu, tex->guest_size) : 0;
+    if (owned && !any_format && !drawable_format(*tex)) {
+        static std::atomic<int> logged{0};
+        if (logged.fetch_add(1, std::memory_order_relaxed) < 30)
+            logf("vk: texture #%u %#llx %ux%u NVN %#x is block-compressed: uploaded from memory although render targets used its "
+                 "storage", tex->id, (unsigned long long)tex->gpu, tex->width, tex->height, tex->nvn_format);
+        owned = 0;
+    }
     if (owned && !remade_skip_old()) {   // (one evicted that came from memory: uploaded from it again. Above)
         std::lock_guard lk(from_memory_mu);
         auto e = evicted_from_memory.find(evicted_key(tex->gpu, tex->width, tex->height, tex->nvn_format));

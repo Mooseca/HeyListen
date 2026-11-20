@@ -12,6 +12,7 @@
 #include "vk_loader.h"
 #include "vk_api.h"
 #include "split_count.h"   // (TICK-052)
+#include "present_mode.h"
 
 #if defined(_MSC_VER) && (defined(_M_X64) || defined(_M_IX86))
 #include <intrin.h>
@@ -35,10 +36,26 @@ void queue_flush();          // (the same, taking dev.present_mu)
 // (hookshot) held submits out, then vkDeviceWaitIdle with the present queue's lock taken too (dev.present_mu held): the device's
 // every queue is synchronized by the host around it
 void device_wait_idle_locked();
+/// The display's refresh in mHz, 0 unknown (vk_main.cpp)
+int display_refresh_mhz();
+/// (VRR row) What it comes to now: the row, the fullscreen row, the display's refresh range, RX_VK_FIFO / RX_VK_IMMEDIATE. Cached a
+/// fraction of a second; log says one line for each change (why, mode, cap) and the window's style follows (host/display.c)
+present_mode::VrrState vrr_resolved(bool log);
+/// A number that changes when the V-Sync or VRR rows change what the swapchain should be (present_image makes it again)
+int present_choice_key();
+/// The most the game's frame rate limit may be under VRR (host/nn_vi.c, HL_OPT_VRR_CAP): the refresh - 3; 0 when VRR is off, or
+/// the refresh is not known, or the cap would be under 60
+int vrr_fps_cap();
+/// The gap the display thread keeps between frame generation's presents under VRR (ns), 0: none
+int64_t vrr_min_gap_ns();
 
 struct Device {
     VkInstance instance = VK_NULL_HANDLE;
     const char* present_mode_name = nullptr;   // (the swapchain's: the overlay shows it)
+    unsigned present_modes_offered = 0;        // (present_mode.h Offered bits of the surface; the V-Sync mode row reads them)
+    bool present_modes_known = false;          // (create_swapchain has asked the surface)
+    uint32_t swap_min_images = 0, swap_max_images = 0;   // (its minImageCount/maxImageCount: the V-Sync mode row's clamp)
+    bool vrr_active = false;                   // (present_mode.h vrr_resolve: the VRR row's effect as the swapchain was made)
     VkPhysicalDevice physical = VK_NULL_HANDLE;
     VkPhysicalDeviceProperties props{};
     VkPhysicalDeviceMemoryProperties memory{};
@@ -388,6 +405,9 @@ inline void trace_gpu(uint32_t what, uint64_t guest, uint64_t size, uint64_t poo
     if (host && host->trace_gpu) host->trace_gpu(what, guest, size, pool, value, vk_timeline_completed());
 }
 void vk_timeline_wait(uint64_t v);
+/// (ported from Hookshot 54530a0d) A wait for the timeline to reach v, at most timeout_ms: true when it did. The capture's wait for
+/// its late pages names its own bound (its cap follows the GPU, vk_memory.cpp take_capture); every other caller keeps vk_timeline_wait
+bool vk_timeline_wait_for(uint64_t v, uint32_t timeout_ms);
 void vk_tl_note(const char* what, uint64_t a = 0, uint64_t b = 0);   // (stream R2, vk_replay.cpp: an event of RX_VK_TL's timeline from another file)
 void gpu_tail_note_late(uint64_t v);   // (TICK-057, vk_replay.cpp: a capture waited for v's late pages: the GPU's busy tail before it)
 /// (TICK-060, RX_VK_LATE_DEFER) vk_memory.cpp: the highest late value a pending fix waits for (0: none); the fixes whose value done

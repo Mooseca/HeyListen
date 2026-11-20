@@ -3486,9 +3486,52 @@ bool take_capture(std::unique_ptr<Capture> c, uint64_t value, uint64_t completed
             // (timed apart: the replay thread waits here for the GPU, the more often the fewer pools have a mirror. With
             // RX_VK_MIRROR_MB=1024 on an 8 GB card it was most of a capture's 2.4-3 ms, six submits a frame: Hyrule Field at
             // 35-45 fps instead of 55, issue 995)
+            // (ported from Hookshot 54530a0d, pixl27: "The captures' wait for late pages follows the GPU: no white flashes on
+            // slower cards") Upstream cut this wait at a fixed 20 ms, and a card whose frames take longer than that on the GPU
+            // had nearly every wait the exposure needs cut: the page's copy, made before the write-back landed, was what the
+            // mirror sync put back (the CPU's reset sums over the GPU's light) and the picture flashed white. Here the fixed
+            // cut was 250 ms, which already covers ordinary slow frames; this port makes the cap follow the GPU as upstream
+            // does: the larger of RX_VK_CAPTURE_WAIT_MAX_MS (20 by default; the floor upstream measured) and four times a
+            // running estimate of the long waits (RX_VK_CAPTURE_WAIT_K, 4; from the waits that had to wait: up 0.9 ms when one
+            // takes longer than the estimate, 2 ms when one is cut, down 0.1 ms otherwise), at most 250 ms. So a fast card no
+            // longer blocks up to 250 ms for a few-ms wait, and a slow one raises the cap to what its frames need.
+            // RX_VK_CAPTURE_WAIT_ADAPT=0: the fixed 250 ms this port found (or RX_VK_CAPTURE_WAIT_MAX_MS, when set), as
+            // before this port. A wait that is cut leaves the submit's copy of its late pages in place (and their hashes), as
+            // upstream: re-copying guest memory then is what takes the CPU's reset sums over the GPU's newest light. With
+            // LATE_DEFER on (the default) these waits are
+            // the takes it keeps: a value not yet sent, a late page in a texture's storage, kLateFixMax fixes pending; the
+            // deferred ones already follow the GPU on the fix thread, up to 2 s, with the readers that need them waiting.
+            static const int wait_max_ms = getenv("RX_VK_CAPTURE_WAIT_MAX_MS") ? std::max(0, atoi(getenv("RX_VK_CAPTURE_WAIT_MAX_MS"))) : 20;
+            static const bool adapt = !getenv("RX_VK_CAPTURE_WAIT_ADAPT") || atoi(getenv("RX_VK_CAPTURE_WAIT_ADAPT")) != 0;
+            static const int wait_fixed_ms = getenv("RX_VK_CAPTURE_WAIT_MAX_MS") ? wait_max_ms : 250;   // (this port's fixed cap)
+            static const int64_t k = getenv("RX_VK_CAPTURE_WAIT_K") ? std::clamp<int64_t>(atoi(getenv("RX_VK_CAPTURE_WAIT_K")), 1, 16) : 4;
+            static std::atomic<int64_t> p90_us{(int64_t)wait_max_ms * 500};
+            static std::atomic<int64_t> st_waits{0}, st_cut{0};
+            const int64_t p90 = p90_us.load(std::memory_order_relaxed);
+            const int cap_ms = adapt ? (int)std::clamp<int64_t>(k * p90 / 1000, wait_max_ms, std::max(wait_max_ms, 250)) : wait_fixed_ms;
+            const uint64_t done0 = vk_timeline_completed();
+            const bool must_wait = adapt && done0 < c->late_value;
             const auto tw = std::chrono::steady_clock::now();
-            if (c->late_value > vk_timeline_completed()) gpu_tail_note_late(c->late_value);   // (TICK-057: a real wait)
-            vk_timeline_wait(c->late_value);
+            if (done0 < c->late_value) gpu_tail_note_late(c->late_value);   // (TICK-057: a real wait)
+            bool done = true;
+            if (cap_ms > 0) done = vk_timeline_wait_for(c->late_value, (uint32_t)cap_ms);
+            else vk_timeline_wait(c->late_value);   // (RX_VK_CAPTURE_WAIT_MAX_MS=0: no cap of its own, the wait's 250 ms)
+            if (must_wait) {
+                const int64_t took = done ? std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - tw).count()
+                                          : (int64_t)cap_ms * 1000;
+                if (!done) p90_us.fetch_add(2000, std::memory_order_relaxed);
+                else if (took > p90) p90_us.fetch_add(900, std::memory_order_relaxed);
+                else if (p90_us.fetch_sub(100, std::memory_order_relaxed) < 100) p90_us.store(0, std::memory_order_relaxed);
+                static std::atomic<bool> told{false};   // (once: a card slower than the cap, for the players' logs)
+                if (cap_ms >= 2 * wait_max_ms && !told.exchange(true))
+                    logf("vk: captures' waits for late pages: the cap follows a slower GPU, now %d ms (RX_VK_CAPTURE_WAIT_MAX_MS %d)",
+                         cap_ms, wait_max_ms);
+            }
+            st_cut += !done;
+            if (++st_waits % 1200 == 0)
+                logf("vk: captures' waits for late pages: %lld, %lld of them cut; the cap now %d ms (RX_VK_CAPTURE_WAIT_MAX_MS %d%s, "
+                     "the waits' 90th percentile %.1f ms)", (long long)st_waits.load(), (long long)st_cut.load(), cap_ms,
+                     wait_max_ms, adapt ? "" : ", fixed", p90_us.load() / 1000.0);
             st_tk_late += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - tw).count();
             st_tk_late_n++;
             st_tr_late_ns.fetch_add(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - tw).count(),
@@ -3496,10 +3539,11 @@ bool take_capture(std::unique_ptr<Capture> c, uint64_t value, uint64_t completed
             st_tr_late_n.fetch_add(1, std::memory_order_relaxed);
             uint8_t* const base = (uint8_t*)host->guest_base();
             for (uint32_t i : c->late) {
+                if (!done) continue;   // (a cut wait: the submit's copy and its hashes stay, not guest memory's reset words)
                 guarded_copy((uint8_t*)c->map + (uint64_t)i * 4096, base + ((uint64_t)c->pages[i] << kPageShift), 4096);
                 if (i < c->hok.size()) c->hok[i] = 0;   // (TICK-060: other bytes than the copy hashed)
             }
-            flush_mapped(c->alloc, c->nbytes);
+            if (done) flush_mapped(c->alloc, c->nbytes);
         }
     }
     const auto tl = std::chrono::steady_clock::now();
@@ -7213,8 +7257,9 @@ void memory_end_submission(VkCommandBuffer cmd) {
                 const int64_t f = st_direct_fast.load(), fb = st_direct_fast_bytes.load(), tv = st_import_texel_views.load(),
                               tvb = st_import_texel_bytes.load(), un = st_import_unswizzle_bytes.load();
                 logf("vk: GPU reads of imported guest memory (600 submits, a submit): binds on the lock-free path %.1f (%.2f MB), texel buffer "
-                     "views %.1f (%.2f MB), GPU unswizzles %.2f MB; mirrors %llu MB", (f - l_fast) / 600.0, (fb - l_fastb) / 600.0 / 1048576,
-                     (tv - l_tv) / 600.0, (tvb - l_tvb) / 600.0 / 1048576, (un - l_un) / 600.0 / 1048576, (unsigned long long)(mirror_bytes >> 20));
+                     "views %.1f (%.2f MB; %lld in these 600 submits, %lld so far), GPU unswizzles %.2f MB; mirrors %llu MB",
+                     (f - l_fast) / 600.0, (fb - l_fastb) / 600.0 / 1048576, (tv - l_tv) / 600.0, (tvb - l_tvb) / 600.0 / 1048576,
+                     (long long)(tv - l_tv), (long long)tv, (un - l_un) / 600.0 / 1048576, (unsigned long long)(mirror_bytes >> 20));
                 l_fast = f, l_fastb = fb, l_tv = tv, l_tvb = tvb, l_un = un;
             }
             if (wb_lazy_on()) {

@@ -20,6 +20,7 @@
 
 #include "vk_fsr3fi.h"
 #include "vk_draw.h"   // (extern_guarded_shader_module, extern_guarded_compute)
+#include "vk_framegen.h"   // (framegen_now: the Frame generation row as it runs)
 #include "vk_menu.h"    // (the Frame generation row)
 #include "vk_gprof.h"   // (RX_VK_PASS_TIMING: a span per pass, so the report names them)
 #include "vk_texture.h"
@@ -328,7 +329,7 @@ uint32_t asked() {
         return e && *e ? std::max(0, atoi(e)) : -1;
     }();
     if (env >= 0) return env ? 1u : 0u;
-    return opts.framegen == 2 ? 1u : 0u;
+    return framegen_now() == 2 ? 1u : 0u;   // (as it runs: a saved 4x with AMD FSR 3.1 chosen is its 2x)
 }
 
 /// A memory dependency over the whole queue, in the synchronization2 form this renderer loads.

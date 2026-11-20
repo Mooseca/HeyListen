@@ -7,6 +7,7 @@
 //
 // Pipelines persist in a VkPipelineCache next to the executable (mkw_vk_pipelines.bin).
 #include <algorithm>
+#include <cmath>
 #include <filesystem>
 #include <iterator>
 #include <atomic>
@@ -36,10 +37,12 @@
 #include "vk_paths.h"
 #include "vk_draw.h"
 #include "flat_map.h"
+#include "perf_report.h"   // (zone_note_program / zone_note_state: the per-zone key recorder, once a key per map)
 #include "dlss_actor.h"
 #include "vk_temporal.h"
 #include "vk_fsr3.h"          // (AMD FSR 3.1 in the gameplay upscale's place)
 #include "vk_fsr3_inputs.h"
+#include "vk_hdr_tonemap.h"   // (heylisten: the native HDR mode's tone-mapping pass)
 #include "vk_dump.h"
 #include "vk_gprof.h"
 #include "vk_jobs.h"
@@ -398,6 +401,11 @@ struct RecordingRes {
     uint32_t idle = 0;             // (recordings of the slot that stayed in the first stream)
     // (hookshot: flat (flat_map.h): an unordered_map put a malloc into every c1 upload kept, and a free into the next recording's clear)
     FlatMap<uintptr_t, std::pair<VkBuffer, uint64_t>> c1_at;   // (c1 of a stage, by the stage's address: uploaded once a recording)
+    // (a uniform buffer copied as submitted (RX_VK_UB_SNAPSHOT), by its address and size: the copy serves the recording's later
+    // draws of it while the capture view is the same, as a read then would give the same bytes. RX_VK_UB_SNAPSHOT_REUSE=0: a copy
+    // for every binding. Hookshot a5028dc5, #1795)
+    struct UbSnap { uint64_t addr, n, view; VkBuffer buf; uint64_t at; };
+    std::unordered_map<uint64_t, UbSnap> ub_snap;
 };
 // (a recording's first stream: one for each of the kRecordings slots. RX_VK_STREAM_MB=<n>: that size, 2 by default; a recording
 // that needs more is given a bigger stream for the rest of it (RX_VK_STREAM_GROW_OFF=1: draws are skipped instead, and the default
@@ -1680,6 +1688,7 @@ bool pipe_same(uint64_t prog, uint64_t variant, int topo, uint32_t samples, int 
 struct PipeFast {
     bool on = false;
     PipeEntry* pe = nullptr;
+    uint64_t key = 0;   // (the pipeline's key as it was recorded: the zone recorder's own note of the fast hit)
     uint64_t prog = 0, variant = 0;
     int topo = 0, n = 0, nvattr = 0;
     uint32_t samples = 0, depth = 0, blend_en = 0, chmask = 0, poly = 0, clamp = 0, a2c = 0;
@@ -1857,13 +1866,15 @@ PipeEntry* graphics_pipeline(const Program& p, const NvnState& s, const Targets&
                       f.samples, f.n, f.depth, f.formats, f.nvattr, f.vattr, f.div, f.blend_en, f.blend, f.chmask, f.poly,
                       f.clamp, f.a2c)) {
             FINE_N(FC_PIPE_FAST, 1);
+            zone_note_state(f.key);   // (the fast hit keeps the key of its entry: the set lookup, as on the slow path)
             return f.pe;
         }
-    auto remember = [&](PipeEntry* e) {
+    auto remember = [&](PipeEntry* e, uint64_t pkey) {
         if (!e) return e;
+        zone_note_state(pkey);   // (every slow-path lookup notes the pipeline's key: the set lookup, once a key per map)
         if (!(pipe_fast[0].on && pipe_fast[0].pe == e)) pipe_fast[1] = pipe_fast[0];
         PipeFast& f = pipe_fast[0];
-        f.on = true, f.pe = e, f.prog = (uint64_t)(uintptr_t)&p, f.variant = p.variant, f.topo = topo_c;
+        f.on = true, f.pe = e, f.key = pkey, f.prog = (uint64_t)(uintptr_t)&p, f.variant = p.variant, f.topo = topo_c;
         f.samples = (uint32_t)at.samples, f.n = at.n, f.depth = (uint32_t)at.depth_format, f.nvattr = s.nvattr;
         f.blend_en = blend_en, f.chmask = chmask, f.poly = poly, f.clamp = clamp, f.a2c = a2c;
         std::memcpy(f.formats, formats, sizeof formats);
@@ -1879,11 +1890,12 @@ PipeEntry* graphics_pipeline(const Program& p, const NvnState& s, const Targets&
     // lost near water). Another object with the same key gets a pipeline of its own, under a key of its own (not noted: it holds
     // an address); a thread's map is by key and object too. RX_VK_PIPE_BY_PROGRAM=0: shared by the key alone, as before
     static const bool by_program = [] { const char* e = getenv("RX_VK_PIPE_BY_PROGRAM"); return !(e && env_value_off(e)); }();
-    uint64_t key = pipeline_key(p, s, at, topo);
+    const uint64_t pkey = pipeline_key(p, s, at, topo);   // (the pipeline's key as the notes and the recorder know it)
+    uint64_t key = pkey;
     const uint64_t own = mix(key, (uint64_t)(uintptr_t)&p);
     const uint64_t mkey = by_program ? own : key;   // (a thread's map: by key and object)
     static thread_local FlatMap<uint64_t, PipeEntry*> mine;   // (entries live as long as the cache; hookshot: flat, flat_map.h)
-    if (auto m = mine.find(mkey); m != mine.end()) return FINE_X(FC_PIPE_MAP, 1), remember(m->second);
+    if (auto m = mine.find(mkey); m != mine.end()) return FINE_X(FC_PIPE_MAP, 1), remember(m->second, pkey);
     PROF_EXACT();   // (new to this thread, or new: rare, and a pipeline made can take milliseconds)
     ParLock lk;
     auto it = pipelines.find(key);
@@ -1899,7 +1911,7 @@ PipeEntry* graphics_pipeline(const Program& p, const NvnState& s, const Targets&
             it = pipelines.find(key);
         }
     }
-    if (it != pipelines.end()) return remember(mine[mkey] = it->second.get());
+    if (it != pipelines.end()) return remember(mine[mkey] = it->second.get(), pkey);
     pcache_init();
     PipeEntry* e = pipelines.emplace(key, std::make_unique<PipeEntry>()).first->second.get();
     e->prog.store(&p, std::memory_order_release);
@@ -1908,7 +1920,7 @@ PipeEntry* graphics_pipeline(const Program& p, const NvnState& s, const Targets&
         if (!own_key) pipeline_note(key, p, s, at, topo, color_types);   // (its own key holds an address: nothing to note)
         e->pipeline = build_graphics(p, s, at, topo);
         e->ready = true;
-        return remember(e);
+        return remember(e, pkey);
     }
     // (TICK-008) Nothing of the pipeline is done on this thread: a worker notes it, links it from the libraries when they are on
     // (RX_VK_GPL: the draw goes ahead on the linked pipeline) and builds it whole. A draw that finds it not ready is left out.
@@ -1950,7 +1962,7 @@ PipeEntry* graphics_pipeline(const Program& p, const NvnState& s, const Targets&
             if (job->cold[i])
                 jobs_push([job, i] { gpl_build_cold(*job->p, job->s, job->at, job->topo, i + 1, job->cold[i]); });
     }, false, &e->ready);   // (a draw that waits for it runs it at once if it is still queued: jobs_wait)
-    return remember(e);
+    return remember(e, pkey);
 }
 
 /// part: -1 the whole pipeline, or the graphics pipeline library it stands for: 0 vertex input, 1 pre-rasterization, 2 fragment
@@ -2928,18 +2940,50 @@ VkDescriptorBufferInfo uniform_range(const NvnState& s, const Stage& st, uint32_
                 return {cur->stream, at, n};
             }
         // (RX_VK_UB_SNAPSHOT=1: the contents as they are now, in the stream, not the pool the GPU reads later)
-        static const bool snapshot = getenv("RX_VK_UB_SNAPSHOT") != nullptr;
+        // (on by default on integrated GPUs and on Intel when the pools have no VRAM mirror (vk_memory.cpp mirror_on() off): the
+        // GPU then reads the game's memory itself when it runs the frame, and by then the game has written the next frame's
+        // uniforms over the ones submitted (the per-object matrices are in memory it reuses frame after frame). On Intel the
+        // depth prepass drew the Kokiri ground with other objects' matrices, out of sight: the depth there stayed far, and the
+        // fog pass painted sky over the ground (the white forest on Intel Core Ultra iGPUs and Arc cards: Hookshot #2464,
+        // Longshot #446). On a Steam Deck, bound in place, 1 of 3 starts froze in a conversation (a capture's and a readback's
+        // write-back never came) where 0 of ~25 did with the copy; the copy's cost there is ~1 fps (Hookshot #1795). A mirror
+        // is made at the submission and does not see the rewrite. Discrete GPUs with no mirror (GCN, RX_VK_MIRROR=0) keep the
+        // default off until it is measured there. RX_VK_UB_SNAPSHOT=0: off)
+        static const bool snapshot = [] {
+            const char* e = getenv("RX_VK_UB_SNAPSHOT");
+            const bool on = e ? !env_value_off(e)
+                              : !pools_mirrored() && (dev.props.vendorID == 0x8086 ||
+                                                      dev.props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU);
+            logf("vk: uniform buffers %s (RX_VK_UB_SNAPSHOT=%d)", on ? "copied as submitted" : "bound in place", on ? 1 : 0);
+            return on;
+        }();
         BufferRef b = snapshot ? BufferRef{} : gpu_buffer_bind(u.addr, n, false);
         if (b && b.offset % align == 0) return direct = true, VkDescriptorBufferInfo{b.buffer, b.offset, n};
+        static const bool snap_reuse = [] {   // (unset: on; set, as env_on reads it)
+            const char* e = getenv("RX_VK_UB_SNAPSHOT_REUSE");
+            return !e || !env_value_off(e);
+        }();
+        const uint64_t snap_key = u.addr * 0x9E3779B97F4A7C15ull ^ n;
+        const uint64_t view = snapshot && snap_reuse ? memory_capture_view() : 0;
+        static std::atomic<int64_t> snap_hits{0};
+        if (view) {
+            auto it = cur->ub_snap.find(snap_key);
+            if (it != cur->ub_snap.end() && it->second.addr == u.addr && it->second.n == n && it->second.view == view) {
+                snap_hits.fetch_add(1, std::memory_order_relaxed);
+                return {it->second.buf, it->second.at, n};
+            }
+        }
         const uint64_t at = stream_alloc(n, align);   // (unaligned or outside the pools: copied into the stream)
         if (at == UINT64_MAX) return bi;
         FINE_N(FC_UBO_STREAM, 1);
         // (as the submission had it, not as the game has rewritten it since: the captures' pages)
-        memory_read_as_submitted(u.addr, cur->mapped + at, n);
-        static int64_t copied;
-        if (++copied % 5000 == 1)
-            logf("vk: uniform buffer %#llx +%#llx copied into the stream (%s; %lld so)", (unsigned long long)u.addr,
-                 (unsigned long long)n, b ? "unaligned" : "outside the pools", (long long)copied);
+        // (a copy that could not be read is not kept for the recording's later bindings: each gets its own, as before)
+        if (memory_read_as_submitted(u.addr, cur->mapped + at, n) && view) cur->ub_snap[snap_key] = {u.addr, n, view, cur->stream, at};
+        static std::atomic<int64_t> copied{0};
+        if (copied.fetch_add(1, std::memory_order_relaxed) % 5000 == 0)
+            logf("vk: uniform buffer %#llx +%#llx copied into the stream (%s; %lld so, %lld reused copies)", (unsigned long long)u.addr,
+                 (unsigned long long)n, b ? "unaligned" : "outside the pools", (long long)copied.load(std::memory_order_relaxed),
+                 (long long)snap_hits.load(std::memory_order_relaxed));
         return {cur->stream, at, n};
         };
         const VkDescriptorBufferInfo r = full();
@@ -4465,6 +4509,25 @@ Targets bare_targets(const NvnState& s, Targets at) {
     return at;
 }
 
+/// (hookshot, 17/11, issue 47 and the Discord's striped ground) Whether a draw left out of these targets is drawn again in the next
+/// frames: every target was drawn in the frame before (the scene's own, redrawn each frame) and the draw covers it, its viewport
+/// and scissor over nine tenths of it. Not a part the game draws once into a target it keeps: a tile, a decal, a shadow of a
+/// cache it updates a piece at a time. Left out, such a piece was never drawn again, and that part of the target kept what was
+/// there before until the area was loaded again: rectangular patches of the wrong texels over the ground, a few minutes into a
+/// place never seen in this session (Flix's route in the Fire Temple, every time after a fresh start; logs with draws left out
+/// in all four reports). Those wait for their pipeline instead
+bool targets_redrawn(const Targets& at, const NvnState& s) {
+    const uint64_t now = texture_frame_no();
+    const auto recent = [&](const Texture* t) { return !t || t->last_written + 1 >= now; };
+    for (int i = 0; i < at.n; i++)
+        if (!recent(at.color[i])) return false;
+    if (!recent(at.depth)) return false;
+    if (!at.width || !at.height) return false;
+    const float w = (float)at.width * 0.9f, h = (float)at.height * 0.9f;
+    if (std::fabs(s.viewport[0][2]) < w || std::fabs(s.viewport[0][3]) < h) return false;
+    if (s.scissor[2] > 0 && s.scissor[3] > 0 && ((float)s.scissor[2] < w || (float)s.scissor[3] < h)) return false;
+    return true;
+}
 /// Whether the targets of a draw kept a picture from an earlier frame (a draw left out of them shows for one frame)
 bool targets_persistent(const Targets& at) {
     const uint64_t now = texture_frame_no();
@@ -5189,6 +5252,7 @@ void draw_begin_recording(int slot, VkCommandBuffer cmd, uint64_t value) {
              c1_peak.load(std::memory_order_relaxed));
     r.used = 0, r.before = 0;
     r.c1_at.reset();   // (hookshot: its array kept: emptied at every recording's start, it fills again to about the same size)
+    r.ub_snap.clear();
     cur = &r;
     pass() = Pass{};
     work_since_barrier = false;
@@ -7130,6 +7194,78 @@ bool draw_writes_nothing(const Program& p, const NvnState& s, const Targets& at)
 std::atomic<int64_t> st_occ_proxy_skips{0};
 int64_t occ_proxy_skips() { return st_occ_proxy_skips.load(std::memory_order_relaxed); }
 
+/// (RX_VK_HDR_FIND=1, for finding the game's tone-mapping pass: the first draw of each program that samples a floating-point scene
+/// image (B10G11R11, RGB9E5, RGBA16F) and writes an 8-bit or 10-bit colour image, said once, with its target, what it samples and
+/// the sizes of its uniform buffers. The key and the inputs are all that is kept of it)
+static void hdr_find(const NvnState& s, const Program& p, const Targets& at) {
+    static const bool on = getenv("RX_VK_HDR_FIND") != nullptr;
+    if (!on || p.mesh || !at.n || !at.color[0]) return;
+    const VkFormat f = at.color_format[0];
+    if (f != VK_FORMAT_R8G8B8A8_UNORM && f != VK_FORMAT_R8G8B8A8_SRGB && f != VK_FORMAT_B8G8R8A8_UNORM &&
+        f != VK_FORMAT_B8G8R8A8_SRGB && f != VK_FORMAT_A2B10G10R10_UNORM_PACK32)
+        return;
+    bool scene = false;
+    for (const Texture* t : gfx_sampled())
+        scene |= t->format == VK_FORMAT_B10G11R11_UFLOAT_PACK32 || t->format == VK_FORMAT_E5B9G9R9_UFLOAT_PACK32 ||
+                 t->format == VK_FORMAT_R16G16B16A16_SFLOAT;
+    if (!scene) return;
+    static std::mutex mu;
+    static std::unordered_set<uint64_t> seen;
+    std::lock_guard lk(mu);
+    if (seen.size() >= 64 || !seen.insert(p.key ^ ((uint64_t)f << 56)).second) return;
+    char line[900];
+    int n = snprintf(line, sizeof line, "vk: HDR find: program %016llx (frame %llu) writes %ux%u vk %d (c0 #%u), targets %d, samples",
+                     (unsigned long long)p.key, (unsigned long long)texture_frame_no(), at.width, at.height, (int)f, at.color[0]->id, at.n);
+    for (const Texture* t : gfx_sampled())
+        if (n < 600) n += snprintf(line + n, sizeof line - n, " #%u %ux%u vk %d;", t->id, t->width, t->height, (int)t->format);
+    n += snprintf(line + n, sizeof line - n, " uniform buffers:");
+    for (const Stage& st : p.stages) {
+        const int ns = std::clamp(st.nvn_stage, 0, kNvnStages - 1);
+        for (int i = 0; i < 16 && n < 800; i++)
+            if (s.ubo[ns][i].addr && i + 3 < Shader::Info::MAX_CBUFS && st.info.constant_buffer_used_sizes[i + 3])
+                n += snprintf(line + n, sizeof line - n, " s%d.c%d %#llx+%#llx (used %u);", ns, i + 3, (unsigned long long)s.ubo[ns][i].addr,
+                              (unsigned long long)s.ubo[ns][i].size, (unsigned)st.info.constant_buffer_used_sizes[i + 3]);
+    }
+    logf("%s", line);
+}
+
+/// (heylisten, the HDR row's "Native + our tone mapper") The game's tone-mapping pass, a full-screen draw of its scene image into the
+/// HDR10 window image, done by our own pass (vk_hdr_tonemap.cpp) instead: the same image in, the same one out, the exposure read from
+/// the pass's own uniform buffer. true: it is done and the draw is left out. false: it cannot be (another kind of target, no
+/// pipeline), and the game's pass draws as it would
+static bool hdr_tonemap_draw(VkCommandBuffer cmd, NvnState& s, const Program& p, const Targets& at) {
+    if (p.stages.empty() || p.compute || p.mesh || at.n != 1 || !at.color[0] || at.depth || at.samples != VK_SAMPLE_COUNT_1_BIT ||
+        at.color_format[0] != VK_FORMAT_A2B10G10R10_UNORM_PACK32)
+        return false;
+    const Stage* fs = nullptr;
+    for (const Stage& st : p.stages)
+        if (st.vk_stage == VK_SHADER_STAGE_FRAGMENT_BIT) fs = &st;
+    if (!fs || fs->info.texture_descriptors.empty()) return false;
+    const uint32_t handle = handle_of(s, *fs, fs->info.texture_descriptors[0], 0);
+    Texture* scene = nullptr;
+    const VkImageView scene_view = handle ? texture_view_of(handle, VK_IMAGE_VIEW_TYPE_2D, ViewUse::Sample, VK_FORMAT_UNDEFINED, &scene) : VK_NULL_HANDLE;
+    // (the scene as the game's pass takes it: a float image. Anything else bound first is not our pass's scene, and the
+    // game's draw is kept)
+    if (scene && scene->format != VK_FORMAT_B10G11R11_UFLOAT_PACK32 && scene->format != VK_FORMAT_E5B9G9R9_UFLOAT_PACK32 &&
+        scene->format != VK_FORMAT_R16G16B16A16_SFLOAT)
+        return false;
+    VkFormat out_format = VK_FORMAT_UNDEFINED;
+    const VkImageView out_view = texture_view(at.color[0], s.rt.color[0], s.rt.has_cview[0] ? &s.rt.cview[0] : nullptr, VK_IMAGE_VIEW_TYPE_2D,
+                                              ViewUse::Storage, &out_format, VK_FORMAT_A2B10G10R10_UNORM_PACK32);
+    if (!scene || !scene_view || !out_view || out_format != VK_FORMAT_A2B10G10R10_UNORM_PACK32) return false;
+    const VkDescriptorBufferInfo ubo = uniform_range(s, *fs, 3);
+    end_pass(cmd);
+    full_barrier(cmd);
+    if (!hdr_tonemap_record(cmd, p.key, scene_view, out_view, at.width, at.height, ubo)) return false;
+    full_barrier(cmd);
+    // (no reason to texture_written: it notes a virtual-pool texture's page map, and this is the draw path with no ParLock of
+    // its own — the upscale stand-in's storage writes say nothing either)
+    texture_written(at.color[0]);
+    descriptors_disturbed();   // (the pass's own pushes are gone from the compute bind point)
+    if (dump_on()) dump_image(cmd, at.color[0], at.color_level[0], at.color_layer[0], "hdr tone mapping result");
+    return true;
+}
+
 void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
     Pass& ps = pass();   // (hookshot, once: the accessor is a call and a thread-local read at each use (__tls_get_addr in the shared library). The same object for the thread's life: draw_begin_recording resets it in place)
     if (par_stats_on) par_stats_draw();
@@ -7175,6 +7311,7 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
         ParLock lk(d.mesh);   // (graphics programs: each thread's picks, program_pick's own lock)
         cp = program_for(s, d.mesh ? ProgramKind::Mesh : ProgramKind::Graphics, types);
     }
+    if (cp) zone_note_program(cp->key);   // (the zone recorder's set lookup: on the program pick's own path, once a key per map)
     {   // (hookshot, a test) RX_VK_NO_MESH=1: task / mesh draws left out, to see what they draw; =2: the others left out
         static const int no_mesh = getenv("RX_VK_NO_MESH") ? atoi(getenv("RX_VK_NO_MESH")) : 0;
         if ((no_mesh == 1 && d.mesh) || (no_mesh == 2 && !d.mesh)) return;
@@ -7199,6 +7336,21 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
             if (told++ < 2)
                 logf("vk: draws of program %016llx left out: its targets have no view (RX_VK_SKIP_PROG=- runs them anyway)",
                      (unsigned long long)cp->key);
+            return;
+        }
+        // (hookshot, issues 6 and 7, 2026-11-14) OoT's 2b37a33d189014a8 and 0948a49a3c3068a8: two small box draws (24 indices) into a
+        // half-size HDR target that read the 128 x 72 x 96 volume textures, every frame. On an RTX 5070 Ti the device was lost as
+        // soon as Link entered water, and both of a player's reports named these two as the only draws in flight both times, the
+        // second the last one begun (NV checkpoints, knoch23, v0.6.6). On this RTX 3060 Ti they never hang, but they are wrong
+        // too: in the Market fountain Link's skin, hair and belt came out white (hs2864), and normal without them (hs2865).
+        // Standing in the Market and Kokiri Forest without them, no difference beyond the anti-aliasing's jitter (hs2866 /
+        // hs2867). Left out until what they compute is translated right; RX_VK_FOG_BOXES=1 runs them as before
+        static const bool fog_boxes = getenv("RX_VK_FOG_BOXES") && atoi(getenv("RX_VK_FOG_BOXES")) != 0;
+        if (!fog_boxes && (cp->key == 0x2b37a33d189014a8ull || cp->key == 0x0948a49a3c3068a8ull)) {
+            static std::atomic<int> told{0};
+            if (told++ < 2)
+                logf("vk: draws of program %016llx left out: a GPU hang in water on RTX 50 cards, Link white in water elsewhere "
+                     "(RX_VK_FOG_BOXES=1 runs them)", (unsigned long long)cp->key);
             return;
         }
         // (the list parsed once into key prefixes: it was a snprintf and a string compare on every draw)
@@ -7263,7 +7415,11 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
     // (hookshot: left out by default. Waiting, Ocarina froze 0.2-3 s at each area's first new programs, the most reported stutter;
     // RX_VK_PIPE_SKIP=0: waited for, as mkw-recomp needs)
     static const bool always_wait = getenv("RX_VK_PIPE_SKIP") && atoi(getenv("RX_VK_PIPE_SKIP")) == 0;
-    const bool may_skip = !always_wait && targets_persistent(at);
+    // (hookshot, issue 47: and only where the next frame draws it again, targets_redrawn. RX_VK_SKIP_PARTS=1: as before, any draw
+    // into targets that hold an earlier frame's picture)
+    static const bool skip_parts = getenv("RX_VK_SKIP_PARTS") && atoi(getenv("RX_VK_SKIP_PARTS")) != 0;
+    const bool persistent = targets_persistent(at) && (skip_parts || targets_redrawn(at, s));
+    const bool may_skip = !always_wait && persistent;
     auto wait_for = [&](const std::atomic<bool>& ready, bool shader) {
         PROF_EXACT();
         const auto t0 = std::chrono::steady_clock::now();
@@ -7476,6 +7632,11 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
     PROF_HOT(PROF_CMDS);
     texture_watch_prog(p.key);
     if (!same_desc) gfx_sampled() = draw_sampled();
+    hdr_find(s, p, at);   // (RX_VK_HDR_FIND)
+    if (!d.mesh && hdr_tonemap_wanted() && hdr_tonemap_key(p.key) && hdr_tonemap_draw(cmd, s, p, at)) {   // (heylisten: the HDR row's tone mapper)
+        st_draws++;
+        return;
+    }
     static const bool barrier_every = getenv("RX_VK_BARRIER_EVERY_DRAW") != nullptr;   // (an experiment: a pass each)
     if (barrier_every) end_pass(cmd);
     uint16_t writes;
@@ -9685,6 +9846,45 @@ void compute_optimize(Program& q) {
         logf("vk: compute pipeline of %016llx: optimized in %lld ms, bound from now on", (unsigned long long)q.key, (long long)ms);
 }
 
+/// (RX_VK_HDR_FIND=1: hdr_find's twin for dispatches: a compute program that samples a floating-point scene image and writes an
+/// 8-bit or 10-bit one, said once with the images' sizes and NVN formats and its uniform buffers' sizes)
+static void hdr_find_dispatch(const NvnState& s, uint64_t key) {
+    static const bool on = getenv("RX_VK_HDR_FIND") != nullptr;
+    if (!on) return;
+    uint32_t ntex = 0, nimg = 0;
+    cs_slot_counts(s, &ntex, &nimg);
+    ntex = std::min(ntex, 128u), nimg = std::min(nimg, 32u);
+    char line[900];
+    int n = snprintf(line, sizeof line, "vk: HDR find: compute %016llx (frame %llu) grid %ux%ux%u samples", (unsigned long long)key,
+                     (unsigned long long)texture_frame_no(), s.grid[0], s.grid[1], s.grid[2]);
+    bool scene = false, out = false;
+    auto describe = [&](const char* what, uint64_t h, bool sampled) {
+        nvn_tex t;
+        nvn_view v;
+        bool hv = false;
+        if (!h || !texture_of((int)(h & 0xFFFFF), &t, &v, &hv)) return;
+        const unsigned f = (unsigned)t.d.format;
+        if (sampled) scene |= f == NVN_FORMAT_R11G11B10F || f == NVN_FORMAT_RGB9E5F || f == NVN_FORMAT_RGBA16F;
+        else out |= f == NVN_FORMAT_RGBA8 || f == NVN_FORMAT_RGBA8_SRGB || f == NVN_FORMAT_RGB10A2 || f == NVN_FORMAT_BGRA8 ||
+                    f == NVN_FORMAT_BGRA8_SRGB;
+        if (n < 700)
+            n += snprintf(line + n, sizeof line - n, "%s %#llx %ux%u nvn %#x;", what, (unsigned long long)t.gpu, t.d.width, t.d.height, f);
+    };
+    for (uint32_t i = 0; i < ntex; i++) describe(" tex", s.tex[5][i], true);
+    n += snprintf(line + n, sizeof line - n, " writes");
+    for (uint32_t i = 0; i < nimg; i++) describe(" img", s.img[5][i], false);
+    if (!scene || !out) return;
+    n += snprintf(line + n, sizeof line - n, " uniform buffers:");
+    for (int i = 0; i < 8; i++)
+        if (s.ubo[5][i].addr && n < 840)
+            n += snprintf(line + n, sizeof line - n, " c%d %#llx+%#llx;", i + 3, (unsigned long long)s.ubo[5][i].addr,
+                          (unsigned long long)s.ubo[5][i].size);
+    static std::mutex mu;
+    static std::unordered_set<uint64_t> seen;
+    std::lock_guard lk(mu);
+    if (seen.size() < 64 && seen.insert(key).second) logf("%s", line);
+}
+
 void dispatch(VkCommandBuffer cmd, NvnState& s, uint32_t x, uint32_t y, uint32_t z, uint64_t indirect) {
     if (par_stats_on) par_stats_draw();
     PROF(PROF_DISPATCH);
@@ -9759,6 +9959,7 @@ void dispatch(VkCommandBuffer cmd, NvnState& s, uint32_t x, uint32_t y, uint32_t
     if ((!cp || cp->failed || slow_network) && upscale_stub(cmd, s, compute_code_key(s))) return void(st_dispatches++);
     if (slow_network) SKIP_HERE();   // (an earlier pass of the network: the stub is its last pass)
     if (!cp || !cp->ready.load(std::memory_order_acquire) || cp->failed) SKIP_HERE();
+    hdr_find_dispatch(s, cp->key);   // (RX_VK_HDR_FIND)
     {   // (hookshot, RX_VK_SKIP_PROG=<key prefix,...>: those programs' dispatches left out, for diagnosis)
         static const char* skip = getenv("RX_VK_SKIP_PROG");
         if (skip) {
@@ -10135,6 +10336,7 @@ void draw_stats3(int64_t* pending_skips, int64_t* waits, double* wait_ms) {
     *pending_skips = st_pending_skips, *waits = st_waits, *wait_ms = st_wait_ms;
 }
 double draw_shader_wait_ms() { return st_shader_wait_ms; }
+uint64_t pipeline_state_stamp() { return kStateStamp; }
 bool draw_stats4(int64_t* links, double* link_ms, int64_t* lib_hits, int64_t* lib_cold, int64_t* lib_built, double* lib_build_ms) {
     *links = st_links.load(), *link_ms = st_link_us.load() / 1000.0, *lib_hits = st_lib_hits.load(), *lib_cold = st_lib_cold.load();
     *lib_built = st_lib_built.load(), *lib_build_ms = st_lib_build_us.load() / 1000.0;

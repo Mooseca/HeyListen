@@ -28,6 +28,7 @@ constexpr uint32_t FG_COPY_COMP_SPV[] = {0}, FG_LUMA_COMP_SPV[] = {0}, FG_FLOW_C
                    FG_MEDIAN_COMP_SPV[] = {0}, FG_SYNTH_COMP_SPV[] = {0}, FG_SCALE_COMP_SPV[] = {0};
 /* ACTUAL_STRUCTS */
 int multiplier() { return opts.framegen; }
+int framegen_now() { return opts.framegen; }   /* (vk_framegen.cpp: the Frame generation row as it runs) */
 int display_refresh_mhz() { return 60000; }
 void logf(const char*, ...) {}
 struct Object { char kind; uint64_t parent; };

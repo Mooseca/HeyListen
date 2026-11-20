@@ -61,6 +61,7 @@
 #include "vk_lag.h"   // (RX_VK_LAG_LOG)
 #include "readback_late.h"   // (RX_VK_READBACK_LATE)
 #include "exe_base.h"   // (RX_VK_RB_PROF's call sites: offsets in the exe)
+#include "perf_parts.h"   // (the frame's parts for the performance summary: submit/present scopes, the waits)
 #include "vk_work.h"   // (after the others: counts the commands that do GPU work, for full_barrier)
 
 namespace mkwvk {
@@ -579,8 +580,10 @@ uint64_t vk_timeline_reached() {
     return v;
 }
 int64_t vk_value_submitted_ns(uint64_t v);
-void vk_timeline_wait(uint64_t v) {   // (at most 250 ms: a submission held back behind the caller's thread goes on without it)
-    if (!timeline || completed() >= v) return;
+// (ported from Hookshot 54530a0d) the wait's bound: the capture's late pages name their own (its cap follows the GPU, with
+// RX_VK_CAPTURE_WAIT_ADAPT=0 the 250 ms of vk_timeline_wait, as before)
+bool vk_timeline_wait_for(uint64_t v, uint32_t timeout_ms) {
+    if (!timeline || completed() >= v) return true;
     queue_flush_for(FR_VALUE);
     VkSemaphoreWaitInfo wi{VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO};
     wi.semaphoreCount = 1;
@@ -588,7 +591,7 @@ void vk_timeline_wait(uint64_t v) {   // (at most 250 ms: a submission held back
     wi.pValues = &v;
     const uint64_t done0 = completed();
     const int64_t t0 = std::chrono::steady_clock::now().time_since_epoch().count(), sub = vk_value_submitted_ns(v);
-    const VkResult wres = vkWaitSemaphores(dev.device, &wi, 250000000ull);
+    const VkResult wres = vkWaitSemaphores(dev.device, &wi, (uint64_t)timeout_ms * 1000000ull);
     if (wres == VK_TIMEOUT) {
         static std::atomic<int> logged{0};
         if (logged++ < 8) logf("vk: a capture's wait for write-back %llu timed out (done %llu)", (unsigned long long)v, (unsigned long long)completed());
@@ -616,6 +619,10 @@ void vk_timeline_wait(uint64_t v) {   // (at most 250 ms: a submission held back
             unsub = wait_ns = max_ns = gpu_had_ns = ahead = 0;
         }
     }
+    return wres == VK_SUCCESS;
+}
+void vk_timeline_wait(uint64_t v) {   // (at most 250 ms: a submission held back behind the caller's thread goes on without it)
+    (void)vk_timeline_wait_for(v, 250);
 }
 namespace {
 
@@ -967,7 +974,10 @@ Recording& begin_recording(uint64_t value) {
     if (r.value) {
         PROF(PROF_SLOTWAIT);
         const auto t0 = std::chrono::steady_clock::now();
-        recording_wait(r);
+        {   // (a wait for the GPU behind: the summary's gpu_wait part, on this thread)
+            perf_parts::Scope perf_wait(perf_parts::t_wait);
+            recording_wait(r);
+        }
         st_wait_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - t0).count();
         gpu_time_collect(r);
         gprof_collect(r.slot);
@@ -4654,6 +4664,10 @@ RbScope::~RbScope() {
     rb_prof_from = presents_now;
     rb_prof_next = presents_now + 300;
 }
+// (heylisten) the read-backs' waits for the GPU, all threads, since the game started (perf_report.cpp reads the delta a
+// frame: the summary's readback cause and its gpu_wait part). The wait the CPU pays for its reads of GPU results — the
+// exposure meter's page is the one a frame always waits for — was measured only into the log's counters before
+std::atomic<int64_t> st_rb_wait_ns{0};
 void invalidate(uint64_t gpu, uint64_t size) {
     static const bool rb_prof = getenv("RX_VK_RB_PROF") != nullptr || getenv("RX_VK_TL") != nullptr || getenv("RX_VK_TL_S") != nullptr;
     RbScope rbs(rb_prof, gpu, size);
@@ -4782,6 +4796,7 @@ void invalidate(uint64_t gpu, uint64_t size) {
                 waited++;
                 const int64_t d = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - w0).count();
                 ns += d;
+                st_rb_wait_ns.fetch_add(d, std::memory_order_relaxed);
                 static const bool log_each = getenv("RX_VK_LOG_READBACK_WAITS") != nullptr;
                 static std::atomic<int> logged{0};
                 if (log_each && presents_now > 4000 && logged++ < 300)
@@ -5194,6 +5209,15 @@ bool write_png(const char* path, const uint8_t* rgba, uint32_t w, uint32_t h) {
 // (do_present: the game's picture is already HDR10, Native HDR taken. Read by present_image, and by vk_fsr4.cpp, whose context is
 // made for HDR colour while it is)
 std::atomic<bool> present_native_pq{false};
+/// (RX_VK_HDR_FORCE=1, for a PC with no HDR display: the game is told its display is HDR10 although the swapchain is SDR, so its
+/// own HDR path runs and can be looked at in the dumps and the shots; what the window shows is then not meant to look right)
+bool hdr_forced() {
+    static const bool on = getenv("RX_VK_HDR_FORCE") && atoi(getenv("RX_VK_HDR_FORCE")) != 0;
+    return on;
+}
+/// Whether the game is told it has an HDR10 display and its PQ picture is taken as it is (the HDR row on Native, or on our
+/// tone mapper: vk_hdr_tonemap.cpp's extern of this is why it is out of the unnamed namespace)
+bool hdr_game_native() { return (dev.hdr || hdr_forced()) && opts.hdr >= 2; }
 
 namespace {
 
@@ -5553,7 +5577,7 @@ void do_present(const nvn_tex* t, const int crop[4]) {
         if (tex) src = tex->image, sw = tex->width, sh = tex->height;
         // (the Insert menu's HDR set to Native: the game, told its display is HDR10, presents PQ codes in RGB10A2 (vk
         // A2B10G10R10); that picture goes to the HDR10 swapchain as it is, not through the SDR-to-HDR pass)
-        present_native_pq.store(tex && dev.hdr && opts.hdr == 2 && tex->format == VK_FORMAT_A2B10G10R10_UNORM_PACK32,
+        present_native_pq.store(tex && hdr_game_native() && tex->format == VK_FORMAT_A2B10G10R10_UNORM_PACK32,
                                 std::memory_order_relaxed);
         if (tex && !dev.offscreen && (opts.upscale || opts.sharpness || dev.hdr)) {
             // Keep the sampled view with the same cached image as the direct present, before advancing its age.
@@ -5861,7 +5885,7 @@ void do_present(const nvn_tex* t, const int crop[4]) {
         log_frame_stats();
     }
     if (dev.offscreen || interpolated) return;
-    present_image(src, sw, sh, crop, direct_view);
+    present_image(src, sw, sh, crop, direct_view, present_native_pq.load(std::memory_order_relaxed));
 }
 
 } // namespace
@@ -6055,13 +6079,19 @@ std::atomic<uint32_t> present_kind{0};   // (vk_framegen.cpp: 1 while a made fra
 // for the submit and the present. Held over vkAcquireNextImageKHR and the fence, it stopped the replay's submits for as long as
 // the swapchain had no image free, twice a frame with frame interpolation.
 std::mutex present_image_mu;
-void present_image(VkImage src, uint32_t sw, uint32_t sh, const int crop[4], VkImageView view) {
+void present_image(VkImage src, uint32_t sw, uint32_t sh, const int crop[4], VkImageView view, bool pq) {
     std::lock_guard lk(present_image_mu);
-    static int hdr_was = -1;   // (the Insert menu's HDR as the swapchain was made for it; -1: not yet looked at)
-    const bool hdr_changed = hdr_was >= 0 && hdr_was != opts.hdr;   // (turned on or off: the swapchain's format)
-    if (hdr_was < 0) hdr_was = opts.hdr;
+    static int hdr_was = -1;   // (the Insert menu's HDR, on or off, as the swapchain was made for it; -1: not yet looked at)
+    // (only on or off is the swapchain's format: Expanded to Native, or to our tone mapper, keeps it, and the picture does not go
+    // through a new swapchain for it)
+    const bool hdr_changed = hdr_was >= 0 && hdr_was != (opts.hdr != 0);
+    if (hdr_was < 0) hdr_was = opts.hdr != 0;
+    static int present_was = -1;   // (the V-Sync, V-Sync mode and VRR rows as the swapchain was made for them: present_choice_key)
+    const int present_now = present_choice_key();
+    const bool present_changed = present_was >= 0 && present_was != present_now;
+    if (present_was < 0) present_was = present_now;
     const uint64_t want = dev.swap_resize.exchange(0, std::memory_order_acquire);
-    if (want || !dev.swapchain || reflex_swapchain_stale() || hdr_changed) {   // (resized, gone, Reflex or HDR changed)
+    if (want || !dev.swapchain || reflex_swapchain_stale() || hdr_changed || present_changed) {   // (resized, gone, Reflex, HDR, V-Sync or VRR changed)
         std::lock_guard qk(dev.present_mu);
         const uint32_t width = want ? (uint32_t)(want >> 32) : dev.swap_extent.width;
         const uint32_t height = want ? (uint32_t)want : dev.swap_extent.height;
@@ -6075,7 +6105,8 @@ void present_image(VkImage src, uint32_t sw, uint32_t sh, const int crop[4], VkI
                                                    std::memory_order_release, std::memory_order_relaxed);
             return;   // (the old swapchain may already be retired; do not acquire or reset a frame fence)
         }
-        hdr_was = opts.hdr;
+        hdr_was = opts.hdr != 0;
+        present_was = present_now;
     }
     if (src) {   // (the Window scaling filter's row: whether the window is the picture's size. Only the game's frames and the
                  // made ones: the start-up screen (no src) is drawn at the window's own size, which made the row read "Not
@@ -6088,7 +6119,10 @@ void present_image(VkImage src, uint32_t sw, uint32_t sh, const int crop[4], VkI
     Frame& f = frames[frame_index];
     const int log_slot = frame_index;
     frame_index = (frame_index + 1) % 3;
-    vkWaitForFences(dev.device, 1, &f.done, VK_TRUE, UINT64_MAX);
+    {   // (the previous present's blit, waited for: the swapchain's block, the summary's present cause)
+        perf_parts::Scope perf_wait(perf_parts::t_present);
+        vkWaitForFences(dev.device, 1, &f.done, VK_TRUE, UINT64_MAX);
+    }
     framelog_collect(log_slot);
     uint32_t index = 0;
 #ifdef _WIN32
@@ -6102,10 +6136,15 @@ void present_image(VkImage src, uint32_t sw, uint32_t sh, const int crop[4], VkI
     const uint64_t acquire_timeout = unseen ? 0 : 100000000ull;
 #endif
     const bool acq_fence = acquire_fence_on() && f.acq;
-    VkResult res = vkAcquireNextImageKHR(dev.device, dev.swapchain, acquire_timeout, acq_fence ? VK_NULL_HANDLE : f.acquired,
-                                         acq_fence ? f.acq : VK_NULL_HANDLE, &index);
+    VkResult res;
+    {   // (an image free from the swapchain: the display queue's wait, the summary's present cause)
+        perf_parts::Scope perf_wait(perf_parts::t_present);
+        res = vkAcquireNextImageKHR(dev.device, dev.swapchain, acquire_timeout, acq_fence ? VK_NULL_HANDLE : f.acquired,
+                                    acq_fence ? f.acq : VK_NULL_HANDLE, &index);
+    }
     if (acq_fence && (res == VK_SUCCESS || res == VK_SUBOPTIMAL_KHR)) {   // (the image free: waited for here, not on the queue)
         const auto t0 = std::chrono::steady_clock::now();
+        perf_parts::Scope perf_wait(perf_parts::t_present);
         vkWaitForFences(dev.device, 1, &f.acq, VK_TRUE, UINT64_MAX);
         vkResetFences(dev.device, 1, &f.acq);
         const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
@@ -6196,7 +6235,7 @@ void present_image(VkImage src, uint32_t sw, uint32_t sh, const int crop[4], VkI
     }
     const VkImage scaled = src && view ? framegen_scale(f.cmd, view, src, sw, sh, crop, rect.w, rect.h) : VK_NULL_HANDLE;
     // (hookshot) the Insert menu's HDR: the picture (scaled, or the game's own with its crop) to HDR10, copied in as the SDR one is
-    const VkImage hdr_image = dev.hdr && src && view && !present_native_pq.load(std::memory_order_relaxed)
+    const VkImage hdr_image = dev.hdr && src && view && !pq
         ? (scaled ? framegen_hdr(f.cmd, framegen_scaled_view(), rect.w, rect.h, nullptr, rect.w, rect.h)
                   : framegen_hdr(f.cmd, view, sw, sh, crop, rect.w, rect.h))
         : VK_NULL_HANDLE;
@@ -6321,12 +6360,15 @@ void present_image(VkImage src, uint32_t sw, uint32_t sh, const int crop[4], VkI
     // ~15% to submit. With a queue of their own (dev.present_queue, a compute family's: vk_main.cpp create_device) the presents go
     // out with the submits' lock let go: the blit above signals swap_rendered on the replay's queue (submitted already, as a binary
     // semaphore's wait needs). (Waiting for the blit's fence before the present, with the lock let go, was worse.)
-    if (dev.present_queue) {
-        qk.unlock();
-        std::lock_guard pq(dev.present_queue_mu);
-        res = vkQueuePresentKHR(dev.present_queue, &pi);
-    } else {
-        res = vkQueuePresentKHR(dev.queue, &pi);
+    {   // (the present call itself, which can hold the presenting thread: the summary's present cause)
+        perf_parts::Scope perf_wait(perf_parts::t_present);
+        if (dev.present_queue) {
+            qk.unlock();
+            std::lock_guard pq(dev.present_queue_mu);
+            res = vkQueuePresentKHR(dev.present_queue, &pi);
+        } else {
+            res = vkQueuePresentKHR(dev.queue, &pi);
+        }
     }
     reflex_presented();
     if (res == VK_ERROR_DEVICE_LOST) device_lost();   // (on the presents' own queue this is the first place a lost device shows)
@@ -6527,12 +6569,15 @@ void replay_thread_main() {
         int64_t d0 = 0, x;
         if (timeline) draw_stats(&d0, &x, &x, &x);
         switch (j.kind) {
-        case JOB_SUBMIT: submit_job(j.handles, j.value, j.queue); break;
+        case JOB_SUBMIT:   // (RX_VK_ASYNC=1: the replay thread's work is its own render part)
+            { perf_parts::Scope perf_entry(perf_parts::t_render); submit_job(j.handles, j.value, j.queue); } break;
         case JOB_PRESENT:   // (the frame's work whole before it is shown)
+        {
+            perf_parts::Scope perf_entry(perf_parts::t_render);
             drain(0);
             present_value = j.value;
             do_present(j.has_tex ? &j.tex : nullptr, j.has_crop ? j.crop : nullptr);
-            break;
+        } break;
         case JOB_TEXTURE_RELEASED:   // (after the stopped work that may use it)
             drain(1);
             do_texture_released(&j.tex);
@@ -6642,6 +6687,7 @@ bool replay_behind() {
 
 std::mutex submit_order_mu;   // (captures and submits queued in the same order)
 void submit_q(const uint64_t* handles, int n, uint64_t queue) {
+    perf_parts::Scope perf_entry(perf_parts::t_render);   // (the renderer's entry on this thread: the summary's render part)
     tl_ev("submit+", queue, n);
     struct TlSub { ~TlSub() { tl_ev("submit-"); } } tl_sub;
     if (!async_on()) {
@@ -6696,6 +6742,7 @@ void submit(const uint64_t* handles, int n) {
     submit_q(handles, n, 0);
 }
 void present(const nvn_tex* t, const int crop[4]) {
+    perf_parts::Scope perf_entry(perf_parts::t_render);   // (the renderer's entry on this thread: the summary's render part)
     tl_at_present(presents_now);
     tl_ev("present+");
     struct TlPres { ~TlPres() { tl_ev("present-"); } } tl_pres;
@@ -6942,15 +6989,17 @@ void fill_replay_table(MkwVkRenderer& t) {
         if (id == HOS_OPT_CHEAT_FLIGHT) return menu_player_flight();
         if (id == HOS_OPT_CHEAT_ACTION) return menu_take_cheat_action();
         if (id == HOS_OPT_CHEAT_CAMERA) return menu_free_camera();
-        if (id == HOS_OPT_HDR_NATIVE) return dev.hdr && opts.hdr == 2;
+        if (id == HOS_OPT_HDR_NATIVE) return hdr_game_native();
         if (id == HOS_OPT_HDR_PEAK) return std::clamp(opts.hdr_peak, 400, 10000);
         if (id == HOS_OPT_HDR_WHITE) return std::clamp(opts.hdr_white, 80, 500);
         if (id == HOS_OPT_DISCORD) return opts.discord != 0;
         if (id == HL_OPT_SKIP_TITLE) return opts.skip_title != 0;
+        if (id == HL_OPT_HUD_LAYOUT) return opts.hud_layout;
+        if (id == HL_OPT_VSYNC_MODE) return opts.vsync_mode;
         return id == 0 ? opts.realtime : id == 1 ? menu_is_open() : id == 2 ? resolution_auto() && !temporal_full_scale() : id == 3 ? (temporal_full_scale() ? 10000 : resolution_scale()) : id == 4 ? opts.pad_background : id == 5 ? opts.text_speed : id == 6 ? opts.mouse_native :
                id == 7 ? opts.mouse_sens : id == 8 ? opts.mouse_invert : id == 9 ? opts.rumble : id == 16 ? opts.invert_cam_x : id == 17 ? opts.invert_cam_y : id == HOS_OPT_GYRO ? opts.gyro : id == HOS_OPT_GYRO_SENS_X ? opts.gyro_sens_x : id == HOS_OPT_GYRO_SENS_Y ? opts.gyro_sens_y : id == HOS_OPT_GYRO_INV_X ? opts.gyro_inv_x : id == HOS_OPT_GYRO_INV_Y ? opts.gyro_inv_y : id == HOS_OPT_GYRO_DEADZONE ? opts.gyro_deadzone :
                id == HOS_OPT_DLSS_JITTER_W || id == HOS_OPT_DLSS_JITTER_H || id == HOS_OPT_DLSS_JITTER_PHASES ? jitter_option(id) :
-               id == HL_OPT_FPS_LIMIT ? (opts.fps_limit == 1 ? 90 : opts.fps_limit == 2 ? 120 : opts.fps_limit == 3 ? 144 : opts.fps_limit == 4 ? 165 : opts.fps_limit == 5 ? 240 : 60) : 0;   // (HeyListen: the frame rate limit, host/nn_vi.c; vk_opt_ids.h)
+               id == HL_OPT_FPS_LIMIT ? menu_fps_limit() : id == HL_OPT_FRAMEGEN_MULT ? (framegen_on() && framegen_now() >= 2 ? framegen_now() : 1) : id == HL_OPT_VRR_CAP ? vrr_fps_cap() : 0;   // (HeyListen: the frame rate limit, the multiplier it is shared with and the VRR row's cap, host/nn_vi.c; vk_opt_ids.h)
     };
     t.option_set = menu_option_set;
     t.nvn_register_sampler = register_sampler_queued;
@@ -7139,5 +7188,9 @@ bool replay_tex_storage_in(uint64_t gpu, uint64_t size) { return tex_pages_any(g
 
 /// (heylisten) the GPU's own time so far, ns (the performance summary's per-frame GPU time, perf_report.cpp)
 int64_t gpu_time_ns() { return st_gpu_ns; }
+
+/// (heylisten) the read-backs' waits for the GPU so far, ns (the summary's readback cause and its gpu_wait part,
+/// perf_report.cpp): the CPU reads of GPU results waiting for their write-back, invalidate above
+int64_t readback_wait_ns() { return st_rb_wait_ns.load(std::memory_order_relaxed); }
 
 } // namespace mkwvk

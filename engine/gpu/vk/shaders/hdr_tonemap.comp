@@ -1,0 +1,75 @@
+#version 450
+// (heylisten) The native HDR mode (the HDR row's "Native + our tone mapper"): the game's final scene image, linear light with
+// values above 1 where its own curve leaves them, to HDR10 (PQ, Rec. 2020) for the window image — in the game's own
+// tone-mapping pass's place (vk_hdr_tonemap.cpp). The pass's own constants are kept as they are: its colour matrix, Rec. 709
+// in and Rec. 2020 nits out, the display's white (the paper white the game was told, and whatever else its CPU folds into it,
+// its exposure) baked in — so under our curve's knee the picture is the game's own native HDR, and only the light above it
+// differs: ITU-R BT.2390's EETF (the Hermite roll-off) takes it to the peak brightness instead of running past what the
+// display shows. The saturation is the player's, and a highlight that would pass PQ's ceiling is desaturated to the light it
+// kept rather than clipped.
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(binding = 0) uniform sampler2D scene;
+layout(binding = 1, rgb10_a2) uniform writeonly image2D dst;
+// the game's own constants for the pass, its fragment stage's c3 as it bound it (0x150 bytes; only the colour matrix is
+// ours to read: nine words at +0x120..+0x148, the same ones its shader takes the colour through)
+layout(std140, binding = 2) uniform Game {
+    vec4 words[21];
+} game;
+layout(push_constant) uniform P {
+    float peak;         // peak brightness, nits (the brightest highlight)
+    float saturation;   // the colour's saturation, 1 as the scene has it
+    float pad0, pad1;
+} pc;
+
+vec3 pq(vec3 nits) {
+    const float m1 = 0.1593017578125, m2 = 78.84375, c1 = 0.8359375, c2 = 18.8515625, c3 = 18.6875;
+    const vec3 l = pow(clamp(nits / 10000.0, 0.0, 1.0), vec3(m1));
+    return pow((c1 + c2 * l) / (1.0 + c3 * l), vec3(m2));
+}
+float pq_enc(float nits) {
+    const float m1 = 0.1593017578125, m2 = 78.84375, c1 = 0.8359375, c2 = 18.8515625, c3 = 18.6875;
+    const float l = pow(clamp(nits / 10000.0, 0.0, 1.0), m1);
+    return pow((c1 + c2 * l) / (1.0 + c3 * l), m2);
+}
+float pq_dec(float e) {
+    const float m1 = 0.1593017578125, m2 = 78.84375, c1 = 0.8359375, c2 = 18.8515625, c3 = 18.6875;
+    const float p = pow(clamp(e, 0.0, 1.0), 1.0 / m2);
+    return 10000.0 * pow(max(p - c1, 0.0) / (c2 - c3 * p), 1.0 / m1);
+}
+// BT.2390-3 annex 5.4, the EETF: nits over a source of 10000 to a display of pc.peak nits (black 0), the light under the
+// knee as it is and a Hermite spline above it to the peak. The denominator is guarded: a peak at PQ's ceiling makes the
+// knee 1, and a light at the ceiling would make the slope 0/0
+float eetf(float nits) {
+    const float e1 = pq_enc(nits);
+    const float max_lum = pq_enc(pc.peak);
+    const float ks = 1.5 * max_lum - 0.5;
+    const float t = clamp((e1 - ks) / max(1.0 - ks, 1e-6), 0.0, 1.0);
+    const float t2 = t * t, t3 = t2 * t;
+    const float p = (2.0 * t3 - 3.0 * t2 + 1.0) * ks + (t3 - 2.0 * t2 + t) * (1.0 - ks) + (-2.0 * t3 + 3.0 * t2) * max_lum;
+    return pq_dec(mix(e1, p, step(ks, e1)));
+}
+
+void main() {
+    const ivec2 size = imageSize(dst);
+    const ivec2 at = ivec2(gl_GlobalInvocationID.xy);
+    if (at.x >= size.x || at.y >= size.y) return;
+    vec3 c = textureLod(scene, (vec2(at) + 0.5) / vec2(size), 0.0).rgb;
+    c = mix(vec3(0.0), c, greaterThanEqual(c, vec3(0.0)));   // (clamped at 0; a NaN channel, none should reach here,
+                                                              // would flare: read as 0, the engine guards the game's writes)
+    // the game's colour matrix, as its own pass takes the colour through it: Rec. 709 in, Rec. 2020 nits out
+    const vec3 m_r = game.words[0x130 / 16].xyz, m_g = game.words[0x120 / 16].xyz, m_b = game.words[0x140 / 16].xyz;
+    vec3 nits = vec3(dot(m_r, c), dot(m_g, c), dot(m_b, c));
+    nits = mix(vec3(0.0), nits, greaterThanEqual(nits, vec3(0.0)));   // (the matrix's light at 0, a stray NaN as 0)
+    // the tone curve, on the luminance: the game's own light as it is under the knee, above it rolled off to the peak
+    const float y = dot(nits, vec3(0.2627, 0.6780, 0.0593));   // Rec. 2020's luminance weights
+    const float out_y = eetf(y);
+    const float scale = out_y / max(y, 1e-6);
+    nits *= scale;
+    // the player's saturation, the luminance kept
+    nits = mix(vec3(out_y), nits, pc.saturation);
+    // a channel that would pass PQ's ceiling (10000 nits): desaturated to the light it kept, so the hue holds
+    const float mx = max(nits.r, max(nits.g, nits.b));
+    const float over = clamp((mx - 10000.0) / max(10000.0 - out_y, 1e-3), 0.0, 1.0);
+    nits = mix(nits, vec3(out_y), over);
+    imageStore(dst, at, vec4(pq(nits), 1.0));
+}
