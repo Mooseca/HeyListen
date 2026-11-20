@@ -50,6 +50,7 @@
 #include "vk_perf.h"
 #include "segment_plan.h"   // (TICK-050: the parallel replay's segment count)
 #include "vk_jobs.h"
+#include "storm_hold.h"
 #include "vk_shader.h"
 #include "vk_state.h"
 #include "vk_texture.h"
@@ -5588,6 +5589,15 @@ std::shared_ptr<std::vector<uint8_t>> shot_pixels(uint64_t at_value, int64_t at_
 }
 void do_present(const nvn_tex* t, const int crop[4]) {
     static PendingShot pending;
+    // (hookshot) The storm hold's one tick a present (storm_hold.h), before this frame is drawn or shown: the present's
+    // number is the game's frame clock (texture_frame_no, one a present), and noting it here keeps the jobs' quiet clock
+    // running whether the frames are drawn or their draws are held out. present_held: the hold latches and it is the
+    // presents that it withholds (the default; RX_VK_STORM_HOLD_PRESENT=0 holds the draws instead).
+    const uint64_t storm_frame = texture_frame_no();
+    jobs_frame_note(storm_frame);
+    storm_hold_tick(jobs_pending(), (int64_t)jobs_last_push_age_frames(), storm_frame);
+    const bool present_held = storm_hold_presents_held();
+
     // (hookshot) NVIDIA Reflex (vk_reflex.cpp): this frame's simulation ended, its submission starts; on the way out (after the
     // present) the driver's sleep until the next frame should begin
     temporal_idle();   // (DLSS, FSR: their video memory let go once not used for a while)
@@ -5711,6 +5721,10 @@ void do_present(const nvn_tex* t, const int crop[4]) {
                 struct stat sb;
                 shot = stat(shot_go, &sb) == 0;
             }
+            // (the storm hold's present: this frame is drawn but not shown — present_image() shows nothing and the
+            // compositor keeps the last picture — so it is not written as a shot. The shots stay what went to the screen,
+            // and an acceptance counts only what a player saw)
+            if (present_held) shot = false;
             // (RX_VK_SHOT_MENU=1, a debug aid: without a window the Insert menu is neither ticked nor drawn; this ticks it
             // at each present and draws it into the shots, for pictures of it from a headless run)
             static const bool shot_menu = getenv("RX_VK_SHOT_MENU") != nullptr;
@@ -5751,7 +5765,7 @@ void do_present(const nvn_tex* t, const int crop[4]) {
                                            sw, sh, crop, present_native_pq.load(std::memory_order_relaxed));
             submit_recording(g, false);
         }
-        if (interpolated) framegen_queue(value);
+        if (interpolated) framegen_queue(value, present_held);
         else menu_note_frame(true);   // (the FPS counter's, as frame generation's thread counts what it shows)
         {   // (RX_VK_WAIT_GPU=<frames>: the replay no further ahead of the GPU than that)
             static uint64_t values[8];
@@ -5982,6 +5996,71 @@ void do_present(const nvn_tex* t, const int crop[4]) {
 
 } // namespace
 
+// (hookshot) The storm hold (storm_hold.h): one latch, ticked once a present here — the present path is where the
+// game's frame clock is, and where its queue's quiet is measured (jobs_frame_note, jobs_last_push_age_frames) — and read
+// by the draw path (vk_draw.cpp, draws held) and present_image() (presents held). One atomic mirror for the readers on
+// the replay, the present and the display threads.
+namespace {
+
+StormHold storm_hold_state;
+std::atomic<bool> storm_held{false};
+
+} // namespace
+
+const StormHoldRules& storm_hold_rules() {
+    static const StormHoldRules rules = [] {
+        StormHoldRules r;
+        if (const char* e = getenv("RX_VK_STORM_HOLD")) r.deep = atoi(e);
+        if (const char* e = getenv("RX_VK_STORM_MIN_FRAMES")) r.min_frames = atoll(e);
+        if (const char* e = getenv("RX_VK_STORM_QUIET_FRAMES")) r.quiet_frames = atoll(e);
+        r.off_depth = std::max<int64_t>(1, r.deep / 2);
+        r.hold_present = !getenv("RX_VK_STORM_HOLD_PRESENT") || atoi(getenv("RX_VK_STORM_HOLD_PRESENT")) != 0;
+        return r;
+    }();
+    return rules;
+}
+
+bool storm_hold_on() {
+    return storm_held.load(std::memory_order_relaxed);
+}
+
+bool storm_hold_draws_held() {
+    return storm_hold_on() && !storm_hold_rules().hold_present;
+}
+
+bool storm_hold_presents_held() {
+    return storm_hold_on() && storm_hold_rules().hold_present;
+}
+
+StormHoldEvent storm_hold_tick(int64_t pending, int64_t push_age, uint64_t frame) {
+    const StormHoldRules& r = storm_hold_rules();
+    static std::chrono::steady_clock::time_point engaged_at;
+    const StormHoldEvent ev = storm_hold_state.tick(r, pending, push_age, frame);
+    storm_held.store(storm_hold_state.on, std::memory_order_relaxed);
+    if (ev == StormHoldEvent::Engaged) {
+        engaged_at = std::chrono::steady_clock::now();
+        logf("vk: a translation storm: %d jobs queued, the %s held until it drains (from present %llu)",
+             (int)pending, r.hold_present ? "presents" : "frame's draws", (unsigned long long)frame);
+    } else if (ev == StormHoldEvent::Released) {
+        const double sec = std::chrono::duration<double>(std::chrono::steady_clock::now() - engaged_at).count();
+        logf("vk: the storm drained: held %.1f s, %lld presents, %d jobs left, none pushed for %lld presents",
+             sec, (long long)(frame - storm_hold_state.since_frame), (int)pending, (long long)push_age);
+    }
+    // (hookshot, a test) RX_VK_STORM_TRACE=1: while held, the queue's depth and its quiet clock every 2 s, to see the
+    // band the churn rides and what the release waited out. Tick-driven, so the present hold traces as the draw hold does
+    static const bool trace = getenv("RX_VK_STORM_TRACE") && atoi(getenv("RX_VK_STORM_TRACE")) != 0;
+    if (trace && storm_hold_state.on) {
+        static std::chrono::steady_clock::time_point last;
+        const auto now = std::chrono::steady_clock::now();
+        if (ev == StormHoldEvent::Engaged || now - last >= std::chrono::seconds(2)) {
+            last = now;
+            logf("vk: storm trace: %d jobs queued, quiet for %lld presents, held %lld presents", (int)pending, (long long)push_age,
+                 (long long)(frame - storm_hold_state.since_frame));
+        }
+    }
+    return ev;
+}
+
 // (hookshot) RX_VK_FRAMELOG=<file>: every frame shown, the game's and the made ones, as they go to the screen, 320x180, while
 // <file>.go exists (scripts/framelog.py finds the flashes). Taken at the last step and written on a thread of its own, so
 // that the game keeps its speed: a shot of every frame at 1280x720 held it at 30 fps, where the flashes may not show.
@@ -6208,6 +6287,16 @@ void present_image(VkImage src, uint32_t sw, uint32_t sh, const int crop[4], VkI
                                 dev.swap_extent.height);
     }
     menu_tick();
+    // (hookshot, the storm hold's present: RX_VK_STORM_HOLD_PRESENT, on by default; storm_hold.h, ticked in do_present) A
+    // cold area's arrival is still translating: this frame was drawn, its submits and its frame log all ran, but its
+    // picture is one of the churn's — so the swapchain is not touched, and the last image the compositor was given keeps
+    // the screen. Nothing is acquired, so no image's semaphore (f.acquired) or fence (f.acq) is waited for, reset or left
+    // in flight; the frame slots' fences stay signalled, as the last present left them, so the first present past the
+    // release waits on f.done exactly as any present does and acquires whichever image the swapchain offers next. Frame
+    // pacing is not this blit's: the game's own frame clock and the present queue's presents_ahead set it, and presents and
+    // texture_frame_no (the hold's clock, the frame log, the shots' numbering) ran in do_present before this. A resize or
+    // HDR change above still made the swapchain again, so the window can be resized while the picture is held.
+    if (storm_hold_presents_held()) return;
     Frame& f = frames[frame_index];
     const int log_slot = frame_index;
     frame_index = (frame_index + 1) % 3;

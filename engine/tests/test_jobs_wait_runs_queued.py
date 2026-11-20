@@ -2,6 +2,8 @@
 
 vk_jobs.cpp is compiled beside stand-ins for vk_internal.h and vk_draw.h (logging, the thread calls, ub_thread_off) and
 run with every worker held in a job: the draw's pipeline job, queued behind them, must run on the thread that waits.
+The source is checked for the same contract's neighbours: jobs pushed with their flags, and the storm hold's release
+waiting for the queue to stop being pushed (jobs_last_push_age_frames), not for its depth alone.
 python -I -B tests/test_jobs_wait_runs_queued.py
 """
 import argparse
@@ -52,6 +54,20 @@ def check_source():
         raise SystemExit("jobs_wait no longer runs a queued job it waits for")
     if "return fresh" not in wait:
         raise SystemExit("jobs_wait no longer tells whether the job ran during the wait")
+    if "last_push_frame.store" not in jobs or "uint64_t jobs_last_push_age_frames" not in jobs:
+        raise SystemExit("the jobs queue no longer tells how long it has gone unpushed")
+    hold = (ROOT / "gpu/vk/storm_hold.h").read_text(encoding="utf-8")
+    if "quiet_frames" not in hold or "min_frames" not in hold or "StormHoldEvent tick(" not in hold:
+        raise SystemExit("the storm hold no longer waits for the churn to stop pushing before it releases, or lost its floor")
+    if 'RX_VK_STORM_QUIET_FRAMES' not in hold or 'RX_VK_STORM_MIN_FRAMES' not in hold:
+        raise SystemExit("the storm hold's switches are not named beside its rule")
+    replay = (ROOT / "gpu/vk/vk_replay.cpp").read_text(encoding="utf-8")
+    if "storm_hold_tick(jobs_pending(), (int64_t)jobs_last_push_age_frames()," not in replay:
+        raise SystemExit("the present path no longer ticks the storm hold with the queue's quiet clock")
+    if "storm_hold_draws_held()" not in draw:
+        raise SystemExit("the draw path no longer asks the storm hold whether the draws are held")
+    if "texture_sample_deferred_take" not in draw or 'RX_VK_DEFER_SKIP' not in draw:
+        raise SystemExit("a draw whose sampled texture is held back is no longer left out of its frame")
 
 
 def main():

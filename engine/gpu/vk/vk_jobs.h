@@ -4,6 +4,7 @@
 #pragma once
 
 #include <atomic>
+#include <cstdint>
 #include <functional>
 
 namespace mkwvk {
@@ -18,5 +19,10 @@ void jobs_push_serial(std::function<void()> fn, bool first = false);
 bool jobs_wait(const std::atomic<bool>& flag);
 void jobs_notify();
 int jobs_pending();
+/// The present the draw path is recording now, for the jobs' quiet clock; noted per draw, cheap
+void jobs_frame_note(uint64_t frame);
+/// Presents since the last jobs_push (UINT64_MAX/2: nothing pushed yet). A queue that has not grown for a while of the
+/// game's frames is a churn that has stopped pushing, whatever depth it still shows: the storm hold releases on it
+uint64_t jobs_last_push_age_frames();
 
 } // namespace mkwvk

@@ -1,0 +1,98 @@
+// The storm hold's state machine (gpu/vk/storm_hold.h), with no game, no GPU and no environment behind it: the latch,
+// its engage depth, its floor and its quiet rule, and the depth rule the first version used. Built by
+// tests/test_storm_hold_present.py.
+#include "storm_hold.h"
+
+#include <algorithm>
+#include <cstdio>
+
+using namespace mkwvk;
+
+namespace {
+
+int failures = 0;
+void expect(bool ok, const char* what) {
+    if (!ok) std::printf("FAIL: %s\n", what), failures++;
+}
+
+StormHoldRules rules(int deep, int64_t min_frames, int64_t quiet_frames) {
+    StormHoldRules r;
+    r.deep = deep;
+    r.min_frames = min_frames;
+    r.quiet_frames = quiet_frames;
+    r.off_depth = deep > 0 ? std::max<int64_t>(1, deep / 2) : 0;
+    return r;
+}
+
+} // namespace
+
+int main() {
+    {   // (the defaults: the switches' numbers and the present held, not the draws)
+        const StormHoldRules d;
+        expect(d.deep == 200 && d.min_frames == 400 && d.quiet_frames == 100 && d.off_depth == 100,
+               "the defaults are the hold's tuned numbers, the depth rule at half the engage depth");
+        expect(d.hold_present, "the present is what is held by default");
+    }
+    {   // (RX_VK_STORM_HOLD=0: no latch, whatever the queue holds)
+        StormHold h;
+        const StormHoldRules r = rules(0, 400, 100);
+        for (int i = 0; i < 10; i++)
+            expect(h.tick(r, 5000, 0, 10 + i) == StormHoldEvent::None && !h.on, "deep 0 never engages");
+    }
+    {   // (engage at the depth, not below it; since_frame is the present it engaged at)
+        StormHold h;
+        const StormHoldRules r = rules(200, 400, 100);
+        expect(h.tick(r, 199, 0, 50) == StormHoldEvent::None && !h.on, "199 queued is under the engage depth");
+        expect(h.tick(r, 200, 0, 51) == StormHoldEvent::Engaged && h.on, "200 queued engages");
+        expect(h.since_frame == 51, "the engage's present is remembered");
+        expect(h.tick(r, 500, 0, 60) == StormHoldEvent::None && h.on, "already held: no second engage");
+    }
+    {   // (the floor: nothing releases within min_frames presents, quiet or not)
+        StormHold h;
+        const StormHoldRules r = rules(200, 400, 100);
+        h.tick(r, 300, 0, 1000);
+        expect(h.tick(r, 0, 10000, 1399) == StormHoldEvent::None && h.on, "399 presents after the engage: still held");
+        expect(h.tick(r, 0, 10000, 1400) == StormHoldEvent::Released && !h.on,
+               "at the floor, the queue long quiet: released");
+    }
+    {   // (the quiet rule: the queue's depth alone does not release while jobs are still being pushed)
+        StormHold h;
+        const StormHoldRules r = rules(200, 100, 50);
+        h.tick(r, 300, 0, 0);
+        expect(h.tick(r, 0, 49, 200) == StormHoldEvent::None && h.on,
+               "the queue empty but a job pushed 49 presents ago: still held");
+        expect(h.tick(r, 0, 50, 201) == StormHoldEvent::Released && !h.on, "quiet for the whole quiet window: released");
+    }
+    {   // (a held queue that refills stays held past the floor)
+        StormHold h;
+        const StormHoldRules r = rules(200, 100, 50);
+        h.tick(r, 300, 0, 0);
+        for (uint64_t f = 100; f < 400; f += 10)
+            expect(h.tick(r, 400, 0, f) == StormHoldEvent::None && h.on, "the churn still pushing: held past the floor");
+        expect(h.tick(r, 0, 50, 400) == StormHoldEvent::Released, "and released when it stops");
+    }
+    {   // (quiet_frames=0: the first version's rule, the queue below half the engage depth, still after the floor)
+        StormHold h;
+        const StormHoldRules r = rules(200, 400, 0);
+        h.tick(r, 300, 0, 0);
+        expect(h.tick(r, 100, 0, 400) == StormHoldEvent::None && h.on, "a queue at half the engage depth holds");
+        expect(h.tick(r, 99, 0, 401) == StormHoldEvent::Released && !h.on, "under it, after the floor: released");
+        StormHold h2;
+        h2.tick(r, 300, 0, 0);
+        expect(h2.tick(r, 0, 0, 399) == StormHoldEvent::None && h2.on, "the depth rule keeps the floor too");
+    }
+    {   // (re-engage: a second storm after a release starts its own clock)
+        StormHold h;
+        const StormHoldRules r = rules(200, 400, 100);
+        h.tick(r, 300, 0, 0);
+        expect(h.tick(r, 0, 500, 400) == StormHoldEvent::Released, "the first storm drains");
+        expect(h.tick(r, 300, 0, 5000) == StormHoldEvent::Engaged && h.since_frame == 5000, "a second storm engages again");
+        expect(h.tick(r, 0, 500, 5100) == StormHoldEvent::None && h.on, "with a floor of its own");
+    }
+    if (failures) {
+        std::printf("FAIL: %d checks\n", failures);
+        return 1;
+    }
+    std::puts("PASS: the storm hold latches at its depth, holds its floor, releases on the quiet and re-engages");
+    return 0;
+}

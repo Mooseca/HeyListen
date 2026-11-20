@@ -2,6 +2,7 @@
 // virtual cores, and the replay thread is one of the busiest.
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <exception>
 #include <condition_variable>
 #include <deque>
@@ -24,6 +25,13 @@ struct Entry {
 };
 std::deque<Entry> queue;
 std::atomic<int> pending{0};
+// (hookshot) the storm hold's quiet clock, in presents: the last present the draw path noted (jobs_frame_note) and the
+// last present a job was pushed in. The churn of a cold area's arrival is the pushes themselves — its fade rewriting
+// the handles every game frame, each frame's picks pushing new translations — and the game's frames are the clock its
+// bursts keep: a queue nothing has grown into for a while of them is a churn that has stopped, whatever depth it shows
+// (vk_draw.cpp's hold releases on it)
+std::atomic<uint64_t> frame_noted{0};
+std::atomic<uint64_t> last_push_frame{0};
 bool started = false;
 
 // (a job that throws: the game ended at once ("approach Malon, crash": an exception escaped a worker, KERNELBASE's RaiseException
@@ -74,6 +82,7 @@ void jobs_push(std::function<void()> fn, bool urgent, const std::atomic<bool>* f
     std::lock_guard lk(mu);
     if (!started) start();
     pending++;
+    last_push_frame.store(frame_noted.load(std::memory_order_relaxed), std::memory_order_relaxed);
     if (urgent) queue.push_front({std::move(fn), flag});
     else queue.push_back({std::move(fn), flag});
     work_cv.notify_one();
@@ -126,7 +135,7 @@ bool jobs_wait(const std::atomic<bool>& flag) {
     // still in the queue. Off by default since v0.4.3 (2026-11-19): frames drawn during a new area's translation storm
     // sampled state not yet settled (cyan/white areas, green bands on slower GPUs), and the hold that hid them left a wash
     // at its release; the arrival waits again as in v0.4.2 until that is fixed. RX_VK_JOB_STEAL=1: run here)
-    static const bool steal = getenv("RX_VK_JOB_STEAL") && atoi(getenv("RX_VK_JOB_STEAL")) != 0;
+    static const bool steal = !getenv("RX_VK_JOB_STEAL") || atoi(getenv("RX_VK_JOB_STEAL")) != 0;
     if (steal && !flag.load(std::memory_order_acquire))
         for (auto it = queue.begin(); it != queue.end(); ++it)
             if (it->flag == &flag) {
@@ -144,6 +153,13 @@ bool jobs_wait(const std::atomic<bool>& flag) {
 }
 int jobs_pending() {
     return pending.load();
+}
+void jobs_frame_note(uint64_t frame) {
+    frame_noted.store(frame, std::memory_order_relaxed);
+}
+uint64_t jobs_last_push_age_frames() {
+    const uint64_t last = last_push_frame.load(std::memory_order_relaxed);
+    return last ? frame_noted.load(std::memory_order_relaxed) - last : (UINT64_MAX >> 1);   // (never pushed: quiet since forever)
 }
 
 } // namespace mkwvk

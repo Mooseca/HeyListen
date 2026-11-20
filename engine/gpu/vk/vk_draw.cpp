@@ -50,6 +50,7 @@
 #include "vk_gprof.h"
 #include "profile_run.h"   // (the performance profile's pass timestamps: tprof_end)
 #include "vk_jobs.h"
+#include "storm_hold.h"
 #include "vk_shader.h"
 #include "vk_menu.h"     // (psychov35_bank: PsychoV35's grading for its bank, uniform_range)
 #include "vk_texture.h"
@@ -2712,6 +2713,14 @@ bool log_img_wanted(uint64_t key) {   // (hookshot) RX_VK_LOG_IMG=<key prefix,..
     return false;
 }
 
+/// (hookshot) RX_VK_DEFER_SKIP=1 (default): a draw whose sampled texture is held back for a later frame (the upload budget
+/// spent) is left out of that frame, as a draw whose pipeline is not ready is, and its descriptors are not reused: the next
+/// frame's build meets the texture with the budget fresh and uploads it. =0: drawn as before, the placeholder sampled
+static bool defer_skip_on() {
+    static const bool on = !getenv("RX_VK_DEFER_SKIP") || atoi(getenv("RX_VK_DEFER_SKIP")) != 0;
+    return on;
+}
+
 VkImageView texture_view_of(uint32_t handle, VkImageViewType want, ViewUse use, VkFormat storage_as = VK_FORMAT_UNDEFINED,
                             Texture** tex_out = nullptr, uint32_t* level_out = nullptr) {
     const uint32_t version = texture_slot_version((int)(handle & 0xFFFFF));
@@ -2774,6 +2783,14 @@ VkImageView texture_view_of(uint32_t handle, VkImageViewType want, ViewUse use, 
                      t.d.height, t.d.depth, t.d.levels, (unsigned long long)t.gpu, has_view ? "yes" : "no",
                      has_view && v.set_format ? v.format : 0, has_view && v.set_target ? v.target : -1, (int)want, (int)use);
         }
+    }
+    // (hookshot) The view of a held-back texture is no view: caching it would serve the placeholder for every later draw
+    // of the handle until the game rewrote its slot — a storm hold's release drew the crowd's burst behind the budget, and
+    // the sky behind that kept its washed placeholder for tens of presents (RX_VK_DEFER_SKIP leaves the draws out instead)
+    if (defer_skip_on() && texture_sample_deferred()) {
+        if (tex_out) *tex_out = tex;
+        if (level_out) *level_out = level;
+        return view;
     }
     handle_hits()[key] = {view, tex, dgen, level, version, texture_epoch(), use == ViewUse::Sample || use == ViewUse::Storage};
     if (tex_out) *tex_out = tex;
@@ -3742,8 +3759,12 @@ void build_descriptors(const NvnState& s, const Program& p) {
                         view = VK_NULL_HANDLE, tex = nullptr;
                     }
                     sampler = sampler_for((int)(handle >> 20), d.is_depth);
+                    // (hookshot) A slot that resolved through a held-back texture holds no view to reuse: invalid, so the
+                    // next draw resolves again and its fresh budget uploads the texture (RX_VK_DEFER_SKIP)
+                    const bool held_back = defer_skip_on() && texture_sample_deferred();
                     if (sl)
-                        *sl = TexSlot{handle, version, samp_version, texture_epoch(), dgen_now, samp_retired, samp_frame, view, tex, sampler, true};
+                        *sl = TexSlot{handle, version, samp_version, texture_epoch(), dgen_now, samp_retired, samp_frame,
+                                      view, tex, sampler, !held_back};
                 }
                 upload_defer_ok = false;
                 // (Lichii bd0171f7) the shader clamps its index to the last element: a table that names a texture there may run
@@ -7449,31 +7470,21 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
         if (shader) st_shader_wait_ms += ms;
         return fresh;
     };
-    // (hookshot) The storm hold: while the translation queue is still hundreds deep — a cold area's arrival, its fade
-    // rewriting the texture handles every game frame, each frame's state its own variant — this thread's draws are
-    // left out, and the frames show the area's earlier picture, as a draw left out always does. The frames the storm
-    // itself drew sampled the fade's transient words (white/cyan blowouts, green bands — the picture regression that
-    // 9c42f5e7's render-instead-of-stall unmasked); the queue's depth is the churn's own clock, so the first presents
-    // past the hold sample the state by then settled. The waits below still run, and still steal: it is what drains
-    // the queue at the pace the storm always had. Engaged above RX_VK_STORM_HOLD jobs (200), released below half of
-    // that: the queue saws with each frame's pushes, and a hold that flickered with it drew the churn's transient
-    // frames anyway. 0: off, drawn as before
-    static const int hold_deep = getenv("RX_VK_STORM_HOLD") ? atoi(getenv("RX_VK_STORM_HOLD")) : 0;   // (off by default since v0.4.3: the steal it covers for is off; RX_VK_STORM_HOLD=200 with RX_VK_JOB_STEAL=1)
-    static const int64_t hold_off = (int64_t)std::max(1, hold_deep / 2);
-    thread_local bool hold_on = false;
-    const int64_t pending_jobs = jobs_pending();
-    if (hold_deep <= 0) hold_on = false;
-    else if (hold_on) {
-        if (pending_jobs < hold_off) hold_on = false;
-    } else if (pending_jobs >= (int64_t)hold_deep) hold_on = true;
-    static std::atomic<int64_t> st_storm_holds{0};
-    if (hold_on && cp->ready.load(std::memory_order_acquire)) {
+    // (hookshot) The storm hold (storm_hold.h; ticked once a present in vk_replay.cpp's do_present). By default the hold
+    // withholds the *present*: the frames go on being drawn — the game's state, its upload stream and its exposure meter
+    // stay live, so the release has nothing to re-adapt and no upload burst to meet — and present_image() shows nothing,
+    // so the compositor keeps the last good picture while the churn's frames (white/cyan blowouts, green bands: the fade's
+    // transient words that #1714's render-instead-of-stall unmasked) never reach the screen. RX_VK_STORM_HOLD_PRESENT=0:
+    // the draws are left out instead, as the hold's first version did — the frame shows the area's earlier picture (or the
+    // teleport's black) and the waits below still run and still steal, which drains the queue at the storm's own pace.
+    // RX_VK_STORM_HOLD=0: no hold at all, drawn and shown as before.
+    if (storm_hold_draws_held() && cp->ready.load(std::memory_order_acquire)) {
         st_pending_skips++;
+        static std::atomic<int64_t> st_storm_holds{0};
         st_storm_holds.fetch_add(1, std::memory_order_relaxed);
         if (st_storm_holds.load(std::memory_order_relaxed) < 8 ||
             st_storm_holds.load(std::memory_order_relaxed) % 2000 == 0)
-            logf("vk: a translation storm: %d jobs queued, the frame's draws left out until it drains",
-                 jobs_pending());
+            logf("vk: a translation storm: %d jobs queued, the frame's draws left out until it drains", jobs_pending());
         return;
     }
     if (!cp->ready.load(std::memory_order_acquire)) {
@@ -7632,6 +7643,21 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
         FINE_N(FC_BUILDS, 1);
         trace_tex_hit = nullptr, trace_tex_mask = 0;
         build_descriptors(s, p);   // (textures first used here are uploaded by the recording's upload command buffer)
+        // (hookshot) A draw whose build held a sampled texture back: it would sample the placeholder, and the descriptor
+        // set it built would keep doing so for the presents it is reused over — a storm hold's release drew the market
+        // with the crowd's upload burst behind the budget, and the sky behind that stayed a washed placeholder for tens
+        // of presents, long after the churn itself was over. The draw is left out of this frame (the picture keeps what
+        // it had where it drew, as a draw whose pipeline is not ready always has), and the set is not reused: the next
+        // frame's build meets the texture with the budget fresh and uploads it. RX_VK_DEFER_SKIP=0: drawn as before
+        if (defer_skip_on() && texture_sample_deferred_take()) {
+            static std::atomic<int64_t> st_defer_skips{0};
+            if (st_defer_skips.fetch_add(1, std::memory_order_relaxed) < 8 ||
+                st_defer_skips.load(std::memory_order_relaxed) % 2000 == 0)
+                logf("vk: a draw left out: its texture is held back for a later frame (program %016llx)",
+                     (unsigned long long)p.key);
+            last_desc_valid = false;   // (the set it built names the placeholder: the next draw builds its own)
+            return;
+        }
         FINE_N(FC_WRITES, (int64_t)dw().writes.size());
         static std::string last_logged;
         if (dump_on()) {
