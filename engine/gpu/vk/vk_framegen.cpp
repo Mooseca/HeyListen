@@ -359,7 +359,9 @@ bool init_pq() {
 /// The frames for a w x h present; pq (HeyListen): it is the game's PQ picture (Native HDR), the frames then RGB10A2. A change
 /// of either makes them again
 bool ensure_size(VkCommandBuffer cmd, uint32_t w, uint32_t h, bool pq) {
-    pq = pq && init_pq();
+    // (NVIDIA DLSS Frame Generation, where it makes the frames, is given them as RGBA8 (vk_dlss.cpp names that format for its
+    // resources): the frames stay 8-bit with it, as before the 10-bit frames)
+    pq = pq && !dlss_fg_wanted() && init_pq();
     if (fg.w == w && fg.h == h && fg.mult == multiplier() && fg.pq == pq) return true;
     {   // (the display thread is done with the old sets first)
         std::unique_lock lk(fg.mu);
