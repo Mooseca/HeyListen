@@ -47,6 +47,7 @@ ARGS = {
     "tests/test_native_float_atomic_add.py": ["--cxx", "{cxx}", "--headers", "{spirv_headers}", "--spirv-val", "{spirv_val}"],
     "tests/test_compute_local_memory.py": ["--cxx", "{cxx}", "--headers", "{spirv_headers}", "--spirv-val", "{spirv_val}"],
     "tests/test_shader_module_guard.py": ["--cxx", "{cxx}"],
+    "tests/test_widen_alpha.py": ["--cxx", "{cxx}", "--headers", "{vulkan_headers}"],
     "tests/test_flat_map.py": ["--cxx", "{cxx}"],
     "tests/test_registration_host_copies.py": ["--cxx", "{cxx}"],
     "tests/test_psychov35.py": ["--cxx", "{cxx}"],
