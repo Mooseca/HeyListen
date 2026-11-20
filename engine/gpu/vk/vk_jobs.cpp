@@ -35,12 +35,12 @@ std::atomic<int> pending{0};
 std::atomic<uint64_t> frame_noted{0};
 std::atomic<uint64_t> last_push_frame{0};
 bool started = false;
-// (hookshot) RX_VK_JOB_DEMAND: where the jobs a draw asked for this present go in the queue (past the urgent ones), so that the
+// (hookshot) RX_VK_JOB_DEMAND (on; 0: first in, first out): where the jobs a draw asked for this present go in the queue (past the urgent ones), so that the
 // frame's draws are served in their order and ahead of what no draw has wanted since
 uint64_t demand_frame = 0;
 size_t demand_pos = 0;
 bool demand_on() {
-    static const bool on = getenv("RX_VK_JOB_DEMAND") && atoi(getenv("RX_VK_JOB_DEMAND")) != 0;
+    static const bool on = !getenv("RX_VK_JOB_DEMAND") || atoi(getenv("RX_VK_JOB_DEMAND")) != 0;
     return on;
 }
 
@@ -60,14 +60,17 @@ void run_guarded(std::function<void()>& fn) {
 
 // (hookshot) RX_VK_STORM_WORKERS=<n>: while the storm hold is on, n workers translate (the base ones and extra ones that take
 // jobs only while it is). The game's own threads wait on the arrival's translations then, and the cold area's queue is worth
-// every core; outside a storm the base count is what shares the CPU with the game. 0/unset: no extra workers
+// every core; outside a storm the base count is what shares the CPU with the game. Unset: every hardware thread but one (12
+// at most) on 8 threads or more; 0: no extra workers
 std::atomic<bool> boost{false};
 unsigned base_workers = 0;
 bool extra_started = false;
 unsigned storm_workers_wanted() {
     static const unsigned n = [] {
-        const char* e = getenv("RX_VK_STORM_WORKERS");
-        return e ? (unsigned)std::clamp(atoi(e), 0, 32) : 0u;
+        if (const char* e = getenv("RX_VK_STORM_WORKERS")) return (unsigned)std::clamp(atoi(e), 0, 32);
+        // (unset: every hardware thread but one, 12 at most, on a machine of 8 threads or more; fewer: the base workers only)
+        const unsigned hw = std::thread::hardware_concurrency();
+        return hw >= 8 ? std::min(hw - 1, 12u) : 0u;
     }();
     return n;
 }

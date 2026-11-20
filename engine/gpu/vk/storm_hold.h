@@ -34,8 +34,10 @@ struct StormHoldRules {
     int64_t settle = 1;         ///< ... for this many presents running (the picture is partial while the queue is deep: draws whose
                                 ///< programs are not built are left out, and it completes the moment the queue is drained)
     bool hold_present = true;   ///< withhold the present (the default), not the frame's draws
-    int64_t live_frames = 0;    ///< (RX_VK_STORM_LIVE=<presents>, 0 off) the release counts the jobs a draw asked for in the last this many
+    int64_t live_frames = 3;    ///< (RX_VK_STORM_LIVE=<presents>, 0 off) the release counts the jobs a draw asked for in the last this many
                                 ///< presents, not the whole queue: the churn's superseded variants sit in it for good and are not what the picture waits for
+    int64_t live_off_depth = 50;   ///< (RX_VK_STORM_LIVE_DEPTH) ... and releases once fewer than this many of them are queued (at 100 the picture
+                                   ///< was still partial: green/cyan bands in 6 presents on the PC 3050; at 50 and 30, none in 4 runs)
 };
 
 enum class StormHoldEvent { None, Engaged, Released };
@@ -65,7 +67,7 @@ struct StormHold {
             return StormHoldEvent::Engaged;
         }
         const int64_t held = (int64_t)(frame - since_frame);
-        calm = (live >= 0 ? live : pending) < r.off_depth ? calm + 1 : 0;
+        calm = (live >= 0 ? live < r.live_off_depth : pending < r.off_depth) ? calm + 1 : 0;
         whole = skips == 0 ? whole + 1 : 0;
         const bool quiet = r.quiet_frames > 0 ? push_age >= r.quiet_frames : calm >= r.settle || (r.whole_frames && whole >= r.settle);
         if (quiet && held >= r.min_frames) {

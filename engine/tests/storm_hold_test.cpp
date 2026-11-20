@@ -32,6 +32,7 @@ int main() {
         const StormHoldRules d;
         expect(d.deep == 200 && d.min_frames == 0 && d.quiet_frames == 0 && d.off_depth == 100 && d.settle == 1 && !d.whole_frames,
                "the defaults: engaged at 200 queued, released as the queue drops under half of that");
+        expect(d.live_frames == 3 && d.live_off_depth == 50, "the release counts the jobs asked for in the last 3 presents, under 50");
         expect(d.hold_present, "the present is what is held by default");
     }
     {   // (RX_VK_STORM_HOLD=0: no latch, whatever the queue holds)
@@ -112,7 +113,7 @@ int main() {
     {   // (live: the release counts the jobs a draw asked for lately, not the queue's stale rest; < 0: the queue)
         StormHold h;
         StormHoldRules d;
-        d.off_depth = 10, d.settle = 2;
+        d.off_depth = 10, d.live_off_depth = 10, d.settle = 2;
         h.tick(d, 300, 0, 0);
         expect(h.tick(d, 300, 0, 10, -1, 5) == StormHoldEvent::None && h.on, "one present with few live jobs: held");
         expect(h.tick(d, 300, 0, 11, -1, 50) == StormHoldEvent::None && h.on, "a live refill restarts the count");
