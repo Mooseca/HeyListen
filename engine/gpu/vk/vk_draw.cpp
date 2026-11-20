@@ -833,7 +833,7 @@ __declspec(noinline) VkResult guarded_graphics(VkPipelineCache cache, const VkGr
         return VK_ERROR_UNKNOWN;
     }
 }
-__declspec(noinline) VkResult guarded_compute(VkPipelineCache cache, const VkComputePipelineCreateInfo* ci, VkPipeline* pl) {
+__declspec(noinline) VkResult guarded_compute_once(VkPipelineCache cache, const VkComputePipelineCreateInfo* ci, VkPipeline* pl) {
     __try {
         return vkCreateComputePipelines(dev.device, cache, 1, ci, nullptr, pl);
     } __except (1) {
@@ -889,7 +889,7 @@ VkResult guarded_graphics(VkPipelineCache cache, const VkGraphicsPipelineCreateI
     fault_armed = 0;
     return r;
 }
-VkResult guarded_compute(VkPipelineCache cache, const VkComputePipelineCreateInfo* ci, VkPipeline* pl) {
+VkResult guarded_compute_once(VkPipelineCache cache, const VkComputePipelineCreateInfo* ci, VkPipeline* pl) {
     install_driver_fault_guard();
     if (sigsetjmp(fault_jmp, 1) != 0) {
         logf("vk: the driver faulted compiling a compute pipeline: that one is left out");
@@ -901,6 +901,31 @@ VkResult guarded_compute(VkPipelineCache cache, const VkComputePipelineCreateInf
     return r;
 }
 #endif
+/// (Hookshot f1eb23c9, Chad-) AMD's proprietary compiler fails (-13) or faults (-77) on some programs, the Market's and Kakariko's
+/// dogs among them (RX 6600 XT, driver 0x800161): a pipeline it fails on is built once more with
+/// VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT, which it builds, instead of the draws being left out. Not for the memory errors,
+/// which the optimizer does not cause, nor for the cold ask's VK_PIPELINE_COMPILE_REQUIRED, which is no failure.
+/// RX_VK_NO_UNOPT_RETRY=1: no second build (a failed pipeline stays left out)
+static bool retry_without_optimizer(VkResult r, VkPipelineCreateFlags flags) {
+    static const bool off = std::getenv("RX_VK_NO_UNOPT_RETRY") != nullptr;
+    return !off && dev.props.vendorID == 0x1002 && r != VK_SUCCESS && r != VK_ERROR_OUT_OF_HOST_MEMORY &&
+           r != VK_ERROR_OUT_OF_DEVICE_MEMORY && r != VK_PIPELINE_COMPILE_REQUIRED &&
+           !(flags & VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT);
+}
+/// A compute pipeline the driver's compiler fails on is built again without its optimizer, as a graphics one is (build_graphics)
+VkResult guarded_compute(VkPipelineCache cache, const VkComputePipelineCreateInfo* ci, VkPipeline* pl) {
+    const VkResult r = guarded_compute_once(cache, ci, pl);
+    if (!retry_without_optimizer(r, ci->flags)) return r;
+    VkComputePipelineCreateInfo again = *ci;
+    again.flags |= VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT;
+    *pl = VK_NULL_HANDLE;
+    const VkResult second = guarded_compute_once(cache, &again, pl);
+    static std::atomic<int> told{0};
+    if (told++ < 20)
+        logf("vk: a compute pipeline failed (%d) with the driver's optimizer: %s", (int)r,
+             second == VK_SUCCESS ? "made without it" : "not made without it either");
+    return second;
+}
 
 // (longshot #190) Intel's Windows driver faults in vkGetPipelineCacheData (igvk64.dll, an access violation) when it fetches a
 // cache's data while other threads build pipelines with that cache: the game closes with no message. Vulkan allows both at once;
@@ -2199,15 +2224,18 @@ VkPipeline build_graphics(const Program& p, const NvnState& s, const Targets& at
         IntelDriverGate gate(cold != nullptr);
         if (gate.busy) return intel_gate_busy(), *cold = true, VK_NULL_HANDLE;
         r = guarded_graphics_held(part >= 0 || driver_cache_only ? VK_NULL_HANDLE : pcache, &ci, &pl);
-        // (d1d6caa7) the AMD Windows compiler can reject an ordinary graphics pipeline with its optimizer on, on the cards that run
-        // task + mesh draws as compute (issue 996): once more without it
-        if (dev.props.vendorID == 0x1002 && dev.task_mesh_fallback && !p.mesh && part < 0 && r == VK_ERROR_UNKNOWN &&
-            !(ci.flags & VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT)) {
+        // (d1d6caa7, and Hookshot f1eb23c9 for every graphics pipeline: Chad-) the AMD Windows compiler can reject an ordinary
+        // graphics pipeline with its optimizer on (-13: the Market's and Kakariko's dogs on an RX 6600 XT; the cards that run task +
+        // mesh draws as compute, issue 996): once more without it, which it builds. Not for the memory errors
+        if (retry_without_optimizer(r, ci.flags)) {
+            const VkResult first = r;
             ci.flags |= VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT;
             pl = VK_NULL_HANDLE;
-            r = guarded_graphics_held(pcache, &ci, &pl);
-            if (r == VK_SUCCESS)
-                logf("vk: graphics pipeline for %016llx recovered with optimization disabled", (unsigned long long)p.key);
+            r = guarded_graphics_held(part >= 0 || driver_cache_only ? VK_NULL_HANDLE : pcache, &ci, &pl);
+            static std::atomic<int> told{0};
+            if (told++ < 20)
+                logf("vk: %s %016llx failed (%d) with the driver's optimizer: %s", part >= 0 ? "a library of" : "graphics pipeline for",
+                     (unsigned long long)p.key, (int)first, r == VK_SUCCESS ? "made without it" : "not made without it either");
         }
     }
     if (cold && r == VK_PIPELINE_COMPILE_REQUIRED) return *cold = true, VK_NULL_HANDLE;
