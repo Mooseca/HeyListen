@@ -42,6 +42,7 @@
 #include "vk_dump.h"
 #include "vk_paths.h"   // (game_module_path: the frame trace beside the game)
 #include "vk_gprof.h"
+#include "profile_run.h"   // (the performance profile's pass timestamps: tprof_bind)
 #include "vk_framegen.h"
 #include "vk_menu.h"
 #include "perf_report.h"
@@ -2675,6 +2676,7 @@ Recording& begin_segment_recording(uint64_t value) {
     VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
     bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     vkBeginCommandBuffer(r.cmd, &bi);
+    tprof_bind(r.slot, r.cmd);   // (the performance profile)
     r.value = value;
     return r;
 }
@@ -2709,6 +2711,7 @@ Recording& begin_segment_slot(uint64_t value) {   // (begin_segment_recording wi
         gpu_time_collect(r);
         gprof_collect(r.slot);
     }
+    tprof_bind(r.slot, r.cmd);   // (the performance profile)
     r.value = value;
     return r;
 }

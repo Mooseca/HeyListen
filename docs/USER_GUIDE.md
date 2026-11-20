@@ -387,6 +387,12 @@ in-game menu (Insert) control it:
   use count and their order of first use — **hashes of shader programs and pipeline states only, no game code** — and sends
   them at the next start, so a release can have the next zone's pipelines ready before you enter it; `zones_sent` keeps a
   copy. Set `HL_TELEMETRY_ZONES=0` to turn only this part off.
+  The same row also sends, per map, a **detailed profile** of where the time goes, every 5 minutes and at exit: how many of
+  the CPU's samples (one for each 1/250 s of CPU time a thread uses) fell in the game's translated code, our native
+  engine, the renderer, the graphics driver and the operating system, the addresses of the functions with the most samples
+  (an address in the game's program or an offset in HeyListen's own files, **numbers only, no code, no names, no data**) and
+  how long the GPU spent in each render pass, with the GPU's vendor and driver, the PC's GPU, CPU and operating system names
+  and the build's id. `profile_sent` keeps a copy. Set `HL_TELEMETRY_PROFILE=0` to turn only this part off.
 - **Send crash reports automatically**: off by default. After a crash a window says what happened and asks. **Report
   manually** copies a report to your clipboard and opens a new issue on GitHub for you to paste it into; **Report
   automatically** shows you the exact report and sends it only when you press Send. With this row on, the report is sent at
@@ -400,7 +406,7 @@ in-game menu (Insert) control it:
   it is removed on request. To get one deleted, open an issue or ask on Discord with the report's time and we remove it.
 
 Turn either row off and what was waiting to be sent (`perf_pending`, `perf_sent`, `pipelines_pending`, `pipelines_sent`,
-`zones_pending`, `zones_sent`) is deleted. A build with no address
+`zones_pending`, `zones_sent`, `profile_pending`, `profile_sent`) is deleted. A build with no address
 to send to shows both rows as *Not available in this build* and sends nothing. Details and the exact fields:
 [performance statistics](performance-statistics.md).
 

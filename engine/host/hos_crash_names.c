@@ -96,6 +96,8 @@ static uint64_t pe_identity(uintptr_t base) {
     value ^= (checksum * 0x9E3779B97F4A7C15ULL);
     return value ? value : 1;
 }
+/* The executable's (or any loaded module's) identity as the tables carry it: the build id the performance profile sends. 0 when unknown */
+uint64_t hos_crash_module_identity(uintptr_t base) { return pe_identity(base); }
 static int load_table(int which, const char *path) {
     if (which < 0 || which >= HOS_CRASH_NAMES_TABLES || !path || !path[0]) return 0;
     FILE *f = fopen(path, "rb");

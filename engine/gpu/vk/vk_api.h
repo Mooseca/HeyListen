@@ -15,7 +15,7 @@
 extern "C" {
 #endif
 
-#define MKWVK_API_VERSION 17
+#define MKWVK_API_VERSION 18
 enum { HOS_OPT_CHEAT_HEARTS = 32, HOS_OPT_CHEAT_FLIGHT, HOS_OPT_CHEAT_ACTION, HOS_OPT_CHEAT_CAMERA };
 /* (hookshot) the Motion page's rows (host/pad_sdl.c reads them, vk_replay.cpp's option answers them): Motion controls on
    or off, the horizontal's and the vertical's sensitivity in percent, each turned around, and the deadzone (0 to 2) */
@@ -159,6 +159,16 @@ typedef struct MkwVkHost {
        what to install, UTF-8) in a window, unless it has none (HOS_HEADLESS), and ends the game with exit code 3, as for no
        usable Vulkan in a --prepare-shaders run (which the back end does not ask this for). Does not return */
     void (*no_usable_gpu)(const char *text);
+    /* (version 18, the detailed performance profile: gpu/vk/profile_run.cpp, host/hos_profile.c) which kind of code a sampled program
+       counter in the executable is in, asked by the sampler thread once the sampled thread runs again: the bucket (0 the game's lifted
+       code, 1 the native engine, 3 the host, 4 audio: gpu/vk/profile_report.h's Module) and in *key the lifted function's guest
+       address, else the function's offset in the executable */
+    int (*profile_pc)(uintptr_t pc, uint64_t *key);
+    /* (version 18) the executable's build id (the symbol tables' identity: PE fields hashed), 0 when unknown */
+    uint64_t (*build_id)(void);
+    /* (version 18) the thread ids (the OS's) of the guest's own threads, at most max: their names are the game's, so the profile
+       tells their role (the game) from this. Returns how many */
+    int (*profile_threads)(uint32_t *tids, int max);
 } MkwVkHost;
 enum {
     MKWVK_TRACE_WRITEBACK = 1,     /* a mirror's GPU writes copied into guest memory (in a submission) */

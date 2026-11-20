@@ -71,6 +71,7 @@ SENDER = r"""
 int hos_perf_send_run(const char *dir);
 int hos_pipes_send_run(const char *dir);
 int hos_zones_send_run(const char *dir);
+int hos_profile_send_run(const char *dir);
 void hos_log(const char *fmt, ...) { (void)fmt; }
 void hos_log_flush(void) {}
 const char *hos_version(void) { return "vtest-1"; }
@@ -80,7 +81,8 @@ int hos_crash_test_clipboard(const char *t) { (void)t; return 1; }
 int hos_crash_test_open(const char *w) { (void)w; return 1; }
 int main(int argc, char **argv) {
     printf("%d\n", argc > 2 && argv[2][0] == 'p' ? hos_pipes_send_run(argv[1])
-                              : argc > 2 && argv[2][0] == 'z' ? hos_zones_send_run(argv[1]) : hos_perf_send_run(argv[1]));
+                              : argc > 2 && argv[2][0] == 'z' ? hos_zones_send_run(argv[1])
+                              : argc > 2 && argv[2][0] == 'f' ? hos_profile_send_run(argv[1]) : hos_perf_send_run(argv[1]));
     return 0;
 }
 """
@@ -447,6 +449,70 @@ def zones(tmp):
     check(run(f) == (-1, []), "and left alone until then")
 
 
+def profile(tmp):
+    """The detailed profile's sender (hos_profile_send_run): the performance summaries' rules, from profile_pending, to /telemetry/profile"""
+    curl = tmp / ("curl" + EXE)
+    exe = tmp / ("sender" + EXE)
+    case = [7000]
+
+    def folder(on=True, stamp="telemetry=https://t.example\n", waiting=1):
+        case[0] += 100
+        f = tmp / ("game%d" % case[0])
+        (f / "profile_pending").mkdir(parents=True)
+        (f / "perf_pending").mkdir()
+        (f / "hookshot_options.ini").write_text("send_performance_stats=%d\n" % (1 if on else 0), encoding="utf-8")
+        if stamp is not None:
+            (f / "hookshot_version.txt").write_text("version=v1\n" + stamp, encoding="utf-8")
+        for i in range(waiting):
+            (f / "profile_pending" / ("%d-0.json" % (1763366400 + i))).write_text('{"v":1,"i":%d}' % i, encoding="utf-8")
+        return f
+
+    def run(f, answer="sent", **env):
+        calls = f / "calls.txt"
+        calls.unlink(missing_ok=True)
+        e = {k: v for k, v in os.environ.items() if not k.startswith(("HL_", "CURL_"))}
+        e.update(CRASH_TEST_CURL=str(curl), CURL_CALLS=str(calls), CURL_ANSWER=answer, **env)
+        r = subprocess.run([str(exe), str(f), "f"], capture_output=True, text=True, env=e, timeout=120)
+        assert r.returncode == 0, r.stderr
+        return int(r.stdout.strip()), (calls.read_text(encoding="utf-8").splitlines() if calls.exists() else [])
+
+    def waiting(f):
+        return sorted(p.name for p in (f / "profile_pending").glob("*.json"))
+
+    f = folder()
+    n, calls = run(f)
+    check(n == 1 and len(calls) == 1 and calls[0].startswith('https://t.example/telemetry/profile =https {"v":1,"i":0}'),
+          "profile: the row on and an address: posted to <address>/telemetry/profile over https only")
+    check(waiting(f) == [] and len(list((f / "profile_sent").glob("*.json"))) == 1, "the batch taken is deleted, a copy kept in profile_sent")
+    f = folder(on=False)
+    check(run(f) == (-1, []) and len(waiting(f)) == 1, "the row off: nothing sent, the batch stays")
+    f = folder(stamp="")
+    check(run(f) == (-1, []) and len(waiting(f)) == 1, "no address: nothing sent")
+    f = folder()
+    check(run(f, HL_TELEMETRY_PROFILE="0") == (-1, []) and len(waiting(f)) == 1, "HL_TELEMETRY_PROFILE=0: nothing sent, by itself")
+    n, calls = run(f, HL_TELEMETRY_PROFILE="1")
+    check(n == 1 and len(calls) == 1, "HL_TELEMETRY_PROFILE=1 is not off")
+    f = folder(waiting=5)
+    n, calls = run(f)
+    check(n == 2 and len(calls) == 2 and len(waiting(f)) == 3, "two batches a start at most")
+    f = folder(waiting=11)
+    n, calls = run(f, HL_PERF_MAX_SENDS="1")
+    check(n == 1 and len(waiting(f)) == 7 and calls[0].endswith('"i":3}'), "more than 8 waiting: the oldest go unsent, the newest 8 stay")
+    f = folder(waiting=1)
+    (f / "profile_pending" / "1763366400-0.json").write_bytes(b"x" * (256 * 1024 + 1))
+    n, calls = run(f)
+    check(n == 1 and calls == [] and waiting(f) == [], "a batch over 256 KiB is dropped, never posted")
+    f = folder(waiting=1)
+    (f / "profile_pending" / "1763366400-0.json").write_bytes(b"x" * (200 * 1024))
+    n, calls = run(f)
+    check(n == 1 and len(calls) == 1, "a batch of 200 KB goes")
+    f = folder()
+    n, calls = run(f, "busy")
+    check(n == 0 and len(waiting(f)) == 1 and (f / "profile_pending" / ".next").exists() and not (f / "perf_pending" / ".next").exists(),
+          "a busy server: the batch is kept, the wait noted in its own folder")
+    check(run(f) == (-1, []), "and left alone until then")
+
+
 def stamp_lines():
     sys.path.insert(0, str(ROOT / "nx2"))
     import addresses
@@ -480,6 +546,7 @@ def main():
         sender(tmp)
         pipelines(tmp)
         zones(tmp)
+        profile(tmp)
 
 
 if __name__ == "__main__":

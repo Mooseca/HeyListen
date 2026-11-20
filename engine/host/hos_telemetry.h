@@ -20,10 +20,13 @@
 #define HOS_TELEMETRY_PERF_PATH "/telemetry/perf"
 #define HOS_TELEMETRY_PIPELINES_PATH "/telemetry/pipelines"
 #define HOS_TELEMETRY_ZONES_PATH "/telemetry/zones"
+#define HOS_TELEMETRY_PROFILE_PATH "/telemetry/profile"
 /* HL_TELEMETRY_PIPELINES=0 turns the pipeline state records off by themselves (the performance summaries stay as the row says) */
 #define HOS_TELEMETRY_PIPELINES_ENV "HL_TELEMETRY_PIPELINES"
 /* HL_TELEMETRY_ZONES=0 turns the per-zone shader and pipeline usage off by itself (the performance summaries stay as the row says) */
 #define HOS_TELEMETRY_ZONES_ENV "HL_TELEMETRY_ZONES"
+/* HL_TELEMETRY_PROFILE=0 turns the detailed performance profile (where the CPU and GPU time goes, per map) off by itself */
+#define HOS_TELEMETRY_PROFILE_ENV "HL_TELEMETRY_PROFILE"
 enum { HOS_TELEMETRY_URL_MAX = 300 };
 
 /* Whether the pipeline state records may go, by HL_TELEMETRY_PIPELINES: on unless it is exactly "0" */
@@ -33,6 +36,11 @@ static inline int hos_telemetry_pipelines_on(const char *env_value) {
 
 /* Whether the per-zone shader and pipeline usage may go, by HL_TELEMETRY_ZONES: on unless it is exactly "0" */
 static inline int hos_telemetry_zones_on(const char *env_value) {
+    return !(env_value && env_value[0] == '0' && env_value[1] == 0);
+}
+
+/* Whether the detailed performance profile may go, by HL_TELEMETRY_PROFILE: on unless it is exactly "0" */
+static inline int hos_telemetry_profile_on(const char *env_value) {
     return !(env_value && env_value[0] == '0' && env_value[1] == 0);
 }
 
