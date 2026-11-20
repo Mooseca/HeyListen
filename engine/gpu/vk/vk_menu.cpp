@@ -956,12 +956,6 @@ Row rows[] = {
      "and a frame-time graph. F10 cycles Off, FPS and Full.", hn_fps, false, true},
     {TAB_GAMEPLAY, "Menu size", &opts.menu_size, 0, 3, 1, tx_menu_size,
      "How large this menu and the start-up screen are drawn.", hn_menu_size, false, true},
-    // (hookshot) the input rows, together here so they are easy to find; the Controls page shows the same two above its grid
-    {TAB_GAMEPLAY, "Layout preset", &opts.pad_layout, 0, 3, 1, tx_pad_layout,
-     "Which face button is which. Binding one yourself on the Controls page makes it Custom.", hn_pad_layout},
-    {TAB_GAMEPLAY, "Button prompts", &opts.prompts, 0, HOS_PROMPT_N, 1, tx_prompts,
-     "The button icons the game shows, in its texts and menus: those of this controller, for the buttons your controls "
-     "put each action on.", hn_prompts, true, true},
     {TAB_GAMEPLAY, "Game speed", &opts.realtime, 0, 1, 1, tx_speed, "How the game keeps time when it runs below 60 fps.",
      hn_speed},
     {TAB_GAMEPLAY, "Text speed", &opts.text_speed, 0, 3, 1, tx_text_speed,
@@ -996,7 +990,13 @@ Row rows[] = {
      "that offers to update, keep your version or skip that version. Nothing is asked when you are offline, and when the launcher "
      "starts the game it looks for updates itself. Applies after a restart.", nullptr, true, true},
 
-    // Controls (11 rows; Motion opens the 6 TAB_MOTION rows, Controls its page, which shows the Gameplay tab's Layout preset and Button prompts rows too)
+    // Controls (13 rows; Motion opens the 6 TAB_MOTION rows, Controls its page, which shows this tab's Layout preset and Button prompts rows too)
+    // (hookshot) the input rows first, together so they are easy to find; the Controls page shows the same two above its grid
+    {TAB_CONTROLS, "Layout preset", &opts.pad_layout, 0, 3, 1, tx_pad_layout,
+     "Which face button is which. Binding one yourself on the Controls page makes it Custom.", hn_pad_layout},
+    {TAB_CONTROLS, "Button prompts", &opts.prompts, 0, HOS_PROMPT_N, 1, tx_prompts,
+     "The button icons the game shows, in its texts and menus: those of this controller, for the buttons your controls "
+     "put each action on.", hn_prompts, true, true},
     {TAB_CONTROLS, "Controller in background", &opts.pad_background, 0, 1, 1, tx_onoff,
      "Whether the controller plays the game while another window has the focus.", hn_background},
     {TAB_CONTROLS, "Mouse camera", &opts.mouse_native, 0, 1, 1, tx_mousecam, "How the captured mouse turns the camera.",
@@ -1655,7 +1655,7 @@ int page = 0;          // 0 the options, 1 the controls, 3 the teleport list, 4 
                        // debug tools' own page, now on the Debug tab)
 int csel = 0, ccol = 0;   // the page's row (kTop first: its own rows, then the controls, then reset) and column (0 the
                           // gamepad, 1 the keyboard)
-constexpr int kTop = 2;   // (Layout preset and Button prompts, rows of the Gameplay tab that the page shows above its grid too: a preset shows in the grid at once)
+constexpr int kTop = 2;   // (Layout preset and Button prompts, rows of the Controls tab that the page shows above its grid too: a preset shows in the grid at once)
 /// The global row of the page's own row j (0 the layout preset, 1 the button prompts)
 int page_row_global(int j) {
     const int* want = j == 0 ? &opts.pad_layout : &opts.prompts;
