@@ -6013,7 +6013,8 @@ const StormHoldRules& storm_hold_rules() {
         if (const char* e = getenv("RX_VK_STORM_HOLD")) r.deep = atoi(e);
         if (const char* e = getenv("RX_VK_STORM_MIN_FRAMES")) r.min_frames = atoll(e);
         if (const char* e = getenv("RX_VK_STORM_QUIET_FRAMES")) r.quiet_frames = atoll(e);
-        r.off_depth = std::max<int64_t>(1, r.deep / 2);
+        if (const char* e = getenv("RX_VK_STORM_OFF_DEPTH")) r.off_depth = std::max<int64_t>(1, atoll(e));
+        if (const char* e = getenv("RX_VK_STORM_SETTLE")) r.settle = std::max<int64_t>(1, atoll(e));
         r.hold_present = !getenv("RX_VK_STORM_HOLD_PRESENT") || atoi(getenv("RX_VK_STORM_HOLD_PRESENT")) != 0;
         return r;
     }();

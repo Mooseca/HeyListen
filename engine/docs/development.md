@@ -174,8 +174,9 @@ case-sensitive, and an unknown one is ignored.
 |---|---|
 | `RX_VK_STORM_HOLD=<jobs>` | Engages while this many shader translations are queued (200), the cold arrival's churn; `0` is off — the frames are drawn and shown as before. While held, the present is withheld (`RX_VK_STORM_HOLD_PRESENT`) or, with that `0`, the frame's draws are left out |
 | `RX_VK_STORM_HOLD_PRESENT=0` | The draws are held instead of the present: the frames show the area's earlier picture (or the teleport's black). On by default: the frames go on being drawn — the game's state, its uploads and its exposure meter stay live — and `present_image()` shows nothing, so the compositor keeps the last good picture while the churn's frames never reach the screen |
-| `RX_VK_STORM_MIN_FRAMES=<presents>` | No release within this many presents of the engage (400). `0` with the next: the first rule, released on the queue dipping below half the engage depth |
-| `RX_VK_STORM_QUIET_FRAMES=<presents>` | No release while a job was pushed in the last this many presents (100), a gap the churn's bursts do not bridge |
+| `RX_VK_STORM_MIN_FRAMES=<presents>` | No release within this many presents of the engage (0) |
+| `RX_VK_STORM_QUIET_FRAMES=<presents>` | No release while a job was pushed in the last this many presents (0: off; the queue's depth is the rule) |
+| `RX_VK_STORM_OFF_DEPTH=<jobs>`, `RX_VK_STORM_SETTLE=<presents>` | Released once fewer than this many jobs are queued (4) for this many presents running (3): the picture is partial while the queue is deep, its draws left out for want of their programs, and whole the present it drains |
 | `RX_VK_STORM_TRACE=1` | While held, the queue's depth and its quiet clock logged every 2 s |
 
 A held present is not written as a shot: `RX_VK_SHOTS` keeps showing only what reached the screen.

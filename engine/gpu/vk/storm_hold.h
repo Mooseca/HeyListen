@@ -27,9 +27,11 @@ namespace mkwvk {
 /// The hold's numbers, from the environment once (RX_VK_STORM_HOLD, _MIN_FRAMES, _QUIET_FRAMES, _HOLD_PRESENT)
 struct StormHoldRules {
     int deep = 200;             ///< engage at this many queued jobs (<= 0: no hold)
-    int64_t min_frames = 400;   ///< no release within this many presents of the engage
-    int64_t quiet_frames = 100; ///< none while a job was pushed in the last this many presents (<= 0: the depth rule)
-    int64_t off_depth = 100;    ///< (quiet_frames <= 0) release below this many queued jobs: half the engage depth
+    int64_t min_frames = 0;     ///< no release within this many presents of the engage
+    int64_t quiet_frames = 0;   ///< none while a job was pushed in the last this many presents (<= 0: the depth rule)
+    int64_t off_depth = 4;      ///< (quiet_frames <= 0) release once fewer than this many jobs are queued ...
+    int64_t settle = 3;         ///< ... for this many presents running (the picture is partial while the queue is deep: draws whose
+                                ///< programs are not built are left out, and it completes the moment the queue is drained)
     bool hold_present = true;   ///< withhold the present (the default), not the frame's draws
 };
 
@@ -40,6 +42,7 @@ enum class StormHoldEvent { None, Engaged, Released };
 struct StormHold {
     bool on = false;
     uint64_t since_frame = 0;   ///< the present the latch engaged at
+    int64_t calm = 0;           ///< presents running the queue has been under the release depth
 
     /// One tick a present. pending: jobs queued; push_age: presents since the last push; frame: this present's number.
     StormHoldEvent tick(const StormHoldRules& r, int64_t pending, int64_t push_age, uint64_t frame) {
@@ -49,11 +52,12 @@ struct StormHold {
         }
         if (!on) {
             if (pending < r.deep) return StormHoldEvent::None;
-            on = true, since_frame = frame;
+            on = true, since_frame = frame, calm = 0;
             return StormHoldEvent::Engaged;
         }
         const int64_t held = (int64_t)(frame - since_frame);
-        const bool quiet = r.quiet_frames > 0 ? push_age >= r.quiet_frames : pending < r.off_depth;
+        calm = pending < r.off_depth ? calm + 1 : 0;
+        const bool quiet = r.quiet_frames > 0 ? push_age >= r.quiet_frames : calm >= r.settle;
         if (quiet && held >= r.min_frames) {
             on = false;
             return StormHoldEvent::Released;

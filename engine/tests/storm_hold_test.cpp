@@ -21,6 +21,7 @@ StormHoldRules rules(int deep, int64_t min_frames, int64_t quiet_frames) {
     r.min_frames = min_frames;
     r.quiet_frames = quiet_frames;
     r.off_depth = deep > 0 ? std::max<int64_t>(1, deep / 2) : 0;
+    r.settle = 1;
     return r;
 }
 
@@ -29,8 +30,8 @@ StormHoldRules rules(int deep, int64_t min_frames, int64_t quiet_frames) {
 int main() {
     {   // (the defaults: the switches' numbers and the present held, not the draws)
         const StormHoldRules d;
-        expect(d.deep == 200 && d.min_frames == 400 && d.quiet_frames == 100 && d.off_depth == 100,
-               "the defaults are the hold's tuned numbers, the depth rule at half the engage depth");
+        expect(d.deep == 200 && d.min_frames == 0 && d.quiet_frames == 0 && d.off_depth == 4 && d.settle == 3,
+               "the defaults: engaged at 200 queued, released once the queue is drained (under 4) for 3 presents");
         expect(d.hold_present, "the present is what is held by default");
     }
     {   // (RX_VK_STORM_HOLD=0: no latch, whatever the queue holds)
@@ -80,6 +81,17 @@ int main() {
         StormHold h2;
         h2.tick(r, 300, 0, 0);
         expect(h2.tick(r, 0, 0, 399) == StormHoldEvent::None && h2.on, "the depth rule keeps the floor too");
+    }
+    {   // (the drained-queue rule, the default: under the depth for settle presents running, a deep tick starts it again)
+        StormHold h;
+        const StormHoldRules d;
+        h.tick(d, 300, 0, 0);
+        expect(h.tick(d, 3, 0, 10) == StormHoldEvent::None && h.on, "one present with the queue drained: still held");
+        expect(h.tick(d, 3, 0, 11) == StormHoldEvent::None && h.on, "two: still held");
+        expect(h.tick(d, 50, 0, 12) == StormHoldEvent::None && h.on, "a refill restarts the count");
+        expect(h.tick(d, 0, 0, 13) == StormHoldEvent::None && h.tick(d, 0, 0, 14) == StormHoldEvent::None && h.on,
+               "two again: held");
+        expect(h.tick(d, 0, 0, 15) == StormHoldEvent::Released && !h.on, "the third running: released");
     }
     {   // (re-engage: a second storm after a release starts its own clock)
         StormHold h;
