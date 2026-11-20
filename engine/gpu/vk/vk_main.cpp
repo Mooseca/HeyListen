@@ -748,9 +748,15 @@ bool create_device() {
     bool task_mesh_fallback = mesh_rule::task_mesh_fallback_wanted(!linux_os, dev.props.vendorID, dev.props.deviceID, mesh_choice.mode,
                                                                    getenv("RX_VK_TASK_MESH_FALLBACK"));
     dev.task_mesh_fallback = task_mesh_fallback && dev.mesh_shader && f12.bufferDeviceAddress && !getenv("RX_VK_NO_MESH_FALLBACK");
-    if (dev.task_mesh_fallback) logf("vk: task + mesh programs use the compute fallback (RX_VK_TASK_MESH_FALLBACK=0: native)");
+    // (longshot 3228cb5f, #1650, #1239) on Windows Navi 21 to 23 the driver also hangs on a mesh-only draw (Saria's stump in Kokiri
+    // Forest, an RX 6800 XT): those take the compute path too, by the same default rule and switch, RX_VK_TASK_MESH_FALLBACK=0 turns both off
+    dev.mesh_only_fallback = dev.task_mesh_fallback && !linux_os && mesh_rule::task_mesh_fallback_default(dev.props.vendorID, dev.props.deviceID);
+    if (dev.task_mesh_fallback)
+        logf("vk: %s programs use the compute fallback (RX_VK_TASK_MESH_FALLBACK=0: native)",
+             dev.mesh_only_fallback ? "mesh-only and task + mesh" : "task + mesh");
     logf("vk: mesh shaders: %s, from %s: %s", mesh_choice.mode == 2 ? "Compute" : mesh_choice.mode == 1 ? "Native" : "Automatic",
-         mesh_choice.why, dev.mesh_shader ? (dev.task_mesh_fallback ? "native, task + mesh draws on the compute path" : "native")
+         mesh_choice.why, dev.mesh_shader ? (dev.mesh_only_fallback ? "native, mesh-only and task + mesh draws on the compute path"
+                            : dev.task_mesh_fallback ? "native, task + mesh draws on the compute path" : "native")
                          : dev.mesh_fallback ? "the compute path" : "none");
     if (robust) logf("vk: robust buffer access %s", robust_ok ? "on" : "not supported");
     f.features.robustBufferAccess = robust_ok ? VK_TRUE : VK_FALSE;   // (off by default: the game's accesses stay in their buffers)
