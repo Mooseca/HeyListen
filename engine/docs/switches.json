@@ -2,7 +2,7 @@
  "schema": 1,
  "generated_by": "engine/scripts/list_switches.py",
  "scope": "C, C++ and headers under engine/ (engine/tests and vendored trees other than a64-kit excluded) and the Python the builder, the lifter and the scripts run: getenv, std::getenv, _wgetenv, the code's own env helpers and table-driven reads, and os.environ.",
- "count": 1321,
+ "count": 1322,
  "switches": [
   {
    "name": "A64_DEVIRT",
@@ -6626,6 +6626,27 @@
    "comment": "TICK-062 A4/B7, HOS_OBJ_PACK=1: the slot pointer and its key side by side (stride 2: {Obj *, key} pairs, 16 bytes) instead of the pointer array and then the key array (stride 1): a probe touches one cache line, not two, before the object itself. The same values at the same slot numbers, so every lookup answers as before.",
    "documented_in": null,
    "source": "comment at host/nn_os_sync.c",
+   "documented": true,
+   "set_via": "In `hookshot_env.txt`, or in the environment.",
+   "use": null
+  },
+  {
+   "name": "HOS_OCB_HOLD_MS",
+   "area": "host",
+   "group": "System and services",
+   "audience": "developer",
+   "files": [
+    {
+     "path": "host/hl_ocb_hold.c",
+     "line": 35
+    }
+   ],
+   "default": "off (unset)",
+   "values": "on or off (0, false, off, no and empty are off)",
+   "explanation": "HOS_OCB_HOLD_MS (default 2000): how many ms a new neighbouring map must stay the game's choice before its preload replaces the one held; 0 or off: the game's own choice at every frame (Castle Town's market flickered between two).",
+   "comment": "HOS_OCB_HOLD_MS (default 2000): how many ms a new neighbouring map must stay the game's choice before its preload replaces the one held; 0 or off: the game's own choice at every frame (Castle Town's market flickered between two).",
+   "documented_in": null,
+   "source": "comment at host/hl_ocb_hold.c",
    "documented": true,
    "set_via": "In `hookshot_env.txt`, or in the environment.",
    "use": null

@@ -186,9 +186,12 @@ def movie_site(s, addr, off):
 #   playback's call to f_832b7b50 (is the note flag set), found by its return address: a line after it makes the result
 #   hos_oot_song_cue(site, x0): a set flag read again before the sound job ran again reads clear (host/hl_high_fps.c). The
 #   two playbacks, f_832b2af0 (site 0) and f_832b2dc0 (site 1), have their own hooks.
+# - HL_OCB_HOOK(832b9880, "<hash>"): (Longshot c88f70440, SadTransGirl, #1814; Castle Town's market) the OptimizeChangeBank preload
+#   manager's update, at its label L_832b9dc8 (the unit it chose is in x21, bit 31 of w21: none; the manager in x19): the choice
+#   goes through hos_oot_ocb_pick (host/hl_ocb_hold.c) before the update tests it. A line after the label, once.
 # Each goes in only where its function's text hashes as recorded, both lines of a kind or none. The marker is the address
 # plus one, as a step hook's (one hook a function), so a tree that does not ask for it takes it out as a stale gate.
-WANT_LIFT = re.compile(r'^HL_(SOUND|SOLVER|WHOLE|HEAP|BGM|TURN|HORSE|FLOOR|DRIVE|LOOP|POSE|SONG)_HOOK\(\s*([0-9a-f]{8})\s*,\s*"([0-9a-f]*)"((?:\s*,\s*(?:\d+|"[^"\n]*"))*)\s*\)',
+WANT_LIFT = re.compile(r'^HL_(SOUND|SOLVER|WHOLE|HEAP|BGM|TURN|HORSE|FLOOR|DRIVE|LOOP|POSE|SONG|OCB)_HOOK\(\s*([0-9a-f]{8})\s*,\s*"([0-9a-f]*)"((?:\s*,\s*(?:\d+|"[^"\n]*"))*)\s*\)',
                        re.M)
 CUT = "    c->x[%d]=recomp_fp_to_int(c->vreg[0][0]&UINT64_C(0xffffffff),32,32,1,3,c->fpcr,&c->fpsr);\n"
 SOUND_SLOT = "g_module_base + 0x80435000ULL + (int64_t)75927552"   # (the page of the step's pointer, whose +2192 holds it)
@@ -236,6 +239,11 @@ LOOP_MUL_REST = re.compile(r"    _v=a64_fpx_(?:hot_)?mul32_fma32\(c,_a,_b,_z\);\
 POSE_STORE = "    { { uint64_t _v=0; memcpy(&_v,&c->vreg[0][0],4); recomp_store32(c,(c->x[22]+0ULL),_v); } }\n"
 # (a song's playback: the call asking whether the note flag is set, by its return address)
 SONG_CALLS = {"832b2af0": "c->x[30] = 0x832b2c84ULL; f_832b7b50(c);\n", "832b2dc0": "c->x[30] = 0x832b2ed4ULL; f_832b7b50(c);\n"}
+
+
+# (the preload manager's choice: the label, then the test of bit 31 of w21 (none chosen); the line goes between them)
+OCB_LABEL = "L_832b9dc8:;\n"
+OCB_TEST = "if (((c->x[21] >> 31) & 1)) { goto L_832b9e0c; }\n"
 
 
 HEAP_CPU = (0x80456910, 0x80456da4)   # (f_804566e0's tryAlloc calls, by their return addresses, and the GPU memory's)
@@ -304,6 +312,9 @@ def lift_lines(kind, addr, args):
     if kind == "song":
         return ["    { extern uint64_t hos_oot_song_cue(uint32_t, uint64_t); c->x[0] = hos_oot_song_cue(%d, c->x[0]); }" %
                 (0 if addr == "832b2af0" else 1) + mark]
+    if kind == "ocb":
+        return ["    { extern uint64_t hos_oot_ocb_pick(Ctx *A64_NOESC, uint64_t, uint64_t); "
+                "c->x[21] = hos_oot_ocb_pick(c, c->x[19], c->x[21]); }" + mark]
     if kind == "heap":
         lines = []
         for lr in HEAP_CPU:
@@ -401,6 +412,9 @@ def lift_places(body, addr, kind, args):
     if kind == "song":
         call = SONG_CALLS.get(addr)
         return [body.index(call) + len(call)] if call and body.count(call) == 1 else None
+    if kind == "ocb":
+        anchor = OCB_LABEL + OCB_TEST
+        return [body.index(anchor) + len(OCB_LABEL)] if body.count(anchor) == 1 else None
     if kind == "heap":
         places = []
         for lines in ((HEAP_CPU_LINE, HEAP_CPU), (HEAP_GPU_LINE, HEAP_GPU)):
