@@ -833,7 +833,7 @@ __declspec(noinline) VkResult guarded_graphics(VkPipelineCache cache, const VkGr
         return VK_ERROR_UNKNOWN;
     }
 }
-__declspec(noinline) VkResult guarded_compute(VkPipelineCache cache, const VkComputePipelineCreateInfo* ci, VkPipeline* pl) {
+__declspec(noinline) VkResult guarded_compute_once(VkPipelineCache cache, const VkComputePipelineCreateInfo* ci, VkPipeline* pl) {
     __try {
         return vkCreateComputePipelines(dev.device, cache, 1, ci, nullptr, pl);
     } __except (1) {
@@ -889,7 +889,7 @@ VkResult guarded_graphics(VkPipelineCache cache, const VkGraphicsPipelineCreateI
     fault_armed = 0;
     return r;
 }
-VkResult guarded_compute(VkPipelineCache cache, const VkComputePipelineCreateInfo* ci, VkPipeline* pl) {
+VkResult guarded_compute_once(VkPipelineCache cache, const VkComputePipelineCreateInfo* ci, VkPipeline* pl) {
     install_driver_fault_guard();
     if (sigsetjmp(fault_jmp, 1) != 0) {
         logf("vk: the driver faulted compiling a compute pipeline: that one is left out");
@@ -901,6 +901,31 @@ VkResult guarded_compute(VkPipelineCache cache, const VkComputePipelineCreateInf
     return r;
 }
 #endif
+/// (Hookshot f1eb23c9, Chad-) AMD's proprietary compiler fails (-13) or faults (-77) on some programs, the Market's and Kakariko's
+/// dogs among them (RX 6600 XT, driver 0x800161): a pipeline it fails on is built once more with
+/// VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT, which it builds, instead of the draws being left out. Not for the memory errors,
+/// which the optimizer does not cause, nor for the cold ask's VK_PIPELINE_COMPILE_REQUIRED, which is no failure.
+/// RX_VK_NO_UNOPT_RETRY=1: no second build (a failed pipeline stays left out)
+static bool retry_without_optimizer(VkResult r, VkPipelineCreateFlags flags) {
+    static const bool off = std::getenv("RX_VK_NO_UNOPT_RETRY") != nullptr;
+    return !off && dev.props.vendorID == 0x1002 && r != VK_SUCCESS && r != VK_ERROR_OUT_OF_HOST_MEMORY &&
+           r != VK_ERROR_OUT_OF_DEVICE_MEMORY && r != VK_PIPELINE_COMPILE_REQUIRED &&
+           !(flags & VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT);
+}
+/// A compute pipeline the driver's compiler fails on is built again without its optimizer, as a graphics one is (build_graphics)
+VkResult guarded_compute(VkPipelineCache cache, const VkComputePipelineCreateInfo* ci, VkPipeline* pl) {
+    const VkResult r = guarded_compute_once(cache, ci, pl);
+    if (!retry_without_optimizer(r, ci->flags)) return r;
+    VkComputePipelineCreateInfo again = *ci;
+    again.flags |= VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT;
+    *pl = VK_NULL_HANDLE;
+    const VkResult second = guarded_compute_once(cache, &again, pl);
+    static std::atomic<int> told{0};
+    if (told++ < 20)
+        logf("vk: a compute pipeline failed (%d) with the driver's optimizer: %s", (int)r,
+             second == VK_SUCCESS ? "made without it" : "not made without it either");
+    return second;
+}
 
 // (longshot #190) Intel's Windows driver faults in vkGetPipelineCacheData (igvk64.dll, an access violation) when it fetches a
 // cache's data while other threads build pipelines with that cache: the game closes with no message. Vulkan allows both at once;
@@ -2027,7 +2052,7 @@ VkPipeline build_graphics(const Program& p, const NvnState& s, const Targets& at
             static std::atomic<int> logged{0};
             if (logged++ < 8)
                 logf("vk: vertex stream %u divisor %u%s", b, s.vstream[b].divisor, dev.vertex_divisor ? "" : " (not supported: 1)");
-            if (dev.vertex_divisor) vdivs.push_back({b, s.vstream[b].divisor});
+            if (dev.vertex_divisor) vdivs.push_back({b, std::min(s.vstream[b].divisor, dev.max_vertex_divisor)});
         }
     {   // (each NVN vertex format once: what the game draws with)
         static std::mutex mu;
@@ -2199,15 +2224,18 @@ VkPipeline build_graphics(const Program& p, const NvnState& s, const Targets& at
         IntelDriverGate gate(cold != nullptr);
         if (gate.busy) return intel_gate_busy(), *cold = true, VK_NULL_HANDLE;
         r = guarded_graphics_held(part >= 0 || driver_cache_only ? VK_NULL_HANDLE : pcache, &ci, &pl);
-        // (d1d6caa7) the AMD Windows compiler can reject an ordinary graphics pipeline with its optimizer on, on the cards that run
-        // task + mesh draws as compute (issue 996): once more without it
-        if (dev.props.vendorID == 0x1002 && dev.task_mesh_fallback && !p.mesh && part < 0 && r == VK_ERROR_UNKNOWN &&
-            !(ci.flags & VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT)) {
+        // (d1d6caa7, and Hookshot f1eb23c9 for every graphics pipeline: Chad-) the AMD Windows compiler can reject an ordinary
+        // graphics pipeline with its optimizer on (-13: the Market's and Kakariko's dogs on an RX 6600 XT; the cards that run task +
+        // mesh draws as compute, issue 996): once more without it, which it builds. Not for the memory errors
+        if (retry_without_optimizer(r, ci.flags)) {
+            const VkResult first = r;
             ci.flags |= VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT;
             pl = VK_NULL_HANDLE;
-            r = guarded_graphics_held(pcache, &ci, &pl);
-            if (r == VK_SUCCESS)
-                logf("vk: graphics pipeline for %016llx recovered with optimization disabled", (unsigned long long)p.key);
+            r = guarded_graphics_held(part >= 0 || driver_cache_only ? VK_NULL_HANDLE : pcache, &ci, &pl);
+            static std::atomic<int> told{0};
+            if (told++ < 20)
+                logf("vk: %s %016llx failed (%d) with the driver's optimizer: %s", part >= 0 ? "a library of" : "graphics pipeline for",
+                     (unsigned long long)p.key, (int)first, r == VK_SUCCESS ? "made without it" : "not made without it either");
         }
     }
     if (cold && r == VK_PIPELINE_COMPILE_REQUIRED) return *cold = true, VK_NULL_HANDLE;
@@ -9567,6 +9595,7 @@ struct Pre {
     std::vector<Program*> fallbacks;  // the programs translated for the mesh fallback: their compute pipelines (a GPU without mesh shaders)
     std::atomic<size_t> next{0}, done{0}, made{0}, failed{0};
     std::atomic<unsigned> running{0};
+    std::atomic<bool> abandoned{false};   // (Hookshot 4ae22a7a: the game went on without them: no worker takes a new pipeline)
     size_t total = 0;
     size_t carried = 0, missing = 0;
     bool background = false;
@@ -9746,7 +9775,7 @@ void precompile_run(void (*progress)(size_t done, size_t total), bool wait) {
         if (!wait) SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
         ub_thread_off();   // (a background thread: see ub_thread_off)
         for (;;) {
-            if (prepare_stopped()) break;
+            if (prepare_stopped() || pre->abandoned.load(std::memory_order_relaxed)) break;
             const size_t i = pre->next++;
             if (i >= total) break;
             if (i < pre->computes.size()) {
@@ -9829,9 +9858,14 @@ void precompile_run(void (*progress)(size_t done, size_t total), bool wait) {
         Sleep(100);
         const auto now = std::chrono::steady_clock::now();
         if (pre->done.load() != last_done) last_done = pre->done.load(), last_change = now;
-        else if (stall_s > 0 && pre->next.load() >= total && now - last_change > std::chrono::seconds(stall_s)) {
-            logf("vk: precompile: %zu of %zu done, nothing finished for %d s: the game starts, the rest go on behind it", pre->done.load(),
-                 total, stall_s);
+        // (Hookshot 4ae22a7a, NotRexed: whether or not every pipeline was handed out. With every worker inside the driver on a pipeline
+        // it never returns from, none was, and the start waited for good on AMD's RX 6600 / 6600 XT, the CPU idle. Not every one
+        // handed out: the workers take no new pipeline, the rest are made in play)
+        else if (stall_s > 0 && now - last_change > std::chrono::seconds(stall_s)) {
+            const bool all_out = pre->next.load() >= total;
+            if (!all_out) pre->abandoned = true;
+            logf("vk: precompile: %zu of %zu done, nothing finished for %d s: the game starts, the rest %s", pre->done.load(), total,
+                 stall_s, all_out ? "go on behind it" : "are made in play");
             pre->background = true;
             break;
         }
