@@ -182,3 +182,36 @@ wait is the one named `0x113c88b000+0x1040`) and fps. 3050 variants: exe and dll
 - Next steps in order: slot run with `RX_VK_LOG_READBACK2` filtered to 0x1040 (add a size filter to the diagnostic or raise its cap) to
   settle open question 1-3; write `hl::expo` (ring, lag rule) with its unit test; vk hooks; `_CHECK` at `L = 1`; pictures; speed lease
   measurement; 3050 variants.
+
+## 6. Implemented and measured (second session, 2026-11-21)
+
+Decision taken by the coordinator: fixed lag `L = 2`. Code: `engine/gpu/vk/expo_feed.h` (the pure rules, tested by `tests/test_expo_feed.py`),
+`vk_expo.cpp` (ring, producer, consumer, check), the producer call after the meter dispatch in `vk_draw.cpp`, the consumer branch in
+`invalidate()` (`vk_replay.cpp`). Switch `HL_EXPO_GPU` (0 default, 1 on, 2 check), `HL_EXPO_LAG` (2), `HL_EXPO_WAIT_MS` (4), `HL_EXPO_LOG=<rows>`.
+Diagnostics added (default off): `RX_VK_LOG_METER=<rows>`, `RX_VK_LOG_READBACK2_SIZE`, `RX_VK_LOG_READBACK2_ROWS`.
+
+Open questions of section 4, answered by `RX_VK_LOG_METER` and the 0x1040 read logs:
+1. Market: only `435a0138b9013040` runs, writing block `0x113c88e000` (the game's B ring; the CPU reads its word 3). Kakariko and Lost Woods: also
+   `592079442d7129da`, writing `0x113c88b000` (ring A). The third block `0x113c891000` (C) is never written by a program in these scenes and reads 0.
+2. Both programs bind the whole 0x1040 block at offset 0.
+3. The program fills the whole block (about 1,028 non-zero words: the four sums, then a table); the CPU reads and zeroes only words 0-3 (B: reads word 3).
+4. Zone change: not exercised by a scripted scene (the scenes started from saves); the ring keeps counting across loads (the two double-dispatch frames at
+   the start of a run show as the only mismatches below). Left for a hand-played check.
+
+`_CHECK` (`HL_EXPO_GPU=2`, uniform options, "Render resolution: 100% chosen, drawn at 100%"): Market 4,999 of 5,000 reads equal; Kakariko 6,994 of 7,000;
+Lost Woods 6,991 of 7,000. Every mismatch row has the old path equal to the ring's **lag 2** slot: the replay had already recorded the next dispatch
+(loading frames record two a frame, or the replay ran ahead), so "newest recorded" was one ahead of what the old wait returned. With `L = 2` that case
+returns the same sums the old path read; nothing else differed (0 reads with the newest slot not finished). `L = 2` against the old path is one dispatch
+older in all other frames (visible in the rows: lag2 equals the previous row's old value).
+
+Pictures (`RX_VK_SHOTS`, mode 1, same options): Market day, Kakariko village (day: the save has no night), inside the Deku Tree (dark): all right, no
+flash, no tint (shots in `E:\OOT\scratch-expo1\shots-m1`, `shotsd-*`). Lost Woods and a night scene were checked in mode 2 only (old path's pictures).
+Served reads: 3,000 reads, 0 took an older slot, at most 1 found nothing (the first read).
+
+Speed (main PC, SPEED lease priority 2, slot a, `market-spin` on `market-mid`, dlss 0, upscaling 0, resolution 100%, hdr 0, vsync off, no cap
+(`frame_rate_limit=5`), x3 interleaved, off then on): fps off 70.6 / 81.1 / 81.2 (mean 77.6), on 78.9 / 84.5 / 76.8 (mean 80.1): **inside the noise
+(+3%)**. The calls that wait (`readbacks of GPU results` line) stay at 270-500 of 3,000 at 0.1-0.6 ms: the other rings (0x2000, 0x40) still wait. This
+is the expected result on the 5070 (the meter waits 0.2 ms there); the gain, if any, is for the 3050, where the meter's wait is part of the ~14 ms: not
+measured here (3050 runs go through its own session). The binaries are in `C:/OOT/builds/expo1/` on the 3050 (`HeyListen.exe`, `hookshot_vk.dll`,
+`HeyListen.map`): the same exe runs both variants, `HL_EXPO_GPU=0` and `HL_EXPO_GPU=1`.
+Default stays **off**: the meter is one of several waiting ranges, so the frame gains only once R2 and R3 (0x40 ring, 0x2000 pair) are also off the wait.
