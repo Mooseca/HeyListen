@@ -1616,6 +1616,9 @@ bool upload_astc_gpu(Texture& tex, uint64_t total, const Ranges* dirty) {
             const VkImageView view = astc_level_view(&tex, level, all_lv ? ~0u : layers[k]);
             if (!view) return false;
             astc_chunk_step(cmd, chunk_texels, (uint64_t)g.w * g.h * (all_lv ? tex.layers : 1));
+            // (a chunk's flush ends the command buffer and begins it again in place: the pipeline bound before is gone, and a dispatch
+            // with none bound made the NVIDIA driver read a null pipeline, 0xc0000005 at nvoglv64 +0xe1c65e, in the quest tab of the pause menu)
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, astc_pipe);
             const uint64_t from = (all_lv ? 0 : k * tail) + off;
             VkDescriptorBufferInfo bi{s.buffer, s.offset + from, staged - from};
             VkDescriptorImageInfo ii{VK_NULL_HANDLE, view, VK_IMAGE_LAYOUT_GENERAL};
