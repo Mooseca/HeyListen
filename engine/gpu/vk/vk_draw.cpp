@@ -9343,7 +9343,13 @@ bool prepare_is_update() {
     static const double limit = getenv("RX_VK_LAZY_MAX_CHANGED") ? atof(getenv("RX_VK_LAZY_MAX_CHANGED")) / 100.0 : 0.10;
     logf("vk: update: %.0f%% of %zu sampled programs translate differently than the last start's (the limit is %.0f%%, over it the "
          "shaders are prepared before the game)", share * 100, measured, limit * 100);
-    if (measured >= 16 && share > limit) return false;
+    // (a sample under 16 programs says nothing: "0% of 0 sampled" was lazy, and a start on caches the ledger does not match then
+    // compiled every program in play, seconds of freeze each (#1553 A/B). It prepares before the game, as an unknown change does)
+    if (measured < 16) {
+        logf("vk: update: too few programs sampled to tell: the shaders are prepared before the game");
+        return false;
+    }
+    if (share > limit) return false;
     lazy_update.store(true);
     return true;
 }
