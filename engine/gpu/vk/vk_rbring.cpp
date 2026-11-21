@@ -144,7 +144,7 @@ bool rbring_check_on() { return config().lag != 0 && config().check; }
 /// The CPU reads (guest, size): the range is one to stage from now on
 void rbring_note_read(uint64_t guest, uint64_t size) {
     if (!config().lag || !guest) return;
-    if (size != 0x40 && size != 0x2000 && size != 0x1040) return;
+    if (!rb_ring::class_of(size)) return;
     const int cls = rb_ring::class_of(size);
     if (!cls) return;
     std::lock_guard lk(mu);
@@ -181,7 +181,7 @@ void rbring_note_written(uint64_t guest, uint64_t size) {
 
 /// A program's binding for writing in a mirror (pools_mu held): true when the range is staged, so no write-back is made for it
 bool rbring_stage_bind(uint64_t guest, uint64_t size, VkBuffer buffer, VkDeviceSize offset) {
-    if (!config().lag || (size != 0x40 && size != 0x2000 && size != 0x1040) || !buffer) return false;
+    if (!config().lag || !rb_ring::class_of(size) || !buffer) return false;
     std::lock_guard lk(mu);
     const auto it = table.find({guest, size});
     if (it == table.end()) return false;
@@ -241,7 +241,7 @@ void rbring_flush(VkCommandBuffer cmd, uint64_t value) {
 
 /// HL_RB_LAG_CHECK=1: a read of a range no program writes (answered with no wait in lag mode) before the check's entry: would the waits have changed it?
 bool rbring_quiet(uint64_t guest, uint64_t size) {
-    if (!config().lag || !config().check || (size != 0x40 && size != 0x2000 && size != 0x1040)) return false;
+    if (!config().lag || !config().check || !rb_ring::class_of(size)) return false;
     std::lock_guard lk(mu);
     const auto it = table.find({guest, size});
     return it != table.end() && !it->second.stageable && served(it->second);
@@ -257,7 +257,7 @@ void rbring_quiet_result(uint64_t size, bool changed) {
 /// True: this read is answered by rbring_apply and waits for nothing (lag mode, not the check, a range whose bindings are staged)
 bool rbring_serves(uint64_t guest, uint64_t size) {
     if (!config().lag || config().check) return false;
-    if (size != 0x40 && size != 0x2000 && size != 0x1040) return false;
+    if (!rb_ring::class_of(size)) return false;
     std::lock_guard lk(mu);
     const auto it = table.find({guest, size});
     return it != table.end() && served(it->second);

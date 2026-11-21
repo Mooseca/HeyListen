@@ -40,10 +40,10 @@ inline Config parse(const char* lag, const char* check, const char* wait) {
 }
 
 /// The class of a CPU read: 1 the meter's block (size 0x1040: the game has three such rings and the Market's programs write only one of them,
-/// the others are read all the same), 2 a 0x40 slot, 3 a 0x2000 block, 0 none
-inline int class_of(uint64_t size) { return size == 0x1040 ? 1 : size == 0x40 ? 2 : size == 0x2000 ? 3 : 0; }
+/// the others are read all the same; and its 0xc0 companion block), 2 a 0x40 slot, 3 a 0x2000 block, 0 none
+inline int class_of(uint64_t size) { return size == 0x1040 || size == 0xc0 ? 1 : size == 0x40 ? 2 : size == 0x2000 ? 3 : 0; }
 /// The bytes of the range that are staged and handed back (the CPU reads words 0 and 3 of the meter's block only)
-inline uint64_t copy_bytes(int cls, uint64_t size) { return cls == 1 ? 16 : size; }
+inline uint64_t copy_bytes(int cls, uint64_t size) { return cls == 1 && size == 0x1040 ? 16 : size; }
 
 struct Entry {
     uint64_t seq = 0;     // 1, 2, ... in staging order (0: empty)

@@ -25,8 +25,8 @@ int main() {
     CHECK(parse(nullptr, nullptr, nullptr).lag == 0 && !parse(nullptr, nullptr, nullptr).check && parse(nullptr, nullptr, nullptr).wait_ms == 200.0);
     CHECK(parse("2", "1", "5").lag == 2 && parse("2", "1", "5").check && parse("2", "1", "5").wait_ms == 5.0);
     CHECK(parse("99", "0", nullptr).lag == kMaxLag && !parse("99", "0", nullptr).check && parse("-3", nullptr, nullptr).lag == 0);
-    CHECK(class_of(0x40) == 2 && class_of(0x2000) == 3 && class_of(0x1040) == 1 && class_of(0x80) == 0 && class_of(0) == 0);
-    CHECK(copy_bytes(1, 0x1040) == 16 && copy_bytes(2, 0x40) == 0x40 && copy_bytes(3, 0x2000) == 0x2000);
+    CHECK(class_of(0x40) == 2 && class_of(0x2000) == 3 && class_of(0x1040) == 1 && class_of(0xc0) == 1 && class_of(0x80) == 0 && class_of(0) == 0);
+    CHECK(copy_bytes(1, 0x1040) == 16 && copy_bytes(1, 0xc0) == 0xc0 && copy_bytes(2, 0x40) == 0x40 && copy_bytes(3, 0x2000) == 0x2000);
     Entry e[kMaxEntries];
     unsigned n = 0;
     CHECK(pick(e, n, 10, 2, 0) < 0 && newest(e, n) < 0);
