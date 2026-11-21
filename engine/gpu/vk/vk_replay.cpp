@@ -50,6 +50,7 @@
 #include "vk_opt_ids.h"
 #include "vk_perf.h"
 #include "segment_plan.h"   // (TICK-050: the parallel replay's segment count)
+#include "completion_tracker.h"   // (stream ORDER2: the recordings' completion tracked off the order thread)
 #include "vk_jobs.h"
 #include "storm_hold.h"
 #include "vk_shader.h"
@@ -278,6 +279,9 @@ struct Recording {
     bool submitted = false;
     int grp_owner = -1;   // (stream ORDER1, RX_VK_SEG_MERGE: the slot whose fence this recording's submit signals, with others' in one submit; -1: its own)
     uint64_t batch = 0;   // (RX_VK_BATCH: the batch it went out in, waited for on batch_tl; 0: its own fence)
+    mkwvk::completion::Slot comp;   // (stream ORDER2, RX_VK_COMPLETION_THREAD: the submit numbers; see comp_submit)
+    bool comp_tracked = false;      // (its last submit was handed to the completion thread: its fence is waited for and reset there)
+    uint64_t chk_seq = 0;           // (RX_VK_COMPLETION_CHECK: the recordings' timeline value its submit signals, 0: none known)
 };
 // (24: the event waits cut a frame's command buffers into pieces, each with recordings of its own, and with 16 the
 // replay waited ~1.5 ms a frame for a slot the GPU still had)
@@ -319,6 +323,32 @@ struct DrvTime {   // (adds its scope's wall time to a pair of counters when RX_
     DrvTime& operator=(const DrvTime&) = delete;
 };
 struct Recording;
+// ---- (stream ORDER2, step 1) RX_VK_COMPLETION_THREAD=1 (off until measured): the order thread never waits on the GPU's completion ----
+// The order thread (the replay thread under sync_order_mu) spent 5.1% of its time in recording_wait (vkGetFenceStatus, vkResetFences, or a
+// vkWaitForFences when the GPU was behind: ~15 recordings a frame, driver calls on a thread that is 37% of the Market's critical path on
+// a 6-core CPU). With the switch each submit's fence is handed to a thread of its own (comp_submit, under dev.present_mu: in the queue's
+// order), which waits for it and resets it; recording_wait then only reads an atomic, and blocks (on a condition variable, not in the
+// driver) only when the slot is wanted again before the GPU is done with it, as before. Nothing the game sees changes: the same fences,
+// the same slots, the same submits in the same order; `submitted` is still cleared by the order thread, in recording_wait.
+// RX_VK_COMPLETION_CHECK=1 (a diagnostic): each retired slot's recordings-timeline value is checked to have been reached, and the fence
+// to be reset; a violation is logged and counted. RX_VK_COMPLETION_THREAD=0: as before. Not with RX_VK_BATCH (its recordings wait on batch_tl).
+bool comp_on() {
+    static const bool v = [] {
+        const bool on = getenv("RX_VK_COMPLETION_THREAD") && atoi(getenv("RX_VK_COMPLETION_THREAD")) != 0;
+        if (on) logf("vk: recordings' completion tracked by a thread of its own (RX_VK_COMPLETION_THREAD)");
+        return on;
+    }();
+    return v;
+}
+bool comp_check_on() {
+    static const bool v = getenv("RX_VK_COMPLETION_CHECK") && atoi(getenv("RX_VK_COMPLETION_CHECK")) != 0;
+    return v;
+}
+struct CompStats {
+    std::atomic<int64_t> waited{0}, waited_ns{0}, fast{0}, violations{0};
+};
+CompStats comp_stats;
+mkwvk::completion::Tracker* comp_tracker();   // (below, once dev and Recording are known)
 struct FenceGroup {
     static constexpr int kMax = 8;
     Recording* m[kMax];
@@ -330,10 +360,72 @@ void fence_done(VkFence f) {
     if (!(fence_poll_on() && vkGetFenceStatus(dev.device, f) == VK_SUCCESS)) vkWaitForFences(dev.device, 1, &f, VK_TRUE, UINT64_MAX);
     vkResetFences(dev.device, 1, &f);
 }
+mkwvk::completion::Tracker* comp_tracker() {
+    static mkwvk::completion::Tracker* t = new mkwvk::completion::Tracker([](uint64_t token) {   // (never destroyed: it runs to the process's end)
+        static std::once_flag named;
+        std::call_once(named, [] { SetThreadDescription(GetCurrentThread(), L"mkw_vk completion"); });
+        VkFence f = reinterpret_cast<VkFence>(token);
+        const VkResult w = vkWaitForFences(dev.device, 1, &f, VK_TRUE, UINT64_MAX);
+        if (w == VK_ERROR_DEVICE_LOST) device_lost();
+        if (comp_check_on() && w == VK_SUCCESS && vkGetFenceStatus(dev.device, f) != VK_SUCCESS) {
+            static int failures;
+            if (failures++ < 8) logf("vk: completion check: a fence waited for is not signalled");
+            comp_stats.violations.fetch_add(1, std::memory_order_relaxed);
+        }
+        if (vkResetFences(dev.device, 1, &f) == VK_ERROR_DEVICE_LOST) device_lost();
+    });
+    return t;
+}
+/// (stream ORDER2) The submit just made, `owner`'s fence signalled by it, with the `n` recordings in it (the owner among them, last):
+/// handed to the completion thread. Called with dev.present_mu held, right after a successful vkQueueSubmit2: the queue's order.
+/// A recording the batch holds (r.batch) is not handed over: it has no fence of its own in flight
+void comp_submit(Recording& owner, Recording* const* members, int n) {
+    mkwvk::completion::Slot* s[mkwvk::completion::Tracker::kMax];
+    if (n > mkwvk::completion::Tracker::kMax) n = mkwvk::completion::Tracker::kMax;
+    for (int i = 0; i < n; i++) s[i] = &members[i]->comp, members[i]->comp_tracked = true;
+    comp_tracker()->submit(reinterpret_cast<uint64_t>(owner.fence), s, n);
+}
+void comp_submit(Recording& r) {
+    Recording* m = &r;
+    comp_submit(r, &m, 1);
+}
 /// (a recording slot's last submit done: before it is used again)
 void recording_wait(Recording& r) {
     if (!r.submitted) return;
     DrvTime drv_time(drvwall.rw_ns, drvwall.rw_n);
+    if (r.comp_tracked) {   // (stream ORDER2: the completion thread has the fence; here only its answer is read)
+        if (mkwvk::completion::Tracker::done(r.comp)) {
+            comp_stats.fast.fetch_add(1, std::memory_order_relaxed);
+        } else {
+            const int64_t t0 = DrvTime::now();
+            comp_tracker()->wait(r.comp);
+            comp_stats.waited.fetch_add(1, std::memory_order_relaxed);
+            comp_stats.waited_ns.fetch_add(DrvTime::now() - t0, std::memory_order_relaxed);
+        }
+        if (comp_check_on()) {
+            uint64_t tl = 0;
+            if (r.chk_seq && rec_timeline && vkGetSemaphoreCounterValue(dev.device, rec_timeline, &tl) == VK_SUCCESS && tl < r.chk_seq) {
+                static int failures;
+                if (failures++ < 8)
+                    logf("vk: completion check: slot %d retired at recordings value %llu, its submit signals %llu", r.slot,
+                         (unsigned long long)tl, (unsigned long long)r.chk_seq);
+                comp_stats.violations.fetch_add(1, std::memory_order_relaxed);
+            }
+            if (vkGetFenceStatus(dev.device, r.fence) == VK_SUCCESS) {
+                static int failures;
+                if (failures++ < 8) logf("vk: completion check: slot %d retired with its fence still signalled", r.slot);
+                comp_stats.violations.fetch_add(1, std::memory_order_relaxed);
+            }
+        }
+        r.comp_tracked = false, r.chk_seq = 0;
+        r.submitted = false;
+        static std::atomic<uint32_t> n{0};
+        if ((n.fetch_add(1, std::memory_order_relaxed) + 1) % 7200 == 0)
+            logf("vk: completion thread: %lld slots found done, %lld waited for (%.2f ms in all), %lld check violations",
+                 (long long)comp_stats.fast.load(), (long long)comp_stats.waited.load(), comp_stats.waited_ns.load() / 1e6,
+                 (long long)comp_stats.violations.load());
+        return;
+    }
     if (r.grp_owner >= 0) {   // (one of a group submitted together: the owner's fence is for all of them, and they are all done with it)
         FenceGroup& g = fence_groups[r.grp_owner];
         Recording& owner = *g.m[g.n - 1];
@@ -1196,6 +1288,7 @@ void submit_recording(Recording& r, bool signal_value = true, uint64_t signal_at
     tl_ev("rec-qsubmit-", seq);
     probe_submit(seq, 1);
     r.submitted = res == VK_SUCCESS;
+    if (r.submitted && comp_on()) r.chk_seq = seq, comp_submit(r);   // (stream ORDER2)
     if (r.submitted && signal_value) note_signal_sent(signal.value);
     static int failures;
     if (res != VK_SUCCESS && failures++ < 8) logf("vk: submit %llu failed (%d)", (unsigned long long)r.value, (int)res);
@@ -2988,6 +3081,7 @@ void presync_early_finish(bool segments) {
         queue_flush_locked();
         const VkResult res = vkQueueSubmit2(dev.queue, 1, &si, r.fence);
         r.submitted = res == VK_SUCCESS;
+        if (r.submitted && comp_on()) comp_submit(r);   // (stream ORDER2)
         if (res != VK_SUCCESS) logf("vk: early pre-sync submit %llu failed (%d)", (unsigned long long)r.value, (int)res);
         if (res == VK_ERROR_DEVICE_LOST) device_lost();
     }
@@ -3159,6 +3253,7 @@ const uint8_t* replay_handle_early(VkCommandBuffer& cmd, const uint8_t* h, bool 
         gpu_time_segment_submitted(*j->r);   // (the blits' places among the timed recordings)
         const VkResult res = vkQueueSubmit2(dev.queue, 1, &si, j->r->fence);
         j->r->submitted = res == VK_SUCCESS;
+        if (j->r->submitted && comp_on()) comp_submit(*j->r);   // (stream ORDER2)
         if (res != VK_SUCCESS) logf("vk: segment submit %llu failed (%d)", (unsigned long long)j->r->value, (int)res);
         if (res == VK_ERROR_DEVICE_LOST) device_lost();
     };
@@ -3795,7 +3890,11 @@ const uint8_t* replay_handle(VkCommandBuffer& cmd, const uint8_t* h, bool may_st
         const VkResult res = vkQueueSubmit2(dev.queue, 1, &si, owner.fence);
         if (wall_fine_on()) drvwall.seg_n.fetch_add(1, std::memory_order_relaxed), drvwall.seg_cbs.fetch_add((int64_t)gn, std::memory_order_relaxed);
         for (size_t q = 0; q < gn; q++) member[q]->r->submitted = res == VK_SUCCESS;
-        if (gn > 1 && res == VK_SUCCESS) {
+        if (res == VK_SUCCESS && comp_on()) {   // (stream ORDER2: the completion thread has the group's fence; no FenceGroup)
+            Recording* ms[kMerge];
+            for (size_t q = 0; q < gn; q++) ms[q] = member[q]->r;
+            comp_submit(owner, ms, (int)gn);
+        } else if (gn > 1 && res == VK_SUCCESS) {
             FenceGroup& g = fence_groups[owner.slot];
             g.n = (int)gn;
             for (size_t q = 0; q < gn; q++) g.m[q] = member[q]->r, member[q]->r->grp_owner = owner.slot;
