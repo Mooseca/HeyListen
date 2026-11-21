@@ -5485,7 +5485,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 4826
+     "line": 4839
     },
     {
      "path": "host/hos_main.c",
@@ -5510,7 +5510,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 4825
+     "line": 4838
     },
     {
      "path": "host/mkw_glue.c",
@@ -5519,7 +5519,7 @@
    ],
    "default": "unset",
    "values": "text",
-   "explanation": "undocumented: gpu/vk/vk_memory.cpp:4825 (in `noaccess_ram_on()`) reads it as a text value: `const char* lazy = getenv(\"HOS_LAZY_COMMIT\");`. No comment in the source says what it changes.",
+   "explanation": "undocumented: gpu/vk/vk_memory.cpp:4838 (in `noaccess_ram_on()`) reads it as a text value: `const char* lazy = getenv(\"HOS_LAZY_COMMIT\");`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -6059,7 +6059,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 4824
+     "line": 4837
     },
     {
      "path": "host/hos_memsplit.c",
@@ -14420,7 +14420,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 4963
+     "line": 4976
     }
    ],
    "default": "off (unset)",
@@ -14693,7 +14693,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 5249
+     "line": 5262
     },
     {
      "path": "gpu/vk/vk_replay.cpp",
@@ -14718,7 +14718,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 6058
+     "line": 6071
     }
    ],
    "default": "0 (unset)",
@@ -15167,7 +15167,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 5857
+     "line": 5870
     }
    ],
    "default": "off (unset)",
@@ -15301,7 +15301,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 1504
+     "line": 1507
     },
     {
      "path": "gpu/vk/vk_shader.cpp",
@@ -15310,7 +15310,7 @@
    ],
    "default": "unset",
    "values": "text",
-   "explanation": "undocumented: gpu/vk/vk_memory.cpp:1504 (in `capture_on()`) reads it as a text value: `const char* e = getenv(\"RX_VK_CAPTURE\");`. No comment in the source says what it changes.",
+   "explanation": "undocumented: gpu/vk/vk_memory.cpp:1507 (in `capture_on()`) reads it as a text value: `const char* e = getenv(\"RX_VK_CAPTURE\");`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -15326,11 +15326,11 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 2340
+     "line": 2353
     },
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 2349
+     "line": 2362
     },
     {
      "path": "host/hos_main.c",
@@ -15355,11 +15355,11 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 2596
+     "line": 2609
     },
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 2984
+     "line": 2997
     }
    ],
    "default": "off (unset)",
@@ -15380,7 +15380,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 3130
+     "line": 3143
     }
    ],
    "default": "off (unset)",
@@ -15422,7 +15422,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 5247
+     "line": 5260
     }
    ],
    "default": "unset",
@@ -15443,7 +15443,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 2231
+     "line": 2244
     }
    ],
    "default": "on (unless set to 0, false, off or no)",
@@ -15485,7 +15485,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 2593
+     "line": 2606
     }
    ],
    "default": "unset",
@@ -15506,7 +15506,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 2394
+     "line": 2407
     }
    ],
    "default": "off (unset)",
@@ -15527,7 +15527,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 2531
+     "line": 2544
     }
    ],
    "default": "off (unset)",
@@ -15548,7 +15548,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 2999
+     "line": 3012
     }
    ],
    "default": "2",
@@ -15569,7 +15569,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 2180
+     "line": 2193
     }
    ],
    "default": "on (unless set to 0, false, off or no)",
@@ -15590,11 +15590,11 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 2418
+     "line": 2431
     },
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 2419
+     "line": 2432
     }
    ],
    "default": "2",
@@ -15615,7 +15615,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 2983
+     "line": 2996
     }
    ],
    "default": "2",
@@ -15636,7 +15636,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 3677
+     "line": 3690
     }
    ],
    "default": "on (unless set to 0, false, off or no)",
@@ -15657,7 +15657,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 3679
+     "line": 3692
     }
    ],
    "default": "4",
@@ -15678,11 +15678,11 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 3676
+     "line": 3689
     },
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 3678
+     "line": 3691
     }
    ],
    "default": "20",
@@ -15703,7 +15703,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 3032
+     "line": 3045
     }
    ],
    "default": "off (unset)",
@@ -15875,7 +15875,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 1442
+     "line": 1445
     }
    ],
    "default": "on (unless set to 0, false, off or no)",
@@ -16093,7 +16093,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 2331
+     "line": 2344
     }
    ],
    "default": "unset",
@@ -18167,7 +18167,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 1992
+     "line": 2005
     }
    ],
    "default": "unset",
@@ -18460,7 +18460,7 @@
     },
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 5723
+     "line": 5736
     }
    ],
    "default": "off (unset)",
@@ -19194,7 +19194,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 3007
+     "line": 3020
     }
    ],
    "default": "off (unset)",
@@ -19646,7 +19646,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 4179
+     "line": 4192
     }
    ],
    "default": "16",
@@ -19688,7 +19688,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 6614
+     "line": 6627
     }
    ],
    "default": "unset",
@@ -19709,11 +19709,11 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 6621
+     "line": 6634
     },
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 6624
+     "line": 6637
     }
    ],
    "default": "75",
@@ -19734,7 +19734,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 4270
+     "line": 4283
     }
    ],
    "default": "on (unless set to 0, false, off or no)",
@@ -19755,7 +19755,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 4187
+     "line": 4200
     }
    ],
    "default": "64",
@@ -19776,7 +19776,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 7010
+     "line": 7023
     }
    ],
    "default": "off (unset)",
@@ -19931,7 +19931,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 6550
+     "line": 6563
     }
    ],
    "default": "off (unset)",
@@ -19973,11 +19973,11 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 6348
+     "line": 6361
     },
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 6351
+     "line": 6364
     }
    ],
    "default": "unset",
@@ -20040,7 +20040,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 3411
+     "line": 3424
     }
    ],
    "default": "on (unless set to 0, false, off or no)",
@@ -20061,7 +20061,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 3631
+     "line": 3644
     }
    ],
    "default": "on (unless set to 0, false, off or no)",
@@ -20082,7 +20082,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 3306
+     "line": 3319
     }
    ],
    "default": "off (unset)",
@@ -20103,7 +20103,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 3637
+     "line": 3650
     }
    ],
    "default": "off (unset)",
@@ -20283,11 +20283,11 @@
     },
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 6190
+     "line": 6203
     },
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 6946
+     "line": 6959
     }
    ],
    "default": "off (unset)",
@@ -20589,7 +20589,7 @@
     },
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 7036
+     "line": 7049
     }
    ],
    "default": "off (unset)",
@@ -20631,7 +20631,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 5528
+     "line": 5541
     }
    ],
    "default": "unset",
@@ -20786,7 +20786,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 4586
+     "line": 4599
     }
    ],
    "default": "off (unset)",
@@ -21126,7 +21126,7 @@
     },
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 7697
+     "line": 7710
     }
    ],
    "default": "off (unset)",
@@ -21168,7 +21168,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 2420
+     "line": 2433
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
@@ -21646,7 +21646,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 4391
+     "line": 4404
     }
    ],
    "default": "unset",
@@ -21667,7 +21667,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 6090
+     "line": 6103
     }
    ],
    "default": "off (unset)",
@@ -21688,7 +21688,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 6502
+     "line": 6515
     }
    ],
    "default": "off (unset)",
@@ -21709,11 +21709,11 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 4463
+     "line": 4476
     },
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 4473
+     "line": 4486
     }
    ],
    "default": "0 (unset)",
@@ -21734,7 +21734,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 6163
+     "line": 6176
     }
    ],
    "default": "unset",
@@ -21755,7 +21755,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 6915
+     "line": 6928
     }
    ],
    "default": "off (unset)",
@@ -21776,7 +21776,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 6518
+     "line": 6531
     }
    ],
    "default": "unset",
@@ -21969,7 +21969,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 5225
+     "line": 5238
     }
    ],
    "default": "unset",
@@ -21990,7 +21990,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 5257
+     "line": 5270
     }
    ],
    "default": "1",
@@ -22011,7 +22011,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 5322
+     "line": 5335
     },
     {
      "path": "host/hos_main.c",
@@ -22036,7 +22036,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 5032
+     "line": 5045
     }
    ],
    "default": "on (unless set to 0, false, off or no)",
@@ -22057,7 +22057,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 5261
+     "line": 5274
     }
    ],
    "default": "off (unset)",
@@ -22672,7 +22672,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 6401
+     "line": 6414
     }
    ],
    "default": "unset",
@@ -22714,7 +22714,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 4982
+     "line": 4995
     }
    ],
    "default": "off (unset)",
@@ -22949,7 +22949,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 6856
+     "line": 6869
     }
    ],
    "default": "off (unset)",
@@ -23041,7 +23041,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 5681
+     "line": 5694
     }
    ],
    "default": "off (unset)",
@@ -23062,7 +23062,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 2117
+     "line": 2130
     },
     {
      "path": "gpu/vk/vk_replay.cpp",
@@ -23275,7 +23275,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 7601
+     "line": 7614
     }
    ],
    "default": "off (unset)",
@@ -24256,20 +24256,20 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 5940
-    },
-    {
-     "path": "gpu/vk/vk_memory.cpp",
-     "line": 5958
+     "line": 5953
     },
     {
      "path": "gpu/vk/vk_memory.cpp",
      "line": 5971
+    },
+    {
+     "path": "gpu/vk/vk_memory.cpp",
+     "line": 5984
     }
    ],
    "default": "off (unset)",
    "values": "on or off (0, false, off, no and empty are off)",
-   "explanation": "undocumented: gpu/vk/vk_memory.cpp:5940 (in `guest_span_cached()`) reads it as an on/off switch: `static const bool imported_only = getenv(\"RX_VK_POOL_END_IMPORTED\") != nullptr;`. No comment in the source says what it changes.",
+   "explanation": "undocumented: gpu/vk/vk_memory.cpp:5953 (in `guest_span_cached()`) reads it as an on/off switch: `static const bool imported_only = getenv(\"RX_VK_POOL_END_IMPORTED\") != nullptr;`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -24285,7 +24285,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 6732
+     "line": 6745
     }
    ],
    "default": "unset",
@@ -24327,7 +24327,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 6225
+     "line": 6238
     }
    ],
    "default": "unset",
@@ -24348,7 +24348,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 8212
+     "line": 8225
     }
    ],
    "default": "on (unless set to 0, false, off or no)",
@@ -24495,11 +24495,11 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 2677
+     "line": 2690
     },
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 2689
+     "line": 2702
     }
    ],
    "default": "off (unset)",
@@ -24520,7 +24520,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 2605
+     "line": 2618
     }
    ],
    "default": "250",
@@ -24692,7 +24692,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 4142
+     "line": 4155
     }
    ],
    "default": "0",
@@ -24885,7 +24885,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 5311
+     "line": 5324
     }
    ],
    "default": "off (unset)",
@@ -25337,7 +25337,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 5659
+     "line": 5672
     }
    ],
    "default": "off (unset)",
@@ -25358,7 +25358,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 5722
+     "line": 5735
     }
    ],
    "default": "off (unset)",
@@ -25488,7 +25488,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 1914
+     "line": 1927
     }
    ],
    "default": "on (unless set to 0, false, off or no)",
@@ -25773,7 +25773,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 4927
+     "line": 4940
     }
    ],
    "default": "on (unless set to 0, false, off or no)",
@@ -25815,7 +25815,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 2014
+     "line": 2027
     }
    ],
    "default": "unset",
@@ -26045,7 +26045,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 1601
+     "line": 1604
     },
     {
      "path": "host/hos_main.c",
@@ -26091,7 +26091,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 3771
+     "line": 3784
     }
    ],
    "default": "off (unset)",
@@ -26783,7 +26783,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 3546
+     "line": 3559
     },
     {
      "path": "host/hos_main.c",
@@ -27232,7 +27232,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 1845
+     "line": 1858
     }
    ],
    "default": "off (unset)",
@@ -27677,12 +27677,12 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 4444
+     "line": 4457
     }
    ],
    "default": "0",
    "values": "a whole number",
-   "explanation": "undocumented: gpu/vk/vk_memory.cpp:4444 (in `test_vram_bytes()`) reads it as a number: `static const uint64_t cap = getenv(\"RX_VK_TEST_VRAM_MB\") ? (uint64_t)std::max(0, atoi(getenv(\"RX_VK_TEST_VRAM_MB\"))) ...`. No comment in the source says what it changes.",
+   "explanation": "undocumented: gpu/vk/vk_memory.cpp:4457 (in `test_vram_bytes()`) reads it as a number: `static const uint64_t cap = getenv(\"RX_VK_TEST_VRAM_MB\") ? (uint64_t)std::max(0, atoi(getenv(\"RX_VK_TEST_VRAM_MB\"))) ...`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -27698,7 +27698,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 1534
+     "line": 1537
     }
    ],
    "default": "unset",
@@ -27740,7 +27740,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 1963
+     "line": 1976
     }
    ],
    "default": "unset",
@@ -27920,7 +27920,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 4037
+     "line": 4050
     },
     {
      "path": "gpu/vk/vk_replay.cpp",
@@ -28869,7 +28869,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 7144
+     "line": 7157
     }
    ],
    "default": "on (unless set to 0, false, off or no)",
@@ -28890,7 +28890,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 4513
+     "line": 4526
     }
    ],
    "default": "on (unless set to 0, false, off or no)",
@@ -28911,7 +28911,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 6138
+     "line": 6151
     }
    ],
    "default": "unset",
@@ -28932,7 +28932,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 4534
+     "line": 4547
     }
    ],
    "default": "on (unless set to 0, false, off or no)",
@@ -28953,7 +28953,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 4864
+     "line": 4877
     }
    ],
    "default": "off (unset)",
@@ -28974,7 +28974,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 7162
+     "line": 7175
     }
    ],
    "default": "0 (unset)",
@@ -28995,7 +28995,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 4528
+     "line": 4541
     }
    ],
    "default": "unset",
@@ -29083,7 +29083,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 7354
+     "line": 7367
     }
    ],
    "default": "unset",
