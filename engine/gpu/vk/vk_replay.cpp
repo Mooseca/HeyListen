@@ -1675,6 +1675,13 @@ struct ReplayWall {
     int64_t early_ns[10] = {};   // (replay_handle_early's steps, EarlyWall)
 };
 ReplayWall rwall;
+// (stream ORDER1, RX_VK_PROF_FINE=1) what the order thread (sync_watch) spent in its locked passes: wall, its own CPU time (GetThreadTimes) and
+// the part of rwall that went to the replay thread's counters during them
+struct OrderWall {
+    int64_t wall_ns = 0, cpu_ns = 0, passes = 0, active = 0;
+    int64_t submit_ns = 0, dry_ns = 0, seg_ns = 0, whole_ns = 0, mem_ns = 0, finish_ns = 0;
+};
+OrderWall owall;
 bool wall_fine_on() {
     static const bool v = getenv("RX_VK_PROF_FINE") != nullptr;
     return v;
@@ -1779,6 +1786,16 @@ void op_cost_report(double frames) {
          per(n.heavy_n, last.heavy_n), per(n.heavy_draws, last.heavy_draws), ms(n.handle_ns, last.handle_ns), per(n.handles, last.handles),
          ms(n.dry_ns, last.dry_ns), ms(n.seg_ns, last.seg_ns), per(n.big, last.big), ms(n.whole_ns, last.whole_ns), per(n.whole, last.whole),
          ms(n.mem_ns, last.mem_ns), ms(n.finish_ns, last.finish_ns));
+    {
+        static OrderWall ol;
+        const OrderWall& o = owall;
+        logf("vk: a frame (fine, order thread, locked passes): wall %.2f ms, cpu %.2f ms (%.1f passes, %.1f with work); of the replay "
+             "thread's counters: submissions %.2f, dry pass %.2f, segments %.2f, whole here %.2f, memory work %.2f, recordings ended %.2f",
+             ms(o.wall_ns, ol.wall_ns), ms(o.cpu_ns, ol.cpu_ns), per(o.passes, ol.passes), per(o.active, ol.active),
+             ms(o.submit_ns, ol.submit_ns), ms(o.dry_ns, ol.dry_ns), ms(o.seg_ns, ol.seg_ns), ms(o.whole_ns, ol.whole_ns),
+             ms(o.mem_ns, ol.mem_ns), ms(o.finish_ns, ol.finish_ns));
+        ol = o;
+    }
     last = n;
     op_cost_report(frames);
 }
@@ -4355,6 +4372,12 @@ void sync_settle() {
     burst_end();
     update_blocked();
 }
+/// this thread's CPU time (kernel and user), 100 ns units: summed over a window it is exact to a timer tick
+int64_t thread_cpu_100ns() {
+    FILETIME c, e, k, u;
+    if (!GetThreadTimes(GetCurrentThread(), &c, &e, &k, &u)) return 0;
+    return (int64_t)((((uint64_t)k.dwHighDateTime << 32) | k.dwLowDateTime) + (((uint64_t)u.dwHighDateTime << 32) | u.dwLowDateTime));
+}
 void sync_watch() {
     SetThreadDescription(GetCurrentThread(), L"mkw_vk order");
     for (;;) {
@@ -4364,10 +4387,21 @@ void sync_watch() {
         std::unique_lock lk(sync_order_mu, std::try_to_lock);
         if (!lk) continue;
         tl_ev("watch+");
+        const ReplayWall w0 = rwall;
+        const int64_t t0 = wall_fine_on() ? wall_now() : 0, c0 = wall_fine_on() ? thread_cpu_100ns() : 0;
         burst_begin(0);   // (a signal from the CPU the thread that made it could not act on)
         schedule();
         burst_end();
         update_blocked();
+        if (t0) {
+            owall.wall_ns += wall_now() - t0, owall.cpu_ns += (thread_cpu_100ns() - c0) * 100, owall.passes++;
+            if (rwall.submits != w0.submits) {
+                owall.active++;
+                owall.submit_ns += rwall.submit_ns - w0.submit_ns, owall.dry_ns += rwall.dry_ns - w0.dry_ns;
+                owall.seg_ns += rwall.seg_ns - w0.seg_ns, owall.whole_ns += rwall.whole_ns - w0.whole_ns;
+                owall.mem_ns += rwall.mem_ns - w0.mem_ns, owall.finish_ns += rwall.finish_ns - w0.finish_ns;
+            }
+        }
         tl_ev("watch-");
         const double held = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - blocked_since).count();
         if (blocked_n.load() && held > hold_ms()) {
