@@ -4863,7 +4863,9 @@ void invalidate(uint64_t gpu, uint64_t size) {
     // the CPU reads and sets to 0) this way: it read 0 one frame, then the old sum came back over the CPU's 0 and the next
     // frame added to it (2x): the exposure stepped 0.2 EV up and down several times a second (the white flashes).
     // RX_VK_NO_READBACK_WAIT=1: as before
-    if (size) {
+    // (EXPO1, HL_EXPO_GPU=1) a meter block the engine's ring is fed from: no wait for any write-back, the sums come from the ring below
+    const bool expo_skip = size == 0x1040 && expo_mode() == 1 && expo_serves(host->gpu_guest(gpu));
+    if (size && !expo_skip) {
         static const bool off = getenv("RX_VK_NO_READBACK_WAIT") != nullptr;
         bool ever = false;
         if (!off && (memory_writeback_value(host->gpu_guest(gpu), size, &ever), ever)) {
@@ -4980,7 +4982,9 @@ void invalidate(uint64_t gpu, uint64_t size) {
     }
     {   // (ported from hookshot 53eb0441, pixl27, RX_VK_METER_HOLD=0 turns it off) OoT's exposure sums read before a new result
         // has landed are the zeros the game wrote after its last read: it is given the last result again
-        if (meter_hold_on() && size == 0x1040 && memory_is_meter(host->gpu_guest(gpu))) {
+        if (expo_skip) {
+            expo_answer(gpu);
+        } else if (meter_hold_on() && size == 0x1040 && memory_is_meter(host->gpu_guest(gpu))) {
             static std::mutex mu;
             static std::unordered_map<uint64_t, std::array<uint32_t, 4>> last;
             static std::atomic<int64_t> st_reads{0}, st_given{0};
@@ -4997,19 +5001,23 @@ void invalidate(uint64_t gpu, uint64_t size) {
                 logf("vk: exposure sums: 2000 reads, %lld of them given the last result again (RX_VK_METER_HOLD)", (long long)st_given.exchange(0));
         }
     }
+    if (size == 0x1040 && expo_mode() == 2) expo_check(gpu);   // (EXPO1, HL_EXPO_GPU=2: what the old path read against the ring)
     {   // (sprint 5, RX_VK_LOG_READBACK2=<present>: what the CPU is about to read, after the waits: 400 ranges of 0x1000 bytes or more)
         static const int64_t from = getenv("RX_VK_LOG_READBACK2") ? atoll(getenv("RX_VK_LOG_READBACK2")) : -1;
         static std::atomic<int> n{0};
-        if (from >= 0 && presents_now >= from && size >= 0x20 && n++ < 400) {
+        // (EXPO1) RX_VK_LOG_READBACK2_SIZE=<hex>: only ranges of that size; RX_VK_LOG_READBACK2_ROWS=<n>: the cap (default 400)
+        static const uint64_t only = getenv("RX_VK_LOG_READBACK2_SIZE") ? strtoull(getenv("RX_VK_LOG_READBACK2_SIZE"), nullptr, 16) : 0;
+        static const int cap = getenv("RX_VK_LOG_READBACK2_ROWS") ? atoi(getenv("RX_VK_LOG_READBACK2_ROWS")) : 400;
+        if (from >= 0 && presents_now >= from && size >= 0x20 && (!only || size == only) && n++ < cap) {
             std::vector<uint32_t> w(size / 4);
             host->gpu_read(gpu, w.data(), w.size() * 4);
             size_t nz = 0, first = 0;
             uint64_t sum = 0;
             for (size_t i = 0; i < w.size(); i++)
                 if (w[i]) { if (!nz) first = i; nz++, sum += w[i]; }
-            logf("vk: readback2 %lld %#llx +%#llx: %zu non-zero words (first at %zu: %08x %08x %08x %08x), sum %llx; value %llu done %llu fence %llu",
+            logf("vk: readback2 %lld %#llx +%#llx: %zu non-zero words (first at %zu: %08x %08x %08x %08x), words 0-3 %08x %08x %08x %08x, sum %llx; value %llu done %llu fence %llu",
                  (long long)presents_now, (unsigned long long)gpu, (unsigned long long)size, nz, first, w[first], first + 1 < w.size() ? w[first + 1] : 0,
-                 first + 2 < w.size() ? w[first + 2] : 0, first + 3 < w.size() ? w[first + 3] : 0, (unsigned long long)sum,
+                 first + 2 < w.size() ? w[first + 2] : 0, first + 3 < w.size() ? w[first + 3] : 0, w[0], w[1], w[2], w[3], (unsigned long long)sum,
                  (unsigned long long)memory_writeback_value(host->gpu_guest(gpu), size, nullptr), (unsigned long long)completed(), (unsigned long long)fence());
         }
     }

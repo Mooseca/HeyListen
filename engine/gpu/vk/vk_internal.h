@@ -426,6 +426,13 @@ inline bool meter_hold_on() {
 /// the block's start, noted where the meter's programs bind it (vk_draw.cpp), and whether guest is one (vk_replay.cpp invalidate)
 void memory_meter_range(uint64_t guest, uint64_t size);
 bool memory_is_meter(uint64_t guest);
+/// (EXPO1, vk_expo.cpp, HL_EXPO_GPU) the exposure meter's sums from an engine-owned ring: the mode (0 off, 1 on, 2 check), the producer
+/// after a meter dispatch, and the consumer in invalidate()
+int expo_mode();
+void expo_record(VkCommandBuffer cmd, VkBuffer src, VkDeviceSize offset, uint64_t guest);
+bool expo_serves(uint64_t guest);
+void expo_answer(uint64_t gpu);
+void expo_check(uint64_t gpu);
 /// (vk_replay.cpp) The GPU's progress on the recordings' timeline, and a wait for it to reach v
 uint64_t vk_timeline_completed();
 /// (longshot #442) The timeline's value without the write-backs it applies: a plain read, safe under the replay's lock
