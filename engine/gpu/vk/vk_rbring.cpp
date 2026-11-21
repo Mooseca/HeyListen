@@ -64,6 +64,7 @@ struct Stats {
     std::atomic<int64_t> reads{0}, applied{0}, none{0}, waited{0}, late{0};
     std::atomic<int64_t> chk_new{0}, chk_equal{0}, chk_differ{0}, chk_zero{0}, chk_nonzero{0}, chk_notdone{0}, chk_old{0};
     std::atomic<int64_t> age[4] = {};
+    std::atomic<int64_t> got[5] = {};   // (serve mode) the age in frames of the entries handed out: 1, 2, 3, 4, more
 } stats[4];
 std::atomic<int64_t> st_staged{0}, st_staged_bytes{0}, st_direct{0};
 std::atomic<uint64_t> learned_lo{~0ull}, learned_hi{0};   // (the span of the learned ranges: a written binding outside it is not looked up)
@@ -299,6 +300,7 @@ void rbring_apply(uint64_t gpu, uint64_t size) {
     std::memcpy(buf, ring_map + e.at, n);
     host->gpu_write(gpu, buf, n);
     stats[cls].applied++;
+    stats[cls].got[std::min<int64_t>(4, std::max<int64_t>(1, c - e.tag)) - 1]++;
     {
         std::lock_guard lk(mu);
         const auto it = table.find({guest, size});
@@ -306,9 +308,12 @@ void rbring_apply(uint64_t gpu, uint64_t size) {
     }
     hash_add(c, cls, rb_ring::hash_read(cls, guest, buf, n));
     if (stats[cls].reads % 3000 == 0)
-        logf("vk: rbring %s: 3000 reads, %lld applied (%lld waited for the GPU, %lld not done in time), %lld nothing new; staged so far %lld ranges, %.1f MB",
+        logf("vk: rbring %s: 3000 reads, %lld applied (%lld waited for the GPU, %lld not done in time), %lld nothing new; age in frames of the entries "
+             "applied 1/2/3/4+: %lld/%lld/%lld/%lld (a fixed lag L hands out entries L frames old or older); staged so far %lld ranges, %.1f MB",
              cname(cls), (long long)stats[cls].applied.exchange(0), (long long)stats[cls].waited.exchange(0), (long long)stats[cls].late.exchange(0),
-             (long long)stats[cls].none.exchange(0), (long long)st_staged.load(), st_staged_bytes.load() / 1048576.0);
+             (long long)stats[cls].none.exchange(0), (long long)stats[cls].got[0].exchange(0), (long long)(stats[cls].got[1].exchange(0) + 0),
+             (long long)stats[cls].got[2].exchange(0), (long long)(stats[cls].got[3].exchange(0) + stats[cls].got[4].exchange(0)),
+             (long long)st_staged.load(), st_staged_bytes.load() / 1048576.0);
 }
 
 /// HL_RB_LAG_CHECK=1, after the old path's waits: the ring's candidate against the value the game is about to read
