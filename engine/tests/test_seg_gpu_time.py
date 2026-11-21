@@ -81,8 +81,9 @@ def main():
     need(rh.index("submit_recording(r, false);\n    jt_mark(20, 0);") < rh.index("ts_recseq[j->r->slot] = rec_seq;"),
          "replay_handle: the recording number is taken before rec_cur's submit")
     need("gpu_time_begin(r);" in function(rp, "void segment_begin_here(Recording& r) {"), "RX_VK_SEG_SETUP_PAR: a segment's timestamps not begun")
-    sq = rh.index("gpu_time_segment_submitted(*j->r);") if "gpu_time_segment_submitted(*j->r);" in rh else -1
-    need(sq > 0 and rh.index("queue_flush_locked();", rh.index("record_job")) < sq < rh.index("vkQueueSubmit2(dev.queue, 1, &si, j->r->fence)"),
+    seg_count = "gpu_time_segment_submitted(*j->r);" if "gpu_time_segment_submitted(*j->r);" in rh else "gpu_time_segment_submitted(*member[q]->r);"   # (ORDER1: merged submits count each member)
+    sq = rh.index(seg_count) if seg_count in rh else -1
+    need(sq > 0 and rh.index("queue_flush_locked();", rh.index("record_job")) < sq < rh.index("vkQueueSubmit2(dev.queue, 1, &si, " + ("owner.fence)" if "vkQueueSubmit2(dev.queue, 1, &si, owner.fence)" in rh else "j->r->fence)")),
          "replay_handle: a segment's submit is not counted under the present lock before it goes")
 
     if fails:

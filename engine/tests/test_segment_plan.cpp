@@ -75,6 +75,18 @@ int main() {
         CHECK("an empty range is no sample", !r.valid);
         balanced_targets(r, 3, 900, out);
         CHECK("still even", out[0] == 300 && out[1] == 600);
+        // (RX_VK_SEG_TAIL: the last part shorter)
+        Profile e;
+        balanced_targets(e, 4, 700, out, 0.5);   // (3.5 parts: 200 each, the last 100)
+        CHECK("tail 0.5, no profile: the last part is half", out[0] == 200 && out[1] == 400 && out[2] == 600);
+        balanced_targets(p, 4, 800, out, 1.0);
+        CHECK("tail 1 is the default", out[0] == 200 && out[1] == 400 && out[2] == 600);
+        balanced_targets(p, 4, 700, out, 0.5);
+        CHECK("tail 0.5, even cost: the last part is half", out[0] > 195 && out[0] < 205 && out[2] > 595 && out[2] < 605);
+        balanced_targets(p, 2, 800, out, 0.25);
+        CHECK("tail 0.25 of two parts: the boundary at 4/5", out[0] > 635 && out[0] < 645);
+        balanced_targets(p, 3, 800, out, 100.0);
+        CHECK("a tail above 1 is 1", out[0] > 265 && out[0] < 270);
     }
     std::puts("segment plan: all checks passed");
 }

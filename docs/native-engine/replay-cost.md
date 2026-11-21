@@ -124,6 +124,18 @@ and counts violations; counters logged every 7200 slot waits: found done / waite
 Expected gain: small on the PC 3050 (slot waits 0.13 ms + polls); it is the cheap, safe base.
 
 ### Hand-over
-- Branch perf/order2 (from perf/order-044 3b8a320e7), worktree E:\OOT\HeyListen-wt\order2, tip 6f2966edc + this note. Not built yet (mkg.ps1 pending a lease), unit test passes (25 runs).
+- Branch perf/order2 (from perf/order-044 3b8a320e7), worktree E:\OOT\HeyListen-wt\order2. Step C built (mkg, 0 failed, 21 Nov), unit tests pass; full suite 480 passed, 4 failed = 2 known nx2 + test_dry_lean/test_seg_gpu_time, fixed in the F commit (the second was already failing on perf/order-044).
 - To validate when machines are free: build; run Market and castle-move with RX_VK_COMPLETION_THREAD=1 RX_VK_COMPLETION_CHECK=1: 0 violations, pictures as default, no stalls; then A/B with RX_VK_PROF_FINE.
-- Next: step A (defer the segment join), measured against ORDER1's counters.
+- Step A (defer the join) analysed, NOT implemented: the join is not where the time is (the replay thread waits for `done` of each job, each already
+  being submitted in order by its finisher under EARLY_GPU; par_pool.done.wait afterwards is ~0). What the thread really spends is the dry pass
+  and its OWN last segment, recorded after the dry pass (replay_handle_early: record_job(last)). Deferring the wait for the segments would
+  let the thread go on into the "what follows" recording and the next dry pass, but needs: heap-owned jobs (they live on the stack with seg_cv /
+  seg_mu captured by reference), par_active/par_seq/texture_segments_begin(nullptr) kept until the real join, ub_updates readers vs the next
+  appender (ub_growing covers one command buffer), thread-local draw/texture recording state, and every submit_recording kept behind the
+  segments' in-order submits (sub_mu drain). Too much to build blind (no game runs): ask before doing it, with a plan to test it by picture.
+### Step F (done): `RX_VK_SEG_TAIL=<percent>` (default 100 = off)
+The replay thread's own (last) segment gets that share of the time of each other segment (50: half), the rest goes to the idle workers
+(segment_plan::balanced_targets(..., tail); the profile-balanced boundaries move later in the command buffer; both the early plan and the
+post-dry-pass plan use it). 100 is bit-identical to before (integer path). Try 60, 40 on the Market (RX_VK_PROF_FINE: "the replay thread
+recorded x ms" in the early-segments log line; slowest segment must not exceed it much).
+

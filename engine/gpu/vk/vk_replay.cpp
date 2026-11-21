@@ -3140,6 +3140,18 @@ int early_gpu_mode() {
     }();
     return v;
 }
+/// (stream ORDER2, RX_VK_SEG_TAIL=<percent>, default 100: off) the replay thread's own (last) segment's share of the time against each other
+/// segment's: it starts once the dry pass is over (3.5 ms on the PC 3050's Market) while the others started as the dry pass passed their
+/// ends, and the order thread is the critical path on 6-core CPUs: 50 gives it half a segment's time, the rest goes to the idle workers
+double seg_tail() {
+    static const double v = [] {
+        const char* e = getenv("RX_VK_SEG_TAIL");
+        const double t = e ? std::clamp(atoi(e), 5, 100) / 100.0 : 1.0;
+        if (t < 1.0) logf("vk: the replay thread's own segment %.0f%% of the others' (RX_VK_SEG_TAIL)", t * 100);
+        return t;
+    }();
+    return v;
+}
 int64_t early_gpu_first() {
     static const int64_t v = getenv("RX_VK_EARLY_GPU_FIRST") ? std::max<int64_t>(8, atoll(getenv("RX_VK_EARLY_GPU_FIRST"))) : 48;
     return v;
@@ -3558,7 +3570,7 @@ const uint8_t* replay_handle(VkCommandBuffer& cmd, const uint8_t* h, bool may_st
         const int nplan = mkwvk::segment_plan::segment_count(last_total, per, recorders, seg_cap(), one_round);
         if (nplan >= 2) {
             int64_t plan[kMaxBatch] = {};
-            mkwvk::segment_plan::balanced_targets(pk_profile[pk_this], nplan, last_total, plan);
+            mkwvk::segment_plan::balanced_targets(pk_profile[pk_this], nplan, last_total, plan, seg_tail());
             if (early_gpu_mode() >= 2) plan[0] = std::min(plan[0], early_gpu_first());   // (stream C1: the GPU's first work sooner)
             int64_t total_now = 0;
             bool cut = false;
@@ -3600,7 +3612,7 @@ const uint8_t* replay_handle(VkCommandBuffer& cmd, const uint8_t* h, bool may_st
         static const int lean_mode = getenv("RX_VK_DRY_LEAN") ? atoi(getenv("RX_VK_DRY_LEAN")) : 0;
         if (nplan >= 2 && lean_mode >= 2) {
             int64_t want[kMaxBatch] = {};
-            if (balance) mkwvk::segment_plan::balanced_targets(profile, nplan, T, want);
+            if (balance) mkwvk::segment_plan::balanced_targets(profile, nplan, T, want, seg_tail());
             for (int k = 1; k < nplan; k++) {
                 const int64_t w = balance ? want[k - 1] : T * k / nplan;
                 const int64_t lo = w / pe * pe;
@@ -3636,7 +3648,7 @@ const uint8_t* replay_handle(VkCommandBuffer& cmd, const uint8_t* h, bool may_st
     if (wall_fine_on()) rwall.dry_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - t_dry0).count();
     const int nseg = mkwvk::segment_plan::segment_count(total, per, recorders, seg_cap(), one_round);
     int64_t wants[kMaxBatch] = {};
-    if (balance) mkwvk::segment_plan::balanced_targets(profile, nseg, total, wants);
+    if (balance) mkwvk::segment_plan::balanced_targets(profile, nseg, total, wants, seg_tail());
     std::vector<Segment> seg;
     seg.push_back({h, nullptr, &start, ub0, 0, serial0});
     // (RX_VK_PARALLEL_BOUNDARY=<k>, diagnosis: only the k-th boundary of each command buffer splits it, and its program's code keys are logged,
