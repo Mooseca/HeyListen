@@ -276,17 +276,72 @@ struct Recording {
     // as no older submission is unfinished (submit_job), and a slot waiting on its value could wait on the replay)
     VkFence fence = VK_NULL_HANDLE;
     bool submitted = false;
+    int grp_owner = -1;   // (stream ORDER1, RX_VK_SEG_MERGE: the slot whose fence this recording's submit signals, with others' in one submit; -1: its own)
     uint64_t batch = 0;   // (RX_VK_BATCH: the batch it went out in, waited for on batch_tl; 0: its own fence)
 };
 // (24: the event waits cut a frame's command buffers into pieces, each with recordings of its own, and with 16 the
 // replay waited ~1.5 ms a frame for a slot the GPU still had)
 constexpr int kRecordings = 48;   // (test: 24 before; with RX_VK_BATCH the ring came round to held submits once a frame)
 Recording recordings[kRecordings];
+static_assert(kRecordings == 48, "fence_groups has one a slot");
 int recording_index = 0;
 
+// ---- (stream ORDER1) the order thread's driver calls: counted (RX_VK_PROF_FINE), and two ways to make them fewer ----
+// RX_VK_FENCE_POLL=0: a slot's fence waited for with vkWaitForFences at once, as before; else its status is looked at first and the
+// wait (a system call on the NVIDIA driver, whatever the fence's state) left out when it is signalled: ~15 recordings a frame
+// RX_VK_SEG_MERGE=0: each segment of a parallel replay submitted alone, as before; else the segments already recorded when the replay
+// thread gets to submit one go in the same vkQueueSubmit2 (one fence for the group: FenceGroup)
+bool wall_fine_on();
+struct DrvWall {
+    std::atomic<int64_t> qs_ns{0}, qs_n{0}, rw_ns{0}, rw_n{0}, seg_n{0}, seg_cbs{0};
+};
+DrvWall drvwall;
+bool fence_poll_on() {
+    static const bool v = !getenv("RX_VK_FENCE_POLL") || atoi(getenv("RX_VK_FENCE_POLL")) != 0;
+    return v;
+}
+bool seg_merge_on() {
+    static const bool v = !getenv("RX_VK_SEG_MERGE") || atoi(getenv("RX_VK_SEG_MERGE")) != 0;
+    return v;
+}
+struct DrvTime {   // (adds its scope's wall time to a pair of counters when RX_VK_PROF_FINE is on)
+    std::atomic<int64_t>& ns;
+    std::atomic<int64_t>& n;
+    int64_t t0;
+    static int64_t now() { return std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count(); }
+    DrvTime(std::atomic<int64_t>& a, std::atomic<int64_t>& b) : ns(a), n(b), t0(wall_fine_on() ? now() : 0) {}
+    ~DrvTime() {
+        if (!t0) return;
+        ns.fetch_add(now() - t0, std::memory_order_relaxed);
+        n.fetch_add(1, std::memory_order_relaxed);
+    }
+    DrvTime(const DrvTime&) = delete;
+    DrvTime& operator=(const DrvTime&) = delete;
+};
+struct Recording;
+struct FenceGroup {
+    static constexpr int kMax = 8;
+    Recording* m[kMax];
+    int n = 0;
+};
+FenceGroup fence_groups[48];   // (by the owner's slot: kRecordings, static_assert below)
+/// (a fence waited for and reset: the status first, unless RX_VK_FENCE_POLL=0)
+void fence_done(VkFence f) {
+    if (!(fence_poll_on() && vkGetFenceStatus(dev.device, f) == VK_SUCCESS)) vkWaitForFences(dev.device, 1, &f, VK_TRUE, UINT64_MAX);
+    vkResetFences(dev.device, 1, &f);
+}
 /// (a recording slot's last submit done: before it is used again)
 void recording_wait(Recording& r) {
     if (!r.submitted) return;
+    DrvTime drv_time(drvwall.rw_ns, drvwall.rw_n);
+    if (r.grp_owner >= 0) {   // (one of a group submitted together: the owner's fence is for all of them, and they are all done with it)
+        FenceGroup& g = fence_groups[r.grp_owner];
+        Recording& owner = *g.m[g.n - 1];
+        fence_done(owner.fence);
+        for (int i = 0; i < g.n; i++) g.m[i]->submitted = false, g.m[i]->grp_owner = -1;
+        g.n = 0;
+        return;
+    }
     if (r.batch) {
         if (batch_flushed < r.batch) late_fix_wait_unlocked();   // (TICK-060; a stale read only waits or not for a fix)
         {
@@ -302,8 +357,7 @@ void recording_wait(Recording& r) {
         r.submitted = false;
         return;
     }
-    vkWaitForFences(dev.device, 1, &r.fence, VK_TRUE, UINT64_MAX);
-    vkResetFences(dev.device, 1, &r.fence);
+    fence_done(r.fence);
     r.submitted = false;
 }
 
@@ -1035,6 +1089,7 @@ void host_read_barrier(VkCommandBuffer cmd) {
     vkCmdPipelineBarrier2(cmd, &d);
 }
 void submit_recording(Recording& r, bool signal_value = true, uint64_t signal_at = 0) {
+    DrvTime drv_time(drvwall.qs_ns, drvwall.qs_n);
     {
         const uint64_t v = signal_at ? signal_at : r.value;
         ts_sig[r.slot] = v;   // (TICK-057)
@@ -1795,6 +1850,12 @@ void op_cost_report(double frames) {
              ms(o.submit_ns, ol.submit_ns), ms(o.dry_ns, ol.dry_ns), ms(o.seg_ns, ol.seg_ns), ms(o.whole_ns, ol.whole_ns),
              ms(o.mem_ns, ol.mem_ns), ms(o.finish_ns, ol.finish_ns));
         ol = o;
+        static int64_t l_qs_ns, l_qs_n, l_rw_ns, l_rw_n, l_seg_n, l_seg_cbs;
+        const int64_t qs_ns = drvwall.qs_ns.load(), qs_n = drvwall.qs_n.load(), rw_ns = drvwall.rw_ns.load(), rw_n = drvwall.rw_n.load();
+        const int64_t seg_n = drvwall.seg_n.load(), seg_cbs = drvwall.seg_cbs.load();
+        logf("vk: a frame (fine, driver calls, all threads): queue submits %.1f (%.2f ms; of them %.1f segment submits for %.1f segments), slot waits "
+             "%.1f (%.2f ms)", per(qs_n, l_qs_n), ms(qs_ns, l_qs_ns), per(seg_n, l_seg_n), per(seg_cbs, l_seg_cbs), per(rw_n, l_rw_n), ms(rw_ns, l_rw_ns));
+        l_qs_ns = qs_ns, l_qs_n = qs_n, l_rw_ns = rw_ns, l_rw_n = rw_n, l_seg_n = seg_n, l_seg_cbs = seg_cbs;
     }
     last = n;
     op_cost_report(frames);
@@ -3679,8 +3740,8 @@ const uint8_t* replay_handle(VkCommandBuffer& cmd, const uint8_t* h, bool may_st
     jt_mark(18, 0);
     bool init_lost = false;
     int64_t pt_wait_ns = 0;   // (TICK-050: the replay thread waiting for segments, in seg_cv)
-    for (auto& jp : jobs) {   // (in order, each as soon as it is done)
-        Job* j = jp.get();
+    for (size_t ji = 0; ji < jobs.size(); ji++) {   // (in order, each as soon as it is done)
+        Job* j = jobs[ji].get();
         // (RX_VK_PARALLEL_SELF=2) before waiting: a segment no worker has taken yet, recorded here as a worker would
         while (self_help && !j->done.load()) {
             std::function<void()> fn;
@@ -3704,21 +3765,41 @@ const uint8_t* replay_handle(VkCommandBuffer& cmd, const uint8_t* h, bool may_st
         }
         if (j->inits < 0) init_lost = true;   // (its init command buffer could not be ended: the replay stops, below)
         if (init_lost) continue;              // (nothing from it on is submitted)
-        VkCommandBufferSubmitInfo cb[3]{{VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO}, {VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO},
-                                        {VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO}};
+        // (stream ORDER1, RX_VK_SEG_MERGE) the segments after it that are already recorded go in the same submit, in order: their
+        // command buffers one after the other as separate submits would have them. One fence for the group (the last one's)
+        constexpr size_t kMerge = FenceGroup::kMax;
+        VkCommandBufferSubmitInfo cb[kMerge * 3];
+        for (auto& c : cb) c = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO};
+        Job* member[kMerge];
         uint32_t n = 0;
-        if (j->inits > 0) cb[n++].commandBuffer = j->r->init;   // (new images made in it or after it: first in the queue)
-        if (j->uploads) cb[n++].commandBuffer = j->r->upload;
-        cb[n++].commandBuffer = j->r->cmd;
+        size_t gn = 0;
+        const auto add = [&](Job* q) {
+            if (q->inits > 0) cb[n++].commandBuffer = q->r->init;   // (new images made in it or after it: first in the queue)
+            if (q->uploads) cb[n++].commandBuffer = q->r->upload;
+            cb[n++].commandBuffer = q->r->cmd;
+            member[gn++] = q;
+        };
+        add(j);
+        if (seg_merge_on())
+            while (gn < kMerge && ji + 1 < jobs.size() && jobs[ji + 1]->done.load(std::memory_order_acquire) && jobs[ji + 1]->inits >= 0)
+                add(jobs[++ji].get());
         VkSubmitInfo2 si{VK_STRUCTURE_TYPE_SUBMIT_INFO_2};
         si.commandBufferInfoCount = n;
         si.pCommandBufferInfos = cb;
         late_fix_wait_unlocked();   // (TICK-060)
+        DrvTime drv_time(drvwall.qs_ns, drvwall.qs_n);
         std::lock_guard lk(dev.present_mu);
         queue_flush_locked();
-        gpu_time_segment_submitted(*j->r);   // (the blits' places among the timed recordings)
-        const VkResult res = vkQueueSubmit2(dev.queue, 1, &si, j->r->fence);
-        j->r->submitted = res == VK_SUCCESS;
+        for (size_t q = 0; q < gn; q++) gpu_time_segment_submitted(*member[q]->r);   // (the blits' places among the timed recordings)
+        Recording& owner = *member[gn - 1]->r;
+        const VkResult res = vkQueueSubmit2(dev.queue, 1, &si, owner.fence);
+        if (wall_fine_on()) drvwall.seg_n.fetch_add(1, std::memory_order_relaxed), drvwall.seg_cbs.fetch_add((int64_t)gn, std::memory_order_relaxed);
+        for (size_t q = 0; q < gn; q++) member[q]->r->submitted = res == VK_SUCCESS;
+        if (gn > 1 && res == VK_SUCCESS) {
+            FenceGroup& g = fence_groups[owner.slot];
+            g.n = (int)gn;
+            for (size_t q = 0; q < gn; q++) g.m[q] = member[q]->r, member[q]->r->grp_owner = owner.slot;
+        }
         if (res != VK_SUCCESS) logf("vk: segment submit %llu failed (%d)", (unsigned long long)j->r->value, (int)res);
         if (res == VK_ERROR_DEVICE_LOST) device_lost();
     }
