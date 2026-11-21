@@ -126,7 +126,22 @@ frames of a new zone read as before.
 
 ### 4.7 Speed (main PC, RTX 5070, SPEED lease priority 2, `market-spin` from `market-mid`, slot a with `dlss=0 upscaling=0 resolution=1 hdr=0 vsync=0 frame_rate_limit=5`, x3 interleaved)
 
-SPEED_TABLE
+Build `step1d`, one exe. "Render resolution: 100% chosen, drawn at 100% with Upscaler 0" in every run. fps of the run (it includes the first 15 s load and the camera turn;
+a sanity figure) and the p50 frame time, rounds interleaved off / `HL_RB_LAG=2` / `HL_RB_LAG=2 HL_RB_R2=2 HL_RB_R3=2` ("cut"):
+
+| round | off fps (p50 ms) | `HL_RB_LAG=2` | cut |
+|---|---|---|---|
+| 1 | 72.7 (11.7) | 82.7 (11.0) | 70.2 (12.1) |
+| 2 | 79.2 (11.5) | 86.5 (10.7) | 78.5 (10.9) |
+| 3 | 80.2 (11.5) | 87.3 (10.7) | 86.8 (10.7) |
+| mean | **77.4** (11.57) | **85.5** (10.8), **+10%** | 78.5 (11.2) |
+
+Reading: `HL_RB_LAG=2` is above all three baseline runs in each round and its p50 and p95 frame times are lower (p95 16.9 / 15.7 / 15.3 against 17.8 / 17.1 / 16.8);
+the readback wait per call falls from 0.035-0.039 to 0.010 ms. The "cut" arm (READB2's refresh cut for what the ring does not serve, which is almost nothing
+here) is inside the noise and not different from off in the mean: a slow first run (70.2, 78.5, then 86.8), the machine warming over the series (every arm
+rises from round 1 to round 3, off too). It was not repeated; the 5070 is GPU-idle in this scene (3.5-4.4 ms of GPU a frame), so a gain from fewer refresh/write-back
+bytes is for the 3050 (variants in `C:\OOTuilds\step1`, ready; the 3050's own session runs them).
+
 
 ## 5. Not done / open
 
@@ -143,7 +158,7 @@ SPEED_TABLE
 
 ## 6. Hand-over
 
-- Branch `refactor/step1` (worktree `E:\OOT\HeyListen-wt\step1`), 9 commits: the merge of `refactor/expo1` and `refactor/readb2` (only the generated switch lists
+- Branch `refactor/step1` (worktree `E:\OOT\HeyListen-wt\step1`), 10 commits over `refactor/expo1`: the merge of `refactor/expo1` and `refactor/readb2` (only the generated switch lists
   conflicted), `HL_RB_LAG` (`rb_ring.h`, `vk_rbring.cpp`, hooks in `vk_memory.cpp` / `vk_replay.cpp`), the quiet ranges, the 0xc0 class, diagnostics, this note.
   Nothing pushed or merged.
 - Builds: `E:\OOT\HeyListen\build\s5\bin\step1d` (main PC), `C:\OOT\builds\step1` on the PC 3050 (`HeyListen.exe`, `hookshot_vk.dll`, `HeyListen.map`). One exe, variants
