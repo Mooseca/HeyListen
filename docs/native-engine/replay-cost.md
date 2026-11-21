@@ -154,3 +154,68 @@ par_conds, par_points (cleared at each dry pass), the written marks (dry_mark_*)
 Measure first (needs a game run under a speed lease, RX_VK_PROF_FINE=1): the dry-pass op-kind table (op_cost_ns[0]) and "its own
 segment" against "dry loop"/"waits and submits", with RX_VK_SEG_TAIL=100/60/40. If the own segment falls enough, the order thread's
 critical path is dry pass + short tail and B's gain is the dry pass alone (3.5 ms): then decide with that table.
+
+
+# ORDER3 (the GPU's idle between recordings, where it comes from; 21-22 Nov 2026, branch refactor/order3)
+
+Branch refactor/order3 = refactor/step1 (627e374e8, the readback ring) + perf/order2's six commits (completion thread, SEG_TAIL, counters).
+All measures below with `HL_RB_LAG=2` (the default to come), Market `market-spin` from `market-mid`, 100%, no upscaler, vsync 0, on the
+main PC (RTX 5070, 7800X3D) under a speed lease.
+
+## The tool: `RX_VK_FEED_LOG=1` (off)
+`RX_VK_PASS_TIMING` cannot tell: it turns the parallel replay off (`replay_handle`: `gprof_on()` takes the serial path), so the 6.4-6.9 ms
+the 3050 showed between command buffers belongs to a serial replay, not to the shipped one. The existing "GPU time ... gaps between recordings"
+line is the shipped configuration's total; `RX_VK_FEED_LOG` splits it. Per recording the host notes when it was **ready** (recorded; a segment
+also waits for the ones before it in the queue's order), when it was **sent** (the `vkQueueSubmit2` that carries it; a held recording's is its
+batch's flush), the GPU's own timestamps are put on the host clock (calibrated timestamps, refreshed every 50 ms), and `feed_stats.h`
+splits each gap before a recording: replay not ready (and of it, how much of the time the replay was inside a `run_submit` pass) / ready but not
+sent (in-order submit, late fix, batch) / sent but the GPU not started / sent before the GPU went idle (a wait inside the GPU or the
+driver). Logged every 600 presents ("GPU feed (RX_VK_FEED_LOG)"). Do not combine it with `RX_VK_TL_S` / `RX_VK_COMPLETION_CHECK` (the first
+test run with both lost the segments from the list; the order3 runs without them are complete). The timeline (`RX_VK_TL`) has new marks in a
+big command buffer's replay: `early+/-`, `dry+/-`, `seg-out`, `seg+/-`, `seg-submit`, `own+/-`.
+
+## What it shows (5070, steady windows, ms a frame, frame 10.9)
+GPU busy 7.2, idle between recordings 3.7: **replay not ready 3.25 (88%)**, ready but not sent 0.07, sent and not started 0.29, sent before the
+GPU went idle 0.13. A run with the replay-pass split (slot lease): not ready 2.15 of which 2.04 with the replay inside a pass. So the idle is
+the replay's own speed (the game had handed the work over), 1/3 of it inside the big command buffers (the GPU caught up with the segments) and
+2/3 before the small recordings between them. The late-fix hold and the batch are not a factor (0.07 ms).
+
+## Knobs tried (interleaved, 3 rounds; `A` = `HL_RB_LAG=2`)
+See the hand-over table below: SEG_TAIL=50/30 moves the replay thread's own segment 0.98 -> 0.61 / 0.47 ms a big command buffer and its wait for
+the workers 0.19 -> 0.58 / 0.79: the same total, the frame the same. `RX_VK_POOL_SPIN=200` (workers and the replay thread look 200 us for work
+before they sleep): nothing on the waits (0.19), and a lower 1% low. `RX_VK_COMPLETION_THREAD=1`: inside the noise.
+
+### Numbers (main PC, speed lease, `market-spin` from `market-mid`, 3 interleaved rounds, fps of the run: a sanity figure; p50 10.5-10.8 ms in every arm)
+First series (build order3, `HL_RB_LAG=2 RX_VK_FEED_LOG=1` on every arm; the E arm lost round 1 to a queued build of another agent, runguard exit 11):
+
+| arm | fps rounds 1/2/3 | replay thread's own segment / its wait for the workers (ms a big command buffer) |
+|---|---|---|
+| A (`HL_RB_LAG=2`) | 86.8 / 87.3 / 87.5 | 0.98 / 0.19 |
+| B `RX_VK_SEG_TAIL=50` | 88.9 / 88.0 / 80.2 (hitchy) | 0.61 / 0.58 |
+| C `RX_VK_SEG_TAIL=30` | 86.9 / 88.7 / 82.2 (hitchy) | 0.47 / 0.79 |
+| D `RX_VK_POOL_SPIN=200` | 84.6 / 80.7 / 85.0 | 0.97 / 0.19 |
+| E `RX_VK_COMPLETION_THREAD=1` | - / 85.4 / 87.3 | 0.99 / 0.18 |
+
+Second series (build order3b, the 3050's configuration on the 5070: fine segments, 4 workers):
+
+| arm | fps rounds 1/2/3 | own segment / wait | slowest segment | segments a big cb |
+|---|---|---|---|---|
+| A (5070 defaults) | 80.2 / 86.0 / 88.1 | 0.98 / 0.19 | 1.41 | 4.5 |
+| S4 `RX_VK_FINE_SEGMENTS=1 RX_VK_PARALLEL=4` | 87.4 / 89.2 / 88.8 | 0.74 / 0.24 | 1.13 | 5.6 |
+| S6 `... RX_VK_PARALLEL=6` | 87.6 / 89.5 / 87.5 | 0.83 / 0.16 | 1.22 | 5.6 |
+| S8 `... RX_VK_PARALLEL=8` | 86.6 / 86.8 / 87.1 | 0.84 / 0.16 | 1.28 | 5.6 |
+| S4T `... RX_VK_SEG_TAIL=40` | 81.3 / 87.5 / 86.3 | 0.40 / 0.40 | 1.25 | 5.5 |
+
+Reading: no knob changes the frame. The replay thread's own segment and its wait for the workers always add to ~1.2 ms a big command buffer
+(a segment is ~1.1-1.3 ms at ~128 draws; the last one cannot start before the dry pass, 0.6 ms, has ended), so what the order thread spends is
+the dry pass plus the longest segment, whoever records it; more recorders (4, 6, 8), a smaller own share (50, 40, 30) and a spin before sleeping
+all leave that sum alone. The 5070's frame (10.6 ms) does not move with any of them, so the 5070 cannot judge this lever: the 3050 can, with the
+feed log (below). The rounds with a 1% low under 10 fps (B-3, C-3, D-2, A-1, S4T-1) are machine hitches, not the knob: the same arms have clean rounds.
+
+## For the PC 3050 (its own session; files in `C:\OOTuilds\order3`: HeyListen.exe, hookshot_vk.dll, HeyListen.map = build order3b)
+Same options for every run (dlss 0, upscaling 0, resolution fixed at 1440p 100%, hdr 0, vsync 0, no cap), `market-spin` from `market-mid`, 3 interleaved
+rounds, `HL_RB_LAG=2` and `RX_VK_FEED_LOG=1` on all, no `RX_VK_PASS_TIMING`, no `RX_VK_TL_S`:
+A plain; B `RX_VK_SEG_TAIL=50`; C `RX_VK_SEG_TAIL=30`; D `RX_VK_POOL_SPIN=200`; E `RX_VK_COMPLETION_THREAD=1`; F `RX_VK_EARLY_GPU=2`; G `RX_VK_PRESYNC_EARLY=1`.
+Read per run: fps and p50/p95; "GPU feed" lines (steady windows: GPU busy, idle, and the idle split into replay not ready (of it with the replay in a
+pass) / ready not sent / sent not started / queued), "GPU time ... gaps between recordings", "parallel replay, early segments ... a command buffer: dry pass
+... the replay thread recorded x ms and waited y ms". With `RX_VK_PROF_FINE=1` in a separate untimed run: the order thread's wall by pass.
