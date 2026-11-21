@@ -119,6 +119,9 @@ def main():
          "the BC levels' runs do not step before they bind")
     need("astc_chunk_step(cmd, chunk_texels, (uint64_t)g.w * g.h * (all_lv ? tex.layers : 1));" in upload,
          "the plain levels do not step before they dispatch")
+    plain = upload[upload.index("(all_lv ? tex.layers : 1));") :]
+    need(plain.index("vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, astc_pipe)") < plain.index("vkCmdPushDescriptorSetKHR"),
+         "the plain levels do not bind the decoder's pipeline again after a step (a flush leaves none bound: a null pipeline in the driver)")
     need("all_lv = all && (!chunk_texels || (uint64_t)g.w * g.h * tex.layers <= chunk_texels)" in upload,
          "a level over the bound is one dispatch of every layer")
     need("astc_chunk_step(cmd, astc_chunk_texels(), group_texels);" in batched, "the batched groups do not step")

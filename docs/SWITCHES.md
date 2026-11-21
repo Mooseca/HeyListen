@@ -1805,7 +1805,7 @@ The CPU unswizzle of TOTK's 3686x3686 and 7373x3686 BC maps was ~150 ms of the b
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:3814`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:3817`.
 
 #### `RX_VK_ACQUIRE_FENCE` - developer
 
@@ -1995,7 +1995,7 @@ A benchmark (RX_VK_BENCH=<present>[,<times>], default 50 times): the frame befor
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:5316`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:5319`.
 
 #### `RX_VK_BUDGET_FREE_CAPPED` - developer
 
@@ -2005,7 +2005,7 @@ A benchmark (RX_VK_BENCH=<present>[,<times>], default 50 times): the frame befor
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:5439`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:5442`.
 
 #### `RX_VK_CAP_BLOCKS` - developer
 
@@ -2165,7 +2165,7 @@ How many of the GPU driver's compiles run at once (Longshot c392df3a's compute g
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:2889`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:2892`.
 
 #### `RX_VK_CS_MODULE_DROP` - developer
 
@@ -2185,7 +2185,7 @@ The render target pool: the most its idle images may hold (by default a twelfth 
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:5050`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:5053`.
 
 #### `RX_VK_DEAD_MIN_UNUSED` - developer
 
@@ -2195,7 +2195,7 @@ The render target pool: the most its idle images may hold (by default a twelfth 
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:5054`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:5057`.
 
 #### `RX_VK_DEAD_TARGETS` - developer
 
@@ -2205,7 +2205,7 @@ The render target pool: the most its idle images may hold (by default a twelfth 
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:5046`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:5049`.
 
 #### `RX_VK_DEFERRED_LATE` - developer
 
@@ -2475,7 +2475,7 @@ undocumented: gpu/vk/vk_draw.cpp:4929 (in `dynamic_state()`) reads it as an on/o
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:5828`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:5831`.
 
 #### `RX_VK_FREE_LATER` - developer
 
@@ -2525,7 +2525,7 @@ AMD FSR 4 for one run (0 never, 1 FSR 4, 2 its Native AA), and another folder fo
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:3211`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:3214`.
 
 #### `RX_VK_GONE_RING` - developer
 
@@ -2535,7 +2535,7 @@ AMD FSR 4 for one run (0 never, 1 FSR 4, 2 its Native AA), and another folder fo
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:3390` and 1 more place.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:3393` and 1 more place.
 
 #### `RX_VK_GPL` - developer
 
@@ -2715,7 +2715,7 @@ Kept, up to RX_VK_KEEP_FINALIZED_MB (512 by default; 0: evicted as before), the 
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:5719`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:5722`.
 
 #### `RX_VK_KEEP_LAZY_MIRRORS` - developer
 
@@ -2735,7 +2735,7 @@ Kept, up to RX_VK_KEEP_FINALIZED_MB (512 by default; 0: evicted as before), the 
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:5868`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:5871`.
 
 #### `RX_VK_KEEP_RETIRED` - player
 
@@ -2845,7 +2845,7 @@ For a first run on a 4 GB card such as a GTX 1650, `RX_VK_LOW_SPEC=1` starts wit
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:5197`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:5200`.
 
 #### `RX_VK_MARKERS_V205` - developer
 
@@ -3105,7 +3105,7 @@ undocumented: gpu/vk/vk_coopmat.cpp:530 (in `coopmat_init()`) reads it as a text
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:3521`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:3524`.
 
 #### `RX_VK_NO_PASS_HAZARDS` - developer
 
@@ -3405,7 +3405,7 @@ What one pass or dispatch writes and the next reads the game orders itself with 
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:3167`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:3170`.
 
 #### `RX_VK_PER_QUEUE_FENCES` - developer
 
@@ -3845,7 +3845,7 @@ Ryzen 9 3900X, Kokiri Forest: see the PR. RX_VK_REPLAY_PIN=0: off. (Only preferr
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:3498`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:3501`.
 
 #### `RX_VK_REUPLOAD_OWN` - developer
 
@@ -3875,7 +3875,7 @@ A texture's re-upload reads every page of its storage the submit-time capture ke
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:3547`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:3550`.
 
 #### `RX_VK_SAMPLER_CACHE` - developer
 
@@ -3975,7 +3975,7 @@ A submission cut into parts (`RX_VK_CHUNK`): 1 each part writes the uniform upda
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:5168`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:5171`.
 
 #### `RX_VK_STAGING_IDLE_S` - developer
 
@@ -3985,7 +3985,7 @@ A submission cut into parts (`RX_VK_CHUNK`): 1 each part writes the uniform upda
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:5160`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:5163`.
 
 #### `RX_VK_STAGING_KEEP_MB` - developer
 
@@ -3995,7 +3995,7 @@ A scene change makes the ones it needs again. RX_VK_STAGING_KEEP_MB=256: as befo
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:5151`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:5154`.
 
 #### `RX_VK_STAMP_SPLIT` - developer
 
@@ -4335,7 +4335,7 @@ Where that would grow it by more than a quarter, or past the scratch, it stays R
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:2685`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:2688`.
 
 #### `RX_VK_VB_RANGE` - developer
 
@@ -4419,13 +4419,13 @@ Where that would grow it by more than a quarter, or past the scratch, it stays R
 
 #### `RX_VK_WORK_LOCAL` - developer
 
-undocumented: gpu/vk/vk_texture.cpp:3026 (in `work_seg_begin()`) reads it as a text value: `const char* e = getenv("RX_VK_WORK_LOCAL");`. No comment in the source says what it changes.
+undocumented: gpu/vk/vk_texture.cpp:3029 (in `work_seg_begin()`) reads it as a text value: `const char* e = getenv("RX_VK_WORK_LOCAL");`. No comment in the source says what it changes.
 
 **Values:** text. **Default:** unset.
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:3026` and 1 more place.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:3029` and 1 more place.
 
 #### `RX_VK_WRITE_HISTORY` - developer
 
@@ -5085,7 +5085,7 @@ The game's own barrier (end of a pass), then the next pass's start barrier, then
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:3124`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:3127`.
 
 #### `RX_VK_BARRIER_DEDUPE_PAR` - developer
 
@@ -5095,7 +5095,7 @@ The game's own barrier (end of a pass), then the next pass's start barrier, then
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:3013`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:3016`.
 
 #### `RX_VK_BARRIER_EVERY_DRAW` - developer
 
@@ -5115,7 +5115,7 @@ Namespace (TICK-057) RX_VK_BARRIER_TRUST=1, off by default: the engine's own pas
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:3066`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:3069`.
 
 #### `RX_VK_COMPUTE_QUICK_FIRST` - developer
 
@@ -5155,7 +5155,7 @@ What one pass or dispatch writes and the next reads the game orders itself with 
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:3182`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:3185`.
 
 #### `RX_VK_FLUSH_UNCACHED` - developer
 
@@ -5165,7 +5165,7 @@ What one pass or dispatch writes and the next reads the game orders itself with 
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:4027`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:4030`.
 
 #### `RX_VK_FOLLOW_MESH` - developer
 
@@ -5195,7 +5195,7 @@ The mesh fallback** (RX_VK_FORCE_MESH_FALLBACK=1) costs the same in the prepare 
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:3076`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:3079`.
 
 #### `RX_VK_GPL_SYNC` - developer
 
@@ -5485,7 +5485,7 @@ RX_VK_NO_VMAP_FLUSH=1: off.
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:3920`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:3923`.
 
 #### `RX_VK_PASS_BARRIER` - developer
 
@@ -5495,7 +5495,7 @@ On NVIDIA by default (the game's barriers were placed for an NVIDIA GPU), off on
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:3225`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:3228`.
 
 #### `RX_VK_PICK_BIND_GEN` - developer
 
@@ -5645,7 +5645,7 @@ The pipeline entry of a draw (a new one is queued for a worker; RX_VK_SYNC_PIPEL
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:3113`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:3116`.
 
 ## Memory and textures
 
@@ -5801,7 +5801,7 @@ undocumented: gpu/render/rx_texture.cpp:1505 (in `trim_decoded_textures()`) read
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:2648`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:2651`.
 
 #### `RX_VK_ASTC_BC_MB` - developer
 
@@ -5811,7 +5811,7 @@ undocumented: gpu/render/rx_texture.cpp:1505 (in `trim_decoded_textures()`) read
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:2643`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:2646`.
 
 #### `RX_VK_ASTC_BC_MIN_KB` - developer
 
@@ -5821,7 +5821,7 @@ undocumented: gpu/render/rx_texture.cpp:1505 (in `trim_decoded_textures()`) read
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:2660`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:2663`.
 
 #### `RX_VK_ASTC_BLOCKS` - developer
 
@@ -5861,7 +5861,7 @@ ASTC textures decoded on the CPU (as RGBA8), or by the GPU's decoder (and big on
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:2723`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:2726`.
 
 #### `RX_VK_ASTC_RGBA8` - player
 
@@ -5951,7 +5951,7 @@ RX_VK_BC_SMALL_LAYERS=<n>: its layers (1 by default: off, no small scratch, ever
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:2760`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:2763`.
 
 #### `RX_VK_BIG_IMAGE_MB` - developer
 
@@ -6031,7 +6031,7 @@ Small mip-chained textures the GPU drew are not written into guest memory a few 
 
 **When a player would use it:** The ground garbles after some minutes in one area: `=1` stops writing small drawn textures back.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:4271`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:4274`.
 
 #### `RX_VK_NO_IMAGE_POOL` - developer
 
@@ -6071,7 +6071,7 @@ GPU writes to mirrored pools are not copied back to guest memory (an experiment,
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:3677`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:3680`.
 
 #### `RX_VK_TEX_CAPTURE_OFF_FILE` - developer
 
@@ -6091,7 +6091,7 @@ Huge textures leave out their top levels: wider than RX_VK_TEX_MAX_DIM (default 
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:2600`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:2603`.
 
 #### `RX_VK_TEX_MAX_MB` - developer
 
@@ -6101,7 +6101,7 @@ Huge textures leave out their top levels: wider than RX_VK_TEX_MAX_DIM (default 
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:2601`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:2604`.
 
 #### `RX_VK_TEX_SKIP_MB` - developer
 
@@ -6111,7 +6111,7 @@ Huge textures leave out their top levels: wider than RX_VK_TEX_MAX_DIM (default 
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:2623`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:2626`.
 
 #### `RX_VK_UNEVEN_BC` - developer
 
@@ -6121,7 +6121,7 @@ OFF by default since v2.0.6: in v2.0.5 an RX 6700 XT's GPU time went from 10-13 
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:2682`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:2685`.
 
 #### `RX_VK_UPLOAD_ALL` - developer
 
@@ -6131,7 +6131,7 @@ OFF by default since v2.0.6: in v2.0.5 an RX 6700 XT's GPU time went from 10-13 
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:3545`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:3548`.
 
 #### `RX_VK_UPLOAD_BUDGET_FRAME_MS` - developer
 
@@ -6141,7 +6141,7 @@ The log's `vk: deferral:` lines say, per present that held any back, how many an
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:3435`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:3438`.
 
 #### `RX_VK_UPLOAD_BUDGET_MS` - developer
 
@@ -6151,7 +6151,7 @@ The upload budget: once a thread has spent this long uploading textures in a pre
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:3429`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:3432`.
 
 #### `RX_VK_UPLOAD_BUDGET_SUM` - developer
 
@@ -6161,7 +6161,7 @@ The time is the looking-up thread's own, so the parallel replay's segment worker
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:3430`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:3433`.
 
 #### `RX_VK_WB_DIFF` - developer
 
@@ -6473,7 +6473,7 @@ The commit the texture cache leaves free before the system's limit (default 2560
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:5676`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:5679`.
 
 #### `RX_VK_EVICT_NO_FLUSH` - developer
 
@@ -6483,7 +6483,7 @@ The commit the texture cache leaves free before the system's limit (default 2560
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:5914`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:5917`.
 
 #### `RX_VK_EVICT_OVERWRITTEN_UNUSED` - developer
 
@@ -6493,7 +6493,7 @@ The commit the texture cache leaves free before the system's limit (default 2560
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:5645`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:5648`.
 
 #### `RX_VK_EVICT_RENDERED` - developer
 
@@ -6503,7 +6503,7 @@ The commit the texture cache leaves free before the system's limit (default 2560
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:5860`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:5863`.
 
 #### `RX_VK_EVICT_UNFLUSHABLE` - developer
 
@@ -6513,7 +6513,7 @@ The commit the texture cache leaves free before the system's limit (default 2560
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:5888`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:5891`.
 
 #### `RX_VK_IMAGES_VRAM_ONLY` - developer
 
@@ -6603,7 +6603,7 @@ No VRAM mirrors of the game's memory pools (on for discrete cards); their budget
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:5278` and 1 more place.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:5281` and 1 more place.
 
 #### `RX_VK_POOL_END_IMPORTED` - developer
 
@@ -6673,7 +6673,7 @@ undocumented: gpu/vk/vk_draw.cpp:9464 reads it as a number: `static const unsign
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:5257`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:5260`.
 
 #### `RX_VK_TARGET_BLOCKS` - developer
 
@@ -6713,7 +6713,7 @@ The texture cache's budget (default 70% of what the driver allows, at most 6 GB)
 
 **When a player would use it:** The texture cache uses too much VRAM: a lower budget in MB.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:5286` and 2 more places.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:5289` and 2 more places.
 
 #### `RX_VK_VRAM_TARGET_PCT` - developer
 
@@ -6723,7 +6723,7 @@ The texture cache's budget (default 70% of what the driver allows, at most 6 GB)
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:5432`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:5435`.
 
 ### Guest memory and captures
 
@@ -7195,7 +7195,7 @@ undocumented: gpu/vk/vk_draw.cpp:2861 (in `ubo_memo_mode()`) reads it as a text 
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:3470`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:3473`.
 
 #### `RX_VK_DESC_COUNTS` - developer
 
@@ -7285,7 +7285,7 @@ Big block-linear textures unswizzled on the GPU (Eden's block_linear_unswizzle_2
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:1755`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:1758`.
 
 #### `RX_VK_IMPORT_CHUNK_MB` - developer
 
@@ -7375,7 +7375,7 @@ A texture in a virtual pool that the GPU writes before anything uploads it has n
 
 **When a player would use it:** HUD labels go blank after a zone change, or black surfaces flicker in Zora's Domain: `=1` is the earlier page-map behaviour.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:4531`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:4534`.
 
 #### `RX_VK_NO_HOST_IMPORT` - developer
 
@@ -7465,7 +7465,7 @@ undocumented: gpu/vk/vk_main.cpp:766 (in `create_device()`) reads it as an on/of
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:4742`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:4745`.
 
 #### `RX_VK_SPARSE_QUEUE` - developer
 
@@ -10807,7 +10807,7 @@ NVIDIA DLSS and Reflex for one run: the readme's NVIDIA DLSS section. `RX_VK_DLS
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:5577`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:5580`.
 
 #### `RX_VK_LOG_BIG_COPY` - diagnostic
 
@@ -10951,13 +10951,13 @@ undocumented: gpu/vk/vk_draw.cpp:2758 (in `texture_view_of()`) reads it as an on
 
 #### `RX_VK_LOG_MADE` - diagnostic
 
-undocumented: gpu/vk/vk_texture.cpp:3370 (in `texture_get()`) reads it as a number: `static const int64_t log_from = getenv("RX_VK_LOG_MADE") ? atoll(getenv("RX_VK_LOG_MADE")) : -1;`. No comment in the source says what it changes.
+undocumented: gpu/vk/vk_texture.cpp:3373 (in `texture_get()`) reads it as a number: `static const int64_t log_from = getenv("RX_VK_LOG_MADE") ? atoll(getenv("RX_VK_LOG_MADE")) : -1;`. No comment in the source says what it changes.
 
 **Values:** a whole number. **Default:** -1.
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:3370`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:3373`.
 
 #### `RX_VK_LOG_MESH_BINDS` - diagnostic
 
@@ -11021,13 +11021,13 @@ undocumented: gpu/vk/vk_texture.cpp:3370 (in `texture_get()`) reads it as a numb
 
 #### `RX_VK_LOG_PARTIAL` - diagnostic
 
-undocumented: gpu/vk/vk_texture.cpp:3610 (in `texture_touch()`) reads it as a text value: `if (partial && getenv("RX_VK_LOG_PARTIAL")) {`. No comment in the source says what it changes.
+undocumented: gpu/vk/vk_texture.cpp:3613 (in `texture_touch()`) reads it as a text value: `if (partial && getenv("RX_VK_LOG_PARTIAL")) {`. No comment in the source says what it changes.
 
 **Values:** text. **Default:** unset.
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:3610`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:3613`.
 
 #### `RX_VK_LOG_PUSH` - diagnostic
 
@@ -11097,7 +11097,7 @@ undocumented: gpu/vk/vk_replay.cpp:4966 (in `invalidate()`) reads it as an on/of
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:2473`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:2476`.
 
 #### `RX_VK_LOG_RESTART` - diagnostic
 
@@ -11127,7 +11127,7 @@ undocumented: gpu/vk/vk_replay.cpp:4966 (in `invalidate()`) reads it as an on/of
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:3817`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:3820`.
 
 #### `RX_VK_LOG_TABLE` - diagnostic
 
@@ -11147,7 +11147,7 @@ The table-entry flip log is diagnostic. It stops after 60 lines, and after this 
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:4104`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:4107`.
 
 #### `RX_VK_LOG_UPLOADS` - diagnostic
 
@@ -11157,7 +11157,7 @@ RX_VK_LOG_UPLOADS=<present>: the uploads from that present on (200 of them; what
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:2198`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:2201`.
 
 #### `RX_VK_LOG_VMAP_CHANGING` - diagnostic
 
@@ -11371,13 +11371,13 @@ undocumented: gpu/vk/vk_framegen.cpp:683 (in `framegen_scale()`) reads it as an 
 
 #### `RX_VK_WATCH_DIM` - diagnostic
 
-undocumented: gpu/vk/vk_texture.cpp:1948 (in `watch_tex()`) reads it as a text value: `if (const char* e = getenv("RX_VK_WATCH_DIM")) sscanf(e, "%ux%u", &w, &h);`. No comment in the source says what it changes.
+undocumented: gpu/vk/vk_texture.cpp:1951 (in `watch_tex()`) reads it as a text value: `if (const char* e = getenv("RX_VK_WATCH_DIM")) sscanf(e, "%ux%u", &w, &h);`. No comment in the source says what it changes.
 
 **Values:** text. **Default:** unset.
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:1948`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:1951`.
 
 #### `RX_VK_WATCH_GPU_WRITE` - diagnostic
 
@@ -11387,7 +11387,7 @@ undocumented: gpu/vk/vk_texture.cpp:1948 (in `watch_tex()`) reads it as a text v
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:4561`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:4564`.
 
 #### `RX_VK_WATCH_KICK` - diagnostic
 
@@ -11437,7 +11437,7 @@ undocumented: gpu/vk/vk_replay.cpp:1969 (in `replay()`) reads it as a text value
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:1936`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:1939`.
 
 #### `RX_VS_COMPUTE_LOG` - diagnostic
 
@@ -12059,7 +12059,7 @@ RX_VK_DUMP_ONLY_W=<width>[,<width>...]: only targets that wide (the minimap's 46
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:1966`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:1969`.
 
 #### `RX_VK_DUMP_PIXELS` - diagnostic
 
@@ -12737,13 +12737,13 @@ A buffer made for a caller that asked for its mapping and given none is returned
 
 #### `RX_VK_UNSWIZZLE_CHECK` - diagnostic
 
-undocumented: gpu/vk/vk_texture.cpp:2340 (in `upload_inner()`) reads it as an on/off switch: `static const bool check = getenv("RX_VK_UNSWIZZLE_CHECK") != nullptr;`. No comment in the source says what it changes.
+undocumented: gpu/vk/vk_texture.cpp:2343 (in `upload_inner()`) reads it as an on/off switch: `static const bool check = getenv("RX_VK_UNSWIZZLE_CHECK") != nullptr;`. No comment in the source says what it changes.
 
 **Values:** on or off (0, false, off, no and empty are off). **Default:** off (unset).
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:2340`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_texture.cpp:2343`.
 
 #### `RX_VK_VALIDATION` - diagnostic
 

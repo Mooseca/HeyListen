@@ -85,12 +85,14 @@ bool make_pool() {
     VkQueryPoolCreateInfo qi{VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
     qi.queryType = VK_QUERY_TYPE_TIMESTAMP;
     qi.queryCount = kSlots * kQ;
-    if (vkCreateQueryPool(dev.device, &qi, nullptr, &pool) != VK_SUCCESS) {
-        pool = VK_NULL_HANDLE;
-        return false;
-    }
-    vkResetQueryPool(dev.device, pool, 0, kSlots * kQ);
-    slots = new TSlot[kSlots];
+    // (the slots before the pool: tprof_collect runs on the renderer's threads once the pool is set, and one that came between
+    // the two read a null slots, a v0.4.3 crash at tprof_collect+0x5d, read 0x1e1e8)
+    if (!slots) slots = new TSlot[kSlots];
+    VkQueryPool p = VK_NULL_HANDLE;
+    if (vkCreateQueryPool(dev.device, &qi, nullptr, &p) != VK_SUCCESS) return false;
+    vkResetQueryPool(dev.device, p, 0, kSlots * kQ);
+    std::atomic_thread_fence(std::memory_order_release);
+    pool = p;
     return true;
 }
 
@@ -473,7 +475,7 @@ void tprof_end_label(VkCommandBuffer cmd, const std::string& label) {
 }
 
 void tprof_collect(int slot) {
-    if (!pool || slot < 0 || slot >= kSlots) return;
+    if (!pool || !slots || slot < 0 || slot >= kSlots) return;
     TSlot& s = slots[slot];
     if (!s.nq) return;
     const uint32_t nq = s.nq, ns = s.ns;
