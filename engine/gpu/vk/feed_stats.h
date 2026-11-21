@@ -4,7 +4,9 @@
      sent    the host's vkQueueSubmit2 that carries it (for a recording held back for a late fix or a batch, the flush's)
      start   the GPU's first timestamp in it
    Idle time from the end of what ran before it, e, to start, g:
-     not ready   e..ready          the replay had not finished recording what the GPU runs next: the feed is late
+     not ready   e..ready          the replay had not finished recording what the GPU runs next: the feed is late. Split by the replay's
+                                   own passes (run_submit holding the replay lock): busy = a pass ran in that time, idle = none did
+                                   (the game had not handed the submission over yet, or its capture was still being taken)
      held        ready..sent       done but not handed to the queue: the in-order submit of the segments before it, a late fix, a batch
      after send  sent..g           handed over, the GPU not on it yet (the driver and the hardware's start latency)
      queued      the whole gap     it was sent before the GPU went idle: waits inside the GPU or the driver, not the host's doing
@@ -23,11 +25,30 @@ struct Rec {
     int kind = 0;
 };
 
+/// A pass of the replay (run_submit with the replay lock held), host ns
+struct Span {
+    double t0 = 0, t1 = 0;
+};
+
+/// How much of [lo, hi] the spans (sorted by t0, not overlapping: one lock) cover
+inline double covered(const std::vector<Span>& spans, double lo, double hi) {
+    if (hi <= lo || spans.empty()) return 0;
+    size_t a = 0, b = spans.size();
+    while (a < b) {   // (the first span that ends after lo)
+        const size_t m = (a + b) / 2;
+        if (spans[m].t1 <= lo) a = m + 1; else b = m;
+    }
+    double sum = 0;
+    for (size_t i = a; i < spans.size() && spans[i].t0 < hi; i++) sum += std::min(hi, spans[i].t1) - std::max(lo, spans[i].t0);
+    return sum;
+}
+
 struct Totals {
     double busy = 0;            // (the union of the recordings' run times)
     double idle = 0;            // (gaps of under 100 ms between them)
     double not_ready = 0, held = 0, after_send = 0, queued = 0;
     double not_ready_kind[3] = {0, 0, 0};
+    double not_ready_busy = 0;  // (of not_ready: the replay was in a pass; the rest it was not)
     int64_t gaps = 0, big_gaps = 0;   // (gaps of 0.5 ms and over)
     double big_idle = 0;              // (their time)
     double longest = 0;
@@ -36,7 +57,7 @@ struct Totals {
 };
 
 /// The recordings of a window, any order: sorted by start, each gap against the latest end so far
-inline Totals attribute(std::vector<Rec> v, double tolerance_ns = 50e3) {
+inline Totals attribute(std::vector<Rec> v, const std::vector<Span>& spans = {}, double tolerance_ns = 50e3) {
     Totals t;
     std::sort(v.begin(), v.end(), [](const Rec& a, const Rec& b) { return a.start < b.start; });
     double end = 0, lo = 0;
@@ -58,6 +79,7 @@ inline Totals attribute(std::vector<Rec> v, double tolerance_ns = 50e3) {
                     const double ready = r.ready ? std::clamp(r.ready, e, g) : e;
                     const double sent = r.sent ? std::clamp(r.sent, ready, g) : ready;
                     t.not_ready += ready - e, t.not_ready_kind[r.kind < 0 || r.kind > 2 ? 0 : r.kind] += ready - e;
+                    t.not_ready_busy += covered(spans, e, ready);
                     t.held += sent - ready;
                     t.after_send += g - sent;
                 }
@@ -79,7 +101,7 @@ inline void accumulate(Totals& a, const Totals& b) {
     a.busy += b.busy, a.idle += b.idle, a.not_ready += b.not_ready, a.held += b.held, a.after_send += b.after_send, a.queued += b.queued;
     for (int k = 0; k < 3; k++) a.not_ready_kind[k] += b.not_ready_kind[k];
     a.gaps += b.gaps, a.big_gaps += b.big_gaps, a.big_idle += b.big_idle, a.window += b.window, a.recs += b.recs;
-    a.longest = std::max(a.longest, b.longest);
+    a.longest = std::max(a.longest, b.longest), a.not_ready_busy += b.not_ready_busy;
 }
 
 } // namespace mkwvk::feed

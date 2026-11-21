@@ -68,6 +68,17 @@ int main() {
         const Totals t = attribute(v);
         CHECK("first is no gap", t.gaps == 1 && near(t.idle, 500e3) && near(t.window, 2000e3 - 10));
     }
+    // (7) the replay's passes: how much of the not-ready time the replay was in a pass
+    {
+        std::vector<Rec> v;
+        v.push_back({0, 0, 0, 1000e3, 0});
+        v.push_back({2000e3, 2100e3, 2200e3, 3000e3, 0});          // idle 1.0..2.2: not ready 1.0..2.0, sent 2.1
+        std::vector<Span> spans = {{1200e3, 1500e3}, {1800e3, 2500e3}};
+        const Totals t = attribute(v, spans);
+        CHECK("not ready", near(t.not_ready, 1000e3));
+        CHECK("covered by passes", near(t.not_ready_busy, 300e3 + 200e3));
+        CHECK("covered edges", near(covered(spans, 0, 5000e3), 1000e3) && near(covered(spans, 1400e3, 1900e3), 200e3) && near(covered({}, 0, 1), 0));
+    }
     std::puts("feed_stats: ok");
     return 0;
 }

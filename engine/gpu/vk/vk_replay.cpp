@@ -854,6 +854,19 @@ int64_t ts_ready_ns[kRecordings], ts_sent_ns[kRecordings];
 uint64_t ts_batch_of[kRecordings];            // (a held recording's batch number, 0: sent by its own submit)
 int ts_kind[kRecordings];
 std::vector<mkwvk::feed::Rec> feed_recs;      // (ts_mu)
+std::mutex feed_pass_mu;
+std::vector<mkwvk::feed::Span> feed_spans;    // (feed_pass_mu: the replay's passes, run_submit with replay_mu held, in order)
+/// run_submit's pass with the replay lock held, for the split of "not ready" (the replay in a pass, or not)
+struct FeedPass {
+    int64_t t0 = 0;
+    FeedPass() { if (feed_on()) t0 = tl_now(); }
+    ~FeedPass() {
+        if (!t0) return;
+        std::lock_guard l(feed_pass_mu);
+        feed_spans.push_back({(double)t0, (double)tl_now()});
+        if (feed_spans.size() > 12000) feed_spans.erase(feed_spans.begin(), feed_spans.begin() + 4000);
+    }
+};
 mkwvk::feed::Totals feed_acc;
 int64_t feed_acc_frames = 0;
 void feed_note_ready(int slot, int kind, int64_t t = 0) {
@@ -4437,6 +4450,7 @@ bool run_submit(const uint64_t* handles, int n, uint64_t value, uint64_t queue, 
                 const uint8_t* p = nullptr, bool may_stop = false) {
     tl_ev("run+", value, queue, cb);
     std::lock_guard lk(replay_mu);
+    FeedPass feed_pass;   // (stream ORDER3)
     tl_ev("run-locked", value);
     struct TlRun { uint64_t v; ~TlRun() { tl_ev("run-", v); } } tl_run{value};
     ReplayPin pin;
@@ -5994,17 +6008,22 @@ void log_frame_stats() {
                 std::lock_guard tl(ts_mu);
                 v.swap(feed_recs);
             }
-            mkwvk::feed::accumulate(feed_acc, mkwvk::feed::attribute(std::move(v)));
+            std::vector<mkwvk::feed::Span> spans;
+            {
+                std::lock_guard l(feed_pass_mu);
+                spans = feed_spans;
+            }
+            mkwvk::feed::accumulate(feed_acc, mkwvk::feed::attribute(std::move(v), spans));
             feed_acc_frames += 120;
             if (feed_acc_frames >= 600) {
                 const mkwvk::feed::Totals& t = feed_acc;
                 const double f = (double)feed_acc_frames, ms = 1e6;
                 logf("vk: GPU feed (RX_VK_FEED_LOG), %lld presents, ms a frame: window %.2f = GPU busy %.2f + idle between recordings %.2f; "
-                     "idle = replay not ready %.2f (whole recordings %.2f, segments %.2f, pre-sync %.2f) + ready, not sent (in-order submit, "
+                     "idle = replay not ready %.2f (of it the replay in a pass %.2f; whole recordings %.2f, segments %.2f, pre-sync %.2f) + ready, not sent (in-order submit, "
                      "late fix, batch) %.2f + sent, GPU not started (driver, start latency) %.2f + sent before the GPU went idle %.2f; "
                      "%.1f recordings, %.1f gaps (%.1f of 0.5 ms and over, %.2f ms of the idle; the longest %.2f ms)",
                      (long long)feed_acc_frames, t.window / f / ms, t.busy / f / ms, t.idle / f / ms, t.not_ready / f / ms,
-                     t.not_ready_kind[0] / f / ms, t.not_ready_kind[1] / f / ms, t.not_ready_kind[2] / f / ms, t.held / f / ms,
+                     t.not_ready_busy / f / ms, t.not_ready_kind[0] / f / ms, t.not_ready_kind[1] / f / ms, t.not_ready_kind[2] / f / ms, t.held / f / ms,
                      t.after_send / f / ms, t.queued / f / ms, t.recs / f, t.gaps / f, t.big_gaps / f, t.big_idle / f / ms,
                      t.longest / ms);
                 feed_acc = {};
