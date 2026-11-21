@@ -10,24 +10,16 @@ No engine change: existing diagnostics only.
 |---|---|---|---|
 | `HL_PROFILE_LOCAL=1 HOS_PERF_REPORT=1 RX_VK_PERF_INTERVAL=60 HL_PROFILE_BATCH_S=10 RX_VK_PROF_FINE=1` (`profile_local/*.json`, the game's per-pass GPU timestamps, **not serialized**) | main PC, RTX 5070, Market `market-spin`, 100% render, 150 s run, 7 batches = 33 s of Market, 2,367 frames | per pass (kind, key, count, ms) and per dispatch (program key) | the report keeps the 24 slowest passes of each 10 s batch (`kMaxPasses`), so small passes are cut; one batch file was lost (deleted by mistake while cleaning the slot), 7 of 8 kept; the sampler thread costs 1.1 ms of CPU a frame |
 | `RX_VK_PASS_TIMING=1` and `=2` (log block every 600 presents, timestamps around every span, **serialized**: spans add up to more than an unprofiled frame, read the shares) | main PC, Market, Kakariko, Hyrule field | every span by kind (pass, dispatch, barrier, write-back, refresh, mesh conversion, uploads), the 25 slowest spans, with `=2` the 20 programs whose draw runs took longest | 8.2-8.3 ms a frame in Market against the unprofiled 3.5-4.4 ms of GPU: shares only |
-| the 3050 logs in `E:\OOT\scratch-step0\3050\` (`100a`, `100b` 100% render, `50` 50%; Market, 1440p) | PC 3050 | "GPU time" lines, "GPU tail", PROF_FINE CPU lines, perf summaries (`parts_ms`) | **no per-pass profile**: no `profile_local/` was written (see "Getting the 3050's per-pass profile") |
+| the 3050 logs in `E:\OOT\scratch-step0\3050\`: `100a`, `100b`, `50` (logs only), then `100c` (150 s, 100% render, 1440p, 14 profile batches of 10 s = 101 s of Market, 4,228 frames) and `pt2` (`RX_VK_PASS_TIMING=2`) | PC 3050 | the per-pass profile (B3), GPU time lines, GPU tail, PROF_FINE CPU lines, perf summaries | same 24-passes-per-batch cap as the 5070 profile; the profile sampler adds CPU (24.0 ms frames in `100c`) |
 | `replay-cost.md` REPLAY1 / DESC1 / ORDER2 (branches `perf/desc-044`, `perf/order2`), `E:\OOT\scratch-trace1\REPORT.md` (WPR) | main PC / PC 3050 | CPU by thread and phase | measured by other streams, cited as is |
 | `shader-efficiency.md` (stream P4) | PC 3050, Kokiri and Hyrule field | program keys to what they are, mesh/compute ms on the 3050 | a different scene from Market |
 
-## Getting the 3050's per-pass profile (answer to the coordinator)
+## Getting a per-pass profile (done for the 3050 as `100c`)
 
-The profile is written by `profile_queue()` in `engine/gpu/vk/perf_report.cpp`: a batch **every `HL_PROFILE_BATCH_S` seconds of play
-(default 300; accepted range 10-3600)** and a final batch **only at a clean exit** (`profile_queue(true)`), into **`profile_local/` in the
-game folder** (next to `HeyListen.exe`, e.g. `C:\OOT\runs\...` there), one file `<unix time>-<n>.json` a batch, only for maps that changed. The
-3050's runs lasted 150 s and ended by the harness's kill, so the first 300 s batch never came and no clean exit happened: only
-`perf_pending\` (the summaries, every `RX_VK_PERF_INTERVAL` = 60 s) was written. What to run there (no code change, the same 100% render
-and options as `100b`):
-
-    HL_PROFILE_LOCAL=1 HOS_PERF_REPORT=1 RX_VK_PERF_INTERVAL=60 HL_PROFILE_BATCH_S=10 RX_VK_PROF_FINE=1   (150 s, Market, market-spin, save market-mid)
-
-then copy `profile_local\*.json` (about 10 s of Market a file) and the log. `HL_PROFILE_BATCH_S=10` is the only addition to the previous
-command line. For the pass-by-pass table with program keys, add a second run of 110 s with `RX_VK_PASS_TIMING=2` (log block every 600
-presents; adds serialization, so not with the profile run). The tool that sums the files is `E:\OOT\scratch-step0\plagg.py` (local).
+The profile is written by `profile_queue()` in `engine/gpu/vk/perf_report.cpp`: a batch every `HL_PROFILE_BATCH_S` seconds of play
+(default 300; range 10-3600), a final batch only at a clean exit, into `profile_local/` in the game folder. A harness-killed run shorter than
+300 s writes nothing unless `HL_PROFILE_BATCH_S=10` is set. The command that worked: `HL_PROFILE_LOCAL=1 HOS_PERF_REPORT=1
+RX_VK_PERF_INTERVAL=60 HL_PROFILE_BATCH_S=10 RX_VK_PROF_FINE=1`, 150 s. The tool that sums the files is `E:\OOT\scratch-step0\plagg.py` (local).
 
 ## B1. GPU time by kind, main PC, Market (RTX 5070, 100% render, 2560x1440)
 
@@ -113,6 +105,76 @@ judge, and `shader-efficiency.md` (Kokiri and Hyrule field, 3050) already says w
 | summary `parts_ms`: game / render / gpu_wait | 0.66 / 8.5 / 14.2 | | per frame of a 22.7 ms frame |
 | `submissions` (replay thread wall, PROF_FINE) | 13.7 ms (13.9 per frame), of it dry pass 3.25, segments' recording and wait 7.5, 17.9 small buffers recorded whole 1.5, memory work 0.86 | | CPU, below |
 
+## B3. The PC 3050, per pass and per program (Market, 100% render, 1440p; the judge machine)
+
+The 3050 is GPU-bound here: 17.7-18.1 ms of GPU in a 24 ms frame, and `RX_VK_NO_READBACK_WAIT=1` gives only +3% (42.0 to 43.4 fps) because GPU
+work then runs back to back at ~22.5 ms a frame (coordinator's measurement). On this machine the lever is GPU work, not the waits.
+
+Serialized `RX_VK_PASS_TIMING` block (`pt2`: 19.46 ms a frame in all against 18.1 ms of unprofiled GPU time, so shares are right and sums
+are ~8% high), ms a frame:
+
+| Group | ms | share | Spans | Module it maps to |
+|---|---:|---:|---|---|
+| **Geometry: render passes** | 11.87 | 61% | 180 spans, 2,220 draws, 66 us a pass | step 2 (draw lists) for the scene passes; list below |
+| **Compute: dispatches** | 4.02 | 21% | 153 spans, 26 us a span | the game's own; owners: the meter (step 1), culling (step 3); the rest stays translated |
+| Game barriers (149 `nvnCommandBufferBarrier`) | 0.42 (of 0.62 for all barriers) | 2% | | the game's own |
+| **Emulation: readback refresh** (`rbrefresh`) | **1.02** | 5.2% | 48 spans, 5.9 MB, 21 us a span | step 1 |
+| **Emulation: write-back copies** (`wb`) | **0.93** | 4.8% | 10.7 spans, 52.7 MB, 87 us a span | step 1, then step 2 (pools a module takes over) |
+| **Emulation: mirror sync** (`msync`) | 0.25 | 1.3% | 29 spans, 1.2 MB | step 2 |
+| **Emulation: upload-buffer barriers** | 0.21 | 1.1% | 124 spans | step 1 and 2 |
+| **Emulation: texture uploads** (`xfer`, `mmake`) | 0.19 + 0.05 (+0.16 texture to texture) | 1.3% | | step 4 |
+| **Emulation: mesh argument conversion** (`meshconv`) | 0.12 | 0.6% | 24 spans | step 2 |
+| Events, uniform-update copies, clears | 0.06 | 0.3% | | |
+| **Emulation total** | **about 2.9-3.1 ms** | **15-16%** | | |
+| Dry-pass-related GPU cost | 0 | | the dry pass is CPU-only | |
+
+The 3050 pays 5.7 times the 5070's readback-refresh time (1.02 against 0.18 ms; 21 us a scatter against 6.5 us) and 2 times its write-back
+time, so the readback protocol's own GPU work (`rbrefresh` + `wb`) is **1.95 ms, 10% of the 3050's GPU frame**, against 0.65 ms on the 5070.
+Untimed in these blocks: the present's blit (0.66 ms in the 3050 log), BC/ASTC passes made elsewhere.
+
+### Per-pass ranking (unserialized profile `100c`, Market, 4,228 frames, ms a frame)
+
+The cap keeps the 24 slowest passes of each 10 s batch, so the list sums to 8.5 of the 17.7 ms; the rest is the long tail of small passes and
+dispatches (counted in the serialized block above). By kind, listed passes only: main (colour+depth scene passes) 6.14, compute 1.88, post
+0.47, shadow 0.01 (the ten small 384x384 shadow passes are in the tail: 0.13 ms serialized).
+
+| Rank | Kind | Pass key | ms a frame | a frame | us each | What it is, module |
+|---:|---|---|---:|---:|---:|---|
+| 1 | main | 38661608ba66017e | 1.059 | 1.0 | 1,060 | a full-screen pass every frame; its size and time match the serialized pass with first program `1a7482c0ec9991ea` (1.07 ms, 11 samplers, 1,786 fragment instructions, 16 texture ops, P4): pixel work, resolution-dependent, not a draw-list module |
+| 2 | main | ef317a5479c11e0b | 0.905 | 0.5 | 1,785 | the heavy scene pass, every second frame; mesh pipelines. Step 2 |
+| 3 | main | 647395d47f52b44b | 0.467 | 0.9 | 517 | scene pass. Step 2 |
+| 4 | post | 9151d1cc545e89d3 | 0.466 | 1.0 | 467 | the screen effect (`d8180bd8c6ecc77b`, full-screen, 0.48 ms serialized): pixel work |
+| 5 | main | c9e43b88b6716a41 | 0.453 | 1.0 | 443 | scene pass (max 3.5 ms). Step 2 |
+| 6 | compute | 9dc98871eb7fc101 | 0.419 | 1.0 | 420 | the cooperative-matrix net, grid 64x36x1: the GPU's tensor path, stays |
+| 7 | compute | ee7764a6b1ef459c | 0.331 | 1.0 | 332 | grid 8x9x12, 112 global-memory helper sites (P4: 0.4-0.5 ms from hoisting) |
+| 8 | main | bf87457d0996edb2 | 0.307 | 1.0 | 308 | scene pass. Step 2 |
+| 9 | compute | 27ee9883e2a20323 | 0.290 | 1.0 | 290 | grid 16x9x12, 32 texture ops, stays |
+| 10 | main | b624742a9cb7e025 | 0.281 | 11.4 | 25 | 11 small passes a frame (the `c254a02b6a76abe8` family, 20 runs, 0.25-0.33 ms serialized). Step 2 |
+| 11 | compute | 171c34b219c9c1a5 | 0.245 | 1.0 | 245 | grid 80x23x1 |
+| 12 | main | 0b3bf877b1d267b5 | 0.242 | 2.1 | 117 | scene pass |
+| 13 | compute | 26fe0c70ab9fc547 | 0.237 | 1.0 | 238 | grid 80x60x1 |
+| 14 | main | b904a551db3bf98a | 0.220 | 1.0 | 220 | scene pass |
+| 15 | compute | 435a0138b9013040 | 0.202 | 1.0 | 202 | **the exposure meter's sum program** (1x1x1; 0.11 ms on the 5070). Step 1 removes it with R1 |
+| 16 | main | 02c9788dfa1c5fd3 | 0.184 | 0.4 | 485 | scene pass |
+| | main | eleven heavy passes: 154f6935, 85583e00, 6c9177fe, 2454dd31, 3021d6c9, 6f1d57bb, 1cd5b84e, f56547ee, d612b7d7, 68ad55de, 5b7d763c | 0.235, 0.205, 0.188, 0.153, 0.152, 0.149, 0.133, 0.111, 0.062, 0.057, 0.044 (1.5 together) | 0.02-0.2 each | 1,100-1,800 | scene passes that run once every 5-50 frames (max 2-3 ms each): they make the long frames. Step 2 |
+| | compute | ab7699ee7f536755, 6637ac1d052d22d4 | 0.113, 0.040 | | | stay |
+
+Per program (`pt2`, `RX_VK_PASS_TIMING=2`, serialized draw runs, longest first; ms a frame, draws a frame): `1a7482c0ec9991ea` 1.073 (1
+draw, full-screen), `fb7de12443c80159` 0.834 (14.7 draws at 57 us: the heaviest geometry program), `d8180bd8c6ecc77b` 0.476 (full-screen),
+`7b8eefac7128cd28` 0.435 (24.9 draws), `17c69696efa907c7` 0.318 (27.4), `46c14f8ee79c5349` 0.315 (60 draws), `3427a1dbefd5e02c` 0.311
+(full-screen), `c254a02b6a76abe8` 0.252 (19.7 small passes), `ffb53ed102dd9908` 0.239 (383 instanced draws at 0.62 us), `d8e59341cf4f629c`
+0.231 (mesh+fragment, 1 draw), `b89bd6c260cc9318` 0.198, `48ed51830b1d8fb7` 0.198, `e81516ff53914df9` 0.190, `b7914ae65792d0c8` 0.183,
+`a14724a987c513eb` 0.155, `e38fe3f7f7659776` 0.155, `c03570482ea9a59e` 0.141, `462cbda9324ed360` 0.117, `ada8fb4146e75f6d` 0.114,
+`b54c711bc898254e` 0.111. The top 20 sum to ~6.9 ms of the 11.9 ms of passes: **four programs are full-screen pixel work (`1a7482c0`,
+`d8180bd8`, `3427a1db`, `d8e59341`: ~2.1 ms); the rest is scene geometry spread over many programs of 0.1-0.8 ms**. No program is more than
+5.5% of the GPU frame.
+
+### What this says about the 3050's ~10.8 ms of resolution-independent GPU time
+
+Serialized shares applied to the 18.1 ms: scene geometry passes ~11 ms (of which full-screen pixel work ~2-3 ms is resolution-dependent), compute
+~3.7 ms, our emulation ~2.7-2.9 ms. The emulation is the part no game change keeps and every module removes; the readback protocol (`rbrefresh` +
+`wb`) is two thirds of it.
+
 ## B2. CPU time by module, one table (ms of CPU a frame; bold = on the critical path)
 
 Main PC = Ryzen 7 7800X3D (REPLAY1, Market, 11.9-12.8 ms frames, 70-72 ms of CPU a frame, ~6 cores busy); 3050 = i5-10400F (24.3 ms
@@ -156,23 +218,37 @@ Ranked by the CPU and GPU time that the module removes **on the 3050**, because 
 The two largest GPU items, the main scene pass (c9e43b88, 0.34 ms on the 5070) and the game's compute (ee7764a6 0.15, ab7699ee 0.14), are
 the game's own work that no step changes; direct rendering removes the **overhead around them** (items 1-4), not their shaders.
 
-## Recommended order of modules, with expected ms
+## Recommended order of modules, with expected ms, by machine type
 
-| Order | Module | Expected gain | Why this place |
+The 3050 data splits the ranking. The 3050 is **GPU-bound at 1440p** (GPU 17.7-18.1 ms in a 24 ms frame; removing every readback wait gives
+only +3%, 42.0 to 43.4 fps). The 5070 is **CPU-bound** (GPU 3.5-4.4 ms in an 11.5-14 ms frame; the same switch bounds a gain of up to +17%).
+
+| Machine type | What bounds the frame | Levers (ms of frame) | Modules that pull them |
+|---|---|---|---|
+| **CPU-bound** (fast GPU: RTX 5070 class) | the CPU chain: order thread, replay, readback waits, dry pass | readback waits up to +17% (0.9-4.2 ms summed); per-draw CPU 14.5 ms summed; dry pass 2.2; the replay's own segment 3.8 on the critical path; visibility ~4.4 | step 1 (readbacks), then 2 (draw loop, dry pass), then 3 |
+| **GPU-bound** (RTX 3050 class at 1440p) | GPU work: scene geometry ~11 ms, compute ~3.7, **our emulation ~3 ms** | emulation ~3 ms (`rbrefresh` 1.0, `wb` 0.9, `msync` 0.25, `meshconv` 0.12, barriers 0.2, `xfer` 0.2); the 11 heavy scene passes ~1.5 ms and 5 passes of 0.3-1.1 ms; ~60 tiny dispatches a frame at 4-7 us; the translated global-memory helper in the mesh and compute programs (0.4-1.1 ms a program, P4) | step 2 for the scene passes and for the pools' write-back and refresh; step 1 for `rbrefresh` + `wb` (1.95 ms) and the meter's 0.20 ms sum program |
+
+On the 3050 the readback wait is not the lever (+3%), but the readback protocol's GPU work is (1.95 ms, 10% of its GPU frame). Step 1 still pays
+there, through R1 and the other readback pages' refresh and write-back, not through shorter waits. At 50% render, where the GPU has slack,
+the waits matter again.
+
+| Order | Module | CPU-bound machines (5070) | GPU-bound machines (3050) |
 |---:|---|---|---|
-| 1 | **Readbacks**: R1 exposure (same side on the GPU), then R2/R3 (`0x40` ring, `0x2000` pair) one frame late, R6 cut grass with its particle job | removes the late-fix wait: 0.9-4.2 ms summed on the 5070, **~16 ms summed on the 3050** (the CPU waits 13.8 ms of GPU tail); on the frame's chain the measured bound is +17% (`NO_READBACK_WAIT`, castle-move, 5070). Also drops `rbrefresh` 0.18 and part of `wb` 0.47 ms of GPU | It is the enabler: while a read waits for the previous frame's GPU work the CPU phase cannot overlap it, and on the 3050 gpu_wait is 14.2 of 22.7 ms. Also the only step that deletes a bug family (#93, white flashes, #50) |
-| 2 | **Draw loop + dry pass as records** (descriptors, texture slots, uniform binds, dry pass; then Vulkan draw lists) | order thread 9 ms of the 24.3 ms 3050 critical path (37%); 14.5 ms summed per-draw CPU and 2.2-3.5 ms dry pass; GPU emulation ~1.3-1.8 ms (16-21%) | The largest CPU block by far, and where the 3050's critical path sits. Ordered after 1 because the records' write-back protocol touches the same pools |
-| 3 | **Visibility job** (~4.4 ms CPU) and its culling readback R4 | ~4.4 ms of CPU (game threads), 0.02 ms of wait | The largest remaining translated CPU block; the loop that calls it goes native with it |
-| 4 | Thin NVN layer for what stays | residual: the remaining small buffers (17.9 recorded whole, 1.5 ms), queue submits (0.57 ms), the present path | After 1-3 it is a small share |
+| 1 | **Readbacks**: R1 exposure first (same side on the GPU), then R2/R3 one frame late, R6 with the particle job | up to +17% (the waits), plus the bug family #93, white flashes, #50 | -1.95 ms GPU (`rbrefresh` + `wb`, if every GPU-written page the CPU reads goes), -0.2 ms (the meter's sum program), +3% from the waits |
+| 2 | **Draw loop and dry pass as records, then Vulkan draw lists for the scene passes** | 14.5 ms summed per-draw CPU and 2.2 ms dry pass; on the 3050 CPU the order thread is 9 ms of the critical path | the GPU's scene geometry (11 ms of passes, ~4-5 ms of it the heavy mesh passes): removes `msync` 0.25, `meshconv` 0.12, barriers 0.2 and the helper cost of the mesh programs (0.4-1.1 ms each, P4): about 1-2 ms, plus whatever owning the draw lists saves per pass (not measurable until a module exists) |
+| 3 | **Visibility job** (+ R4) | ~4.4 ms CPU | little GPU effect |
+| 4 | Thin NVN layer | residual CPU | residual |
+| side | Pixel and compute work no module owns: `1a7482c0`, `d8180bd8`, `3427a1db`, `d8e59341`, `9dc98871`, `ee7764a6`, `27ee9883` (together ~4 ms on the 3050) | | resolution scale and shader-level fixes (hoisting the global-memory helper), outside the refactor's modules |
 
-Ordering by total ms alone puts step 2 first (about 30 ms of CPU summed on the 3050, 14.5 + 3.5 + 7.5 + overhead) and step 3 second (4.4),
-step 1 third on the 5070 (0.9-4.2) but first on the 3050 (~16 summed, and the enabler). The recommendation keeps the plan's order because
-step 1 is cheap per module and unblocks overlap; step 2's gain has to be re-measured on the 3050's own per-pass profile (recipe above)
-before the first draw-list module is built.
+By ms: on the 3050, step 1's protocol cost (1.95 ms of GPU) and step 2's scene passes (11 ms, part of it ours to remove) lead; on the 5070,
+step 2's CPU (14.5 + 2.2 ms and the order thread) and step 1's waits (up to +17%) lead. Step 1 stays first for both: it is the cheapest module,
+the only one that pays on both machine types (waits on the 5070, GPU protocol work on the 3050), and it deletes the bug family. Step 2's gain
+on the 3050 has to come from a prototype of one scene pass: the profile cannot separate a pass's own cost (the game's shaders, which stay)
+from what our translation adds around it (the emulation rows, ~3 ms, about 15% of the GPU frame, which bounds the second).
 
 ## Not verified
 
-- The 3050's per-pass GPU times (not collected, recipe above); the emulation share on the 3050 is the 5070's, applied.
+- The 3050 emulation share is from its own `pt2` block (serialized). Pass keys of the unserialized profile are matched to serialized spans only where signature and ms agree.
 - The 5070 profile covers 33 s of Market with the 24-passes-per-batch cap; passes below ~0.04 ms a frame are not in it.
 - Pass keys of the JSON profile (target format, size, first program) are not program keys; the table maps them to programs only where
   `shader-efficiency.md` and the `PASS_TIMING=2` list agree (marked). The other passes are named by kind and number.
