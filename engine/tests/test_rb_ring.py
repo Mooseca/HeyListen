@@ -22,7 +22,8 @@ static int fails;
 #define CHECK(c) do { if (!(c)) { std::printf("FAIL line %d: %s\n", __LINE__, #c); fails++; } } while (0)
 int main() {
     using namespace rb_ring;
-    CHECK(parse(nullptr, nullptr, nullptr).lag == 0 && !parse(nullptr, nullptr, nullptr).check && parse(nullptr, nullptr, nullptr).wait_ms == 200.0);
+    CHECK(parse(nullptr, nullptr, nullptr).lag == 2 && !parse(nullptr, nullptr, nullptr).check && parse(nullptr, nullptr, nullptr).wait_ms == 200.0);
+    CHECK(parse("0", nullptr, nullptr).lag == 0);   // (0 turns the ring off: the old waiting path)
     CHECK(parse("2", "1", "5").lag == 2 && parse("2", "1", "5").check && parse("2", "1", "5").wait_ms == 5.0);
     CHECK(parse("99", "0", nullptr).lag == kMaxLag && !parse("99", "0", nullptr).check && parse("-3", nullptr, nullptr).lag == 0);
     CHECK(class_of(0x40) == 2 && class_of(0x2000) == 3 && class_of(0x1040) == 1 && class_of(0xc0) == 1 && class_of(0x80) == 0 && class_of(0) == 0);

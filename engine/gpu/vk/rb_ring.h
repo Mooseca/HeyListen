@@ -18,10 +18,11 @@ constexpr unsigned kMaxLag = 6;
 constexpr uint64_t kArena = 4ull << 20;  // bytes of the ring's host memory
 constexpr uint64_t kMaxPending = 1ull << 20;   // bytes staged by one submission at most
 
-/// HL_RB_LAG=<L> (0 or unset: off; 1..kMaxLag; default when set without a number: 2), HL_RB_LAG_CHECK=1 (the old path runs, the ring is compared
-/// with what it read; no change in what the game sees), HL_RB_LAG_WAIT_MS (a read whose entry is not finished waits this long; 200)
+/// HL_RB_LAG=<L> (unset: 2, the default since the 3050 and 5070 A/Bs of 2026-11-21; 0: off, the old waiting path; 1..kMaxLag),
+/// HL_RB_LAG_CHECK=1 (the old path runs, the ring is compared with what it read; no change in what the game sees), HL_RB_LAG_WAIT_MS
+/// (a read whose entry is not finished waits this long; 200)
 struct Config {
-    unsigned lag = 0;
+    unsigned lag = 2;
     bool check = false;
     double wait_ms = 200.0;
 };

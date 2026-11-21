@@ -7969,13 +7969,13 @@ HL_GFX_TIME=1 (a measurement, off by default: one predictable branch a gate call
 
 #### `HL_GFX_VAR` - developer
 
-The key-0xa0 draw function (guest 0x8008d640) ---- The recording job's item body calls it through the table at 0x84c29878 (no lifted code names it, so it is answered by pointer): the job's own draw loop specialized for one key, 40% of the job's NVN calls (gfx-record-job.md section 13). HL_GFX_VAR=1 answers the entries of its plain path natively and runs every other entry through the translation (the function keeps nothing between entries but the block, so the translated body is called on a sublist of one entry); HL_GFX_VAR=2 only classifies the entries (the line "key loop" says how many take each way) and runs them all translated; 0 (the default) leaves the function to the translation.
+The key-0xa0 draw function (guest 0x8008d640) ---- The recording job's item body calls it through the table at 0x84c29878 (no lifted code names it, so it is answered by pointer): the job's own draw loop specialized for one key, 40% of the job's NVN calls (gfx-record-job.md section 13). HL_GFX_VAR=1 answers the entries of its plain path natively and runs every other entry through the translation (the function keeps nothing between entries but the block, so the translated body is called on a sublist of one entry); HL_GFX_VAR=2 only classifies the entries (the line "key loop" says how many take each way) and runs them all translated; 0 leaves the function to the translation. Unset means 1 (pictures and speed checked on the 5070 and the 3050, 2026-11-21: uniform-writer.md).
 
 **Values:** text (`1`, `2` named). **Default:** unset.
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hl_gfx.c:786`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hl_gfx.c:787`.
 
 #### `HL_GFX_VAR_CHECK` - diagnostic
 
