@@ -59,7 +59,7 @@ CPU readers (`HOS_RB_LR_LOG=1`, guest return addresses): R2 `0x80354174` inside 
 
 - **R2** (`f_80354060`): over the list of buffer objects of the module (count at +0xaa8 of the module object), for each one whose flags
   have bit 14: if its memory pool is CPU-cached it invalidates the slot `[ring base + (frame & mask) * stride]`, rounded out to 64 bytes;
-  then reads the 32-bit float at the slot's first word, divides it by a per-object total (twelve times a count kept on the object), clamps to
+  then reads the 32-bit float at the slot's first word, divides it by a per-object total (a multiple of a count kept on the object), clamps to
   0..1, stores it on the object (+0x7ec), and **stores zero into the slot's word**. A read-and-reset like the meter's, but on a plain store:
   the GPU programs do not add (no atomics), they write the count; the zero tells the next read "nothing was written". The consumers of the
   fraction were not followed (fades and glows of the objects are the guess).
@@ -125,10 +125,37 @@ handing the CPU an older finished frame; one mechanism should serve the meter, R
 | `HL_RB_R2_CHECK`, `HL_RB_R3_CHECK` | 0 | 1 measures what the parts would change (no change in what the game sees) |
 | `RX_VK_RB_WHO` | off | logging: writers of what the CPU reads, content samples |
 
-## 6. Measurements
+## 6. Measurements (main PC, RTX 5070, `market-spin` from `market-mid`, speed lease, slot b with `vsync=0`, uncapped, `dlss=0 upscaling=0 resolution=1 hdr=0`; build `readb2-c`)
 
-(to be filled)
+Pictures (`RX_VK_SHOTS`, 28-30 shots a run, off and on in market-mid, kakariko-village and hyrule-field saves; the scripted run lands at
+the same night meadow in all three, so it is one picture three times): no difference by eye (moon, clouds, grass; not black, not white, no
+flashes), the frames are not byte-equal because the game's timing differs run to run. No crash, no stall. Not a strong picture check:
+the save-specific scenes were not reached by the script (the scene's run harness loads the last written save).
+
+GPU cost of the refresh (`RX_VK_PASS_TIMING=1`, serialized spans, ms a frame, 2 runs each): `rbrefresh` **0.173 / 0.179 off, 0.096 / 0.066
+with `HL_RB_R2=2 HL_RB_R3=2`**; its copied bytes 5.7 / 6.0 MB off, 1.7 / 1.1 MB on (-70 to -80%); the log's scatter line 0.41 to 0.25 MB a
+submit. `wb` is unchanged (0.44 ms, 54 MB): the write-backs of R2/R3 are the data the CPU reads, and the bulk of `wb` is R5. On the PC
+3050 the 5070's 5.7-times factor for the refresh predicts about 1.0 to 0.3-0.5 ms a frame (not measured: no game runs on it from here).
+
+Speed (fps of the run, 3 runs each, interleaved, uniform options; a sanity figure, the first 15 s load and the camera turn are inside):
+| arm | fps | GPU ms a frame (log) | readbacks that waited (of 3000) and ms each |
+|---|---|---:|---|
+| off | 76.2, 82.9, 77.5 (mean 78.9) | 3.53-3.63 | 347 / 309 / 371, 0.24-0.29 |
+| `=2` refresh parts | 73.3, 83.2, 83.6 (mean 80.0) | 3.55-3.67 | 404 / 319 / 364, 0.23-0.33 |
+| `=1` refresh + late | 83.6, 83.7, 84.2 (mean 83.8, +6%) | 3.62-3.67 | 283 / 299 / 297, 0.11-0.13 |
+
+Said plainly: the refresh parts alone are inside the noise on this GPU-idle card (one slow first run); the late reads give +6% and halve
+the wait per waiting call, all three runs above all three baselines but one. The late arm's picture is the unproven part (4.3). The gain
+the refresh cut is for is on GPU-bound cards, to be measured on the PC 3050 with `buildeadb2` (`HL_RB_R2=2 HL_RB_R3=2` against off;
+`=1` for the late reads).
 
 ## 7. Hand-over
 
-(to be filled)
+- Branch `refactor/readb2` (3 commits over `refactor/step0`): `vk_memory.cpp` (rbwho diagnostics, class helpers, `rb_exact`, refresh
+  CHECK, merge of overlapping ranges), `vk_replay.cpp` (class reads in `invalidate`, late check), `vk_draw.cpp` (one line: the program
+  key for rbwho), `vk_internal.h`. EXPO1 touches `vk_draw.cpp`/`vk_replay.cpp` in other hunks only.
+- Builds: `E:\OOT\HeyListenuild\s5ineadb2-c` (main PC), `C:\OOTuildseadb2` (PC 3050, exe + dll).
+- Not done: the deterministic late form (4.3), which should be one mechanism with EXPO1's lag-2 ring; R2 reads whose consumer
+  (the objects' fractions) and the second 0x40 site `0x807069dc` were not traced; R3's consumer only read; the PC 3050 was not run.
+- Next: stack on `refactor/expo1` (`HL_EXPO_GPU`), run `HL_RB_R2=1 HL_RB_R3=1` with it: with R1 off the wait, the R2/R3 reads are the rest.
+- Scripts in `E:\OOT\scratch-readb2` (run1.sh, meas.sh, cont.py); slot b's options restored.
