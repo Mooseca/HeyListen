@@ -4806,6 +4806,31 @@ bool wait_value_bounded(uint64_t v) {
 void invalidate(uint64_t gpu, uint64_t size) {
     static const bool rb_prof = getenv("RX_VK_RB_PROF") != nullptr || getenv("RX_VK_TL") != nullptr || getenv("RX_VK_TL_S") != nullptr;
     RbScope rbs(rb_prof, gpu, size);
+    struct RbWhoPost { uint64_t g, n; ~RbWhoPost() { if (n && rbwho_on()) rbwho_content(g, n); } } rbwho_post{gpu, size};
+    // (READB2, HL_RB_R2 / HL_RB_R3, readbacks-r2-r3.md) the class of this read, whether it is read late (no wait: what guest memory holds),
+    // and for the CHECK switch the value it holds at entry, compared with the value after the waits when the read is done
+    const int rb_cls = size ? rbclass_of(size) : 0;
+    const bool rb_late = rb_cls && !rbclass_check(rb_cls) && (rbclass_mode(rb_cls) & 2);
+    struct RbClassPost {
+        int cls;
+        uint64_t gpu, size;
+        std::vector<uint32_t> early;
+        RbClassPost(int c, uint64_t g, uint64_t n) : cls(c), gpu(g), size(n) {
+            if (cls && rbclass_check(cls)) {
+                early.resize((size_t)(size / 4));
+                host->gpu_read(gpu, early.data(), early.size() * 4);
+            }
+        }
+        ~RbClassPost() {
+            if (early.empty()) return;
+            std::vector<uint32_t> late(early.size());
+            host->gpu_read(gpu, late.data(), late.size() * 4);
+            uint64_t diff = 0, z2v = 0, v2z = 0;
+            for (size_t i = 0; i < late.size(); i++)
+                if (late[i] != early[i]) diff++, z2v += early[i] == 0, v2z += late[i] == 0;
+            rbclass_check_late(cls, late.size(), diff, z2v, v2z);
+        }
+    } rb_class_post{rb_cls, gpu, size};
     // (HeyListen, TICK-059) RX_VK_READBACK_TICKET=1: the fast fence poll (wait_inner) no longer waits for the sync_order_mu
     // section in progress (a submit_q / present replay); it notes that section's number t (order_ticket_take) and the CPU's
     // readback here waits until section t has left, before anything else it does. Why that is all the locked path gave it:
@@ -4829,8 +4854,9 @@ void invalidate(uint64_t gpu, uint64_t size) {
     // it, only for what is left of that one section by then, and later readbacks wait for nothing until the next poll's ticket
     // (TICK-058's v3 waited at every readback with write-backs for whichever replay was in progress then: castle-move -6 fps)
     const int ticket = readback_ticket();
-    if (size && ticket == 1) order_ticket_wait();
+    if (size && ticket == 1 && !rb_late) order_ticket_wait();
     rbs.mark(0);
+    if (size && rbwho_on()) rbwho_read(host->gpu_guest(gpu), size);
     if (size) memory_cpu_reads(host->gpu_guest(gpu), size);   // (TICK-015: its pool's write-backs made from now on)
     rbs.skip();
     static const bool log_inv = getenv("RX_VK_LOG_INVALIDATE") != nullptr;
@@ -4878,7 +4904,8 @@ void invalidate(uint64_t gpu, uint64_t size) {
             // (TICK-059) with RX_VK_READBACK_TICKET the ticket's wait above replaces this one (=2: here, a diagnostic)
             rbs.ever = true;
             rbs.skip();
-            if (ticket == 2) order_ticket_wait();
+            if (rb_late) {}   // (READB2: no wait for the replay in progress either)
+            else if (ticket == 2) order_ticket_wait();
             else if (!ticket && fence_poll_fast_on() && !async_on() && sync_waits_on() && !per_queue_fences_off()) {
                 jt_mark(36, 0);   // (36/37: the readback waiting for the replay in progress)
                 { std::lock_guard lk(sync_order_mu); }
@@ -4899,7 +4926,7 @@ void invalidate(uint64_t gpu, uint64_t size) {
             // does not hold back
             const bool unforced = !async_on() && sync_waits_on() && !per_queue_fences_off();
             rbs.skip();
-            if (behind0 && !no_catchup && !unforced) wait_queue_empty(), w = true;   // (work handed over may write it back too)
+            if (behind0 && !no_catchup && !unforced && !rb_late) wait_queue_empty(), w = true;   // (work handed over may write it back too)
             rbs.mark(1);
             const auto w1 = std::chrono::steady_clock::now();
             const uint64_t v = memory_writeback_value(host->gpu_guest(gpu), size, nullptr);
@@ -4907,7 +4934,7 @@ void invalidate(uint64_t gpu, uint64_t size) {
             rbs.skip();
             // (RX_VK_READBACK_LATE: a range a rule names is read as guest memory holds it, with no wait at all)
             const bool pend = v > completed();
-            const bool late = pend && readback_late_wanted(size, v >= f0);
+            const bool late = pend && (rb_late || readback_late_wanted(size, v >= f0));
             if (pend) rbs.pending = true, rbs.newest = v >= f0, rbs.late = late;
             rbs.skip();
             int64_t phase_ns[readback_wait::kPhases] = {};   // (v0.4.4: where this read waited, for the hitch rows' label)

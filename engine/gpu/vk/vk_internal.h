@@ -408,6 +408,29 @@ void memory_note_readback(uint64_t guest, uint64_t size);   // (PR 430) a CPU re
 bool memory_rb_refresh(VkCommandBuffer up);
 void memory_rb_recording_begun();   // (hookshot) at a recording's start, on its thread: the submission it joins (memory_rb_refresh)
 void memory_rb_segments_begin(uint64_t base, uint64_t n);   // (and a parallel replay's segments: their order, base on)
+/// (READB2, RX_VK_RB_WHO=1, logging only) which program wrote the ranges the CPU reads back: the program being bound on this
+/// thread (0: none, a copy or a clear), the GPU-written bindings with it, and the CPU's reads (invalidate) matched against them
+extern thread_local uint64_t rbwho_prog;
+bool rbwho_on();
+void rbwho_write(uint64_t guest, uint64_t size);
+void rbwho_read(uint64_t guest, uint64_t size);
+void rbwho_content(uint64_t gpu, uint64_t size);   // (after the waits: what the CPU is about to see, sampled)
+struct RbWhoProg {
+    uint64_t was;
+    explicit RbWhoProg(uint64_t key) : was(rbwho_prog) { rbwho_prog = key; }
+    ~RbWhoProg() { rbwho_prog = was; }
+};
+/// (READB2, HL_RB_R2 / HL_RB_R3, docs/native-engine/readbacks-r2-r3.md) the two readback classes of the engine refactor's step 1:
+/// R2 the 0x40 ring (a per-object read-and-reset result word, 65 reads a frame), R3 the 0x2000 pair (per-object results, read
+/// next frame). rbclass_of gives the class of a read by its size (0: none); rbclass_mode its switch: bit 0 the class's pages
+/// leave the readback refresh (memory_rb_refresh), bit 1 its reads do not wait for the GPU (the value guest memory holds, one
+/// frame late). HL_RB_Rn_CHECK=1 changes nothing in what the game sees and counts what the two bits would have changed
+int rbclass_of(uint64_t size);
+int rbclass_mode(int cls);
+bool rbclass_check(int cls);
+/// (CHECK, late read) a read of class cls: words of it that differ between the value at its entry and the value after its waits
+void memory_rb_check_poll(uint64_t done);   // (CHECK, refresh: the comparisons of the submissions done)
+void rbclass_check_late(int cls, uint64_t words, uint64_t diff, uint64_t zero_to_value, uint64_t value_to_zero);
 /// (hookshot) a range a program may write in the mirror that is not bound as written (not copied back): memory_rb_refresh
 void memory_note_gpu_write(uint64_t gpu, uint64_t size);
 /// (ported from hookshot 53eb0441, pixl27: its RX_VK_METER_ZERO / RX_VK_METER_HOLD parts only) OoT's exposure meter: two compute
