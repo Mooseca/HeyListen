@@ -5652,6 +5652,7 @@ std::unordered_map<uint32_t, uint64_t> rb_pages;   // (guest page -> mirror_epoc
 // class's refresh part is on, in it as before otherwise
 std::unordered_map<uint32_t, uint64_t> rb_class_pages;
 std::map<uint64_t, std::pair<uint64_t, int>> rb_class_ranges;   // (guest -> size, class; the ranges read in the last 600 epochs)
+std::map<uint64_t, std::pair<uint64_t, uint64_t>> rb_exact;     // (READB2, class R2's refresh part: guest -> size, epoch it was last read at)
 std::atomic<int64_t> st_rb_refresh{0}, st_rb_held{0};
 // (TICK-048) RX_VK_RB_RANGES=1: a readback page's refresh copies only the bytes the CPU's invalidates of it covered (their union,
 // 16-byte aligned outwards), not the whole 4 KB page. The results are small (meters, counters: 0x4000 at most), and the refresh is
@@ -5689,13 +5690,19 @@ void memory_note_readback(uint64_t guest, uint64_t size) {
     const bool chk = cls && rbclass_check(cls);
     const bool cut = cls && !chk && (rbclass_mode(cls) & 1);   // (READB2: the class's pages are not refreshed)
     std::lock_guard lk(pools_mu);
+    if (cut) {   // (READB2: R2 refreshes its own ranges and not their pages, R3 not at all: readbacks-r2-r3.md)
+        if (cls == 2) {
+            rb_exact[guest] = {size, mirror_epoch};
+            if (rb_exact.size() > 4096) rb_exact.clear();
+        }
+        return;
+    }
     if (chk) {
         rb_class_ranges[guest] = {size, cls};
         if (rb_class_ranges.size() > 4096) rb_class_ranges.clear();
     }
     for (uint64_t pg = guest >> kPageShift; pg <= (guest + size - 1) >> kPageShift; pg++) {
-        if (cls && (cut || chk)) rb_class_pages[(uint32_t)pg] = mirror_epoch | (uint64_t)cls << 62;
-        if (cut) continue;
+        if (chk) rb_class_pages[(uint32_t)pg] = mirror_epoch | (uint64_t)cls << 62;
         rb_pages[(uint32_t)pg] = mirror_epoch;
         if (rb_ranges_on()) {   // (TICK-048: the bytes of it read)
             const uint64_t base = pg << kPageShift;
@@ -6015,7 +6022,7 @@ bool memory_rb_refresh(VkCommandBuffer up) {
         ahead_made = ahead_made && k < 64 && (rb_segs.made & below) == below;
         if (k < 64) rb_segs.made |= 1ull << k;
     }
-    if (rb_pages.empty() || !up) return false;
+    if ((rb_pages.empty() && rb_exact.empty()) || !up) return false;
     // (hookshot, TICK-006) once a submission part (mirror_epoch), in its first recording. A parallel replay records a part's
     // segments, and what follows them, into recordings of their own in the same epoch, with no write-back between them: each
     // one's refresh copied the CPU's 0 over the sum the segments before it had added on the GPU. The meter read only the last
@@ -6056,8 +6063,26 @@ bool memory_rb_refresh(VkCommandBuffer up) {
             if (const auto cp = rb_class_pages.find(pgkey); cp != rb_class_pages.end())
                 ck_by_pool[(int)(cp->second >> 62)][&p].push_back({a, a, b - a});
     }
-    for (auto it = rb_class_pages.begin(); it != rb_class_pages.end();)   // (READB2: the pages not read for a while)
+    for (auto it = rb_class_pages.begin(); it != rb_class_pages.end();)   // (READB2 CHECK: the pages not read for a while)
         it = (it->second & ((1ull << 62) - 1)) + 600 < mirror_epoch ? rb_class_pages.erase(it) : std::next(it);
+    for (auto it = rb_exact.begin(); it != rb_exact.end();) {   // (READB2, R2: the ranges themselves, as the page loop above does a page)
+        if (it->second.second + 600 < mirror_epoch) { it = rb_exact.erase(it); continue; }
+        const uint64_t g = it->first, n = it->second.first;
+        ++it;
+        auto pit = imported.upper_bound(g);
+        if (pit == imported.begin()) continue;
+        --pit;
+        Pool& p = pit->second;
+        if (g < p.lo || g >= p.hi || p.mstate != Pool::MIRROR_ON || !p.mirror) continue;
+        if (!p.memory && !p.never_imported && !import_again(p, kAgainRb)) continue;
+        const uint64_t a = g - p.lo, b = std::min(g + n, p.hi) - p.lo;
+        if (b <= a) continue;
+        if (joined && (!ahead_made || written_ahead(p.lo + a, p.lo + b))) {
+            st_rb_held++;
+            continue;
+        }
+        by_pool[&p].push_back({a, a, b - a});
+    }
     if (by_pool.empty()) return false;
     for (auto& [pp, rs] : by_pool)   // (TICK-048: the mirror written there from guest memory)
         for (const VkBufferCopy& r : rs) {
@@ -6076,7 +6101,8 @@ bool memory_rb_refresh(VkCommandBuffer up) {
             std::sort(rs.begin(), rs.end(), [](const VkBufferCopy& x, const VkBufferCopy& y) { return x.srcOffset < y.srcOffset; });
             size_t k = 0;
             for (size_t i = 1; i < rs.size(); i++)
-                if (rs[k].srcOffset + rs[k].size == rs[i].srcOffset) rs[k].size += rs[i].size;
+                if (rs[i].srcOffset <= rs[k].srcOffset + rs[k].size)   // (adjacent, or overlapping: a range inside a page that is copied too, READB2)
+                    rs[k].size = std::max(rs[k].srcOffset + rs[k].size, rs[i].srcOffset + rs[i].size) - rs[k].srcOffset;
                 else rs[++k] = rs[i];
             rs.resize(k + 1);
             if (!pp->memory && pp->never_imported) {   // (RX_VK_POOL_MIRROR: guest memory through staging, into this same command buffer)
