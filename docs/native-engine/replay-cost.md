@@ -212,7 +212,7 @@ the dry pass plus the longest segment, whoever records it; more recorders (4, 6,
 all leave that sum alone. The 5070's frame (10.6 ms) does not move with any of them, so the 5070 cannot judge this lever: the 3050 can, with the
 feed log (below). The rounds with a 1% low under 10 fps (B-3, C-3, D-2, A-1, S4T-1) are machine hitches, not the knob: the same arms have clean rounds.
 
-## For the PC 3050 (its own session; files in `C:\OOTuilds\order3`: HeyListen.exe, hookshot_vk.dll, HeyListen.map = build order3b)
+## For the PC 3050 (its own session; files in `C:\OOT\builds\order3`: HeyListen.exe, hookshot_vk.dll, HeyListen.map = build order3b)
 Same options for every run (dlss 0, upscaling 0, resolution fixed at 1440p 100%, hdr 0, vsync 0, no cap), `market-spin` from `market-mid`, 3 interleaved
 rounds, `HL_RB_LAG=2` and `RX_VK_FEED_LOG=1` on all, no `RX_VK_PASS_TIMING`, no `RX_VK_TL_S`:
 A plain; B `RX_VK_SEG_TAIL=50`; C `RX_VK_SEG_TAIL=30`; D `RX_VK_POOL_SPIN=200`; E `RX_VK_COMPLETION_THREAD=1`; F `RX_VK_EARLY_GPU=2`; G `RX_VK_PRESYNC_EARLY=1`.
