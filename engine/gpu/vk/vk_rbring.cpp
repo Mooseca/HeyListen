@@ -338,6 +338,7 @@ void rbring_check(uint64_t gpu, uint64_t size) {
     const uint64_t n = rb_ring::copy_bytes(cls, size);
     uint8_t waited[0x2000];
     host->gpu_read(gpu, waited, n);
+    hash_add(c, cls, rb_ring::hash_read(cls, guest, waited, n));   // (HL_RB_LAG_LOG=1: what the old path's waits gave the game, as the control of the ring's hashes)
     if (have) {
         st.chk_new++;
         if (e.value > vk_timeline_completed() && !rbring_wait_value(e.value, config().wait_ms)) {
