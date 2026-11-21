@@ -4812,6 +4812,23 @@ void invalidate(uint64_t gpu, uint64_t size) {
     // (STEP1, HL_RB_LAG) the range is learned as one to stage; one already staged is answered by the ring below and waits for nothing
     if (size) rbring_note_read(host->gpu_guest(gpu), size);
     const bool ring_serve = size && rbring_serves(host->gpu_guest(gpu), size);
+    struct RbQuietPost {   // (HL_RB_LAG_CHECK=1: a range no program writes, read before and after the old path's waits)
+        uint64_t gpu = 0, size = 0;
+        std::vector<uint8_t> early;
+        RbQuietPost(uint64_t g, uint64_t n) {
+            if (n && rbring_check_on() && rbring_quiet(host->gpu_guest(g), n)) {
+                gpu = g, size = n;
+                early.resize((size_t)n);
+                host->gpu_read(g, early.data(), n);
+            }
+        }
+        ~RbQuietPost() {
+            if (early.empty()) return;
+            std::vector<uint8_t> late(early.size());
+            host->gpu_read(gpu, late.data(), late.size());
+            rbring_quiet_result(size, late != early);
+        }
+    } rb_quiet_post{gpu, size};
     const int rb_cls = size ? rbclass_of(size) : 0;
     const bool rb_late = rb_cls && !rbclass_check(rb_cls) && (rbclass_mode(rb_cls) & 2);
     struct RbClassPost {

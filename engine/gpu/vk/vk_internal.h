@@ -463,9 +463,12 @@ void expo_check(uint64_t gpu);
 bool rbring_on();
 bool rbring_check_on();
 void rbring_note_read(uint64_t guest, uint64_t size);
+void rbring_note_written(uint64_t guest, uint64_t size);
 bool rbring_stage_bind(uint64_t guest, uint64_t size, VkBuffer buffer, VkDeviceSize offset);
 void rbring_flush(VkCommandBuffer cmd, uint64_t value);
 bool rbring_serves(uint64_t guest, uint64_t size);
+bool rbring_quiet(uint64_t guest, uint64_t size);
+void rbring_quiet_result(uint64_t size, bool changed);
 void rbring_apply(uint64_t gpu, uint64_t size);
 void rbring_check(uint64_t gpu, uint64_t size);
 /// (vk_replay.cpp) The GPU's progress on the recordings' timeline, and a wait for it to reach v

@@ -6324,6 +6324,7 @@ thread_local BindMemo bind_memo[256];
 
 BufferRef gpu_buffer_bind(uint64_t gpu, uint64_t size, bool written) {
     if (written) texture_gpu_wrote(gpu, size);
+    if (written) rbring_note_written(gpu >= (1ull << 40) ? host->gpu_guest(gpu) : gpu, size);   // (STEP1, HL_RB_LAG)
     if (written && rbwho_on()) rbwho_write(gpu >= (1ull << 40) ? host->gpu_guest(gpu) : gpu, size);
     if (cap_only_gpu()) cap_excl_note(gpu, size, written ? "a buffer binding (written)" : "a buffer binding", __builtin_return_address(0));
     // (below 1 TB a GPU address is the guest address itself, and a pool holds the whole range or nothing: the host's

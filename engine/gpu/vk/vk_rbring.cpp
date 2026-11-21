@@ -36,6 +36,10 @@ bool frame_log_on() {
 struct Addr {
     int cls = 0;
     bool stageable = false;   // a binding written in the mirror was staged: reads are answered by the ring
+    bool tainted = false;     // a written binding that is not exactly this range overlaps it (its write-back would land in it): the old path
+    uint64_t writes = 0;      // written bindings of exactly this range, and how many of them were staged (the rest went to guest memory directly)
+    uint64_t staged = 0;
+    uint64_t reads = 0;       // the CPU's reads of it so far
     rb_ring::Entry ents[rb_ring::kMaxEntries];
     unsigned n = 0;
     uint64_t applied = 0;   // the newest seq handed to the game
@@ -61,6 +65,14 @@ struct Stats {
     std::atomic<int64_t> age[4] = {};
 } stats[4];
 std::atomic<int64_t> st_staged{0}, st_staged_bytes{0}, st_direct{0};
+std::atomic<uint64_t> learned_lo{~0ull}, learned_hi{0};   // (the span of the learned ranges: a written binding outside it is not looked up)
+constexpr unsigned kQuietReads = 8;   // reads of a range no program writes before it is answered without a wait (the write-backs of before are long done)
+// A range is served by the ring when its writes are exactly its staged ones, nothing else's write-back lands in it, and either a staged entry
+// exists or no program has written it at all (a result slot nothing wrote: nothing to wait for)
+bool served(const Addr& a) {
+    if (a.tainted || a.writes != a.staged) return false;
+    return a.stageable || (a.writes == 0 && a.reads >= kQuietReads);
+}
 
 bool ring_init() {   // (mu held)
     if (ring_map) return true;
@@ -133,8 +145,23 @@ void rbring_note_read(uint64_t guest, uint64_t size) {
     const int cls = rb_ring::class_of(size, size == 0x1040 && memory_is_meter(guest));
     if (!cls) return;
     std::lock_guard lk(mu);
-    if (table.size() > 4096) table.clear();
-    table[{guest, size}].cls = cls;
+    if (table.size() > 4096) table.clear(), learned_lo = ~0ull, learned_hi = 0;
+    Addr& a = table[{guest, size}];
+    a.cls = cls, a.reads++;
+    if (learned_lo > guest) learned_lo = guest;
+    if (learned_hi < guest + size) learned_hi = guest + size;
+}
+
+/// Every binding for writing (a mirror's or guest memory's, gpu_buffer_bind): the learned ranges it overlaps are marked, an exact one counted
+void rbring_note_written(uint64_t guest, uint64_t size) {
+    if (!config().lag || guest >= learned_hi.load(std::memory_order_relaxed) || guest + size <= learned_lo.load(std::memory_order_relaxed)) return;
+    std::lock_guard lk(mu);
+    for (auto it = table.lower_bound({guest > 0x2000 ? guest - 0x2000 : 0, 0}); it != table.end() && it->first.first < guest + size; ++it) {
+        const uint64_t lo = it->first.first, hi = lo + it->first.second;
+        if (hi <= guest) continue;
+        if (lo == guest && hi == guest + size) it->second.writes++;
+        else it->second.tainted = true;
+    }
 }
 
 /// A program's binding for writing in a mirror (pools_mu held): true when the range is staged, so no write-back is made for it
@@ -144,15 +171,15 @@ bool rbring_stage_bind(uint64_t guest, uint64_t size, VkBuffer buffer, VkDeviceS
     const auto it = table.find({guest, size});
     if (it == table.end()) return false;
     if (!ring_init() || pending_bytes + rb_ring::copy_bytes(it->second.cls, size) > rb_ring::kMaxPending) return false;
+    it->second.staged++;
+    it->second.stageable = true;
     for (Req& r : pending)
         if (r.guest == guest && r.size == size) {   // (written twice in a submission: the last binding's state is what the end copies)
             r.buffer = buffer, r.offset = offset;
-            it->second.stageable = true;
             return !config().check;
         }
     pending.push_back({guest, size, buffer, offset});
     pending_bytes += rb_ring::copy_bytes(it->second.cls, size);
-    it->second.stageable = true;
     return !config().check;
 }
 
@@ -196,13 +223,28 @@ void rbring_flush(VkCommandBuffer cmd, uint64_t value) {
     pending.clear(), pending_bytes = 0;
 }
 
+/// HL_RB_LAG_CHECK=1: a read of a range no program writes (answered with no wait in lag mode) before the check's entry: would the waits have changed it?
+bool rbring_quiet(uint64_t guest, uint64_t size) {
+    if (!config().lag || !config().check || (size != 0x40 && size != 0x2000 && size != 0x1040)) return false;
+    std::lock_guard lk(mu);
+    const auto it = table.find({guest, size});
+    return it != table.end() && !it->second.stageable && served(it->second);
+}
+void rbring_quiet_result(uint64_t size, bool changed) {
+    static std::atomic<int64_t> reads{0}, changes{0};
+    if (changed) changes++;
+    if (++reads % 3000 == 0)
+        logf("vk: rbring check quiet ranges (read 0x%llx bytes; no program writes them): 3000 reads, %lld of them changed by the old path's waits",
+             (unsigned long long)size, (long long)changes.exchange(0));
+}
+
 /// True: this read is answered by rbring_apply and waits for nothing (lag mode, not the check, a range whose bindings are staged)
 bool rbring_serves(uint64_t guest, uint64_t size) {
     if (!config().lag || config().check) return false;
     if (size != 0x40 && size != 0x2000 && size != 0x1040) return false;
     std::lock_guard lk(mu);
     const auto it = table.find({guest, size});
-    return it != table.end() && it->second.stageable;
+    return it != table.end() && served(it->second);
 }
 
 /// The read of a served range: the newest unapplied entry `lag` frames old into guest memory
@@ -268,6 +310,7 @@ void rbring_check(uint64_t gpu, uint64_t size) {
         const auto it = table.find({guest, size});
         if (it == table.end() || !it->second.stageable) return;
         Addr& a = it->second;
+        if (a.tainted || a.writes != a.staged) st_direct++;
         cls = a.cls, total = arena_total;
         if (const int nw = rb_ring::newest(a.ents, a.n); nw >= 0) age = (int)std::min<int64_t>(3, std::max<int64_t>(0, c - a.ents[nw].tag));
         const int k = rb_ring::pick(a.ents, a.n, c, config().lag, a.applied);
