@@ -3375,6 +3375,7 @@ void desc_counts_unpack(uint64_t packed, size_t* nbuf, size_t* nimg, size_t* nvi
 struct MeterOut { VkBuffer buffer = VK_NULL_HANDLE; VkDeviceSize offset = 0, size = 0; };
 thread_local MeterOut meter_out;
 void build_descriptors(const NvnState& s, const Program& p) {
+    const RbWhoProg rbwho_scope(p.key);   // (READB2, RX_VK_RB_WHO: the program whose bindings the writes below belong to)
     if (p.key == 0x435a0138b9013040ull || p.key == 0x592079442d7129daull) meter_out = {};
     // (hookshot) the thread's writer asked for once: each out is a call and a thread-local read (__tls_get_addr in the shared
     // library), and a build made dozens of them. The same object for the thread's life, reset in place here
