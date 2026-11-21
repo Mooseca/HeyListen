@@ -124,3 +124,30 @@ Hyrule Field and back, Kokiri Forest to Lost Woods, a door of Kakariko, with `HL
 go up), a range that is learned again after a load starts on the old path and is served after 8 reads (quiet) or its first staged write, so the first
 frames of a new zone read as before.
 
+### 4.7 Speed (main PC, RTX 5070, SPEED lease priority 2, `market-spin` from `market-mid`, slot a with `dlss=0 upscaling=0 resolution=1 hdr=0 vsync=0 frame_rate_limit=5`, x3 interleaved)
+
+SPEED_TABLE
+
+## 5. Not done / open
+
+- **Run-to-run identical hash sequences** (4.2) could not be shown: the game's own state differs between runs from the first meter read. Needs a scene with a
+  frame-deterministic game state, or the owner's hand test.
+- **Zone changes inside the game** were not exercised (4.6): by hand. The load from the title is.
+- **Entries in the same frame as the read** (4.3) are not handed out at lag 1; at lag 2 the question does not arise.
+- Ranges the ring cannot serve (a binding that is not exactly the range, or one that went to guest memory directly: counted as `st_direct`, not logged
+  yet) keep the old wait. R4 (0x3980), R5 and the big ranges are the next classes.
+- `tests/test_parallel_rb_refresh.py` does not build its fixture since READB2's refresh-check code entered `vk_memory.cpp` (it cuts the region that now has
+  `rbclass_*`, `texture_frame_no`, `std::deque` in it); it fails on `refactor/readb2` too. The fixture needs those stubs. `nx2/test_nup_*` fail as always here.
+- The old `HL_EXPO_GPU` ring is kept for A/B; with `HL_RB_LAG` set it is not reached for the ranges the unified ring serves. It can go once `HL_RB_LAG`
+  is the default.
+
+## 6. Hand-over
+
+- Branch `refactor/step1` (worktree `E:\OOT\HeyListen-wt\step1`), 9 commits: the merge of `refactor/expo1` and `refactor/readb2` (only the generated switch lists
+  conflicted), `HL_RB_LAG` (`rb_ring.h`, `vk_rbring.cpp`, hooks in `vk_memory.cpp` / `vk_replay.cpp`), the quiet ranges, the 0xc0 class, diagnostics, this note.
+  Nothing pushed or merged.
+- Builds: `E:\OOT\HeyListen\build\s5\bin\step1d` (main PC), `C:\OOT\builds\step1` on the PC 3050 (`HeyListen.exe`, `hookshot_vk.dll`, `HeyListen.map`). One exe, variants
+  by environment: off (nothing set); `HL_RB_LAG=2`; `HL_RB_LAG=2 HL_RB_R2=2 HL_RB_R3=2` (READB2's refresh cut for what the ring does not serve); the check
+  `HL_RB_LAG=1 HL_RB_LAG_CHECK=1` (0 differences expected, lines `rbring check ...` in the log); `RX_VK_RB_PROF=1` for the waits by range.
+- Scripts and logs: `E:\OOT\scratch-step1` (run1.sh, det*.sh, pics2.sh, speed.sh, cmp.py, rbp.py, aggr.py); runs `build/s5/step1-*` in the main checkout.
+- Next: zone changes by hand; R4/R5 into the same ring; then `HL_RB_LAG=2` on by default if the 3050's numbers and the owner's play agree.
