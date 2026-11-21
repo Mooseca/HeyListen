@@ -456,6 +456,18 @@ void expo_record(VkCommandBuffer cmd, VkBuffer src, VkDeviceSize offset, uint64_
 bool expo_serves(uint64_t guest);
 void expo_answer(uint64_t gpu);
 void expo_check(uint64_t gpu);
+/// (STEP1, vk_rbring.cpp, HL_RB_LAG, docs/native-engine/readback-ring.md) one deterministic mechanism for the readback classes R1 (the meter),
+/// R2 (0x40) and R3 (0x2000): the ranges the CPU reads (note_read) are staged at the end of the submission that wrote them (stage_bind, flush)
+/// into an engine-owned ring, and a read is answered (apply) with the newest unapplied entry that is `lag` frames old, never waiting;
+/// HL_RB_LAG_CHECK=1 (check) compares it with what the old path read
+bool rbring_on();
+bool rbring_check_on();
+void rbring_note_read(uint64_t guest, uint64_t size);
+bool rbring_stage_bind(uint64_t guest, uint64_t size, VkBuffer buffer, VkDeviceSize offset);
+void rbring_flush(VkCommandBuffer cmd, uint64_t value);
+bool rbring_serves(uint64_t guest, uint64_t size);
+void rbring_apply(uint64_t gpu, uint64_t size);
+void rbring_check(uint64_t gpu, uint64_t size);
 /// (vk_replay.cpp) The GPU's progress on the recordings' timeline, and a wait for it to reach v
 uint64_t vk_timeline_completed();
 /// (longshot #442) The timeline's value without the write-backs it applies: a plain read, safe under the replay's lock

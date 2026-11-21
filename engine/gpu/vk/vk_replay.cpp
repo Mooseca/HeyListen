@@ -4809,6 +4809,9 @@ void invalidate(uint64_t gpu, uint64_t size) {
     struct RbWhoPost { uint64_t g, n; ~RbWhoPost() { if (n && rbwho_on()) rbwho_content(g, n); } } rbwho_post{gpu, size};
     // (READB2, HL_RB_R2 / HL_RB_R3, readbacks-r2-r3.md) the class of this read, whether it is read late (no wait: what guest memory holds),
     // and for the CHECK switch the value it holds at entry, compared with the value after the waits when the read is done
+    // (STEP1, HL_RB_LAG) the range is learned as one to stage; one already staged is answered by the ring below and waits for nothing
+    if (size) rbring_note_read(host->gpu_guest(gpu), size);
+    const bool ring_serve = size && rbring_serves(host->gpu_guest(gpu), size);
     const int rb_cls = size ? rbclass_of(size) : 0;
     const bool rb_late = rb_cls && !rbclass_check(rb_cls) && (rbclass_mode(rb_cls) & 2);
     struct RbClassPost {
@@ -4854,7 +4857,7 @@ void invalidate(uint64_t gpu, uint64_t size) {
     // it, only for what is left of that one section by then, and later readbacks wait for nothing until the next poll's ticket
     // (TICK-058's v3 waited at every readback with write-backs for whichever replay was in progress then: castle-move -6 fps)
     const int ticket = readback_ticket();
-    if (size && ticket == 1 && !rb_late) order_ticket_wait();
+    if (size && ticket == 1 && !rb_late && !ring_serve) order_ticket_wait();
     rbs.mark(0);
     if (size && rbwho_on()) rbwho_read(host->gpu_guest(gpu), size);
     if (size) memory_cpu_reads(host->gpu_guest(gpu), size);   // (TICK-015: its pool's write-backs made from now on)
@@ -4891,7 +4894,7 @@ void invalidate(uint64_t gpu, uint64_t size) {
     // RX_VK_NO_READBACK_WAIT=1: as before
     // (EXPO1, HL_EXPO_GPU=1) a meter block the engine's ring is fed from: no wait for any write-back, the sums come from the ring below
     const bool expo_skip = size == 0x1040 && expo_mode() == 1 && expo_serves(host->gpu_guest(gpu));
-    if (size && !expo_skip) {
+    if (size && !expo_skip && !ring_serve) {
         static const bool off = getenv("RX_VK_NO_READBACK_WAIT") != nullptr;
         bool ever = false;
         if (!off && (memory_writeback_value(host->gpu_guest(gpu), size, &ever), ever)) {
@@ -5007,6 +5010,8 @@ void invalidate(uint64_t gpu, uint64_t size) {
             }
         }
     }
+    if (ring_serve) rbring_apply(gpu, size);   // (STEP1, HL_RB_LAG: after everything else the invalidate does, nothing lands over it)
+    else if (size) rbring_check(gpu, size);    // (HL_RB_LAG_CHECK=1: the ring's candidate against what the waits left)
     {   // (ported from hookshot 53eb0441, pixl27, RX_VK_METER_HOLD=0 turns it off) OoT's exposure sums read before a new result
         // has landed are the zeros the game wrote after its last read: it is given the last result again
         if (expo_skip) {
@@ -5305,6 +5310,18 @@ uint32_t crc32(const uint8_t* p, size_t n, uint32_t c = 0xFFFFFFFFu) {
     return c;
 }
 } // namespace
+/// (STEP1, HL_RB_LAG) the timeline reaching v within ms, the held submits sent first
+bool rbring_wait_value(uint64_t v, double ms) {
+    queue_flush_for(FR_VALUE);
+    VkSemaphoreWaitInfo wi{VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO};
+    wi.semaphoreCount = 1;
+    wi.pSemaphores = &timeline;
+    wi.pValues = &v;
+    const VkResult r = vkWaitSemaphores(dev.device, &wi, (uint64_t)(ms * 1e6));
+    (void)completed();
+    return r == VK_SUCCESS;
+}
+
 
 // (vk_internal.h) Called while replaying, including workers joined before the next signal is issued. The current logical value may
 // already have completed before a stopped queue resumes. A new signal instead follows every recording using the resources being

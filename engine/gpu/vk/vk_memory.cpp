@@ -6461,7 +6461,8 @@ BufferRef gpu_buffer_bind(uint64_t gpu, uint64_t size, bool written) {
             if (kb) logf("vk: write-backs only of written bindings up to %llu KB (RX_VK_WB_MAX_KB)", (unsigned long long)kb);
             return kb << 10;
         }();
-        if (!wb_max || size <= wb_max)
+        // (STEP1, HL_RB_LAG) a range the CPU reads back that the readback ring stages: no write-back, the submission's end copies it
+        if ((!wb_max || size <= wb_max) && !rbring_stage_bind(guest, size, p->mirror, off))
             writebacks.push_back({p, off, std::min(off + size, p->hi - p->lo)});
         diff_gpu_wrote(p->lo + off, std::min(off + size, p->hi - p->lo) - off);   // (TICK-048)
         rb_hazard_locked(p->lo + off, p->lo + std::min(off + size, p->hi - p->lo));   // (memory_rb_refresh)
@@ -7920,6 +7921,7 @@ void memory_end_submission(VkCommandBuffer cmd) {
             }
         }
     }
+    rbring_flush(cmd, mem_rec_value);   // (STEP1, HL_RB_LAG: the staged ranges into the readback ring)
     static const bool no_writeback = getenv("RX_VK_NO_WRITEBACK") != nullptr;   // (an experiment: none)
     if (no_writeback) writebacks.clear();
     if (!writebacks.empty()) {
