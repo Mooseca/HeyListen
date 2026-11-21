@@ -87,3 +87,43 @@ recorder that is done takes the next (the pool's queue; the replay thread helps 
   Shots of the four scenes by eye: right.
 - Suites on the final HEAD: Windows 291 passed, 1 failed (nx2/test_nup_paths, known); Linux 307 passed, 2 failed (nx2/test_nup_read_name:
   no `zstandard` in WSL; the byte-compile check: git refuses the worktree path there).
+
+## ORDER2 (the order thread off the critical path on 6-core CPUs)
+
+Evidence: Market on an i5-10400F. The order thread runs 9.0 ms of a 24.3 ms frame; the presenter waits on it ~10.5 ms. ORDER1's counters
+(PC 3050, RX_VK_PROF_FINE): locked passes 12.6 ms wall / 9.5 ms cpu, submissions 11.8 ms, dry pass 3.5, segments' recording and wait 6.6,
+queue submits 14 a frame (0.57 ms), slot waits 30 a frame (0.13 ms); SEG_MERGE never engaged, FENCE_POLL changed nothing. So the driver
+calls are the small part there; the dry pass (serial) and the wait for segments are the big ones. Step order re-aimed accordingly:
+ A. segments: the in-order submit by whichever thread finishes (EARLY_GPU, exists), and the replay thread no longer joining the
+    segments before it goes on (join deferred to the next point that needs the recordings: next begin_recording of the same state,
+    present, wait) -- not started.
+ B. dry pass: parallel / early / overlapped with the previous frame's segments -- not started.
+ C. GPU-completion off the order thread (done, below), D. memory sync off the order thread, E. submission queue instead of
+    sync_order_mu on the presenter, F. smaller own segment (more to the idle workers).
+
+Invariants to keep (every step):
+ 1. Submission order: vkQueueSubmit2 calls keep the order the replay made them in (one queue; guarded by dev.present_mu); fences and the
+    recordings timeline are signalled in that order. Anything handed to another thread is enqueued under dev.present_mu.
+ 2. The game's fence/semaphore semantics: a value's timeline signal, value_rec / whole_val / q_last marks are made at the submit that
+    finishes the value, never earlier; a game fence is never answered before its recording is done.
+ 3. Readback ordering: invalidate (CPU readback) after a fence poll sees every write-back of the recording (RX_VK_READBACK_TICKET,
+    memory_staged_apply before `completed()` is told): completion tracking must not make `submitted`/slot reuse visible earlier.
+ 4. Present ordering: a present follows the work it presents (sync_order_mu, dev.present_mu) and the swapchain's acquire/done fences.
+ 5. A slot is reused only after its submit retired AND its fence is reset; its command pools are reset only then.
+ 6. Event waits (RX_VK_WATCH_EVENT, perf/wait-044): sync_watch's kick is still sent by update_blocked / event_signal_queued; nothing here
+    changes the watch. Integrate by merging perf/wait-044 after measuring; the two touch different lines.
+ 7. Blocking waits that are semantics, not bookkeeping (occ_sync / occ_go_on, replay_flush_upload) stay blocking.
+
+### Step C (done, 6f2966edc): `RX_VK_COMPLETION_THREAD=1` (off)
+engine/gpu/vk/completion_tracker.h: a thread waits for each submit's fence in queue order and resets it; the four submit sites (submit_recording,
+presync early, submit_job, the merged segment submit) hand over under dev.present_mu; recording_wait reads an atomic (blocks on a
+condition variable only when the GPU is still on the slot). Groups need no FenceGroup. Batch recordings keep the old path.
+`RX_VK_COMPLETION_CHECK=1`: checks, at each retire, the recordings timeline reached the submit's value and the fence is reset (logs
+and counts violations; counters logged every 7200 slot waits: found done / waited / ms). Tests: engine/tests/test_completion_tracker.py
+(order, groups, stale generations, 48-slot ring, waiters, stop).
+Expected gain: small on the PC 3050 (slot waits 0.13 ms + polls); it is the cheap, safe base.
+
+### Hand-over
+- Branch perf/order2 (from perf/order-044 3b8a320e7), worktree E:\OOT\HeyListen-wt\order2, tip 6f2966edc + this note. Not built yet (mkg.ps1 pending a lease), unit test passes (25 runs).
+- To validate when machines are free: build; run Market and castle-move with RX_VK_COMPLETION_THREAD=1 RX_VK_COMPLETION_CHECK=1: 0 violations, pictures as default, no stalls; then A/B with RX_VK_PROF_FINE.
+- Next: step A (defer the segment join), measured against ORDER1's counters.
