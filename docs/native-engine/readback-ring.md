@@ -88,3 +88,39 @@ first 9,000 rows that look equal are the title screen, where only R3's all-zero 
 frame-deterministic; none of the harness scenes is. The property that is checkable and was checked is the one above (no timing-dependent branch taken).
 For the owner's hand test: with `HL_RB_LAG=2 HL_RB_LAG_LOG=1`, a still scene must give the same `hash` in consecutive rows once the scene is static, run after run.
 
+### 4.3 CHECK at lag 1 in the other scenes (`market-spin` from each save, 110 s)
+
+| scene | R1 new / differ | R2 new / differ | R3 new / differ | quiet ranges read / changed by the old waits |
+|---|---:|---:|---:|---:|
+| Kakariko | 18,058 / 8 | 9,765 / 0 | 4,500 / 3 | 183,000 / 0 |
+| Lost Woods | 15,747 / 2 | 5,999 / 1 | 4,500 / 0 | 66,000 / 0 |
+| inside the Deku Tree | 12,000 / 12 | 6,000 / 0 | 6,000 / 9 | 57,000 / 0 |
+
+The 35 differences in 78,000 reads (0.04%) are all of one kind: the waited value is the one of a dispatch recorded **in the same frame** as the read
+(tag = c, before the frame's present), which lag 1 (`tag + 1 <= c`) does not take, so the ring hands the previous one (rows such as "waited 3a5412fc, ring
+39d41300, entry tag 11515" at frame 11516, then the waited value one frame ahead again). That is a timing the old path's wait made visible (the
+replay had already recorded the next dispatch); at lag 2 it cannot happen. Nothing was "not done" or overwritten in any run.
+
+### 4.4 What the game is handed at lag 2 (serve mode)
+
+The age in frames of the entries applied (`rbring R1: ... age 1/2/3/4+`): R1 **0 / 2,400 / 0 / 0** in every window of 3,000 reads (100% exactly 2
+frames old), 0 waited for the GPU, 0 not done in time, in every serve run (`market-spin`, 5 runs; the zone run below). Waits left in the Market, from
+`RX_VK_RB_PROF` (ms a frame, sum over the ranges): old path 9.6 (one window of 4.7 from a load), ring 3.7 with 1.9 of it a load window; what remains
+is the 0x3980 culling results (0.2) and a few 0x40 slots written by other bindings. The meter's rings: 1.5-1.9 ms a frame of wait (the unused ring A,
+read at 0x113c88b000, and the 0xc0 block) gone.
+
+### 4.5 Pictures (`RX_VK_SHOTS`, `market-spin` from each save, off and `HL_RB_LAG=2`, same options; 53-59 shots a run)
+
+Market (day), Kakariko (day), Lost Woods (dark, the meter adapts from black), inside the Deku Tree (dark interior): by eye no flash, no tint, no
+black or white frame beyond the load screens (mean luma of every shot, off / on: Market 14.8-131 / 14.1-127, Kakariko 17.7-136 / 14.0-133, Lost Woods
+14.0-108 / 14.0-108, Deku Tree 13.4-107 / 14.1-107; 0 shots above 230). The camera spin makes the shots differ from run to run, so they are not
+compared pixel by pixel. Shots: `E:\OOT\scratch-step1\shots2` (not in the repository).
+
+### 4.6 Zone changes
+
+The title-to-save load (the "Charger" dialog and the zone load that follows) happens in every run above with the ring on, and worked. A scripted walk from
+`market-mid` (12 legs of 3 s forward) stayed inside the Market: no zone change was obtained from a script here. **To be tried by hand**: Market gate to
+Hyrule Field and back, Kokiri Forest to Lost Woods, a door of Kakariko, with `HL_RB_LAG=2`: the ring keeps its entries across loads (frame counts only
+go up), a range that is learned again after a load starts on the old path and is served after 8 reads (quiet) or its first staged write, so the first
+frames of a new zone read as before.
+
