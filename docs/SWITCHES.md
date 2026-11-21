@@ -6145,9 +6145,9 @@ The log's `vk: deferral:` lines say, per present that held any back, how many an
 
 #### `RX_VK_UPLOAD_BUDGET_MS` - developer
 
-The upload budget: once a thread has spent this long uploading textures in a present (40 by default; `0`: never), a new ASTC texture a draw samples there is held back for a later present and sampled as the null descriptor (black) meanwhile. The time is the looking-up thread's own, so the parallel replay's segment workers each have it; `RX_VK_UPLOAD_BUDGET_SUM=1` counts every thread's summed, as before (at the Market's arrival the sum reached 40 ms while the busiest thread had spent 11-31 ms, and 300-450 textures were held back). The log's `vk: deferral:` lines say, per present that held any back, how many and what took the time (new ASTC, other new, uploaded again; the busiest thread's share), and `RX_VK_UPLOAD_BUDGET_FRAME_MS=<ms>` (off by default) also holds them back once every thread's uploads this present, summed, reach that, whichever thread looks up. `vk: deferral done:` how long ...
+The upload budget: once a thread has spent this long uploading textures in a present (40 by default; `0`: never), a new ASTC texture a draw samples there is held back for a later present, and the draw that samples it is left out of that present (`RX_VK_DEFER_SKIP=0`: drawn sampling the placeholder, as before). The time is the looking-up thread's own, so the parallel replay's segment workers each have it; `RX_VK_UPLOAD_BUDGET_SUM=1` counts every thread's summed, as before (at the Market's arrival the sum reached 40 ms while the busiest thread had spent 11-31 ms, and 300-450 textures were held back). The log's `vk: deferral:` lines say, per present that held any back, how many and what took the time (new ASTC, other new, uploaded again; the busiest thread's share), and `RX_VK_UPLOAD_BUDGET_FRAME_MS=<ms>` (off by default) also holds them back once every thread's uploads this present, ...
 
-**Values:** a whole number (`1` in the description). **Default:** the engine's own value.
+**Values:** a whole number (`0`, `1` in the description). **Default:** the engine's own value.
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
