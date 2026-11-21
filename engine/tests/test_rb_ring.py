@@ -1,6 +1,6 @@
 """HL_RB_LAG (gpu/vk/rb_ring.h): the rules that choose which staged result the game's CPU is handed.
 
-A small program checks, with no GPU: the switch parse; the class of a read by its size (the meter's 0x1040 only when the address is one); the
+A small program checks, with no GPU: the switch parse; the class of a read by its size; the
 bytes staged a class; which entry a read at frame c is answered with at each lag (the newest with tag + lag <= c that was not applied
 yet, none otherwise, an applied one never twice); the table's replacement of its oldest entry; the ring's allocation (wrap, total, an entry
 overwritten once the ring has gone round); the per-read hash. And, by the text, that invalidate() skips the old waits only for a served
@@ -25,7 +25,7 @@ int main() {
     CHECK(parse(nullptr, nullptr, nullptr).lag == 0 && !parse(nullptr, nullptr, nullptr).check && parse(nullptr, nullptr, nullptr).wait_ms == 200.0);
     CHECK(parse("2", "1", "5").lag == 2 && parse("2", "1", "5").check && parse("2", "1", "5").wait_ms == 5.0);
     CHECK(parse("99", "0", nullptr).lag == kMaxLag && !parse("99", "0", nullptr).check && parse("-3", nullptr, nullptr).lag == 0);
-    CHECK(class_of(0x40, false) == 2 && class_of(0x2000, false) == 3 && class_of(0x1040, true) == 1 && class_of(0x1040, false) == 0 && class_of(0x80, true) == 0);
+    CHECK(class_of(0x40) == 2 && class_of(0x2000) == 3 && class_of(0x1040) == 1 && class_of(0x80) == 0 && class_of(0) == 0);
     CHECK(copy_bytes(1, 0x1040) == 16 && copy_bytes(2, 0x40) == 0x40 && copy_bytes(3, 0x2000) == 0x2000);
     Entry e[kMaxEntries];
     unsigned n = 0;

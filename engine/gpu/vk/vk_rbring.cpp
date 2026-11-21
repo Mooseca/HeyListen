@@ -39,6 +39,7 @@ struct Addr {
     bool tainted = false;     // a written binding that is not exactly this range overlaps it (its write-back would land in it): the old path
     uint64_t writes = 0;      // written bindings of exactly this range, and how many of them were staged (the rest went to guest memory directly)
     uint64_t staged = 0;
+    uint64_t first_stage = 0;   // the writes counted when the first one was staged: those before it wrote guest memory and have landed long since
     uint64_t reads = 0;       // the CPU's reads of it so far
     rb_ring::Entry ents[rb_ring::kMaxEntries];
     unsigned n = 0;
@@ -70,7 +71,7 @@ constexpr unsigned kQuietReads = 8;   // reads of a range no program writes befo
 // A range is served by the ring when its writes are exactly its staged ones, nothing else's write-back lands in it, and either a staged entry
 // exists or no program has written it at all (a result slot nothing wrote: nothing to wait for)
 bool served(const Addr& a) {
-    if (a.tainted || a.writes != a.staged) return false;
+    if (a.tainted || a.writes - a.first_stage != a.staged) return false;
     return a.stageable || (a.writes == 0 && a.reads >= kQuietReads);
 }
 
@@ -116,17 +117,19 @@ bool ring_init() {   // (mu held)
 
 // ---- the served-values hash, one row a frame (HL_RB_LAG_LOG=1) ----
 std::mutex hmu;
-std::map<int64_t, std::pair<uint64_t, uint32_t>> frame_hash;   // frame -> sum of the reads' hashes, reads
+struct FrameHash { uint64_t sum = 0, by[4] = {}; uint32_t reads = 0; };
+std::map<int64_t, FrameHash> frame_hash;   // frame -> sum of the reads' hashes (and by class), reads
 uint64_t run_hash = 0;
-void hash_add(int64_t frame, uint64_t h) {
+void hash_add(int64_t frame, int cls, uint64_t h) {
     if (!frame_log_on()) return;
     std::lock_guard lk(hmu);
     auto& e = frame_hash[frame];
-    e.first += h, e.second++;
+    e.sum += h, e.by[cls] += h, e.reads++;
     for (auto it = frame_hash.begin(); it != frame_hash.end() && it->first < frame - 3;) {
-        run_hash = (run_hash ^ it->second.first) * 1099511628211ull + (uint64_t)it->first;
-        logf("vk: rbring frame %lld hash %016llx reads %u run %016llx", (long long)it->first, (unsigned long long)it->second.first,
-             it->second.second, (unsigned long long)run_hash);
+        run_hash = (run_hash ^ it->second.sum) * 1099511628211ull + (uint64_t)it->first;
+        logf("vk: rbring frame %lld hash %016llx reads %u run %016llx r1 %016llx r2 %016llx r3 %016llx", (long long)it->first,
+             (unsigned long long)it->second.sum, it->second.reads, (unsigned long long)run_hash, (unsigned long long)it->second.by[1],
+             (unsigned long long)it->second.by[2], (unsigned long long)it->second.by[3]);
         it = frame_hash.erase(it);
     }
 }
@@ -142,12 +145,24 @@ bool rbring_check_on() { return config().lag != 0 && config().check; }
 void rbring_note_read(uint64_t guest, uint64_t size) {
     if (!config().lag || !guest) return;
     if (size != 0x40 && size != 0x2000 && size != 0x1040) return;
-    const int cls = rb_ring::class_of(size, size == 0x1040 && memory_is_meter(guest));
+    const int cls = rb_ring::class_of(size);
     if (!cls) return;
     std::lock_guard lk(mu);
     if (table.size() > 4096) table.clear(), learned_lo = ~0ull, learned_hi = 0;
     Addr& a = table[{guest, size}];
     a.cls = cls, a.reads++;
+    {   // (HL_RB_LAG_LOG=2: the learned ranges that are not served, every 6000 reads)
+        static const bool dbg = getenv("HL_RB_LAG_LOG") && atoi(getenv("HL_RB_LAG_LOG")) >= 2;
+        static uint64_t n = 0;
+        if (dbg && ++n % 6000 == 0) {
+            int rows = 0;
+            for (const auto& [k, v] : table)
+                if (v.reads >= kQuietReads && !served(v) && rows++ < 12)
+                    logf("vk: rbring not served: %#llx +%#llx R%d reads %llu stageable %d tainted %d writes %llu staged %llu", (unsigned long long)k.first,
+                         (unsigned long long)k.second, v.cls, (unsigned long long)v.reads, v.stageable, v.tainted, (unsigned long long)v.writes,
+                         (unsigned long long)v.staged);
+        }
+    }
     if (learned_lo > guest) learned_lo = guest;
     if (learned_hi < guest + size) learned_hi = guest + size;
 }
@@ -171,6 +186,7 @@ bool rbring_stage_bind(uint64_t guest, uint64_t size, VkBuffer buffer, VkDeviceS
     const auto it = table.find({guest, size});
     if (it == table.end()) return false;
     if (!ring_init() || pending_bytes + rb_ring::copy_bytes(it->second.cls, size) > rb_ring::kMaxPending) return false;
+    if (!it->second.stageable) it->second.first_stage = it->second.writes ? it->second.writes - 1 : 0;   // (this binding was counted by rbring_note_written just before)
     it->second.staged++;
     it->second.stageable = true;
     for (Req& r : pending)
@@ -265,7 +281,7 @@ void rbring_apply(uint64_t gpu, uint64_t size) {
         stats[cls].reads++;
         if (k < 0) {
             stats[cls].none++;
-            hash_add(c, rb_ring::hash_read(cls, guest, nullptr, 0));
+            hash_add(c, cls, rb_ring::hash_read(cls, guest, nullptr, 0));
             return;
         }
         e = a.ents[k];
@@ -288,7 +304,7 @@ void rbring_apply(uint64_t gpu, uint64_t size) {
         const auto it = table.find({guest, size});
         if (it != table.end()) it->second.applied = std::max(it->second.applied, e.seq);
     }
-    hash_add(c, rb_ring::hash_read(cls, guest, buf, n));
+    hash_add(c, cls, rb_ring::hash_read(cls, guest, buf, n));
     if (stats[cls].reads % 3000 == 0)
         logf("vk: rbring %s: 3000 reads, %lld applied (%lld waited for the GPU, %lld not done in time), %lld nothing new; staged so far %lld ranges, %.1f MB",
              cname(cls), (long long)stats[cls].applied.exchange(0), (long long)stats[cls].waited.exchange(0), (long long)stats[cls].late.exchange(0),
@@ -310,7 +326,7 @@ void rbring_check(uint64_t gpu, uint64_t size) {
         const auto it = table.find({guest, size});
         if (it == table.end() || !it->second.stageable) return;
         Addr& a = it->second;
-        if (a.tainted || a.writes != a.staged) st_direct++;
+        if (a.tainted || a.writes - a.first_stage != a.staged) st_direct++;
         cls = a.cls, total = arena_total;
         if (const int nw = rb_ring::newest(a.ents, a.n); nw >= 0) age = (int)std::min<int64_t>(3, std::max<int64_t>(0, c - a.ents[nw].tag));
         const int k = rb_ring::pick(a.ents, a.n, c, config().lag, a.applied);
