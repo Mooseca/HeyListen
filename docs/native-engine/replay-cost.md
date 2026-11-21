@@ -139,3 +139,18 @@ The replay thread's own (last) segment gets that share of the time of each other
 post-dry-pass plan use it). 100 is bit-identical to before (integer path). Try 60, 40 on the Market (RX_VK_PROF_FINE: "the replay thread
 recorded x ms" in the early-segments log line; slowest segment must not exceed it much).
 
+
+### Step B (dry pass parallel / overlapped): analysed, NOT implemented (21 Nov)
+A submission is a list of command buffers replayed in a loop (run_submit -> replay_handle per handle); `state` (cur_state) flows from one
+dry pass into the next, and the dry pass also mutates replay-thread-only shared structures in stream order: ev_values, ub_updates,
+par_conds, par_points (cleared at each dry pass), the written marks (dry_mark_*), the textures it makes, occ_* conditions, rec_open_*.
+- Parallel dry pass over one stream: needs state composition across chunks (NvnState is ~27 KB with generation counters and the
+  uniform/event side effects): not a safe offline change.
+- Overlap dry(N+1) with the segments of N: dry(N+1) can start from the state dry(N) left, not waiting for N's recordings, but the
+  `nr` recording that "what follows" N goes into, the in-order submit drain (jobs, sub_mu, seg_cv are locals of replay_handle_early),
+  par_active/par_seq/texture_segments_begin and par_points would all have to outlive the call (same list as step A). It is the
+  same change as A, so it carries the same risk, and it only pays once the own segment (RX_VK_SEG_TAIL) is not what delays the next
+  dry pass.
+Measure first (needs a game run under a speed lease, RX_VK_PROF_FINE=1): the dry-pass op-kind table (op_cost_ns[0]) and "its own
+segment" against "dry loop"/"waits and submits", with RX_VK_SEG_TAIL=100/60/40. If the own segment falls enough, the order thread's
+critical path is dry pass + short tail and B's gain is the dry pass alone (3.5 ms): then decide with that table.
