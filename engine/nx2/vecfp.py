@@ -42,6 +42,7 @@ word translated with FPX off, on random and edge cases). install() is run by nx2
 nx2/insn.py's (it wraps that translate).
 """
 import os
+import re
 
 import a64emit
 import a64_lift
@@ -286,6 +287,16 @@ def wrap(text, call):
     functions were compiled whole (a file of them 1.4 to 3.4 times as long), and two of oot_patches' edits were looked for in
     part of their function and not made (the free camera, the camera centering). tests/test_function_ends.py"""
     return "if (!%s) {\n%s\n    }\n" % (call, text.rstrip("\n"))
+
+
+WRAPPED = re.compile(r"\Aif \(!a64_vfx_\w+\([^\n]*\)\) \{\n(.*)\n    \}\n\Z", re.S)
+
+
+def undo(text):
+    """wrap()'s inverse: the instruction's own C, as the translator wrote it (nx2/guest_locals.py: the functions the text edits'
+    hashes were recorded against are written without the fast paths)"""
+    m = WRAPPED.match(text)
+    return m.group(1) + "\n" if m else text
 
 
 _installed = False

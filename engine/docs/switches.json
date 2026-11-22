@@ -2,7 +2,7 @@
  "schema": 1,
  "generated_by": "engine/scripts/list_switches.py",
  "scope": "C, C++ and headers under engine/ (engine/tests and vendored trees other than a64-kit excluded) and the Python the builder, the lifter and the scripts run: getenv, std::getenv, _wgetenv, the code's own env helpers and table-driven reads, and os.environ.",
- "count": 1433,
+ "count": 1434,
  "switches": [
   {
    "name": "A64_",
@@ -250,13 +250,38 @@
    "audience": "developer",
    "files": [
     {
+     "path": "nx2/guest_locals.py",
+     "line": 56
+    },
+    {
      "path": "third_party/a64-kit/lift/a64_lift.py",
      "line": 514
     }
    ],
-   "default": "unset",
+   "default": "1",
+   "values": "a whole number",
+   "explanation": "undocumented: nx2/guest_locals.py:56 reads it as a number: `return os.environ.get(\"A64_LOCAL_FLAGS\", \"1\")[:1] != \"0\"`. No comment in the source says what it changes.",
+   "comment": null,
+   "documented_in": null,
+   "source": "undocumented",
+   "documented": false,
+   "set_via": "In the build's environment (the builder or the command line), before the build runs.",
+   "use": null
+  },
+  {
+   "name": "A64_LOCAL_FUNCS",
+   "area": "build",
+   "group": "Lift (A64_*)",
+   "audience": "developer",
+   "files": [
+    {
+     "path": "nx2/guest_locals.py",
+     "line": 92
+    }
+   ],
+   "default": "",
    "values": "text",
-   "explanation": "undocumented: third_party/a64-kit/lift/a64_lift.py:514 reads it as a text value: `return bool(os.environ.get(\"A64_LOCAL_FLAGS\"))`. No comment in the source says what it changes.",
+   "explanation": "undocumented: nx2/guest_locals.py:92 reads it as a text value: `v = os.environ.get(\"A64_LOCAL_FUNCS\", \"\").strip()`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -271,13 +296,17 @@
    "audience": "developer",
    "files": [
     {
+     "path": "nx2/guest_locals.py",
+     "line": 46
+    },
+    {
      "path": "third_party/a64-kit/lift/a64_lift.py",
      "line": 519
     }
    ],
    "default": "",
    "values": "text",
-   "explanation": "undocumented: third_party/a64-kit/lift/a64_lift.py:519 reads it as a text value: `v = os.environ.get(\"A64_LOCAL_REGS\", \"\")`. No comment in the source says what it changes.",
+   "explanation": "undocumented: nx2/guest_locals.py:46 reads it as a text value: `v = os.environ.get(\"A64_LOCAL_REGS\", \"\")`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -426,13 +455,17 @@
    "audience": "developer",
    "files": [
     {
+     "path": "nx2/guest_locals.py",
+     "line": 54
+    },
+    {
      "path": "third_party/a64-kit/lift/a64_lift.py",
      "line": 578
     }
    ],
    "default": "off (unset)",
-   "values": "on or off (0, false, off, no and empty are off)",
-   "explanation": "undocumented: third_party/a64-kit/lift/a64_lift.py:578 reads it as an on/off switch: `if \"c->v=\" not in text or not os.environ.get(\"A64_PACKED_FLAGS\"):`. No comment in the source says what it changes.",
+   "values": "on or off (0, false, off, no and empty are off); the description names `0`",
+   "explanation": "undocumented: nx2/guest_locals.py:54 reads it as an on/off switch: `if os.environ.get(\"A64_PACKED_FLAGS\"):`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -498,11 +531,11 @@
    "files": [
     {
      "path": "nx2/vecfp.py",
-     "line": 54
+     "line": 55
     },
     {
      "path": "nx2/vecfp.py",
-     "line": 63
+     "line": 64
     }
    ],
    "default": "1",

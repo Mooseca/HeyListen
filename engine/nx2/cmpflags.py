@@ -58,6 +58,16 @@ def rewrite(text):
     return text
 
 
+def undo(text):
+    """rewrite()'s inverse: the translator's own text for a subtraction's V (nx2/guest_locals.py writes the functions the text
+    edits' hashes were recorded against as the lift wrote them before this change)"""
+    if NEW[64] not in text and NEW[32] not in text:
+        return text
+    for width in (64, 32):
+        text = text.replace(NEW[width], OLD[width])
+    return text
+
+
 _installed = False
 _base = []   # (the translate this one wraps: the tests take their reference from it)
 

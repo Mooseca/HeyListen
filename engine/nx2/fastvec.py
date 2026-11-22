@@ -2,15 +2,15 @@
 lifted text: TBL with a one-register table and EXT as one SSSE3 instruction each (PSHUFB, PALIGNR), 128-bit vector loads (LDR Q,
 LDP Q, LD1 one register) as one 16-byte load, and DUP by element as one broadcast. A64_VBYTES=0 and A64_VMOVES=0 turn the two
 passes off (lift time, so in the lift key). The kit's files stay as they are (third_party/ is not edited: CONTRIBUTING.md);
-install() wraps a64_lift.fpx_header (the helpers go after the kit's VSET_HEADER), a64_lift.hot_text and Lifter.emit_function.
+install() wraps a64_lift.fpx_header (the helpers go after the kit's VSET_HEADER) and Lifter.emit_function.
 
 What differs from Longshot's: its passes run on each instruction's text (vectorize_fpx and op_text), where the TBL / EXT loops
-still have their raw form. HeyListen's hot functions are then lifted as FP blocks (a64_block.py, TICK-063), whose shapes match
-the text of EXT, DUP and the vector loads as op_text leaves it; rewriting an instruction's text there would take those ops out
-of the blocks. So the passes run on the whole function's text, after the block lift (hot_text) for the hot functions and after
-emit_function for the others, in the form op_text leaves them (a64_vset64 + a64_vst16 for a 16-byte destination, a64_vset_lo for
-8 bytes). Longshot's FMUL by element (VFPX_MUL_ELEM, a64_vfpx_mul32_elem) is not ported: the kit already has it (TICK-041,
-a64_vfpx_mul32e). Tests: tests/test_vbytes.py (game-free, from Longshot's, adapted)."""
+still have their raw form. Here they run on a whole function's text after emit_function, in the form op_text leaves them
+(a64_vset64 + a64_vst16 for a 16-byte destination, a64_vset_lo for 8 bytes), and not in the hot functions (A64_HOT_FUNCS) nor
+in the functions the text edits' hashes were recorded against (nx2/guest_locals.py: PLAIN0): the hot functions are lifted as FP
+blocks (a64_block.py, TICK-063) by the shapes of that text, and their PGO profile was recorded on their control flow, which a
+removed byte loop changes. Longshot's FMUL by element (VFPX_MUL_ELEM, a64_vfpx_mul32_elem) is not ported: the kit already has
+it (TICK-041, a64_vfpx_mul32e). Tests: tests/test_vbytes.py (game-free, from Longshot's, adapted)."""
 import os
 import re
 
@@ -152,18 +152,21 @@ def rewrite(text):
     return vectorize_moves(vectorize_bytes(text))
 
 
+PLAIN0 = set()   # (the entries of functions written with the lift's passes off: nx2/guest_locals.py fills it; Lifter.plain0 is this set)
+
+
 _installed = False
 
 
 def install():
-    """the passes around the kit's hot_text and Lifter.emit_function, and the helpers in fpx_header. Once; nothing with both off"""
+    """the passes around the kit's Lifter.emit_function, and the helpers in fpx_header. Once; nothing with both off"""
     global _installed
     if _installed:
         return
     _installed = True
     if not (pass_on("VBYTES") or pass_on("VMOVES")):
         return
-    base_header, base_hot, base_emit = a64_lift.fpx_header, a64_lift.hot_text, a64_lift.Lifter.emit_function
+    base_header, base_emit = a64_lift.fpx_header, a64_lift.Lifter.emit_function
 
     def fpx_header(used):
         text = base_header(used)
@@ -172,15 +175,12 @@ def install():
             raise SystemExit("fastvec: a64_fpx.h no longer holds the kit's VSET_HEADER once: where its helpers go")
         return text.replace(at, at + VBYTE_HEADER + "\n" + VMOVE_HEADER + "\n")
 
-    def hot_text(text):   # (after the FP block lift: its shapes are the ops' texts as op_text makes them)
-        return rewrite(base_hot(text))
-
     hot = []   # (the kit's hot list, read once: the lift's emit processes each read it at their first function)
 
     def emit_function(self, e, texts):
         text, refs = base_emit(self, e, texts)
         if not hot:
             hot.append(a64_lift.hot_functions())
-        return (text if self.fname(e) in hot[0] else rewrite(text)), refs
+        return (text if self.fname(e) in hot[0] or e in PLAIN0 else rewrite(text)), refs
 
-    a64_lift.fpx_header, a64_lift.hot_text, a64_lift.Lifter.emit_function = fpx_header, hot_text, emit_function
+    a64_lift.fpx_header, a64_lift.Lifter.emit_function = fpx_header, emit_function

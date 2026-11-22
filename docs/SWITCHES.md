@@ -10,7 +10,7 @@ python -I engine/scripts/list_switches.py
 
 and commit both files. A test (`engine/tests/test_switches_documented.py`) fails when a switch read in the source is missing here or the data file is out of date.
 
-1433 switches: 56 players may be told to use, 378 diagnostic, 999 developer-only; 1225 have a real explanation and 208 are marked `undocumented`.
+1434 switches: 56 players may be told to use, 378 diagnostic, 1000 developer-only; 1225 have a real explanation and 209 are marked `undocumented`.
 
 ## How to set a switch
 
@@ -73,7 +73,7 @@ The entries below say what each one does, its values and default, and when it is
 | [Host and OS (`HOS_*` and the system's variables)](#host-and-os-hos_-and-the-systems-variables) | 138 | 10 | 0 | 128 |
 | [Telemetry and crash reports](#telemetry-and-crash-reports) | 12 | 0 | 12 | 0 |
 | [Diagnostics and logging](#diagnostics-and-logging) | 295 | 0 | 295 | 0 |
-| [Build and lift time (`A64_*`, `RX_*` and `HOOKSHOT_*` the builder reads)](#build-and-lift-time-a64_-rx_-and-hookshot_-the-builder-reads) | 95 | 0 | 0 | 95 |
+| [Build and lift time (`A64_*`, `RX_*` and `HOOKSHOT_*` the builder reads)](#build-and-lift-time-a64_-rx_-and-hookshot_-the-builder-reads) | 96 | 0 | 0 | 96 |
 
 ## Renderer: upscaling, frame generation, HDR, V-Sync and presentation
 
@@ -13557,7 +13557,7 @@ The Khronos validation layer.
 
 ## Build and lift time (`A64_*`, `RX_*` and `HOOKSHOT_*` the builder reads)
 
-95 switches read by the builder or the lifter, in their environment.
+96 switches read by the builder or the lifter, in their environment.
 
 ### Lift (A64_*)
 
@@ -13673,23 +13673,33 @@ undocumented: third_party/a64-kit/lift/a64_lift.py:2141 reads it as an on/off sw
 
 #### `A64_LOCAL_FLAGS` - developer
 
-undocumented: third_party/a64-kit/lift/a64_lift.py:514 reads it as a text value: `return bool(os.environ.get("A64_LOCAL_FLAGS"))`. No comment in the source says what it changes.
+undocumented: nx2/guest_locals.py:56 reads it as a number: `return os.environ.get("A64_LOCAL_FLAGS", "1")[:1] != "0"`. No comment in the source says what it changes.
 
-**Values:** text. **Default:** unset.
+**Values:** a whole number. **Default:** 1.
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `third_party/a64-kit/lift/a64_lift.py:514`.
+**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/guest_locals.py:56` and 1 more place.
 
-#### `A64_LOCAL_REGS` - developer
+#### `A64_LOCAL_FUNCS` - developer
 
-undocumented: third_party/a64-kit/lift/a64_lift.py:519 reads it as a text value: `v = os.environ.get("A64_LOCAL_REGS", "")`. No comment in the source says what it changes.
+undocumented: nx2/guest_locals.py:92 reads it as a text value: `v = os.environ.get("A64_LOCAL_FUNCS", "").strip()`. No comment in the source says what it changes.
 
 **Values:** text. **Default:** .
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `third_party/a64-kit/lift/a64_lift.py:519`.
+**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/guest_locals.py:92`.
+
+#### `A64_LOCAL_REGS` - developer
+
+undocumented: nx2/guest_locals.py:46 reads it as a text value: `v = os.environ.get("A64_LOCAL_REGS", "")`. No comment in the source says what it changes.
+
+**Values:** text. **Default:** .
+
+**When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
+
+**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/guest_locals.py:46` and 1 more place.
 
 #### `A64_MARK_EACH` - developer
 
@@ -13753,13 +13763,13 @@ undocumented: third_party/a64-kit/lift/a64_lift.py:190 reads it as an on/off swi
 
 #### `A64_PACKED_FLAGS` - developer
 
-undocumented: third_party/a64-kit/lift/a64_lift.py:578 reads it as an on/off switch: `if "c->v=" not in text or not os.environ.get("A64_PACKED_FLAGS"):`. No comment in the source says what it changes.
+undocumented: nx2/guest_locals.py:54 reads it as an on/off switch: `if os.environ.get("A64_PACKED_FLAGS"):`. No comment in the source says what it changes.
 
-**Values:** on or off (0, false, off, no and empty are off). **Default:** off (unset).
+**Values:** on or off (0, false, off, no and empty are off); the description names `0`. **Default:** off (unset).
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `third_party/a64-kit/lift/a64_lift.py:578`.
+**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/guest_locals.py:54` and 1 more place.
 
 #### `A64_SITE_PROFILE` - developer
 
@@ -13789,7 +13799,7 @@ undocumented: nx2/cmpflags.py:39 reads it as a number: `v = os.environ.get("A64_
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/vecfp.py:54` and 1 more place.
+**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/vecfp.py:55` and 1 more place.
 
 ### Builder and toolchain
 
