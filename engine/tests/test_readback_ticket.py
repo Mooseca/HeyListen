@@ -87,6 +87,8 @@ def main():
 #include <vector>
 #define CHECK(x) do { if (!(x)) { std::fprintf(stderr, "FAIL:%d %s\n", __LINE__, #x); std::exit(1); } } while (0)
 static void jt_mark(int, uint64_t) {}
+struct WaitScope { explicit WaitScope(int) {} };
+enum { WS_TICKET };
 ''' + parts + r'''
 std::atomic<uint64_t> registered{0};   // (the newest section that made its "registrations")
 int main() {

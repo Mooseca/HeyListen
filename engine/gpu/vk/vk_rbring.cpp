@@ -24,6 +24,11 @@ const rb_ring::Config& config() {
     static const rb_ring::Config c = [] {
         rb_ring::Config k = rb_ring::parse(getenv("HL_RB_LAG"), getenv("HL_RB_LAG_CHECK"), getenv("HL_RB_LAG_WAIT_MS"));
         if (!k.lag && k.check) k.lag = 2;   // (a check alone compares the lag 2 ring)
+        // (FIF1) with the CPU k-1 frames ahead of the replay (RX_VK_FRAMES_IN_FLIGHT=k) an entry is staged k-1 frames later: lag 2 + (k-1)
+        // keeps every read free of a wait for the replay; HL_RB_LAG says otherwise
+        const char* fk = getenv("RX_VK_FRAMES_IN_FLIGHT");
+        if (k.lag && !(getenv("HL_RB_LAG") && *getenv("HL_RB_LAG")) && fk && atoi(fk) > 1)
+            k.lag = std::min<unsigned>(rb_ring::kMaxLag, 2u + (unsigned)std::min(atoi(fk), 3) - 1u);
         return k;
     }();
     return c;
@@ -208,7 +213,7 @@ void rbring_flush(VkCommandBuffer cmd, uint64_t value) {
         pending.clear(), pending_bytes = 0;
         return;
     }
-    const int64_t tag = presents_now;
+    const int64_t tag = rb_tag_for(value);
     auto barrier = [&](VkPipelineStageFlags2 s, VkAccessFlags2 sa, VkPipelineStageFlags2 d, VkAccessFlags2 da) {
         VkMemoryBarrier2 b{VK_STRUCTURE_TYPE_MEMORY_BARRIER_2};
         b.srcStageMask = s, b.srcAccessMask = sa, b.dstStageMask = d, b.dstAccessMask = da;
@@ -267,7 +272,8 @@ bool rbring_serves(uint64_t guest, uint64_t size) {
 /// The read of a served range: the newest unapplied entry `lag` frames old into guest memory
 void rbring_apply(uint64_t gpu, uint64_t size) {
     const uint64_t guest = host->gpu_guest(gpu);
-    const int64_t c = presents_now;
+    const int64_t c = rb_frame_now();
+    rb_wait_staged(c, config().lag);   // (frames in flight: the replay stages a frame's entries before it shows it)
     rb_ring::Entry e;
     int cls;
     uint64_t total;
@@ -320,7 +326,7 @@ void rbring_apply(uint64_t gpu, uint64_t size) {
 void rbring_check(uint64_t gpu, uint64_t size) {
     if (!config().lag || !config().check) return;
     const uint64_t guest = host->gpu_guest(gpu);
-    const int64_t c = presents_now;
+    const int64_t c = rb_frame_now();
     rb_ring::Entry e;
     int cls = 0;
     uint64_t total = 0;

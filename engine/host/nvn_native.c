@@ -1360,7 +1360,8 @@ NV(nvnEventGetValue) {
            event signalled at once: the replay reads memory as submitted, so the game may go on to the next frame
            while this one is replayed, as far as the window's textures and the replay's queue let it */
         static int nowait = -1;
-        if (nowait < 0) nowait = getenv("HOS_PRESENT_NOWAIT") && atoi(getenv("HOS_PRESENT_NOWAIT")) != 0;
+        if (nowait < 0) nowait = getenv("HOS_PRESENT_NOWAIT") ? atoi(getenv("HOS_PRESENT_NOWAIT")) != 0
+                                 : getenv("RX_VK_FRAMES_IN_FLIGHT") && atoi(getenv("RX_VK_FRAMES_IN_FLIGHT")) > 1;   /* (stream R3: the renderer hands the present over) */
         if (nowait && (c->x[30] == 0x805904a0 || c->x[30] == 0x80590530)) { RET(1); return; }
     }
     LAG_COUNT(LC_EVENT);
