@@ -94,7 +94,7 @@ class TargetImagePoolTests(unittest.TestCase):
 
     def test_the_dead_list_pools_before_it_destroys_and_the_pool_is_trimmed_each_present(self):
         frame = block(self.tex, "void texture_frame(uint64_t completed)")
-        loop = frame[frame.index("for (auto it = dead.begin(); it != dead.end();) {"):]
+        loop = frame[frame.index("for (auto it = dead.begin(); it != dead.end() && destroyed < per_frame;) {"):]   # (RX_VK_DESTROY_PER_FRAME: at most that many a present)
         self.assertLess(loop.index("if (it->pool_key) {"), loop.index("destroy_image(it->image, it->allocation);"))
         self.assertIn("pool_put(*it);", loop[:loop.index("destroy_image(")])
         trim = frame.index("pool_trim();")

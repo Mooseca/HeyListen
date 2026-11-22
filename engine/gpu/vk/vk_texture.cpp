@@ -23,6 +23,7 @@
 #endif
 #include <atomic>
 #include <chrono>
+#include <climits>
 #include <cmath>
 #include <cstring>
 #include <exception>
@@ -322,8 +323,8 @@ bool pool_take(uint64_t key, VkImage& image, VmaAllocation& allocation, std::uno
     return true;
 }
 void pool_destroy(Pooled& p) {
-    for (auto& kv : p.views)
-        if (kv.second) vkDestroyImageView(dev.device, kv.second, nullptr);
+    if (!p.views.empty())   // (RX_VK_REAP: before the image on the reaper's thread, as here)
+        reap([views = std::move(p.views)] { for (auto& kv : views) if (kv.second) vkDestroyImageView(dev.device, kv.second, nullptr); });
     destroy_image(p.image, p.allocation);
     st_pool_destroyed++;
 }
@@ -5365,7 +5366,20 @@ void texture_frame(uint64_t completed) {
             it = textures.erase(it);
         }
     }
-    for (auto it = dead.begin(); it != dead.end();) {
+    // (relink, pixl27; RX_VK_DESTROY_PER_FRAME=<n>, default 24, 0: no cap) At most that many dead textures a frame go to the
+    // reaper, the rest at the next frames: the sweep every 600 frames retired ~300 at once outdoors, and their destruction (kernel
+    // calls each) was a 15-30 ms hitch every 10 s. A render target's image going to the pool, and a spare kept, do not count. A
+    // backlog of over eight frames' worth is worked off in about half a second (dead / 30 a frame), and with VRAM within 5% of what
+    // the driver allows (or past it) the cap is lifted: the dead textures' memory is what the next ones need
+    static const int per_frame_cfg = getenv("RX_VK_DESTROY_PER_FRAME") ? std::max(0, atoi(getenv("RX_VK_DESTROY_PER_FRAME"))) : 24;
+    int per_frame = per_frame_cfg ? per_frame_cfg : INT_MAX;
+    if (per_frame_cfg && dead.size() > (size_t)per_frame * 8) {
+        uint64_t vu = 0, va = 0;
+        if (vram_usage(&vu, &va, nullptr) && va && vu > va / 100 * 95) per_frame = INT_MAX;
+        else per_frame = std::max(per_frame, (int)(dead.size() / 30));
+    }
+    int destroyed = 0;
+    for (auto it = dead.begin(); it != dead.end() && destroyed < per_frame;) {
         if (it->value > completed) {
             ++it;
             continue;
@@ -5375,7 +5389,8 @@ void texture_frame(uint64_t completed) {
             it = dead.erase(it);
             continue;
         }
-        for (VkImageView v : it->views) vkDestroyImageView(dev.device, v, nullptr);
+        if (!it->views.empty())   // (on the reaper, before the image's own end: vk_vma.cpp)
+            reap([views = std::move(it->views)] { for (VkImageView v : views) vkDestroyImageView(dev.device, v, nullptr); });
         static const uint64_t spare_max = (uint64_t)(getenv("RX_VK_SPARE_MB") ? atoi(getenv("RX_VK_SPARE_MB")) : 256) << 20;
         const uint64_t sz = it->ci_key && it->allocation ? allocation_size(it->allocation) : 0;
         if (sz && spare_frames() && it->memory.empty() && !it->buffer && spare_bytes + sz <= spare_max) {
@@ -5384,9 +5399,10 @@ void texture_frame(uint64_t completed) {
             spare_st.kept++;
         } else {
             destroy_image(it->image, it->allocation);
+            destroyed++;
         }
         if (it->buffer) destroy_buffer(it->buffer, it->buffer_alloc);
-        for (VkDeviceMemory m : it->memory) vkFreeMemory(dev.device, m, nullptr);
+        if (!it->memory.empty()) reap([m = std::move(it->memory)] { for (VkDeviceMemory x : m) vkFreeMemory(dev.device, x, nullptr); });
         it = dead.erase(it);
     }
     pool_trim();
@@ -5585,6 +5601,7 @@ void texture_frame(uint64_t completed) {
     }
     if (frame_no % 600 == 0) {
         vma_log_heaps();
+        { char r[200]; reap_report(r, sizeof r); logf("vk: %s (RX_VK_REAP)", r); }
         vma_log_image_blocks();
         {
             std::lock_guard lk(pool_mu);

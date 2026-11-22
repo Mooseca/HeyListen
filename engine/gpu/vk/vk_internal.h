@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <array>
+#include <functional>
 #include <atomic>
 #include <mutex>
 #include <string>
@@ -558,6 +559,13 @@ void res_pipeline_counts(size_t* graphics, size_t* used, int64_t* modules_droppe
 bool vma_init(PFN_vkGetInstanceProcAddr gipa);
 bool create_image(const VkImageCreateInfo& ci, VkImage& image, VmaAllocation& allocation, bool dedicated = false, bool target = false);
 void destroy_image(VkImage image, VmaAllocation allocation);
+/// (RX_VK_REAP, vk_vma.cpp) fn on the reaper's thread, in the order given, or here with RX_VK_REAP=0: a texture's views, a buffer, memory
+/// of its own that the GPU is done with. destroy_image and destroy_buffer go there themselves
+void reap(std::function<void()> fn);
+/// Waits (5 s at most) for what the reaper holds; true when something was queued: a creation the driver refused tries again after it
+bool reap_drain();
+int64_t reap_queued();
+void reap_report(char* out, size_t n);
 /// What an allocation really takes (VkMemoryRequirements.size: padding, alignment, the driver's metadata), 0 for none
 uint64_t allocation_size(VmaAllocation allocation);
 /// (TICK-023/030) the size from which an image gets memory of its own (RX_VK_BIG_IMAGE_MB, 16 MB; 0: none)
