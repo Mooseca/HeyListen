@@ -170,6 +170,19 @@ static const struct FixtureHost { void (*log_flush)(); } fixture_host{}, *host =
 // (stream R4's RX_VK_PROF_FINE counters the cut code adds to: off here, so the scope timer adds nothing)
 struct ReplayWallStub { int64_t whole_ns = 0, whole = 0, dry_ns = 0, seg_ns = 0, big = 0; } rwall;
 struct WallAdd { explicit WallAdd(int64_t&) {} };
+// (streams REPLAY2, ORDER1-3, off here: the feed log, the completion thread, the pool spin, the wall counters)
+namespace feed { enum { kJobs, kOwn, kJoin }; }
+namespace completion { struct Slot {}; }
+struct DrvWallStub { std::atomic<int64_t> qs_ns{0}, qs_n{0}, seg_n{0}, seg_cbs{0}; } drvwall;
+struct DrvTime { DrvTime(std::atomic<int64_t>&, std::atomic<int64_t>&) {} };
+bool wall_fine_on() { return false; }
+bool comp_on() { return false; }
+template <class R> void comp_submit(R&, R**, int) {}
+bool seg_merge_on() { return true; }   // (ORDER1: the segments already recorded go in one submit, in order)
+void feed_set(int) {}
+void feed_note_ready(int, int, int64_t = 0) {}
+void feed_note_sent(int) {}
+template <class F> void spin_before_sleep(F&&) {}
 #include "init_fatal.inc"
 void full_barrier(VkCommandBuffer cmd, const char* = "") {
     record(cmd, 'F');
@@ -298,6 +311,7 @@ struct RunJobs {
 struct {
     std::mutex mu;
     std::deque<std::function<void()>> jobs;
+    std::atomic<uint64_t> posted{0};   // (ORDER3)
     std::deque<std::function<void()>> own[8];   // (TICK-052, RX_VK_PARALLEL_AFFINITY: off by default, never filled here)
     int pending = 0;
     RunJobs cv;
