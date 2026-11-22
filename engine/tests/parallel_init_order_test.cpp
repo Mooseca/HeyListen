@@ -260,6 +260,7 @@ struct Segment {
     // L: the initialization holds the segments' init lock (seg_init_mu) while it records; then latch y lets it go on
     std::string script;
     const uint8_t* end = nullptr;   // (kStop: to the command buffer's end, every segment's commands in order)
+    uint64_t serial_end = UINT64_MAX;   // (OCC1: the real Segment's field, set by the cut-out init jobs)
 };
 const uint8_t* const kStop = reinterpret_cast<const uint8_t*>("stop");
 const std::vector<Segment>* cur_segs;

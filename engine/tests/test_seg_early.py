@@ -53,10 +53,10 @@ def main():
     rep = function(rp, "void replay(VkCommandBuffer& cmd, NvnState& s, const uint8_t* p, const uint8_t* end = nullptr)")
     i = rep.index("ub_updates.push_back(std::move(up));")
     need("UbGrowGuard ug;" in rep[i - 200:i], "the dry pass appends a uniform update unguarded")
-    i = rep.index("par_conds.push_back(s.render_enabled ? 1 : 0);")
+    i = rep.index("par_conds.push_back(cr);")
     need("UbGrowGuard ug;" in rep[i - 200:i] and "par_conds.size() == par_conds.capacity()" in rep[i - 200:i],
          "the dry pass moves par_conds' buffer unguarded")
-    i = rep.index("s.render_enabled = cond_at < par_conds_n.load(std::memory_order_acquire) ? par_conds[cond_at] != 0 : true;")
+    i = rep.index("if (cond_at < par_conds_n.load(std::memory_order_acquire)) {")
     need("UbReadGuard ug;" in rep[i - 200:i], "a worker reads a render condition unguarded")
     i = rep.index("par_points.push_back({p + h.size, s, ub_updates.size(), par_conds.size(), dry_work});")
     need("if (seg_early_hook) seg_early_hook->on_point(par_points.back());" in rep[i:i + 300], "the hook is not called after a point")
