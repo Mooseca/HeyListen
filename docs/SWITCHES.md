@@ -5027,7 +5027,7 @@ undocumented: host/hos_main.c:538 (in `nv_cache_env()`) reads it as a path: `if 
 
 #### `__GL_SHADER_DISK_CACHE_SIZE` - developer
 
-The first start after the change fills the new folder once (a cold driver cache). On NVIDIA only (its driver's library is there), and never over a value the environment already sets. __GL_SHADER_DISK_CACHE_SIZE 4 GB: four times the pipeline cache's size, so a driver update's new entries (they are keyed by driver version, the old ones stay) and the game's own do not push each other out; SKIP_CLEANUP=1 stops the driver deleting entries to stay under the size, which is what evicted ours.
+Set before anything loads Vulkan (the driver reads these when its library is loaded): HL_NV_CACHE_DIR=1 the folder nv_shader_cache in the game's folder, =<path> that folder, unset or 0 off (off until measured). On NVIDIA only (its driver's library is there), and never over a value the environment already sets. __GL_SHADER_DISK_CACHE_SIZE 4 GB: four times the pipeline cache's size, so a driver update's new entries (they are keyed by driver version, the old ones stay) and the game's own do not push each other out; SKIP_CLEANUP=1 stops the driver deleting entries to stay under the size, which is what evicted ours.
 
 **Values:** text (`1` named). **Default:** unset.
 
@@ -8769,7 +8769,7 @@ HL_JOBGROUP_CHECK=1: its invariants are counted and the counters logged every 10
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In the process environment (or in a file named by `HOS_ENV_FILE`); `hookshot_env.txt` refuses this one. **Read at:** `host/hos_main.c:534`.
+**Set it:** In the process environment (or in a file named by `HOS_ENV_FILE`); `hookshot_env.txt` refuses this one. **Read at:** `host/hos_main.c:532`.
 
 #### `HL_PREFAULT` - developer
 

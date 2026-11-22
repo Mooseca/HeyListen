@@ -64,8 +64,7 @@ need("Copyright (C) 2026 Sacrappy" in src("tests/test_quick1.py"), "this test ha
 
 main = src("host/hos_main.c")
 nv = block(main, "static void nv_cache_env(void)")
-need('getenv("HL_NV_CACHE_DIR")' in nv and 'want = "1"' in nv and '!strcmp(want, "0")' in nv,
-     "2: HL_NV_CACHE_DIR unset is on (the folder beside the game), 0 is off")
+need('getenv("HL_NV_CACHE_DIR")' in nv and '!strcmp(want, "0")' in nv, "2: HL_NV_CACHE_DIR unset or 0 is off")
 need("nvidia_driver_present()" in nv, "2: NVIDIA only")
 need("__GL_SHADER_DISK_CACHE_PATH" in nv and "__GL_SHADER_DISK_CACHE_SIZE" in nv and "__GL_SHADER_DISK_CACHE_SKIP_CLEANUP" in nv,
      "2: the three driver variables")
@@ -103,4 +102,4 @@ if fails:
     for f in fails:
         print("FAIL: " + f)
     raise SystemExit("test_quick1: failed")
-print("PASS: QUICK1's five switches are wired; the NVIDIA cache beside the game is on by default, the others off")
+print("PASS: QUICK1's five switches are wired and each is off without its variable")
