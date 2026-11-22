@@ -1,3 +1,5 @@
+# Copyright (C) 2026 Sacrappy
+
 """v0.4.4, the descriptors cause: the recordings' extra descriptor pools are kept and reset (RX_VK_DESC_POOL_KEEP, vk_draw.cpp) instead
 of made in the middle of the draws and destroyed at the next recording, and the performance summary's descriptors cause counts the
 build's own time and the pools' (vk_internal.h DescPart), not the texture work PROF_DESC also held. By the source text and a

@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Sacrappy
+
 // jobs_demand / jobs_pending_live (gpu/vk/vk_jobs.cpp, RX_VK_JOB_DEMAND=1, RX_VK_WORKERS=1): the jobs a draw asks for go up the
 // queue in the draws' order, newest present first, and the live count leaves out what no draw has wanted lately.
 // Built against stand-ins for the renderer's headers (tests/test_jobs_wait_runs_queued.py).

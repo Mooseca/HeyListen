@@ -1,3 +1,5 @@
+# Copyright (C) 2026 Sacrappy
+
 """A texture the GPU writes in a virtual pool keeps its texels when the game finalizes it (gpu/vk/vk_texture.cpp).
 
 A texture in a virtual pool (a GPU address at or above 1 TB) is checked page by page through its mapping: texture_dirty

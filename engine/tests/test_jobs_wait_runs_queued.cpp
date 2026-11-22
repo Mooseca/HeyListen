@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Sacrappy
+
 // jobs_wait (gpu/vk/vk_jobs.cpp): a waited-for job still in the queue runs on the waiting thread at once, instead of after
 // every job queued before it, and the queue tells how long it has gone unpushed (the storm hold's quiet clock).
 // Built against stand-ins for the renderer's headers (tests/test_jobs_wait_runs_queued.py).

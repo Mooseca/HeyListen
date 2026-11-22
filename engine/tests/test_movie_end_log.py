@@ -1,3 +1,5 @@
+# Copyright (C) 2026 Sacrappy
+
 """A movie's end is in every log (host/nn_video.c, #104): the decoder's Flush / Stop and the game being told a picture is
 the last one are logged without HOS_VIDEO_LOG (the first 48 of each), so a log of a movie that never ends for the game
 (the end credits' freeze) shows which of the two lines it lacks. A source-shape check: the real decode path needs the game.

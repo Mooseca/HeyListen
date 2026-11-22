@@ -1,3 +1,5 @@
+# Copyright (C) 2026 Sacrappy
+
 """Every game-free check in one run: each tests/test_*.py and nx2/test_*.py in its own process, the C++ unit tests under
 gpu/vk/tests and a byte-compile of every tracked Python file. All of them run even when one fails; the failures are
 printed whole at the end, with a table of every check (slowest first), also to $GITHUB_STEP_SUMMARY when it is set.
@@ -168,6 +170,8 @@ ARGS = {
     "tests/test_upscaler_off.py": ["--cxx", "{cxx}"],
     "tests/test_target_overlap.py": ["--cxx", "g++"],
     "tests/test_segment_plan.py": ["--cxx", "g++"],
+    "tests/test_completion_tracker.py": ["--cxx", "g++"],
+    "tests/test_feed_stats.py": ["--cxx", "g++"],
     "tests/test_desc_counts.py": ["--cxx", "{cxx}"],
     "tests/test_gone_ring.py": ["--cxx", "g++"],
     "tests/test_split_count.py": ["--cxx", "g++"],

@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Sacrappy
+
 /* nvdrv: NVIDIA's kernel-driver interface, below the real NVN driver.
 
    The NVN driver and NVIDIA's resource manager (NvRm*) are lifted SDK code and run unchanged. They reach the GPU only
@@ -200,7 +202,14 @@ __declspec(dllexport) int hos_gpu_write_live(uint64_t guest, const void *src, ui
     int r = 0;
     if (live) {
 #if defined(A64_WRITE_TRACK) && !defined(__EMSCRIPTEN__)
-        if (__atomic_load_n(&a64_dirty[(uint32_t)guest >> 12], __ATOMIC_ACQUIRE)) r = 2;
+        /* (the page as the marks index it: rtgen.py's A64_DIRTY_AT on the 64-bit window, not the low 32 bits, which read the
+           mark of the page 4 GB lower for a pool above 4 GB; issue 115, ToxicToucan) */
+#ifdef A64_DIRTY_PAGES
+        const uint64_t page = ((uint64_t)guest >> 12) & (A64_DIRTY_PAGES - 1);
+#else
+        const uint64_t page = (uint32_t)guest >> 12;
+#endif
+        if (__atomic_load_n(&a64_dirty[page], __ATOMIC_ACQUIRE)) r = 2;
 #endif
         if (!r) memcpy(GP(guest), src, (size_t)n), r = 1;
     }

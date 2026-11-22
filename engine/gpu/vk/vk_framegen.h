@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Sacrappy
+
 // Frame interpolation (vk_framegen.cpp): made frames shown between the game's (in a window; RX_VK_FRAMEGEN=0: off).
 #pragma once
 

@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Sacrappy
+
 // The Vulkan back end's start: vulkan-1.dll, the instance, the device (Vulkan 1.3 and the extensions the NVN replay
 // wants where the GPU has them: mesh shaders, host memory import, graphics pipeline libraries), the window's
 // swapchain, and the rx_* table (vk_api.h). The NVN replay itself is vk_replay.cpp.
@@ -286,8 +288,15 @@ bool create_instance() {
     // RX_VK_VALIDATION=1: the Khronos validation layer (when installed)
     const char* layer = "VK_LAYER_KHRONOS_validation";
     if (getenv("RX_VK_VALIDATION")) ci.enabledLayerCount = 1, ci.ppEnabledLayerNames = &layer;
-    if (vkCreateInstance(&ci, nullptr, &dev.instance) != VK_SUCCESS) {
-        logf("vk: vkCreateInstance failed");
+    if (const VkResult made = vkCreateInstance(&ci, nullptr, &dev.instance); made != VK_SUCCESS) {
+        // (-9 VK_ERROR_INCOMPATIBLE_DRIVER: no Vulkan driver for any GPU of this PC, or one older than 1.3; -6 VK_ERROR_LAYER_NOT_PRESENT and
+        // -7 VK_ERROR_EXTENSION_NOT_PRESENT: a broken or overlay-injected layer; -1/-2 out of memory; -3 VK_ERROR_INITIALIZATION_FAILED)
+        logf("vk: vkCreateInstance failed (VkResult %d: %s)", (int)made,
+             made == VK_ERROR_INCOMPATIBLE_DRIVER      ? "no Vulkan driver for this PC's GPU, or one older than Vulkan 1.3"
+             : made == VK_ERROR_INITIALIZATION_FAILED ? "the driver's start failed"
+             : made == VK_ERROR_LAYER_NOT_PRESENT     ? "a layer that is not there"
+             : made == VK_ERROR_EXTENSION_NOT_PRESENT ? "an instance extension that is not there"
+                                                      : "see the Vulkan specification's VkResult");
         return false;
     }
     load_instance(dev.instance);
@@ -473,7 +482,7 @@ bool create_device() {
     bool atomic_float = false;
     if (fadd_wanted) optional(VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME, atomic_float);
     optional(VK_KHR_SWAPCHAIN_MUTABLE_FORMAT_EXTENSION_NAME, dev.swap_mutable);   // (hookshot: the overlays, vk_imgui.cpp)
-    if (getenv("RX_VK_TL") || getenv("RX_VK_TL_S")) optional(VK_EXT_CALIBRATED_TIMESTAMPS_EXTENSION_NAME, dev.calibrated_ts);   // (stream R2: the timeline's GPU side)
+    if (getenv("RX_VK_TL") || getenv("RX_VK_TL_S") || getenv("RX_VK_FEED_LOG")) optional(VK_EXT_CALIBRATED_TIMESTAMPS_EXTENSION_NAME, dev.calibrated_ts);   // (stream R2: the timeline's GPU side)
 #ifndef _WIN32
     // (Linux) tl_gpu_dump asks for the device's and the host clock's time (vk_tl_clock.h: CLOCK_MONOTONIC, the shim's
     // QueryPerformanceCounter); a domain the device does not list may not be asked for, so the GPU side (and RX_VK_TL_PROBE) is off

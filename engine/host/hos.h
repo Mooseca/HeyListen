@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Sacrappy
+
 /* Horizon OS layer (HLE of the Nintendo SDK at the nn:: boundary) for a64-kit games.
 
    An import or SDK function the game calls is a C function `void imp_<mangled name>(Ctx *c)` (HLE(...) below):

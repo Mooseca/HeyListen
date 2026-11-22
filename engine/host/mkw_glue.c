@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Sacrappy
+
 /* mkw-recomp's pieces of the standalone runtime that TOTKPort's hos/ keeps elsewhere: the 64-bit guest window's
    commit (TOTK commits its whole 4 GB window up front; MKW's 512 GB window is only reserved), and stand-ins for the
    hooks of files not taken into host/ (the renderer and display, the profiler, mods, TOTK's own patches). */

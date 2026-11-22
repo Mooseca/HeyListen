@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright (C) 2026 Sacrappy
+
 """List every environment switch HeyListen reads, and regenerate the reference documentation.
 
     python -I engine/scripts/list_switches.py            # rewrite engine/docs/switches.json and docs/SWITCHES.md
@@ -74,6 +76,8 @@ def comment_blocks(text):
         body = re.sub(r"(?m)^\s*//+ ?", "", body)
         body = re.sub(r"(?m)^\s*\*+ ?", "", body)
         body = re.sub(r"\s+", " ", body).strip()
+        if re.fullmatch(r"Copyright \(C\) \d{4}(-\d{4})? [^.]+", body):
+            continue  # a file's copyright line says nothing about a switch, and must not start one's sentence
         raw.append((first, last, body))
     blocks = []
     for first, last, body in raw:

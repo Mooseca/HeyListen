@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Sacrappy
+
 /* (HeyListen native engine) The OS layer's side of the memory module (engine/native, hl/c/hl_mem.h;
    docs/native-engine/memory-boundary.md, sections 8 and 11): cold pages of CPU-cached GPU pools and of the game's heaps
    leave the process's working set.
@@ -37,6 +39,8 @@
      HL_MEM_COLD_HEAPS=1  the heaps too (the default)    HL_MEM_COLD_HEAPS=0  the pools only
      HL_MEM_COLD_PRESSURE=0  without the back-off: a pass of 500 ms or more stops all trimming for 60 s, and the pools wait out
        the quiet rule too (the default: the system is paging then, and what comes back is read from the page file)
+     HL_MEM_COLD_LOWMEM=<MB>  no trimming while the system's available RAM is under that (a quarter more to start again; default 0:
+       never held, 3072 proposed). HL_MEM_ACCOUNT=<seconds>  the "hl mem: account:" lines (private commit and working set by owner)
      HL_MEM_COLD_FLAGS=<hex,...>  the pool flags (default 24,64)    HL_MEM_COLD_AGE=<seconds>  the pools' age (default 10)
    Every 10 s two lines "hl mem: cold pages (pools): ..." and "(heaps): ..." give the counters (MB out now, taken out, came
    back and how often, the most that came back in 10 s). */
@@ -49,6 +53,7 @@
 #if defined(_WIN32) && !defined(__EMSCRIPTEN__)
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <psapi.h>
 
 #define HL_MEM_COLD_DEFAULT 1
 #define HL_MEM_COLD_HEAPS_DEFAULT 1
@@ -301,7 +306,145 @@ static void heaps_pass(void) {
     }
 }
 
+/* ---- HL_MEM_ACCOUNT=<seconds> (off by default): where the process's private commit and its working set are, a line
+   "hl mem: account:" every <seconds> (MEM1, 22 Nov 2026: the owner's 15 minutes grew from 7.5 to 29.2 GB of private commit and
+   frames of 0.4-1.2 s came with an OS trim). A sweep of the address space with VirtualQuery (the address space lock is held
+   for each call, so a pass is for diagnosis only) sums the committed bytes of the guest space by part (the heap, the address
+   regions, the part below the heap) and of the rest of the process by kind (private, mapped, image) and by the size of the
+   allocation they are in; QueryWorkingSet says how many resident pages are the guest's (in a GPU pool, outside) and how many
+   the host's. The system's side: available RAM, the commit charge against its limit, the pages the whole system read from
+   disk since the last line (the hard faults), and the process's own page faults. */
+typedef LONG(NTAPI *AcctNtQuerySys)(ULONG, PVOID, ULONG, PULONG);
+typedef BOOL(WINAPI *AcctQueryWs)(HANDLE, PVOID, DWORD);
+typedef struct { uint64_t base, reserved, committed; } AcctAlloc;
+static int acct_by_committed(const void *a, const void *b) {
+    const uint64_t x = ((const AcctAlloc *)a)->committed, y = ((const AcctAlloc *)b)->committed;
+    return x < y ? 1 : x > y ? -1 : 0;
+}
+static int acct_bucket(uint64_t r) {
+    return r >= (1ULL << 30) ? 0 : r >= (256ULL << 20) ? 1 : r >= (64ULL << 20) ? 2 : r >= (16ULL << 20) ? 3 : r >= (2ULL << 20) ? 4 : 5;
+}
+static DWORD WINAPI account_main(void *arg) {
+    const int secs = (int)(intptr_t)arg;
+    AcctNtQuerySys nt_query = (AcctNtQuerySys)(void *)GetProcAddress(GetModuleHandleA("ntdll.dll"), "NtQuerySystemInformation");
+    AcctQueryWs query_ws = (AcctQueryWs)(void *)GetProcAddress(GetModuleHandleA("kernel32.dll"), "K32QueryWorkingSet");
+    uint32_t last_reads = 0, last_faults = 0, have_last = 0;
+    const uint64_t g0 = (uint64_t)(uintptr_t)GP(0);
+    const uint64_t heap_lo = g0 + HOS_HEAP_BASE;
+    static uint64_t pools[COLD_MAX_EXCLUDED][2];
+    static AcctAlloc allocs[1 << 16];
+    for (;;) {
+        Sleep((DWORD)secs * 1000);
+        const int64_t t0 = hos_now_ns();
+        const uint64_t heap_hi = heap_lo + hos_heap_size;
+        uint64_t guest_heap = 0, guest_regions = 0, guest_low = 0, other_private = 0, mapped = 0, image = 0;
+        uint64_t bucket[6] = {0, 0, 0, 0, 0, 0};   /* (>=1 GB, 256 MB-1 GB, 64-256 MB, 16-64 MB, 2-16 MB, <2 MB: by allocation size) */
+        int nalloc = 0;
+        AcctAlloc cur = {0, 0, 0};
+        uint64_t at = 0;
+        MEMORY_BASIC_INFORMATION mbi;
+        while (VirtualQuery((void *)(uintptr_t)at, &mbi, sizeof mbi)) {
+            const uint64_t lo = (uint64_t)(uintptr_t)mbi.BaseAddress, sz = mbi.RegionSize;
+            const uint64_t ab = (uint64_t)(uintptr_t)mbi.AllocationBase;
+            const int in_guest = lo >= g0 && lo < g0 + HOS_GUEST_SPACE;
+            if (mbi.State != MEM_FREE && !in_guest && mbi.Type == MEM_PRIVATE) {
+                if (cur.base != ab) {
+                    if (cur.base) {
+                        bucket[acct_bucket(cur.reserved)] += cur.committed;
+                        if (nalloc < (1 << 16)) allocs[nalloc++] = cur;
+                    }
+                    cur.base = ab, cur.reserved = 0, cur.committed = 0;
+                }
+                cur.reserved += sz;
+            }
+            if (mbi.State == MEM_COMMIT) {
+                if (mbi.Type == MEM_PRIVATE) {
+                    if (in_guest) {
+                        if (lo >= heap_hi) guest_regions += sz;
+                        else if (lo >= heap_lo) guest_heap += sz;
+                        else guest_low += sz;
+                    } else other_private += sz, cur.committed += sz;
+                } else if (mbi.Type == MEM_MAPPED) mapped += sz;
+                else image += sz;
+            }
+            at = lo + sz;
+            if (at >= 0x7FFFFFFE0000ULL) break;
+        }
+        if (cur.base) {
+            bucket[acct_bucket(cur.reserved)] += cur.committed;
+            if (nalloc < (1 << 16)) allocs[nalloc++] = cur;
+        }
+        qsort(allocs, (size_t)nalloc, sizeof allocs[0], acct_by_committed);
+        /* (the working set: every resident page, by where it is) */
+        uint64_t ws_guest_pool = 0, ws_guest_other = 0, ws_host = 0, ws_shared = 0;
+        if (query_ws) {
+            DWORD cap = 64u << 20;
+            ULONG_PTR *buf = (ULONG_PTR *)malloc(cap);
+            while (buf && !query_ws(GetCurrentProcess(), buf, cap)) {
+                if (GetLastError() != ERROR_BAD_LENGTH) { free(buf); buf = NULL; break; }
+                cap = (DWORD)((buf[0] + 4096) * sizeof(ULONG_PTR) + sizeof(ULONG_PTR));
+                free(buf);
+                buf = (ULONG_PTR *)malloc(cap);
+            }
+            if (buf) {
+                const int np = hos_pools_with_flags(NULL, 0, INT64_MAX, pools, COLD_MAX_EXCLUDED);
+                qsort(pools, (size_t)np, sizeof pools[0], by_lo);
+                int pi = 0;
+                for (ULONG_PTR i = 0; i < buf[0]; i++) {
+                    const ULONG_PTR e = buf[1 + i];
+                    const uint64_t va = (uint64_t)(e & ~(ULONG_PTR)0xFFF);
+                    if (e & 0x100) ws_shared += 4096;   /* (the Shared bit) */
+                    if (va >= g0 && va < g0 + HOS_GUEST_SPACE) {
+                        const uint64_t ga = va - g0;
+                        while (pi < np && pools[pi][1] <= ga) pi++;
+                        if (pi < np && pools[pi][0] <= ga) ws_guest_pool += 4096;
+                        else ws_guest_other += 4096;
+                    } else ws_host += 4096;
+                }
+                free(buf);
+            }
+        }
+        PROCESS_MEMORY_COUNTERS_EX pm;
+        memset(&pm, 0, sizeof pm);
+        pm.cb = sizeof pm;
+        K32GetProcessMemoryInfo(GetCurrentProcess(), (PROCESS_MEMORY_COUNTERS *)&pm, sizeof pm);
+        MEMORYSTATUSEX ms;
+        memset(&ms, 0, sizeof ms);
+        ms.dwLength = sizeof ms;
+        GlobalMemoryStatusEx(&ms);
+        uint32_t sys[128];
+        memset(sys, 0, sizeof sys);
+        ULONG got = 0;
+        uint32_t reads = 0;
+        if (nt_query && nt_query(2, sys, sizeof sys, &got) >= 0) reads = sys[20];   /* (SystemPerformanceInformation.PageReadCount) */
+        const uint32_t d_reads = have_last ? reads - last_reads : 0, d_faults = have_last ? (uint32_t)pm.PageFaultCount - last_faults : 0;
+        last_reads = reads, last_faults = (uint32_t)pm.PageFaultCount, have_last = 1;
+        const unsigned long long MB = 1ull << 20;
+        hos_log("hl mem: account: private %llu MB (queried commit %llu MB: guest heap %llu, guest regions %llu, guest low %llu, other "
+                "%llu; mapped %llu, image %llu); other private by allocation size: >=1 GB %llu, 256 MB-1 GB %llu, 64-256 MB %llu, "
+                "16-64 MB %llu, 2-16 MB %llu, <2 MB %llu (%d allocations)",
+                (unsigned long long)pm.PrivateUsage / MB,
+                (unsigned long long)(guest_heap + guest_regions + guest_low + other_private) / MB, guest_heap / MB, guest_regions / MB,
+                guest_low / MB, other_private / MB, mapped / MB, image / MB, bucket[0] / MB, bucket[1] / MB, bucket[2] / MB,
+                bucket[3] / MB, bucket[4] / MB, bucket[5] / MB, nalloc);
+        hos_log("hl mem: account: working set %llu MB (guest pools %llu, guest outside pools %llu, host %llu; shared %llu); the system: "
+                "%llu MB of %llu MB RAM free, commit %llu of %llu MB, %u pages read from disk since the last line, %u page faults "
+                "of the process; the pass took %.0f ms",
+                (unsigned long long)pm.WorkingSetSize / MB, ws_guest_pool / MB, ws_guest_other / MB, ws_host / MB, ws_shared / MB,
+                (unsigned long long)ms.ullAvailPhys / MB, (unsigned long long)ms.ullTotalPhys / MB,
+                (unsigned long long)(ms.ullTotalPageFile - ms.ullAvailPageFile) / MB, (unsigned long long)ms.ullTotalPageFile / MB,
+                d_reads, d_faults, (hos_now_ns() - t0) / 1e6);
+        for (int k = 0; k < 6 && k < nalloc; k++)
+            hos_log("hl mem: account:   host allocation %#llx: %llu MB reserved, %llu MB committed", (unsigned long long)allocs[k].base,
+                    (unsigned long long)allocs[k].reserved / MB, (unsigned long long)allocs[k].committed / MB);
+    }
+    return 0;
+}
+
 static int pressure_on = 1;
+static uint64_t lowmem_mb = 0;   /* (HL_MEM_COLD_LOWMEM=<MB>: available RAM under which nothing is taken out; 0, the default: never held. 3072 is the proposal) */
+static int lowmem_held;
+static int64_t lowmem_since, lowmem_ns, lowmem_passes;
 static int64_t pressure_until;
 static DWORD WINAPI cold_main(void *unused) {
     {
@@ -309,6 +452,10 @@ static DWORD WINAPI cold_main(void *unused) {
         pressure_on = pe && pe[0] ? atoi(pe) != 0 : 1;
     }
     (void)unused;
+    {
+        const char *lm = getenv("HL_MEM_COLD_LOWMEM");
+        if (lm && lm[0]) lowmem_mb = (uint64_t)atoll(lm);
+    }
     double worst_ms[2] = {0, 0};
     int64_t next_report = hos_now_ns() + 10000000000LL;
     uint64_t back_before[2] = {0, 0};   /* (come-backs of every kind, one and two passes ago: the quiet rule) */
@@ -321,6 +468,28 @@ static DWORD WINAPI cold_main(void *unused) {
            pages out and 6.8 GB came back, 113,504 units, and one working-set query took 6.8 s with game threads 2-11 s without a
            core: the system was paging, and each page taken out was one more to read back */
         if (pressure_on && hos_now_ns() < pressure_until) continue;
+        /* (MEM1, HL_MEM_COLD_LOWMEM=<MB>) The system's free RAM is low: every page taken out now goes to the standby or the
+           modified list of a machine that is about to reuse them, the dirty ones are written to the page file first, and what
+           the game or the back end reads next comes back from the disk. Nothing is taken out until the free RAM is a quarter
+           above the line again. */
+        if (lowmem_mb) {
+            MEMORYSTATUSEX ms;
+            memset(&ms, 0, sizeof ms);
+            ms.dwLength = sizeof ms;
+            if (GlobalMemoryStatusEx(&ms)) {
+                const uint64_t avail_mb = ms.ullAvailPhys >> 20;
+                if (!lowmem_held && avail_mb < lowmem_mb) {
+                    lowmem_held = 1, lowmem_since = hos_now_ns();
+                    hos_log("hl mem: cold pages: held, %llu MB of RAM free (under %llu MB; HL_MEM_COLD_LOWMEM=0: not)", (unsigned long long)avail_mb, (unsigned long long)lowmem_mb);
+                }
+                else if (lowmem_held && avail_mb >= lowmem_mb + lowmem_mb / 4) {
+                    lowmem_held = 0;
+                    lowmem_ns += hos_now_ns() - lowmem_since;
+                    hos_log("hl mem: cold pages: going on, %llu MB of RAM free; held %.1f s in all", (unsigned long long)avail_mb, lowmem_ns / 1e9);
+                }
+                if (lowmem_held) { lowmem_passes++; continue; }
+            }
+        }
         const int64_t t0 = hos_now_ns();
         const int64_t unlocks0 = cold_unlocks, queries0 = cold_queries;
         cold_max_ws = cold_max_unlock = cold_max_query = 0;
@@ -364,6 +533,10 @@ static DWORD WINAPI cold_main(void *unused) {
                         "pass %.1f ms at most", line, quiet_passes * COLD_PASS_MS / 1000.0,
                         quiet_passes_all * COLD_PASS_MS / 1000.0, (long long)heap_sweeps, worst_ms[1]);
             }
+            if (lowmem_mb)
+                hos_log("hl mem: cold pages: free RAM line %llu MB (HL_MEM_COLD_LOWMEM): %s now, %lld passes left out in all, held %.1f s in all",
+                        (unsigned long long)lowmem_mb, lowmem_held ? "held" : "not held", (long long)lowmem_passes,
+                        (lowmem_ns + (lowmem_held ? hos_now_ns() - lowmem_since : 0)) / 1e9);
             quiet_passes = 0;
             worst_ms[0] = worst_ms[1] = 0;
             next_report = hos_now_ns() + 10000000000LL;
@@ -373,6 +546,10 @@ static DWORD WINAPI cold_main(void *unused) {
 }
 
 void hl_mem_init(void) {
+    {
+        const char *ac = getenv("HL_MEM_ACCOUNT");
+        if (ac && atoi(ac) > 0) CloseHandle(CreateThread(NULL, 0, account_main, (void *)(intptr_t)atoi(ac), 0, NULL));
+    }
     const char *e = getenv("HL_MEM_COLD");
     const int want = e && e[0] ? atoi(e) != 0 : HL_MEM_COLD_DEFAULT;
     if (!want) {

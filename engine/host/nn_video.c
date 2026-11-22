@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Sacrappy
+
 /* nn::codec's hardware video decoders (VP8/VP9 here) and their image pools, on FFmpeg's libavcodec (the static
    libraries in Eglantine's package cache: work/eg/.cache/cpm/ffmpeg). MKW's movie library (subsdk0, movie::) plays
    its WebM movies through them: the cup openings, the courses' billboards, the emblems.

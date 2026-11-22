@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Sacrappy
+
 /* (HeyListen native engine) Guest code an exeFS (code) mod patches, and so what no native answer may override.
    The builder (nx2/exefs_mods.py, make_game.py --code-mods) patches the game's modules before the translation and writes the
    game folder's hookshot_code_patches.txt: the guest address ranges the patches changed and the guest functions containing them,

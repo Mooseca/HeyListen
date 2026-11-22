@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Sacrappy
+
 /* nn::os synchronization: mutexes, condition variables, events (light, normal, system, timer), semaphores,
    message queues, reader/writer locks, multi-wait.
 

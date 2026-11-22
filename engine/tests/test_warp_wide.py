@@ -1,3 +1,5 @@
+# Copyright (C) 2026 Sacrappy
+
 """Wave64 GPUs (issue 67): the translator emulates the guest's 32-lane warps on a wider subgroup, only where the GPU cannot run
 a stage at 32 lanes, and the cache stamp carries that only then. Reads the sources (no GPU, no game)."""
 import re

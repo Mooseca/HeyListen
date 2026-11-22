@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Sacrappy
+
 /* Which renderer the rx_* calls go to (gpu/vk/vk_api.h): the WebGPU one in the executable (gpu/render, its
    functions renamed wgr_* by rx_wgpu_names.h) or, with RX_BACKEND=vulkan, the Vulkan one in mkw_vk.dll beside the
    executable. Decided at rx_start, before any other rx_* call; a DLL that is missing or finds no usable Vulkan
@@ -452,6 +454,13 @@ int rx_start(void *hwnd) {
             return 1;
         }
         if (r) hos_log("rx: the Vulkan back end could not start on the window: WebGPU");
+        /* (v0.4.2 and v0.4.3: three players whose vkCreateInstance failed fell through to the WebGPU renderer, which panicked
+           inside wgpu_native.dll (an uncaught C++ exception, KERNELBASE 0xe06d7363) and ended as a crash report. That renderer was
+           never made for this game: a PC with no usable Vulkan driver is told so, and the log keeps the reason the back end gave.
+           RX_BACKEND=webgpu (or any other value) still reaches it) */
+        if (!eden && !getenv("HOS_VK_FALLBACK_WEBGPU"))
+            hos_fatal(NULL, "no usable Vulkan driver: HeyListen needs a GPU driver with Vulkan 1.3 (update your graphics driver; the log "
+                            "has the Vulkan back end's reason, \"vk: vkCreateInstance failed\" or the device lines before it)");
     }
     const int ok = wgr_start(hwnd);
     flush_early();

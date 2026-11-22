@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Sacrappy
+
 // Frame interpolation (RX_VK_FRAMEGEN=1; off by default): frames made between the game's, from its last two, shown in
 // between by a display thread, so a game at 60 fps is shown at 120 (RX_VK_FRAMEGEN_MULT=3: 180). The WebGPU
 // renderer's (gpu/render/rx_framegen.cpp, whose comments explain it), on Vulkan:

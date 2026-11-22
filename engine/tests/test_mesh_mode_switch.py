@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Sacrappy
 """How task and mesh programs run: the default by driver and OS, and the switch's precedence (gpu/vk/mesh_mode.h, vk_main.cpp).
 
 Issue 51 (an RX 6800 on Linux with RADV loses the GPU in native task/mesh draws, upstream Hookshot issue 2245): on Linux with

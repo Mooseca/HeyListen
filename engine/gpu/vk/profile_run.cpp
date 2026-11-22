@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Sacrappy
+
 // (heylisten) The detailed performance profile's runtime: see profile_run.h and profile_report.h.
 #include "profile_run.h"
 
@@ -118,7 +120,15 @@ std::atomic<DWORD> registered_tid[16];
 std::atomic<uint8_t> registered_role[16];
 std::atomic<int> registered_n{0};
 
-std::thread sampler;
+// (a file-scope std::thread that is still joinable when the process ends calls std::terminate from its destructor: ExitProcess
+// runs this DLL's static destructors with the sampler still looping, and the player saw "libc++abi: terminating" after
+// "display: window closed, exiting". perf_report_final stops the sampler first; this holder is the net below that)
+struct SamplerThread {
+    std::thread t;
+    ~SamplerThread() { if (t.joinable()) t.detach(); }
+};
+SamplerThread sampler_holder;
+std::thread& sampler = sampler_holder.t;
 std::atomic<bool> stop_sampler{false};
 std::atomic<int64_t> n_samples{0}, n_ticks{0}, n_busy_ns{0}, n_unknown{0}, n_dropped{0};
 std::vector<pf::Range> ranges;   // (sampler thread only)

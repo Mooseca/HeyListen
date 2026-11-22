@@ -1,3 +1,5 @@
+# Copyright (C) 2026 Sacrappy
+
 """(HeyListen) The upload budget (RX_VK_UPLOAD_BUDGET_MS, vk_texture.cpp's upload_defer): a new ASTC texture a draw samples is
 held back for a later present once the looking-up thread's own upload time this present reached the budget, not every
 thread's summed (the parallel replay's segment workers upload side by side: their sum reached 40 ms when the busiest had spent

@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Sacrappy
+
 // (heylisten) The performance summary (perf_report.h), ported from Longshot's #983: on only when the player chose "Send
 // performance statistics" in the menu (opts.send_perf, hookshot_options.ini's send_performance_stats=, OFF by default) AND the
 // build has an address to send to (nx2/addresses.ini's telemetry=, stamped into hookshot_version.txt, or HL_TELEMETRY_URL for a
@@ -872,11 +874,13 @@ void perf_frame_shown() {
 void perf_report_final(int event) {
     const bool measuring = perf_measure.load(std::memory_order_relaxed);
     if (measuring) perf_event(event);
-    std::lock_guard lk(mu);
+    std::unique_lock lk(mu);
     if (measuring) summarize(true);
     states_queue();   // (off: logs why it queues nothing)
     zones_queue();    // (the same moment: the per-zone keys are the recorder's own)
     profile_queue(true);   // (and the profile's last batch)
+    lk.unlock();
+    profile_stop();   // (the CPU sampler is a thread this DLL owns: stopped and joined before the process ends, not destroyed joinable)
 }
 
 }   // namespace mkwvk
