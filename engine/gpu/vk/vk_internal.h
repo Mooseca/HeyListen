@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <array>
 #include <atomic>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -241,11 +242,23 @@ bool probe_serial();
 void probe_dump_all(const char* why);
 void probe_log(uint64_t frame);
 void memory_end_submission(VkCommandBuffer cmd);
-/// (stream REC1) a segment's worker reads this recording's value and epoch, not the replay thread's current ones (vk_memory.cpp)
-uint64_t memory_epoch();
-void memory_recording_thread(uint64_t value, uint64_t epoch);
+/// (stream REC1, SUB1) what a segment's worker reads of the submission it belongs to, not what the replay thread has moved on to (vk_memory.cpp):
+/// the submission's epoch, the newest capture it may read (a capture newer than that is the next submission's), and its lists (write-backs, pools synced)
+struct MemSub;   // (vk_memory.cpp)
+struct MemView {
+    uint64_t epoch = 0;
+    uint32_t cap = 0;
+    std::shared_ptr<MemSub> sub;
+};
+MemView memory_view();   // the replay thread's, now: a group takes it when it begins
+void memory_recording_thread(uint64_t value, const MemView& view);
 void memory_recording_thread_end();
 void memory_recording_check(int64_t* reads, int64_t* value_diff, int64_t* epoch_diff);
+/// (stream SUB1, RX_VK_REC_OVERLAP_CHECK) reads and uses by workers of what a later submission replaced: all 0 with no recording beside another
+struct MemSubCheck {
+    int64_t cap_reads = 0, cap_newer = 0, pool_checks = 0, pool_newer = 0, list_adds = 0, list_other = 0;
+};
+MemSubCheck memory_sub_check();
 /// The game made a memory pool (gpu address, bytes): imported in the background, before it is used
 /// RX_VK_CHECKPOINTS: the draws the GPU reached, logged once the device is lost (vk_draw.cpp)
 void checkpoints_report();

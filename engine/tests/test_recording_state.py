@@ -6,6 +6,7 @@ docs/native-engine/recording-state.md has each piece's note. Here, the pieces al
 - the segments' init command buffers are an object of their group (SegTable), held by the group and by a worker while it records a
   segment of it: no global table (seg_init_mu, seg_inits), and nothing replaces it at a join;
 - a segment's worker reads its own recording's value and epoch (memory_recording_thread), not the replay thread's current ones;
+- (stream SUB1) the capture view, the pool's sync pair and the write-back and synced lists are per submission (MemView);
 - the uniform updates' list positions are absolute (ub_base, ub_end, ub_at): a prune moves nothing a recording holds, and the deque is
   read through ub_at only.
 
@@ -50,7 +51,14 @@ def main():
     need(len(re.findall(r"\bmirror_epoch\b", code)) == 5, "mirror_epoch is read other than through rec_epoch() (its declaration, bump, memory_epoch and accessor)")
     need(rep.count("memory_recording_thread(j->r->value,") == 2 and rep.count("memory_recording_thread_end();") == 2,
          "a segment's worker does not set and clear its recording's value and epoch (both record paths)")
-    need("G.rec_epoch = memory_epoch();" in rep, "a group does not take the epoch it begins in")
+    need("G.view = memory_view();" in rep and "const MemView seg_view = memory_view();" in rep, "a group does not take the view of the submission it begins in")
+    # (stream SUB1) the capture view, the pool's sync pair and the submission's lists
+    need("cap_entry_view(page, &old_entry)" in mem,
+         "memory_read_as_submitted does not read the capture through the submission's view")
+    need(not re.search(r"^std::vector<WriteBack> writebacks;|^std::vector<Pool\*> mirror_wanted, mirror_synced;", mem, re.M),
+         "the write-back and synced lists are global again")
+    need("lists().writebacks.push_back" in mem and "lists().synced.push_back" in mem, "a binding adds to a list other than its submission's")
+    need(code.count("synced_epoch = ") == 2, "a pool's sync pair is set other than through pool_sync_note (its declaration and the note)")
     print("PASS recording state: page table changes per thread, segment init table per group, uniform update positions absolute")
 
 

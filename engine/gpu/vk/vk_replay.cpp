@@ -1606,6 +1606,10 @@ int64_t par_point_every() {
 uint64_t par_seq = 0;   // (the segments' order, across submissions: a recording's uploads precede it; texture_set_segment)
 std::shared_mutex ub_grow_mu;
 std::atomic<bool> ub_growing{false};
+// (stream SUB1) a group of segments is pending (defer_group is set: workers may be recording): reads of the uniform updates' list take ub_grow_mu
+// shared as in a dry pass, so that ub_prune (a pop at the deque's front: its start moves) holds it exclusively. Set before the group's last
+// segment is posted, cleared after its join: never set unless RX_VK_DEFER_JOIN is on
+std::atomic<bool> ub_group_pending{false};
 thread_local int ub_read_depth = 0;   // (a read inside a read holds the lock once)
 // (HeyListen) an append waiting for ub_grow_mu: reads not begun yet hold back until it has it (grow_lock_plain() off). The lock
 // lets new shared holders in while a writer waits (glibc's rwlock prefers readers), and four or more workers each read the list
@@ -1615,7 +1619,8 @@ std::atomic<bool> ub_grow_waiting{false};
 struct UbReadGuard {
     std::shared_lock<std::shared_mutex> lk;
     UbReadGuard() {
-        if (ub_read_depth++ == 0 && rmode == Mode::Worker && ub_growing.load(std::memory_order_acquire)) {
+        if (ub_read_depth++ == 0 && rmode == Mode::Worker &&
+            (ub_growing.load(std::memory_order_acquire) || ub_group_pending.load(std::memory_order_acquire))) {
             for (int spin = 0; ub_grow_waiting.load(std::memory_order_acquire); spin++)
                 if (spin >= 64) std::this_thread::yield();
             lk = std::shared_lock<std::shared_mutex>(ub_grow_mu);
@@ -1668,6 +1673,13 @@ bool deferred_late() {   // (RX_VK_DEFERRED_LATE=1: deferred binds read from the
 void ub_prune(uint64_t done) {
     rec_shared_note(kRsUbPrune);
     if (ub_updates.empty() || ub_updates.front().value > done) return;
+    // (stream SUB1: with a group pending, the workers read the list under ub_grow_mu shared: the pop waits for the reads under way)
+    std::unique_lock<std::shared_mutex> prune_lk;
+    if (ub_group_pending.load(std::memory_order_acquire)) {
+        ub_grow_waiting.store(true, std::memory_order_release);
+        prune_lk = std::unique_lock<std::shared_mutex>(ub_grow_mu);
+        ub_grow_waiting.store(false, std::memory_order_release);
+    }
     while (!ub_updates.empty() && ub_updates.front().value <= done) {
         ub_updates.pop_front();
         ub_base++;
@@ -3385,7 +3397,7 @@ struct EarlyGroup {
     bool sub_after_rd = false;
     std::atomic<bool> dry_uploaded{false};
     SegTableRef seg_table;   // (stream REC1: this group's init command buffers; the workers hold it while they record a segment)
-    uint64_t rec_epoch = 0;   // (stream REC1: memory_epoch() when the group began: what its workers read as the submission's epoch)
+    MemView view;   // (streams REC1, SUB1: memory_view() when the group began: the submission's epoch, capture limit and lists, which its workers read)
     std::condition_variable seg_cv;
     std::mutex seg_mu;
     bool init_lost = false;
@@ -3454,7 +3466,7 @@ void early_record_job(EarlyGroup& G, EarlyJob* j) {
     work_seg_begin();   // (TICK-061, D6: par_active is on while these segments record)
     texture_set_segment(j->order);
     texture_segment_worker(G.seg_table, j->index);
-    memory_recording_thread(j->r->value, G.rec_epoch);   // (stream REC1)
+    memory_recording_thread(j->r->value, G.view);   // (stream REC1)
     texture_begin_recording(j->r->upload, j->r->value);
     draw_begin_recording(j->r->slot, j->r->cmd, j->r->value);
     VkCommandBuffer c = j->r->cmd;
@@ -3570,6 +3582,11 @@ void early_join(EarlyGroup& G) {
             memory_recording_check(&rd, &vd, &ed);
             logf("vk: DEFER_JOIN_CHECK: reads of the submission's value and epoch by segment workers: %lld, where the worker's differed from the replay thread's: "
                  "value %lld, epoch %lld", (long long)rd, (long long)vd, (long long)ed);
+            const MemSubCheck sc = memory_sub_check();   // (stream SUB1)
+            logf("vk: DEFER_JOIN_CHECK: per submission (SUB1): capture entries read by segment workers %lld, of them newer than the worker's submission %lld; "
+                 "pool sync checks %lld, of them a pool synced by a later submission %lld; list additions %lld, to a list that is not the current one %lld",
+                 (long long)sc.cap_reads, (long long)sc.cap_newer, (long long)sc.pool_checks, (long long)sc.pool_newer, (long long)sc.list_adds,
+                 (long long)sc.list_other);
             std::fill(std::begin(defer_stats.shared), std::end(defer_stats.shared), 0);
             std::fill(std::begin(defer_stats.why), std::end(defer_stats.why), 0);
             std::fill(std::begin(defer_stats.beside), std::end(defer_stats.beside), 0);
@@ -3602,6 +3619,7 @@ void defer_join_now(DeferJoinWhy why) {
     defer_group = nullptr;
     feed_set(mkwvk::feed::kJoin);
     early_join(*g);
+    ub_group_pending.store(false, std::memory_order_release);   // (stream SUB1: the workers are done)
 }
 const uint8_t* replay_handle_early(VkCommandBuffer& cmd, const uint8_t* h, bool may_stop, int nplan, const int64_t* plan,
                                    bool self_help, mkwvk::segment_plan::Profile& profile, int64_t* total_out, bool* cut) {
@@ -3630,7 +3648,7 @@ const uint8_t* replay_handle_early(VkCommandBuffer& cmd, const uint8_t* h, bool 
     memory_rb_segments_begin(base, (uint64_t)nplan);
     const auto group = std::make_shared<EarlyGroup>();   // (heap: the join may come after this function has returned, RX_VK_DEFER_JOIN)
     EarlyGroup& G = *group;
-    G.rec_epoch = memory_epoch();
+    G.view = memory_view();
     std::vector<std::unique_ptr<EarlyJob>>& jobs = G.jobs;
     for (int k = 0; k < nplan; k++) {
         auto j = std::make_unique<EarlyJob>();
@@ -3709,6 +3727,7 @@ const uint8_t* replay_handle_early(VkCommandBuffer& cmd, const uint8_t* h, bool 
     if (early) {
         par_active = true;   // (the dry pass's texture paths and marks take ParLock from here on)
         ub_growing.store(true, std::memory_order_relaxed);
+        if (defer_join_mode() != 0) ub_group_pending.store(true, std::memory_order_release);   // (stream SUB1: until this group is joined)
         seg_early_hook = &hook;
     }
     rmode = Mode::Dry;
@@ -3793,6 +3812,7 @@ const uint8_t* replay_handle_early(VkCommandBuffer& cmd, const uint8_t* h, bool 
         jt_mark(18, 0);
         early_wall.mark(7);
         early_join(G);
+        if (!defer_group) ub_group_pending.store(false, std::memory_order_release);   // (stream SUB1: no group is left pending)
         early_wall.mark(8);
     }
     feed_set(mkwvk::feed::kAfter);   // (stream REPLAY2)
@@ -4140,7 +4160,7 @@ const uint8_t* replay_handle(VkCommandBuffer& cmd, const uint8_t* h, bool may_st
         return occ_stop ? occ_go_on(cmd, occ_stop, may_stop, nullptr) : stop;
     }
     const SegTableRef seg_table = texture_segments_begin(inits.data(), inits.size());
-    const uint64_t seg_epoch = memory_epoch();   // (stream REC1)
+    const MemView seg_view = memory_view();   // (stream REC1)
     const auto t_seg0 = std::chrono::steady_clock::now();
     int64_t locks0, wait0;
     par_counts_sum(&locks0, &wait0);
@@ -4151,13 +4171,13 @@ const uint8_t* replay_handle(VkCommandBuffer& cmd, const uint8_t* h, bool may_st
     // (one segment recorded into its own recording, on any recording thread: a worker, or with RX_VK_PARALLEL_SELF the replay
     // thread for the first. The thread's per-recording state (draw_begin_recording, texture_begin_recording) is set for it here;
     // the replay thread's is set again by begin_recording for what follows the segments, below)
-    const auto record_job = [&seg_cv, &seg_mu, &now_ns, &seg_table, seg_epoch, setup_here](Job* j) {
+    const auto record_job = [&seg_cv, &seg_mu, &now_ns, &seg_table, seg_view, setup_here](Job* j) {
         j->t0 = now_ns();
         work_seg_begin();   // (TICK-061, D6: RX_VK_WORK_LOCAL, vk_work.h; par_active is on until every job is done)
         if (setup_here) segment_begin_here(*j->r);   // (TICK-061, D7)
         texture_set_segment(j->order);
         texture_segment_worker(seg_table, j->index);
-        memory_recording_thread(j->r->value, seg_epoch);   // (stream REC1)
+        memory_recording_thread(j->r->value, seg_view);   // (stream REC1)
         texture_begin_recording(j->r->upload, j->r->value);
         draw_begin_recording(j->r->slot, j->r->cmd, j->r->value);
         VkCommandBuffer c = j->r->cmd;

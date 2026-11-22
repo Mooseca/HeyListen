@@ -60,6 +60,15 @@
 namespace mkwvk {
 // (RX_VK_POOL_FINALIZE: the captures of the game's submits queued, and those the replay took: a finalize waits for the ones before it)
 std::atomic<uint64_t> submits_queued{0}, submits_taken{0};
+namespace { struct Pool; struct WriteBack { Pool* pool; uint64_t lo, hi; /* offsets in the pool */ }; }
+// (stream SUB1, docs/native-engine/recording-state.md, piece 10) What a submission collects as it records, and its end consumes: the mirrors
+// it synced (their synced_gen moves at its end) and the ranges its shaders wrote (copied back at its end). One per submission:
+// memory_begin_submission makes a fresh one, a group takes the current one with memory_view(), a worker adds to its group's
+// (lists()), memory_end_submission reads the current one. Under pools_mu, like the vectors they were.
+struct MemSub {
+    std::vector<Pool*> synced;
+    std::vector<WriteBack> writebacks;
+};
 namespace {
 
 // Every raw imported-buffer destruction goes through here, including unpublished allocation rollback.
@@ -83,6 +92,7 @@ struct Pool {
     uint32_t synced_gen = 0;     // every page stamped up to this generation is in the mirror
     uint64_t synced_epoch = 0;   // the submission that last brought it up to date
     uint64_t sync_seg = 0;       // (and the parallel replay's segment whose uploads did)
+    uint64_t prev_epoch = 0, prev_seg = 0;   // (stream SUB1: the pair before the last one: a recording of that submission still finds the pool synced for it, see pool_sync_note)
     uint64_t made_epoch = 0, made_seg = 0;   // (TICK-036: the submission and segment whose uploads filled its mirror)
     uint64_t last_value = 0;     // (the newest submission that bound it: its mirror is in use until that one is done)
     uint64_t direct_write_epoch = 0;   // (the part that last wrote it in guest memory, before it had a mirror)
@@ -121,8 +131,20 @@ uint64_t mem_rec_value = 0, mem_completed = 0;   // (the recording being made, a
 thread_local bool tl_rec_set = false;
 thread_local uint64_t tl_rec_value = 0, tl_rec_epoch = 0;
 std::atomic<int64_t> st_rec_value_diff{0}, st_rec_epoch_diff{0}, st_rec_reads{0};
+// (stream SUB1) the rest of a recording thread's view of its submission: the newest capture it may read (0: the newest there is, the
+// replay thread's and every thread outside a segment), and the submission's lists (below, MemSub). RX_VK_REC_OVERLAP_CHECK counts, for a
+// segment's worker, the reads of a capture entry newer than its limit, the pool sync checks that found a pool synced by a later
+// submission, and the additions to a list that is not the current one: each 0 with no recording beside another
+thread_local uint32_t tl_cap_limit = 0;
+thread_local MemSub* tl_sub = nullptr;
+std::atomic<uint32_t> cap_latest{0};   // (the newest capture kept: what memory_view() gives a group, and what a worker with a lower limit is behind)
+std::atomic<int64_t> st_sub_cap_reads{0}, st_sub_cap_newer{0}, st_sub_pool_checks{0}, st_sub_pool_newer{0}, st_sub_list_adds{0}, st_sub_list_other{0};
 bool rec_check_on() {
     static const bool v = getenv("RX_VK_REC_OVERLAP_CHECK") && atoi(getenv("RX_VK_REC_OVERLAP_CHECK")) != 0;
+    return v;
+}
+bool cap_prev_on() {   // (stream SUB1: the capture table keeps the entry each capture replaced; see cap_entry_view)
+    static const bool v = rec_check_on() || (getenv("RX_VK_SUB_OVERLAP") && atoi(getenv("RX_VK_SUB_OVERLAP")) != 0);
     return v;
 }
 inline uint64_t rec_value_of() {
@@ -1045,6 +1067,21 @@ inline bool cap_entry_late(uint64_t page) {
     if (c >= cap_table.size() || !cap_table[c]) return false;
     return (cap_table[c][page % kCapChunkPages].slot & kCapLateBit) != 0;
 }
+// (stream SUB1, piece 9 of recording-state.md) The capture view of a submission. A capture replaces a page's entry; a worker still recording
+// the submission before reads "guest memory as it was at the submission": the entry its capture left, which the next capture has just
+// replaced. cap_prev keeps that one entry a page (the entry the newest capture replaced, whatever its validity then), made only
+// where a recording may begin beside the workers of the one before (RX_VK_SUB_OVERLAP) or the check runs; a worker whose limit (the newest
+// capture its group saw at its begin, tl_cap_limit) is below the entry reads the previous one, or guest memory where there is none.
+// A page taken by two captures past a worker's limit has lost its entry: Stage B joins a submission before the capture after the next
+bool cap_prev_on();
+std::vector<std::unique_ptr<CapEntry[]>> cap_prev;
+inline void cap_prev_chunk(uint64_t c) {
+    if (c >= cap_prev.size()) cap_prev.resize(c + 1);
+    if (!cap_prev[c]) {
+        cap_prev[c].reset(new CapEntry[kCapChunkPages]);
+        std::memset(cap_prev[c].get(), 0, kCapChunkPages * sizeof(CapEntry));
+    }
+}
 inline void cap_entry_set(uint64_t page, CapEntry e) {
     const uint64_t c = page / kCapChunkPages;
     if (c >= cap_table.size()) cap_table.resize(c + 1);
@@ -1052,7 +1089,31 @@ inline void cap_entry_set(uint64_t page, CapEntry e) {
         cap_table[c].reset(new CapEntry[kCapChunkPages]);
         std::memset(cap_table[c].get(), 0, kCapChunkPages * sizeof(CapEntry));
     }
+    if (cap_prev_on()) {
+        cap_prev_chunk(c);
+        cap_prev[c][page % kCapChunkPages] = cap_table[c][page % kCapChunkPages];
+    }
     cap_table[c][page % kCapChunkPages] = e;
+}
+inline CapEntry cap_entry_prev(uint64_t page) {
+    const uint64_t c = page / kCapChunkPages;
+    if (c >= cap_prev.size() || !cap_prev[c]) return {0, 0};
+    CapEntry e = cap_prev[c][page % kCapChunkPages];
+    e.slot &= ~kCapLateBit;
+    return e;
+}
+/// The page's entry as the submission the calling thread records saw it: the newest, or (a worker whose limit is below it) the one before
+/// it, or none. *old: the entry is the one before, whose validity is not the page's current generation's (it was valid when it was replaced)
+inline CapEntry cap_entry_view(uint64_t page, bool* old) {
+    *old = false;
+    const CapEntry e = cap_entry(page);
+    if (!tl_rec_set) return e;
+    if (rec_check_on()) st_sub_cap_reads.fetch_add(1, std::memory_order_relaxed);
+    if (!tl_cap_limit || e.gen <= tl_cap_limit) return e;
+    if (rec_check_on()) st_sub_cap_newer.fetch_add(1, std::memory_order_relaxed);
+    const CapEntry p = cap_entry_prev(page);
+    if (p.gen && p.gen <= tl_cap_limit) return *old = true, p;
+    return {0, 0};
 }
 // (each kept capture's copy on the GPU, by its generation)
 struct CapHash { std::vector<uint64_t> h; std::vector<uint8_t> ok; };   // (TICK-060: a kept capture's slot hashes, see Capture)
@@ -1890,8 +1951,9 @@ bool memory_read_as_submitted(uint64_t gpu, void* dst, uint64_t n) {
         bool late_read = false;
         auto overlay = [&](const uint64_t guest, uint8_t* const dst, const uint64_t n) {   // (the capture's pages over [guest, guest + n) of guest memory, into dst)
         for (uint64_t page = guest >> kPageShift; page < (guest + n + 4095) >> kPageShift; page++) {
-            const CapEntry e = cap_entry(page);
-            if (!e.gen || e.gen != page_gen(page)) continue;
+            bool old_entry = false;
+            const CapEntry e = cap_entry_view(page, &old_entry);   // (stream SUB1: the entry of the submission the thread records)
+            if (!e.gen || (!old_entry && e.gen != page_gen(page))) continue;
             auto b = cap_bufs.find(e.gen);
             if (b == cap_bufs.end() || !b->second.map) continue;
             const uint64_t a = std::max(page << kPageShift, guest), z = std::min((page + 1) << kPageShift, guest + n);
@@ -1943,7 +2005,9 @@ bool memory_read_as_submitted(uint64_t gpu, void* dst, uint64_t n) {
         } else {
             overlay(guest, (uint8_t*)dst, n);
         }
-        if (!segmented && page0 == page1 && !late_read && from == 0) {   // (in no capture: guest memory stands for its next words too)
+        // (stream SUB1: not for a worker whose capture limit is behind the newest: its answer is for its submission's view only)
+        const bool behind = tl_rec_set && tl_cap_limit && tl_cap_limit != cap_latest.load(std::memory_order_relaxed);
+        if (!segmented && page0 == page1 && !late_read && from == 0 && !behind) {   // (in no capture: guest memory stands for its next words too)
             SubmittedPage& submitted_page = submitted_page_for(page0);
             submitted_page.page = page0;
             submitted_page.pgen = page_gen(page0);
@@ -1957,7 +2021,13 @@ bool memory_read_as_submitted(uint64_t gpu, void* dst, uint64_t n) {
     return true;
 }
 
-uint64_t memory_capture_view() { return cap_view_gen.load(std::memory_order_acquire); }
+uint64_t memory_capture_view() {
+    const uint64_t v = cap_view_gen.load(std::memory_order_acquire);
+    // (stream SUB1: a worker behind the newest capture has a view of its own: what it reads is not what the replay thread reads at the same number)
+    if (tl_rec_set && tl_cap_limit && tl_cap_limit != cap_latest.load(std::memory_order_relaxed))
+        return (1ull << 63) | ((uint64_t)tl_cap_limit << 32) | (v & 0xffffffffu);
+    return v;
+}
 uint32_t memory_page_stamp(uint64_t gpu) {
     const uint64_t guest = gpu < (1ull << 40) ? gpu : host->gpu_guest(gpu);
     const uint64_t page = guest >> kPageShift;
@@ -3300,11 +3370,19 @@ void inherit_watch_print() {
 }
 /// (stream REC1) A segment's worker: the value and epoch of the recording this segment belongs to, read at every use of them below until
 /// memory_recording_thread_end. memory_epoch() (below, with memory_begin_submission) is what the replay thread's group takes when it begins
-void memory_recording_thread(uint64_t value, uint64_t epoch) {
-    tl_rec_set = true, tl_rec_value = value, tl_rec_epoch = epoch;
+void memory_recording_thread(uint64_t value, const MemView& view) {
+    tl_rec_set = true, tl_rec_value = value, tl_rec_epoch = view.epoch;
+    tl_cap_limit = view.cap, tl_sub = view.sub.get();   // (stream SUB1)
 }
 void memory_recording_thread_end() {
-    tl_rec_set = false;
+    tl_rec_set = false, tl_cap_limit = 0, tl_sub = nullptr;
+}
+MemSubCheck memory_sub_check() {
+    MemSubCheck c;
+    c.cap_reads = st_sub_cap_reads.load(), c.cap_newer = st_sub_cap_newer.load();
+    c.pool_checks = st_sub_pool_checks.load(), c.pool_newer = st_sub_pool_newer.load();
+    c.list_adds = st_sub_list_adds.load(), c.list_other = st_sub_list_other.load();
+    return c;
 }
 /// (RX_VK_REC_OVERLAP_CHECK) the reads of a segment's worker where its value or epoch differed from the globals: 0 with no recording beside another
 void memory_recording_check(int64_t* reads, int64_t* value_diff, int64_t* epoch_diff) {
@@ -3599,6 +3677,7 @@ void stamp_split_chunk(void* ctx, int64_t i0, int64_t i1) {
         } else {
             const size_t j = (size_t)i - w.n;
             const uint64_t page = w.copied[j];
+            if (cap_prev_on()) cap_prev[page / kCapChunkPages][page % kCapChunkPages] = cap_table[page / kCapChunkPages][page % kCapChunkPages];
             cap_table[page / kCapChunkPages][page % kCapChunkPages] = CapEntry{w.g, w.slots[j] | (w.late[w.slots[j]] ? kCapLateBit : 0u)};
         }
     }
@@ -3621,6 +3700,7 @@ void stamp_split_run(const uint32_t* pages, size_t n, const uint32_t* copied, co
             cap_table[c].reset(new CapEntry[kCapChunkPages]);
             std::memset(cap_table[c].get(), 0, kCapChunkPages * sizeof(CapEntry));
         }
+        if (cap_prev_on()) cap_prev_chunk(c);
     }
     StampSplit w{pages, copied, slots, n, m, g, late};
     ClaimJob job{nullptr, (int64_t)(n + m), nullptr, nullptr, 256};
@@ -3890,6 +3970,7 @@ bool take_capture(std::unique_ptr<Capture> c, uint64_t value, uint64_t completed
         cap_bufs.emplace(g, b);
         cap_bytes += b.size, cap_used += b.used;
         cur_cap_gen = g;
+        cap_latest.store(g, std::memory_order_relaxed);   // (stream SUB1)
         // (TICK-053: a late page merged at its sync carries kCapLateBit; a slot is the page's index in c->pages, as c->late)
         static thread_local std::vector<uint8_t> late_mark;
         late_mark.assign(c->pages.size(), 0);
@@ -4511,12 +4592,34 @@ inline uint64_t rec_epoch() {
     return tl_rec_epoch;
 }
 bool mirror_upload = false;   // (a submission is being recorded: its upload command buffer takes the syncs)
-std::vector<Pool*> mirror_wanted, mirror_synced;
-struct WriteBack {
-    Pool* pool;
-    uint64_t lo, hi;   // offsets in the pool
-};
-std::vector<WriteBack> writebacks;
+std::vector<Pool*> mirror_wanted;
+std::shared_ptr<MemSub> sub_cur = std::make_shared<MemSub>();   // (the submission being recorded: its lists, pools_mu)
+/// The lists a recording thread adds to: a segment's worker its group's submission's, every other thread the current one. The check
+/// counts the additions to a list that is not the current one (a recording beside the next submission's)
+inline MemSub& lists() {
+    if (rec_check_on()) {
+        st_sub_list_adds.fetch_add(1, std::memory_order_relaxed);
+        if (tl_sub && tl_sub != sub_cur.get()) st_sub_list_other.fetch_add(1, std::memory_order_relaxed);
+    }
+    return tl_sub ? *tl_sub : *sub_cur;
+}
+/// A pool brought up to date at (epoch, seg): the pair it had before is kept as the one before, so a recording of the submission before
+/// still finds the pool synced for it once a later submission has synced it again (see pool_synced_for)
+inline void pool_sync_note(Pool& p, uint64_t epoch, uint64_t seg) {
+    if (p.synced_epoch != epoch) p.prev_epoch = p.synced_epoch, p.prev_seg = p.sync_seg;
+    p.synced_epoch = epoch, p.sync_seg = seg;
+}
+/// Is the pool's mirror up to date for a recording of this epoch from segment `seg` on: synced by that submission at or before the
+/// segment, or (a later submission synced it since) by the pair before. With no recording beside another the second never holds and the
+/// answer is the one the pair gave: synced_epoch == epoch && sync_seg <= seg
+inline bool pool_synced_for(const Pool& p, uint64_t epoch, uint64_t seg) {
+    if (rec_check_on() && tl_rec_set) {
+        st_sub_pool_checks.fetch_add(1, std::memory_order_relaxed);
+        if (p.synced_epoch > epoch) st_sub_pool_newer.fetch_add(1, std::memory_order_relaxed);
+    }
+    if (p.synced_epoch == epoch) return p.sync_seg <= seg;
+    return p.synced_epoch > epoch && p.prev_epoch == epoch && p.prev_seg <= seg;
+}
 
 // ---- (TICK-015) Write-backs left out: the game's pools the CPU does not read. Every range a submission's shaders write is
 // copied from the mirror back to guest memory (69 MB a frame in Hyrule Field, 1.6 ms of GPU time), almost all of it into
@@ -5389,9 +5492,8 @@ int64_t mirror_sync(Pool& p) {
     auto last_buf = cap_bufs.end();
     std::vector<VkBufferCopy>* last_runs = nullptr;
     VkBuffer last_runs_buf = VK_NULL_HANDLE;
-    p.synced_epoch = rec_epoch();
-    p.sync_seg = texture_segment();
-    mirror_synced.push_back(&p);
+    pool_sync_note(p, rec_epoch(), texture_segment());
+    lists().synced.push_back(&p);
     std::vector<VkBufferCopy> runs;   // (from guest memory)
     std::map<VkBuffer, std::vector<VkBufferCopy>> cap_runs;   // (from the captures' copies)
     std::map<VkBuffer, std::vector<VkBufferCopy>> late_runs;  // (TICK-053: the late pages' changed words, 4-byte granular copies)
@@ -6407,7 +6509,7 @@ BufferRef gpu_buffer_bind(uint64_t gpu, uint64_t size, bool written) {
             if (mirror_on()) st_direct_fast.fetch_add(1, std::memory_order_relaxed), st_direct_fast_bytes.fetch_add((int64_t)size, std::memory_order_relaxed);
             return remember({p->buffer, off, size, 0});
         }
-        if (p->mstate == Pool::MIRROR_ON && p->synced_epoch == rec_epoch() && p->sync_seg <= texture_segment())
+        if (p->mstate == Pool::MIRROR_ON && pool_synced_for(*p, rec_epoch(), texture_segment()))
             return remember({p->mirror, off, size, 0});
     }
     ParLock plk;   // (before pools_mu, always: a mirror sync records into the shared upload command buffer)
@@ -6485,7 +6587,7 @@ BufferRef gpu_buffer_bind(uint64_t gpu, uint64_t size, bool written) {
         // (RX_VK_POOL_MIRROR: a never-imported pool's go through staging, memory_end_submission)
         if (!p->memory && !p->never_imported && !import_again(*p, kAgainWrite)) return {};
     }
-    if (p->synced_epoch != rec_epoch() || p->sync_seg > texture_segment()) mirror_sync(*p);
+    if (!pool_synced_for(*p, rec_epoch(), texture_segment())) mirror_sync(*p);
     if (written) {
         // (hookshot, 11-10) RX_VK_WB_MAX_KB=<KB>: bindings larger than that do not queue a write-back. OoT writes
         // tens of MB of culling lists and per-frame buffers through the GPU that the CPU never reads; copying them
@@ -6500,7 +6602,7 @@ BufferRef gpu_buffer_bind(uint64_t gpu, uint64_t size, bool written) {
         }();
         // (STEP1, HL_RB_LAG) a range the CPU reads back that the readback ring stages: no write-back, the submission's end copies it
         if ((!wb_max || size <= wb_max) && !rbring_stage_bind(guest, size, p->mirror, off))
-            writebacks.push_back({p, off, std::min(off + size, p->hi - p->lo)});
+            lists().writebacks.push_back({p, off, std::min(off + size, p->hi - p->lo)});
         diff_gpu_wrote(p->lo + off, std::min(off + size, p->hi - p->lo) - off);   // (TICK-048)
         rb_hazard_locked(p->lo + off, p->lo + std::min(off + size, p->hi - p->lo));   // (memory_rb_refresh)
     }
@@ -7176,9 +7278,12 @@ void memory_pool_finalized(uint64_t gpu, uint64_t size) {   // (the game's threa
     st_fin_notes++;
 }
 
-/// (stream REC1) the epoch of the submission being recorded: what a group of segments reads as its recordings' epoch
-uint64_t memory_epoch() {
-    return mirror_epoch;
+/// (stream REC1, SUB1) the submission being recorded as a group of segments takes it when it begins: its epoch, the newest capture
+/// there is, its lists. What the group's workers read, whatever the replay thread has begun since
+MemView memory_view() {
+    MemView v;
+    v.epoch = mirror_epoch, v.cap = cap_latest.load(std::memory_order_relaxed), v.sub = sub_cur;
+    return v;
 }
 
 void memory_begin_submission() {
@@ -7190,8 +7295,7 @@ void memory_begin_submission() {
     imports_release();   // (RX_VK_NO_HOST_IMPORT)
     mirror_epoch++;
     mirror_upload = true;
-    mirror_synced.clear();
-    writebacks.clear();
+    sub_cur = std::make_shared<MemSub>();   // (stream SUB1: a fresh pair of lists; a group of the submission before keeps its own)
     imports_give_back();
     if (tex_capture_on()) publish_tex_spans(texture_frame_no());
     if (!mirror_on()) return;
@@ -7462,10 +7566,9 @@ bool mirror_make(Pool& pool) {
         pools_gen.fetch_add(1, std::memory_order_relaxed);   // (the binding's buffer changes: guest memory, then this mirror)
         p->fill_value = rec_value_of();   // (RX_VK_NO_HOST_IMPORT: its import may go once this recording is done)
         p->synced_gen = gen_now;
-        p->synced_epoch = rec_epoch();
-        p->sync_seg = texture_segment();
+        pool_sync_note(*p, rec_epoch(), texture_segment());
         p->made_epoch = rec_epoch(), p->made_seg = texture_segment();
-        mirror_synced.push_back(p);
+        lists().synced.push_back(p);
         mirror_bytes += n;
         st_mirrors++;
         st_sync_bytes += (int64_t)n;
@@ -7965,6 +8068,8 @@ void memory_end_submission(VkCommandBuffer cmd) {
     }
     rbring_flush(cmd, rec_value_of());   // (STEP1, HL_RB_LAG: the staged ranges into the readback ring)
     static const bool no_writeback = getenv("RX_VK_NO_WRITEBACK") != nullptr;   // (an experiment: none)
+    MemSub& sub = *sub_cur;   // (stream SUB1: this submission's lists)
+    std::vector<WriteBack>& writebacks = sub.writebacks;
     if (no_writeback) writebacks.clear();
     if (!writebacks.empty()) {
         // per pool, the ranges merged, one copy each (mirror -> the guest's pool)
@@ -8251,8 +8356,8 @@ void memory_end_submission(VkCommandBuffer cmd) {
     }
     // (what this submission synced is current as of now: the GPU's own writes, stamped while it was recorded, are
     // in the mirror and written back; CPU writes collected at the next submission get a newer generation)
-    for (Pool* p : mirror_synced) p->synced_gen = gen_now;
-    mirror_synced.clear();
+    for (Pool* p : sub.synced) p->synced_gen = gen_now;
+    sub.synced.clear();
     mirror_upload = false;
 }
 
