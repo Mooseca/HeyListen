@@ -3590,13 +3590,14 @@ struct EarlyJob {
 };
 // ---- (stream SMALL1) RX_VK_SMALL_PREFIX=1 (default off): small command buffers off the replay thread's serial chain ----
 // A command buffer under two segments' worth of draws and dispatches is recorded whole on the replay thread (replay_handle): its dry pass, then
-// its recording, one after the other, ~55 us each on the PC 3050's Market (17 a frame). With the switch on, the ones followed in the same
-// submission by a big command buffer that the early path cuts (RX_VK_SEG_EARLY) are only dry-passed (~4 us: the state, the render
-// conditions, the uniform updates, the events and counters in stream order) and left pending, each with the state at its start; the big one's
-// replay_handle_early then gives them to one job of its group, the first, which a worker records in order into a recording of its own
-// while the replay thread runs the big one's dry pass; its submit goes ahead of the big one's segments, in order, as any segment's. Pending
-// ones that no such big command buffer follows (the submission ends, a stop, a serial replay, a big one that is not cut) are recorded
-// whole right then, as before, in the recording they would have been (small_pend_flush).
+// its recording, one after the other. With the switch on, the ones of a burst (the pieces of the queues that wait for each other go into one
+// recording; a small piece ends at a wait for the big piece after it, in the next run_submit) with RX_VK_SMALL_PREFIX_MIN draws and dispatches
+// or more, and every one after a pending one, are only dry-passed (~4 us: the state, the render conditions, the uniform updates, the events and
+// counters in stream order, up to a wait) and left pending, each with the state at its start. The next big command buffer that the early path
+// cuts (RX_VK_SEG_EARLY) gives them to one job of its group, the first, which a worker records in order into a recording of its own while
+// the replay thread runs the big one's dry pass; its submit goes ahead of the big one's segments, in order, as any segment's. Pending ones that
+// no such big command buffer follows (the recording ends, a serial replay, a big one that is not cut) are recorded whole right then, as before,
+// in the recording they would have been (small_pend_flush).
 bool small_prefix_on() {
     static const bool v = [] {
         const char* e = getenv("RX_VK_SMALL_PREFIX");
