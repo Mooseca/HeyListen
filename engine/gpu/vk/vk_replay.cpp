@@ -3606,8 +3606,12 @@ bool small_prefix_on() {
     }();
     return v;
 }
-std::vector<PendingSmall> small_pend;   // (replay_mu)
-bool small_later_big = false;           // (run_submit: a later command buffer of this submission has two segments' worth of work)
+std::vector<PendingSmall> small_pend;   // (replay_mu, or sync_order_mu for the span of a burst)
+bool burst_open = false;                // (a burst: the pieces replayed one after the other go into one recording, below)
+int64_t small_prefix_min() {            // (RX_VK_SMALL_PREFIX_MIN: the work from which a command buffer is left pending by itself, 8 by default; the ones after a pending one always are)
+    static const int64_t v = getenv("RX_VK_SMALL_PREFIX_MIN") ? std::max<int64_t>(1, atoll(getenv("RX_VK_SMALL_PREFIX_MIN"))) : 8;
+    return v;
+}
 /// The pending small command buffers recorded now, whole, into the recording that is open, in order
 void small_pend_flush() {
     if (small_pend.empty()) return;
@@ -4319,16 +4323,18 @@ const uint8_t* replay_handle(VkCommandBuffer& cmd, const uint8_t* h, bool may_st
     presync_kick_at = 0;
     if (seg.size() > 1) pk_big_now |= 1ull << pk_this;
     if (presync_early.r) presync_early_finish(seg.size() > 1);   // (TICK-056: its copies ahead of rec_cur, on every path below)
-    if (seg.size() == 1 && small_later_big && small_prefix_on() && !stop && !occ_stop && !defer_group && small_pend.size() < 24) {
-        // (stream SMALL1) a big command buffer follows in this submission: only the dry pass is made here; the recording is a worker's
-        // (replay_handle_early's first job) or, if that does not come, small_pend_flush's
+    if (seg.size() == 1 && small_prefix_on() && burst_open && !occ_stop && !defer_group && small_pend.size() < 24 &&
+        (!small_pend.empty() || total >= small_prefix_min())) {
+        // (stream SMALL1) in a burst (the pieces of the queues that wait for each other go into one recording): only the dry pass is
+        // made here, up to a wait it stopped at; the recording is left to the first job of the next big command buffer's group
+        // (replay_handle_early), or, if no such comes before the recording ends, to small_pend_flush
         PendingSmall e;
         e.start = std::make_unique<NvnState>(start);
-        e.g = {h, nullptr, e.start.get(), ub0, cond0, serial0};
+        e.g = {h, stop, e.start.get(), ub0, cond0, serial0};
         e.work = total;
         small_pend.push_back(std::move(e));
         small_pend_n++;
-        return nullptr;
+        return stop;
     }
     if (seg.size() == 1) {   // (one segment: here, as the dry pass left the reports and conditions)
         small_pend_flush();   // (stream SMALL1: the ones before it first, in order)
@@ -4908,7 +4914,6 @@ void log_order_stats() {
 // back and forth a frame) go into one recording. Each piece had its own, and its memory sync, write-backs and submit:
 // ~8 a frame. The burst's recording is tagged with the newest value among them (what is used in it is kept until
 // that one is done; the timeline is signalled at its end as far as allowed, as for any). ----
-bool burst_open = false;
 uint64_t burst_value = 0;
 void burst_begin(uint64_t value) {
     burst_open = event_waits_on() && !dump_on();
@@ -4929,6 +4934,7 @@ void burst_end() {
 /// The recording being made: ended and submitted, the timeline signalled as far as no older submission is unfinished
 void finish_recording(uint64_t value) {
     (void)value;
+    small_pend_flush();   // (stream SMALL1: the small command buffers left pending, recorded whole before the recording ends)
     Recording& r = *rec_cur;
     rec_cur = nullptr;
     end_pass(r.cmd);
@@ -5044,10 +5050,6 @@ bool run_submit(const uint64_t* handles, int n, uint64_t value, uint64_t queue, 
     for (; cb < n; cb++, p = nullptr) {
         if (!handles[cb]) continue;
         feed_set(mkwvk::feed::kWhole);   // (stream REPLAY2)
-        small_later_big = false;
-        if (small_prefix_on())   // (stream SMALL1: a big command buffer later in this submission, by the headers)
-            for (int k = cb + 1; k < n && !small_later_big; k++)
-                if (handles[k]) small_later_big = count_work(reinterpret_cast<const uint8_t*>(handles[k])) >= 2 * par_seg_per();
         int64_t sq_d0 = 0, sq_di0 = 0;
         if (small_log_on()) {
             int64_t sk, pl;
@@ -5065,8 +5067,7 @@ bool run_submit(const uint64_t* handles, int n, uint64_t value, uint64_t queue, 
         }
         if (stop) break;
     }
-    small_pend_flush();   // (stream SMALL1: what no big command buffer took, recorded whole, before the recording's end)
-    small_later_big = false;
+    if (!burst_open) small_pend_flush();   // (stream SMALL1: in a burst they go on to the next piece; else recorded whole before the recording's end)
     if (small_log_on()) small_seq_note(-1, false);   // (the submission's end)
     defer_join_now();   // (stream JOIN1: a join never outlives the command buffers' loop: the recording's end below needs every segment)
     if (stop) {
