@@ -259,3 +259,42 @@ none of them a wait on another thread (`submit_q` never waits for `sync_order_mu
   It needs the jobs on the heap, `par_active`, `par_seq`, `texture_segments_begin` and the in-order submits kept until a real join (the next `replay_mu` taker's first
   act), and the Serial-mode replay of the next submission to be safe beside workers that are still recording (today only the dry pass runs beside them: `ub_growing`,
   ParLock). That is a design for its own stream with a check mode comparing pictures, not a change to make in a measuring pass.
+
+
+# JOIN1 (the join of a big command buffer's segments deferred; 22 Nov 2026, branch refactor/join1 from refactor/replay2)
+
+## What was built
+- `replay_handle_early`'s jobs, in-order submit rule and join are now `EarlyGroup` (on the heap, held by the pool's jobs), `early_submit_job`, `early_submit_ready`,
+  `early_record_job`, `early_join`. Same behaviour with the switch off (source-shape tests updated).
+- `RX_VK_DEFER_JOIN=1|2` (off; a diagnosis, NOT for play): the last segment goes to the pool too, `replay_handle_early` returns without recording or waiting, and the join is
+  made by the replay thread later: =1 after the next command buffer's dry pass, =2 only at the latest points. Joins are forced before: the next big command buffer's start
+  (its pre-sync and `texture_segments_begin`), a serial replay, an early pre-sync on a worker, the multi-segment path, `occ_go_on`, and run_submit's end of loop (a join never
+  outlives `replay_mu`). A dry pass beside pending segments continues `par_conds` (not reset, `cond0`) and holds `ub_grow_mu`.
+- `RX_VK_DEFER_JOIN_CHECK=1`: at each join, every segment's recorded draws and dispatches against the dry pass's plan; counts the steps that ran beside pending segments.
+- `RX_VK_SMALL_ASYNC`: NOT built (see below).
+
+## Shared state, why nothing useful can run beside the pending segments (read from the code)
+`begin_recording` (the recording that follows) calls `memory_table_begin` (global `table_defer`/`table_pending`, which a worker's `texture_uploads_recorded` ->
+`memory_table_flush` also writes, unlocked), `memory_recording_value` (global `mem_rec_value`), `memory_rb_recording_begun` (`rb_joined`) and `texture_begin_recording`;
+the next pre-sync marks pools `synced_epoch`, which a pending segment's bind consults (a pool it binds later would be taken as synced with the copy behind it in the queue);
+a new submission's `memory_begin_submission` bumps `mirror_epoch` and clears `mirror_synced`/`writebacks`; `finish_recording`'s `memory_end_submission` needs every worker's
+write-backs; `texture_segments_begin` replaces the table the workers index; `ub_prune`, `par_conds_reset` free what workers read. Serial-mode ops write guest memory and `ev_values`.
+Only the dry pass (ParLock, `ub_grow_mu`, `par_conds_n`) is built to run beside workers, and in a real frame the next step after a big command buffer is always one of the forced joins.
+
+## Results (main PC, RTX 5070, speed lease priority 3, `market-spin` from `market-mid`, 3 interleaved rounds, `HL_RB_LAG=2 HL_GFX_VAR=1 RX_VK_FEED_LOG=1`, RUNGUARD_MIN_FREE_MB=2800: the owner's browser left 3.7 GB free)
+| arm | fps r1/r2/r3 | p95 ms | not ready ms | GPU idle ms | own seg / wait-or-join |
+|---|---|---|---|---|---|
+| A off | 74.7 / 85.7 / 87.1 | 17.0 / 15.8 / 15.5 | 2.39 / 1.98 / 1.84 | 2.64 / 2.24 / 2.11 | 0.95 / 0.19 |
+| D1 | 54.4 / 75.2 / 88.8 | 32.4 / 17.7 / 15.3 | 2.86 / 2.20 / 1.91 | 3.11 / 2.45 / 2.17 | 1.0 / 0.78 (the join) |
+| D2 (unsafe) | 86.0 / 87.6 / 78.8 | 15.8 / 15.3 / 16.6 | 2.04 / 1.90 / 2.32 | 2.29 / 2.16 / 2.58 | 1.0 / 0.77 |
+Round 1 of each arm is the slow one (machine state). No gain in not-ready, idle, fps or p95; the wait just becomes the join (0.19 -> 0.78 ms) because nothing runs in between.
+Check (D1/D2 with CHECK, Market, Kakariko, Lost Woods, Inside the Deku Tree, `kokiri-idle`, ~10,000 joins each): 0 segments differ from the plan; steps beside pending segments per join:
+recording begun 1.00, serial small command buffer 0.00, dry pass 0.00. No crash, hang or lost device in any run (no validation layer was on).
+Not verified: pictures. `RX_VK_SHOTS` wrote no file in the bench runs (windowed; a HOS_HEADLESS try also wrote none), so off/on pictures were not compared.
+
+## SMALL_ASYNC: why not built
+A small command buffer is 3.4 draws, ~0.024 ms recorded whole on the 5070 (~0.06 on the 3050); on a worker it needs its own recording and a `vkQueueSubmit2` (~0.04 ms, 14 a frame = 0.57 ms on the 3050)
+plus a new `rec_cur` (`begin_recording`, unsafe beside workers, above) at every one. Net loss or break-even, and unsafe until the memory/texture globals above are per-recording.
+
+## For the PC 3050 (files in `C:\OOT\builds\join1`)
+Not needed for a verdict: the 5070's chain already shows the join has nothing to overlap with. If wanted: A plain vs `RX_VK_DEFER_JOIN=1`, `HL_RB_LAG=2 HL_GFX_VAR=1 RX_VK_FEED_LOG=1`, 3 interleaved rounds, 1440p and 1080p.
