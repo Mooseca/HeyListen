@@ -445,8 +445,8 @@ thread_local bool on_reaper = false;
 bool reap_enabled() {
     static const bool on = [] {
         const char* e = getenv("RX_VK_REAP");
-        if (e && atoi(e) == 0) {
-            logf("vk: images and buffers destroyed on the caller's thread, as before (RX_VK_REAP=0)");
+        if (!e || atoi(e) == 0) {   // (off by default since 2026-11-22: the 5070 A/B was noise, 2 of 3 Market pairs slower; the 3050 decides)
+            logf("vk: images and buffers destroyed on the caller's thread, as before (RX_VK_REAP=1 moves them to a reaper thread)");
             return false;
         }
         std::thread([] {

@@ -2279,9 +2279,9 @@ The render target pool: the most its idle images may hold (by default a twelfth 
 
 #### `RX_VK_DESTROY_PER_FRAME` - developer
 
-(Relink, pixl27; RX_VK_DESTROY_PER_FRAME=<n>, default 24, 0: no cap) At most that many dead textures a frame go to the reaper, the rest at the next frames: the sweep every 600 frames retired ~300 at once outdoors, and their destruction (kernel calls each) was a 15-30 ms hitch every 10 s. A render target's image going to the pool, and a spare kept, do not count. A backlog of over eight frames' worth is worked off in about half a second (dead / 30 a frame), and with VRAM within 5% of what the driver allows (or past it) the cap is lifted: the dead textures' memory is what the next ones need.
+(Relink, pixl27; RX_VK_DESTROY_PER_FRAME=<n>, default 24, 0: no cap) At most that many dead textures a frame go to the reaper, the rest at the next frames: the sweep every 600 frames retired ~300 at once outdoors, and their destruction (kernel calls each) was a 15-30 ms hitch every 10 s. A render target's image going to the pool, and a spare kept, do not count. A backlog of over eight frames' worth is worked off in about half a second (dead / 30 a frame), and with VRAM within 5% of what the driver allows (or past it) the cap is lifted: the dead textures' memory is what the next ones need (off by default since 2026-11-22: 24 was ReLink's; the 5070 A/B was noise; the 3050 decides).
 
-**Values:** a whole number. **Default:** 24.
+**Values:** a whole number. **Default:** 0.
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 

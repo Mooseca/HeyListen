@@ -5371,7 +5371,7 @@ void texture_frame(uint64_t completed) {
     // calls each) was a 15-30 ms hitch every 10 s. A render target's image going to the pool, and a spare kept, do not count. A
     // backlog of over eight frames' worth is worked off in about half a second (dead / 30 a frame), and with VRAM within 5% of what
     // the driver allows (or past it) the cap is lifted: the dead textures' memory is what the next ones need
-    static const int per_frame_cfg = getenv("RX_VK_DESTROY_PER_FRAME") ? std::max(0, atoi(getenv("RX_VK_DESTROY_PER_FRAME"))) : 24;
+    static const int per_frame_cfg = getenv("RX_VK_DESTROY_PER_FRAME") ? std::max(0, atoi(getenv("RX_VK_DESTROY_PER_FRAME"))) : 0;   // (off by default since 2026-11-22: 24 was ReLink's; the 5070 A/B was noise; the 3050 decides)
     int per_frame = per_frame_cfg ? per_frame_cfg : INT_MAX;
     if (per_frame_cfg && dead.size() > (size_t)per_frame * 8) {
         uint64_t vu = 0, va = 0;
