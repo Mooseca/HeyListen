@@ -55,7 +55,7 @@ def main():
 
     e = function(rp, "const uint8_t* replay_handle_early(")
     need("getenv" not in e, "replay_handle_early reads a switch: the segments' GPU time must not depend on one")
-    loop = e[e.index("for (int k = 0; k < nplan; k++) {"):e.index("std::vector<VkCommandBuffer> inits;")]
+    loop = e[e.index("for (int k = 0; k < nplan + (int)P; k++) {"):e.index("std::vector<VkCommandBuffer> inits;")]
     need("gpu_time_begin(*j->r);" in loop and loop.index("vkBeginCommandBuffer(j->r->upload, &bi);") < loop.index("gpu_time_begin(*j->r);"),
          "early path: a segment's timestamps are not begun after its upload command buffer")
     need(e.index("gpu_time_begin(*j->r);") < e.index("hook.on_point = [&](const ParPoint& q) {") < e.index("jt_mark(13, 0);"),

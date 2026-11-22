@@ -79,7 +79,7 @@ def main():
     read += " " + block(read_rest, "else {")   # (OCC1: the entry is a CondRes, its gate read with the result)
     if "cond_at < par_conds.size()" in source:
         raise SystemExit("FAIL: a worker still reads par_conds' size")
-    if source.count("par_points.clear(), par_conds_reset(), dry_work = 0;") != 2 or "par_conds.clear()" in source.replace(reset, ""):
+    if source.count("par_points.clear(), par_conds_reset(), dry_work = 0;") != 1 or source.count("if (!P) par_conds_reset();") != 1 or "par_conds.clear()" in source.replace(reset, ""):
         raise SystemExit("FAIL: a dry pass does not reset par_conds with room")
     docs = (ROOT / "docs/development.md").read_text(encoding="utf-8")
     if "RX_VK_GROW_LOCK_PLAIN" not in docs:
