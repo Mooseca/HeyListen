@@ -326,6 +326,8 @@ void clear_tex(VkCommandBuffer cmd, NvnState& st, const nvn_p_clear_tex& p) {
     if (!resolve(p.tex, &p.view, p.has_view != 0, p.r, s)) return;
     const uint32_t lw = std::max(1u, s.tex->width >> s.level), lh = std::max(1u, s.tex->height >> s.level);
     const bool whole = !s.x && !s.y && s.w == lw && s.h == lh;
+    if (!whole && s.tex->no_attach)   // (QUICK1: a region is cleared by a pass: it needs the attachment usage)
+        if (Texture* again = texture_get(p.tex, false, true)) s.tex = again;
     if ((p.mask & 0xf) != 0xf && (s.tex->aspect & VK_IMAGE_ASPECT_COLOR_BIT)) warn(8, "texture clear with a channel mask: cleared whole");
     end_pass(cmd);
     GprofSpan gp(cmd, "xfer clear texture (with its barriers)");

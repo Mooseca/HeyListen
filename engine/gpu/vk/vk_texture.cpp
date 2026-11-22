@@ -2566,6 +2566,27 @@ void forget_gpu(Texture* tex) {
         }
 }
 
+/// (QUICK1, RX_VK_COMPUTE_ONLY_IMAGES=1, off until measured; idea: Rekarina's notes, 2026-11, SIM_NO_ATTACH) A colour image the game
+/// made with the shader-image flag and looked up first for sampling or storage is made without COLOR_ATTACHMENT usage: the driver
+/// then keeps it in the layout compute likes best (a fluid pass of Rekarina's went from 9 ms to 0.2 ms, in 2 of 5 runs). The
+/// game gives no "this is a render target" flag, so the first time one is bound as a target anyway (texture_get's need_attach), its
+/// image is made again with the usage, its key is remembered (attach_seen: the next one of that shape is made with it from the start),
+/// and its content up to then is lost: a rare, one-time event per shape, not a per-frame one.
+bool compute_only_on() {
+    static const bool on = getenv("RX_VK_COMPUTE_ONLY_IMAGES") && atoi(getenv("RX_VK_COMPUTE_ONLY_IMAGES")) != 0;
+    return on;
+}
+std::mutex attach_mu;
+std::unordered_set<uint64_t> attach_seen;
+uint64_t attach_key(const nvn_tex* t) {
+    return mix(mix(mix(t->gpu, t->d.width | (uint64_t)t->d.height << 32), (uint64_t)t->d.format), (uint64_t)t->d.target << 8 | std::max(1, t->d.samples));
+}
+bool attach_known(const nvn_tex* t) {
+    std::lock_guard lk(attach_mu);
+    return attach_seen.count(attach_key(t)) != 0;
+}
+std::atomic<int> st_no_attach_made{0}, st_no_attach_upgraded{0};
+
 /// (as_target: texture_get's for a render target or a copy's destination, not for sampling: its image goes to the render targets'
 /// blocks, and to the target pool when its texture goes)
 Texture* create(const Key& key, const nvn_tex* t, VkFormat vf, bool astc, int bw, int bh, int bpb, bool as_target) {
@@ -2748,7 +2769,14 @@ Texture* create(const Key& key, const nvn_tex* t, VkFormat vf, bool astc, int bw
     } else if (!is_bc(x.format) && !is_astc(x.format)) {
         // (any format of the class may be a view: attachments and storage where one of them can)
         flags |= VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT | VK_IMAGE_CREATE_EXTENDED_USAGE_BIT;
-        x.usage |= VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+        x.usage |= VK_IMAGE_USAGE_SAMPLED_BIT;
+        if (compute_only_on() && !as_target && !x.sparse && x.samples == VK_SAMPLE_COUNT_1_BIT && (d.flags & NVN_TEXTURE_FLAGS_IMAGE) &&
+            !attach_known(t)) {
+            x.no_attach = true;
+            st_no_attach_made++;
+        } else {
+            x.usage |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+        }
         if (x.samples == VK_SAMPLE_COUNT_1_BIT) x.usage |= VK_IMAGE_USAGE_STORAGE_BIT;
     } else {
         // Raw storage views address one compressed block per texel (8 or 16 bytes).
@@ -3339,7 +3367,7 @@ unsigned view_layer(const nvn_view* v) {
     return v && v->set_layers ? v->min_layer : 0;
 }
 
-Texture* texture_get(const nvn_tex* t, bool for_sampling) {
+Texture* texture_get(const nvn_tex* t, bool for_sampling, bool need_attach) {
     PROF_HOT(PROF_TEXGET);
     if (!t || !t->gpu || t->d.target == NVN_TEXTURE_TARGET_BUFFER) return nullptr;
     const VkFormatInfo fi = vk_format(t->d.format);
@@ -3369,6 +3397,23 @@ Texture* texture_get(const nvn_tex* t, bool for_sampling) {
     k.cls = format_class(fi.format, t->d.format, bpb, fi.astc);
     Texture* tex;
     auto it = textures.find(k);
+    if (it != textures.end() && need_attach && it->second->no_attach) {
+        // (QUICK1: a compute-only image bound as a target after all: made again with the usage, and its shape remembered)
+        Texture* old = it->second.get();
+        {
+            std::lock_guard lk(attach_mu);
+            attach_seen.insert(attach_key(t));
+        }
+        st_no_attach_upgraded++;
+        static int told;
+        if (told++ < 20)
+            logf("vk: compute-only image #%u %#llx %ux%u NVN %#x bound as a target: made again with the attachment usage",
+                 old->id, (unsigned long long)old->gpu, old->width, old->height, old->nvn_format);
+        destroy_later(*old);
+        forget_gpu(old);
+        textures.erase(it);
+        it = textures.end();
+    }
     if (it == textures.end()) {
         tex = create(k, t, fi.format, fi.astc, bw, bh, bpb, !for_sampling);
         if (!tex) return nullptr;
@@ -5476,6 +5521,9 @@ void texture_frame(uint64_t completed) {
                  (unsigned long long)st_pool_destroyed, (unsigned long long)pool_n, (unsigned long long)(pool_bytes >> 20),
                  pool_cap() ? (pool_pressure >= 2 ? ", VRAM critical: given back" : pool_pressure == 1 ? ", VRAM short: halved" : "") : " (RX_VK_TARGET_POOL_MB=0)");
         }
+        if (compute_only_on())
+            logf("vk: compute-only images (RX_VK_COMPUTE_ONLY_IMAGES): %d made without the attachment usage, %d made again with it",
+                 st_no_attach_made.load(), st_no_attach_upgraded.load());
         uint32_t samplers_made = 0, samplers_waiting = 0, samplers_limit = 0;   // (longshot #442: a count that grows without end shows)
         uint64_t samplers_retired = 0, samplers_destroyed = 0;
         sampler_counts(&samplers_made, &samplers_waiting, &samplers_retired, &samplers_destroyed, &samplers_limit);

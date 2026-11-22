@@ -4759,7 +4759,7 @@ Targets targets(NvnState& s) {
     at.n = std::clamp(s.rt.n, 0, 8);
     for (int i = 0; i < at.n; i++) {
         const nvn_tex* t = s.rt.color[i];
-        Texture* tex = t ? texture_get(t, false) : nullptr;
+        Texture* tex = t ? texture_get(t, false, true) : nullptr;
         if (tex && !(tex->aspect & VK_IMAGE_ASPECT_COLOR_BIT)) tex = nullptr;
         if (!tex) continue;
         const nvn_view* v = s.rt.has_cview[i] ? &s.rt.cview[i] : nullptr;
