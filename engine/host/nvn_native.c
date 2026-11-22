@@ -2984,6 +2984,7 @@ NV(nvnQueuePresentTexture) {
     if (i < 0 || i >= o->ntex) die("present of window texture %d", i);
     held_init();
     present_thread = hos_self();   /* (TICK-054, HOS_NVN_HOLD=2: the presenting thread, whose submits are not held) */
+    hos_sw_present();   /* (HL_STALL_WATCH, hos_jobtrace.c: the gap between presents) */
     held_flush_why(HF_PRESENT);   /* (a present flushes the queue) */
     {   /* (heylisten) this frame's pacing sleep (nn_vi.c), for the performance summary's pace part: pushed before the present
            so the frame the renderer counts inside it carries it (gpu/vk/perf_parts.h's HOS_OPT_PERF_PACE, as the Cheats page's

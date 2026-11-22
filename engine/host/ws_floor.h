@@ -59,7 +59,10 @@ static inline int ws_floor_apply(const char *env, uint64_t *mb, uint64_t *ram_mb
     GetProcessWorkingSetSizeEx(GetCurrentProcess(), &lo, &hi, &flags);
     const SIZE_T want = (SIZE_T)*mb << 20, room = (SIZE_T)256 << 20;
     const SIZE_T top = hi > want + room ? hi : want + room;   /* (the maximum at least the minimum: the call's rule) */
-    if (SetProcessWorkingSetSizeEx(GetCurrentProcess(), want, top, QUOTA_LIMITS_HARDWS_MIN_DISABLE | QUOTA_LIMITS_HARDWS_MAX_DISABLE))
+    /* (STALL1, HOS_WS_FLOOR_HARD=1, diagnostic: a hard minimum, which Windows never trims below, even when the PC runs short) */
+    const char *hard = getenv("HOS_WS_FLOOR_HARD");
+    const DWORD min_flag = hard && hard[0] == '1' ? QUOTA_LIMITS_HARDWS_MIN_ENABLE : QUOTA_LIMITS_HARDWS_MIN_DISABLE;
+    if (SetProcessWorkingSetSizeEx(GetCurrentProcess(), want, top, min_flag | QUOTA_LIMITS_HARDWS_MAX_DISABLE))
         return 1;
     *err = GetLastError();
     return -1;

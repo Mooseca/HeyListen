@@ -201,6 +201,7 @@ extern volatile int hos_jt_on;
 void hos_jt_rec(int type, uint64_t a, uint64_t b);
 uint64_t hos_jt_lr(void);
 void hos_jt_start(void);
+void hos_sw_present(void);   /* (HL_STALL_WATCH: the presenting thread's present, hos_jobtrace.c) */
 enum {
     JT_EV_WAIT_B = 1, JT_EV_WAIT_E, JT_EV_SIGNAL, JT_SPIN_E,   /* event (a key, b lr | b how: 0 ready 1 spun 2 slept, +4 timed out) */
     JT_CV_WAIT_B, JT_CV_WAIT_E, JT_CV_SIGNAL,                  /* condition variable (a cv; signal b: count, 0 all) */

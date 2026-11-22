@@ -11,22 +11,30 @@
    HOS_JOBTRACE_AT=<s> (default 90): seconds after start the window opens; HOS_JOBTRACE_SECS=<s> (default 3) its length.
    Records go to one preallocated array (4 M x 32 bytes, allocated only when the trace is asked for) by an atomic index;
    outside the window a record costs one load and a branch. After the window the file is written: "T <idx> <host
-   thread pointer, 16 hex digits> <name>" lines, then "<ns> <type> <thread idx> <a hex> <b hex>" (types in hos.h, JT_*). */
+   thread pointer, 16 hex digits> <name>" lines, then "<ns> <type> <thread idx> <a hex> <b hex>" (types in hos.h, JT_*).
+
+   HL_STALL_WATCH=<ms> (diagnostic, STALL1 22 Nov 2026): the same records kept all the time in a ring (4 M records, the last
+   seconds of a busy game), and a watcher thread that looks at the presenting thread's cadence: when no present has come for
+   <ms> (default 40) it takes the process's page-fault count and working set, each thread's CPU time and where each thread is
+   running (the instruction pointer: module + offset), and when the present does come it writes the records of the gap (and 3 ms
+   before it) to <HL_STALL_WATCH_DIR>/stall_<n>.jt in the HOS_JOBTRACE format and logs the gap's per-thread CPU time, page
+   faults and working-set change: what every thread did while the presenting thread's wait lasted. 24 gaps at most. */
 #include "hos.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <psapi.h>
 #include <immintrin.h>
 
 volatile int hos_jt_on;
 
 typedef struct { int64_t t; uint16_t type, th; uint32_t pad; uint64_t a, b; } JtRec;
-#define JT_CAP (4u << 20)
+#define JT_CAP (4u << 20)   /* (a power of two: the ring of HL_STALL_WATCH masks with it) */
 static JtRec *recs;
 static volatile LONG64 nrec;
-static struct { void *host; char name[64]; } ths[512];
+static struct { void *host; char name[64]; DWORD tid; } ths[512];
 static volatile LONG nths;
 static _Thread_local int my_idx;   /* (index + 1; 0: none yet) */
 
@@ -36,6 +44,7 @@ static int thread_idx(void) {
     if (i >= 512) { my_idx = 512; return 511; }
     HosThread *t = hos_self();
     ths[i].host = t;
+    ths[i].tid = GetCurrentThreadId();
     if (t) snprintf(ths[i].name, sizeof ths[i].name, "%s", hos_thread_name(t));
     else {
         PWSTR d = NULL;
@@ -49,10 +58,13 @@ static int thread_idx(void) {
     return i;
 }
 
+static int sw_ring;   /* (HL_STALL_WATCH: the records wrap) */
+static volatile int64_t sw_last_present;
 void hos_jt_rec(int type, uint64_t a, uint64_t b) {
     if (!recs) return;
-    const LONG64 i = InterlockedIncrement64(&nrec) - 1;
-    if (i >= JT_CAP) return;
+    LONG64 i = InterlockedIncrement64(&nrec) - 1;
+    if (sw_ring) i &= JT_CAP - 1;
+    else if (i >= JT_CAP) return;
     JtRec *r = &recs[i];
     r->t = hos_now_ns();
     r->type = (uint16_t)type;
@@ -110,7 +122,125 @@ static DWORD WINAPI jt_thread(void *p) {
     return 0;
 }
 
+/* (HL_STALL_WATCH) the presenting thread's present: the watcher's clock */
+void hos_sw_present(void) {
+    if (sw_ring) sw_last_present = hos_now_ns();
+}
+
+typedef struct { int64_t user, kern; } SwCpu;
+static int64_t ft_ns(FILETIME f) { return (int64_t)((uint64_t)f.dwHighDateTime << 32 | f.dwLowDateTime) * 100; }
+static void sw_cpu_all(HANDLE *hs, SwCpu *out, LONG m) {
+    for (LONG i = 0; i < m; i++) {
+        FILETIME c, e, k, u;
+        out[i].user = out[i].kern = -1;
+        if (hs[i] && GetThreadTimes(hs[i], &c, &e, &k, &u)) out[i].user = ft_ns(u), out[i].kern = ft_ns(k);
+    }
+}
+static void sw_where(void *rip, char *out, size_t cap) {
+    HMODULE mod = NULL;
+    if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (LPCSTR)rip, &mod) && mod) {
+        char path[MAX_PATH] = "?";
+        GetModuleFileNameA(mod, path, sizeof path);
+        const char *base = strrchr(path, '\\');
+        snprintf(out, cap, "%s+%#llx", base ? base + 1 : path, (unsigned long long)((char *)rip - (char *)mod));
+    } else snprintf(out, cap, "%p", rip);
+}
+static void sw_dump(const char *dir, int n, int64_t from, int64_t to) {
+    char path[MAX_PATH];
+    snprintf(path, sizeof path, "%s/stall_%02d.jt", dir, n);
+    FILE *f = fopen(path, "w");
+    if (!f) { hos_log("stallwatch: cannot write %s", path); return; }
+    fprintf(f, "# jobtrace window %lld %lld\n", (long long)from, (long long)to);
+    const LONG m = nths < 512 ? nths : 512;
+    for (LONG i = 0; i < m; i++)
+        fprintf(f, "T %ld %016llx %s\n", (long)i, (unsigned long long)(uintptr_t)ths[i].host, ths[i].name[0] ? ths[i].name : "?");
+    LONG64 cnt = 0;
+    for (LONG64 i = 0; i < JT_CAP; i++) {
+        const JtRec *r = &recs[i];
+        if (r->t < from || r->t > to) continue;
+        fprintf(f, "%lld %u %u %llx %llx\n", (long long)r->t, r->type, r->th, (unsigned long long)r->a, (unsigned long long)r->b);
+        cnt++;
+    }
+    fclose(f);
+    hos_log("stallwatch: %lld records to %s", (long long)cnt, path);
+}
+static DWORD WINAPI sw_thread(void *p) {
+    const char *dir = (const char *)p;
+    const char *e = getenv("HL_STALL_WATCH");
+    const int thr_ms = e && atoi(e) > 1 ? atoi(e) : 40;
+    static HANDLE hs[512];
+    static SwCpu c0[512], c1[512];
+    static CONTEXT ctx[512];
+    static char have[512], where[512][96];
+    PROCESS_MEMORY_COUNTERS pm0, pm1;
+    memset(&pm0, 0, sizeof pm0);
+    int64_t cur = 0;   /* (the present the running gap began at; 0: none) */
+    int dumped = 0;
+    for (;;) {
+        Sleep(1);
+        const int64_t now = hos_now_ns(), lp = sw_last_present;
+        if (!lp) continue;
+        const LONG m = nths < 512 ? nths : 512;
+        for (LONG i = 0; i < m; i++)
+            if (!hs[i] && ths[i].tid) hs[i] = OpenThread(THREAD_QUERY_LIMITED_INFORMATION | THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT, FALSE, ths[i].tid);
+        if (cur && lp != cur) {   /* the present came: the gap is over */
+            const double ms = (lp - cur) / 1e6;
+            sw_cpu_all(hs, c1, m);
+            memset(&pm1, 0, sizeof pm1);
+            K32GetProcessMemoryInfo(GetCurrentProcess(), &pm1, sizeof pm1);
+            hos_log("stallwatch: gap %.1f ms between presents: page faults +%lu, working set %+lld MB since the %d ms mark; each thread's CPU since the mark and where it was then",
+                    ms, (unsigned long)(pm1.PageFaultCount - pm0.PageFaultCount),
+                    ((long long)pm1.WorkingSetSize - (long long)pm0.WorkingSetSize) / (1 << 20), thr_ms);
+            for (LONG i = 0; i < m; i++) {
+                if (c0[i].user < 0 || c1[i].user < 0) continue;
+                const double u = (c1[i].user - c0[i].user) / 1e6, k = (c1[i].kern - c0[i].kern) / 1e6;
+                if (u + k >= 0.5) hos_log("stallwatch:   %-28s cpu %.1f ms (user %.1f kernel %.1f); then at %s", ths[i].name, u + k, u, k,
+                                          have[i] ? where[i] : "-");
+            }
+            if (dumped < 24) sw_dump(dir, dumped++, cur - 3000000LL, lp + 1000000LL);
+            cur = 0;
+        }
+        if (!cur && now - lp >= (int64_t)thr_ms * 1000000LL) {   /* a gap reached the threshold: where every thread is */
+            cur = lp;
+            sw_cpu_all(hs, c0, m);
+            memset(&pm0, 0, sizeof pm0);
+            K32GetProcessMemoryInfo(GetCurrentProcess(), &pm0, sizeof pm0);
+            const DWORD self = GetCurrentThreadId();
+            for (LONG i = 0; i < m; i++) {
+                have[i] = 0;
+                where[i][0] = 0;
+                if (!hs[i] || ths[i].tid == self) continue;
+                if (SuspendThread(hs[i]) == (DWORD)-1) continue;
+                memset(&ctx[i], 0, sizeof ctx[i]);
+                ctx[i].ContextFlags = CONTEXT_CONTROL;
+                have[i] = GetThreadContext(hs[i], &ctx[i]) != 0;
+                ResumeThread(hs[i]);
+            }
+            for (LONG i = 0; i < m; i++)
+                if (have[i]) sw_where((void *)(uintptr_t)ctx[i].Rip, where[i], sizeof where[i]);
+        }
+    }
+    return 0;
+}
+
 void hos_jt_start(void) {
+    {   /* (HL_STALL_WATCH=<ms>: the ring and the watcher; see the top of the file) */
+        const char *w = getenv("HL_STALL_WATCH");
+        if (w && *w && atoi(w) != 0) {
+            recs = (JtRec *)VirtualAlloc(NULL, (SIZE_T)JT_CAP * sizeof(JtRec), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+            if (!recs) return;
+            hos_mem_tag(recs, (uint64_t)JT_CAP * sizeof(JtRec), "job trace ring (HL_STALL_WATCH)");
+            static char dir[MAX_PATH];
+            const char *d = getenv("HL_STALL_WATCH_DIR");
+            snprintf(dir, sizeof dir, "%s", d && *d ? d : "stall_watch");
+            CreateDirectoryA(dir, NULL);
+            sw_ring = 1, hos_jt_on = 1;
+            HANDLE h = CreateThread(NULL, 0, sw_thread, dir, 0, NULL);
+            if (h) CloseHandle(h);
+            hos_log("stallwatch: on, a gap of %d ms or more between presents is dumped to %s (HL_STALL_WATCH)", atoi(w) > 1 ? atoi(w) : 40, dir);
+            return;
+        }
+    }
     const char *path = getenv("HOS_JOBTRACE");
     if (!path || !*path) return;
     recs = (JtRec *)VirtualAlloc(NULL, (SIZE_T)JT_CAP * sizeof(JtRec), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
