@@ -6059,7 +6059,9 @@ void rbck_poll(uint64_t done) {
                 if (m[i] == g[i]) continue;
                 st.differ++;
                 const uint64_t a = guest + i * 4;
-                auto it = std::upper_bound(c.ranges.begin(), c.ranges.end(), std::make_pair(a, ~0ull));
+                // (the key's type is the ranges' own: on Linux uint64_t is unsigned long, and a pair with ~0ull's unsigned
+                // long long did not compare with them under libstdc++)
+                auto it = std::upper_bound(c.ranges.begin(), c.ranges.end(), std::pair<uint64_t, uint64_t>{a, ~uint64_t(0)});
                 const bool inside = it != c.ranges.begin() && a < std::prev(it)->second;
                 if (!inside) continue;
                 st.in_class++;
