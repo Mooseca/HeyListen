@@ -298,3 +298,44 @@ plus a new `rec_cur` (`begin_recording`, unsafe beside workers, above) at every 
 
 ## For the PC 3050 (files in `C:\OOT\builds\join1`)
 Not needed for a verdict: the 5070's chain already shows the join has nothing to overlap with. If wanted: A plain vs `RX_VK_DEFER_JOIN=1`, `HL_RB_LAG=2 HL_GFX_VAR=1 RX_VK_FEED_LOG=1`, 3 interleaved rounds, 1440p and 1080p.
+
+
+# FEED1 (the held submits' hand-over: why they are held, and what a stream could still gain; 22 Nov 2026, branch refactor/feed1 from refactor/join1)
+
+Result: **RX_VK_FEED_STREAM is not built.** The premise (the main thread hands its held submits over once a frame) is not what the code does: each held
+submit is handed to the replay on its own, 5 us after the hold. What is left to overlap is 0.2 ms of a 10.4 ms frame, and it is the game's own code.
+
+## Why the main thread's submits are held (`host/nvn_native.c`, `HOS_NVN_HOLD=2`, the default since TICK-054)
+- `nvnQueueSubmitCommands` (the submit, ~line 2835): a thread other than the presenting one (OoT: the main thread, 2 submits a frame, 3.38 ms after the
+  present's end, 2 us apart) does not replay; it appends the handles to `held[]` (`held_cs`), sets `hold_event` and returns. The presenting thread (the Presentation
+  Thread, PT) replays its own submits inline and, before each, flushes the held ones under `flush_cs` (`mine` branch, cause `HF_SUBMIT`).
+- The host thread "hos held submits" (`hold_flush_thread`, woken by the event) calls `held_flush_why(HF_THREAD)`: capture and replay of each held submit, in order, under
+  `flush_cs`. Measured on VIS3's three A traces (1,550 frames): hold to the replay's first mark **5 us** (p90 5-6 us). Nothing waits for a frame's end.
+- What the hold protects, rule by rule:
+  1. **Capture time**: the capture is taken at the flush, not at the submit (`HOS_NVN_HOLD_CHECK`: 0.14% of the captured pages differ), so the main thread does not do the 30 MB copy
+     (HOLD=3 tried: the copy moves along the loop). The reason is where the work runs, not an NVN rule.
+  2. **Order of submissions**: one queue order. `flush_cs` makes the PT's submit wait for the held ones, and `held_flush_why` copies the list and replays it in order.
+     This is the rule that makes the PT's first submit wait 0.53 ms (ready 0.24 ms after the last hold, enters the replay 0.77 ms after it).
+  3. **Visibility of a submit to the game's pollers**: `nvnSyncWait` on a fence past the replayed one (`HF_SYNC`), `nvnEventGetValue` (`HF_EVENT`, mode 2), `nvnQueueFinish`
+     (`HF_FINISH`), the present (`HF_PRESENT`) flush what is held first: a held submit may be what signals them, and `held_count()` is added to fence numbers.
+     With `HL_RB_LAG=2` the readbacks (R1-R3) no longer wait for the GPU, so those waits are not readbacks' any more, but the game's own fence and event polls still need
+     them (the flush is the answer to the poll, and it happens at the hold anyway): this reason is unchanged and costs nothing, the flush has begun 5 us after the hold.
+  4. **MKW writes data in place right after its submit** (the comment at the top of the held-submit block): holding is how a flush happens when the game's queue flush
+     would; `nvnQueueFlush` itself is a no-op in mode 2 (the thread is on it). `HOS_NVN_HOLD_LINGER_US` (flush later) gives wrong pictures (white exposure): do not.
+- `RX_VK_BATCH` / late-fix holds in `vk_replay.cpp` (`late_hold`, `batch_on`) are another hold, of the Vulkan submits, not of the game's; they are off or ~0.07 ms (ORDER3).
+
+## What a stream could still gain (VIS3's A traces, `HOS_JOBTRACE`, 1,550 frames, marks 1/2 = a submit's replay, 3 = a hold; mean ms a frame)
+| step | ms |
+|---|---:|
+| present end to the first hold (the main thread's draw code: nothing exists to replay before it) | 1.6-1.8 |
+| hold to the replay's start | 0.005 |
+| last hold to the PT's hand-over wake (queue `lr 834a3084`) | 0.24 |
+| the PT ready, blocked in `flush_cs` behind the held replay (capture 0.34 + memory work 0.32 of the first held submit) | 0.52-0.56 |
+| the replays, first mark to last end | 7.55-7.9 |
+| of that, idle between replays (the PT's own game code between its submits: before submit 2 0.01, 3 0.02, 4 0.04, 5 0.15) | 0.18-0.22 |
+So the replay already starts on each submit as the game produces it. The ~2.5 ms of "game side" is the main thread's draw code (1.7) and the held submits' own replay (0.77);
+the idle between replays, which an asynchronous hand-over of the PT's submits could hide, is 0.2 ms (2%). Hiding the PT's 0.53 ms wait would need the PT's first capture
+taken before the held replay ends: the captures' order (`memory_capture_submit`'s FIFO, dirty marks) is the held thread's to keep, and a gain of at most 0.15 ms (the PT's
+first capture) is not worth a second capture order. What gates the next present is the serial replay (held 0.77 + PT 6.8) behind the main thread's draw code, and the main thread's
+draw code waits for the previous present (`HOS_PRESENT_NOWAIT`'s territory, a different rule, with wrong pictures at stake).
+Scripts: `E:\OOT\scratch-feed1\gaps.py`, `gaps2.py` (the scratch folder; they read `tools/bench/chainb.py`'s trace format). No new run: no code changed.
