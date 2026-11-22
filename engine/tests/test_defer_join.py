@@ -49,7 +49,7 @@ def main():
     rh = function(rp, "const uint8_t* replay_handle(VkCommandBuffer& cmd, const uint8_t* h, bool may_stop)")
     need(rh.index("defer_join_now();") < rh.index("suspend_ok = may_stop;"), "the serial replay is made beside pending segments")
     need("if (presync_kick_at) defer_join_now();" in rh, "the early pre-sync on a worker runs beside pending segments")
-    need("par_points.clear(), dry_work = 0;" in rh and "const size_t cond0 = defer_group ? par_conds_n.load(std::memory_order_acquire) : 0;" in rh
+    need("par_points.clear(), dry_work = 0;" in rh and "const size_t cond0 = defer_group || pend_before ? par_conds_n.load(std::memory_order_acquire) : 0;" in rh
          and "seg.push_back({h, nullptr, &start, ub0, cond0, serial0});" in rh, "a dry pass beside pending segments resets par_conds")
     need("ub_growing.store(true, std::memory_order_relaxed);" in rh[:rh.index("rmode = Mode::Dry;")], "its appends do not hold ub_grow_mu")
     need(rh.index("defer_join_now();", rh.index("if (seg.size() == 1)")) < rh.index("if (!par_pool.started) {"),

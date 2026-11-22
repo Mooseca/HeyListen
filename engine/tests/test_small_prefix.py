@@ -99,9 +99,9 @@ def main():
         raise SystemExit("multi")
     if handle.index("small_pend_flush();   // (stream SMALL1: the small command buffers before it") > handle.index("submit_recording(r, false);"):
         raise SystemExit("the multi-segment path must flush before it submits what came before")
-    early = function(src, "const uint8_t* replay_handle_early(VkCommandBuffer& cmd, const uint8_t* h, bool may_stop, int nplan, const int64_t* plan," + chr(10))
+    early = function(src, "const uint8_t* replay_handle_early(VkCommandBuffer& cmd, const uint8_t* h, bool may_stop, int nplan, const int64_t* plan,")
     need(early, "replay_handle_early", [
-        "std::vector<PendingSmall> pre = {}",
+        "std::vector<PendingSmall> pre) {",
         "const size_t P = pre.empty() ? 0 : 1;",
         "if (!P) par_conds_reset();",
         "const size_t cond0 = par_conds_n.load(std::memory_order_acquire);",

@@ -3843,7 +3843,7 @@ void defer_join_now() {
 }
 const uint8_t* replay_handle_early(VkCommandBuffer& cmd, const uint8_t* h, bool may_stop, int nplan, const int64_t* plan,
                                    bool self_help, mkwvk::segment_plan::Profile& profile, int64_t* total_out, bool* cut,
-                                   std::vector<PendingSmall> pre = {}) {
+                                   std::vector<PendingSmall> pre) {
     NvnState& state = *cur_state;
     defer_join_now();   // (stream JOIN1: the pre-sync and the segments' tables are not shared with segments still recording)
     presync_kick_at = 0;   // (the pre-sync is made here, before the dry pass)

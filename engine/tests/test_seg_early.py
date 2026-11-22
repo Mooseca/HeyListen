@@ -66,13 +66,13 @@ def main():
     e = function(rp, "const uint8_t* replay_handle_early(")
     i_dry = e.index("jt_mark(13, 0);")
     for before in ("memory_sync_mirrors_before_segments();", "texture_rb_refresh_now();", "texture_segments_begin(inits.data(), inits.size());",
-                   "par_active = true;", "ub_growing.store(true", "seg_early_hook = &hook;", "memory_rb_segments_begin(base, (uint64_t)nplan);"):
+                   "par_active = true;", "ub_growing.store(true", "seg_early_hook = &hook;", "memory_rb_segments_begin(base, (uint64_t)nplan + P);"):
         need(e.index(before) < i_dry, "not before the dry pass: " + before)
     after = e[e.index("jt_mark(14, 0);"):]
     need(after.index("seg_early_hook = nullptr;") < after.index("const size_t used = open + 1;"), "the hook outlives the dry pass")
     need("ub_growing.store(false, std::memory_order_release);" in after, "the growth flag is not cleared after the dry pass")
     hook = e[e.index("hook.on_point = [&](const ParPoint& q) {"):e.index("if (early) {")]
-    need("hook.wants = [&](int64_t work, const uint8_t* at) { return (int)open + 1 < nplan && work >= plan[open] && at != jobs[open]->g.p; };" in e,
+    need("hook.wants = [&](int64_t work, const uint8_t* at) { return (int)open + 1 < nplan + (int)P && work >= plan[open - P] && at != jobs[open]->g.p; };" in e,
          "a segment is handed out before its planned end is passed")
     need("if (!hook.wants(q.work, q.p)) return;" in hook, "the hook takes a point the plan does not want")
     need("n->s = q.s;" in hook and "&n->s" in hook, "the next segment points into the moving points' vector")
