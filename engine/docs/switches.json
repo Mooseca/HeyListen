@@ -2,7 +2,7 @@
  "schema": 1,
  "generated_by": "engine/scripts/list_switches.py",
  "scope": "C, C++ and headers under engine/ (engine/tests and vendored trees other than a64-kit excluded) and the Python the builder, the lifter and the scripts run: getenv, std::getenv, _wgetenv, the code's own env helpers and table-driven reads, and os.environ.",
- "count": 1422,
+ "count": 1425,
  "switches": [
   {
    "name": "A64_DEVIRT",
@@ -2244,6 +2244,69 @@
    "comment": "(READB2) the readback classes R2 (size 0x40) and R3 (size 0x2000): HL_RB_R2 / HL_RB_R3, HL_RB_R2_CHECK / HL_RB_R3_CHECK ---- HL_RB_Rn=1: both parts; =2: the refresh part only (the class's pages are not copied from guest memory into the mirror at each submission); =3: the late part only (the class's reads do not wait for the GPU: they read what guest memory holds). The CHECK switch leaves the game's behaviour as it is whatever HL_RB_Rn says and measures what the parts would change (rbclass_check_late, rbck_record). docs/native-engine/readbacks-r2-r3.md.",
    "documented_in": null,
    "source": "comment at gpu/vk/vk_memory.cpp",
+   "documented": true,
+   "set_via": "In `hookshot_env.txt`, or in the environment.",
+   "use": null
+  },
+  {
+   "name": "HL_REGION_KEEP",
+   "area": "native",
+   "group": "Native engine",
+   "audience": "developer",
+   "files": [
+    {
+     "path": "host/hos_regionkeep.c",
+     "line": 54
+    }
+   ],
+   "default": "unset",
+   "values": "text",
+   "explanation": "STALL2, 22 Nov 2026) HL_REGION_KEEP=<seconds> (off by default; 0 off): a freed address region is not discarded at once. The owner's session and the step-0 runs showed the churn: when the game frees a zone's address region (nn::os:: FreeAddressRegion), hos_mem.c discards its pages (DiscardVirtualMemory: out of the working set, back to demand-zero), and the next zone's loaders (ARes_Loading_*) first-touch the same address space again: in the Market 3.47 GB discarded in 63 s of play, 372 K pages (1.45 GB) faulted straight back, 84 of the 130 stutters. Windows spends about 10 us a fault when the PC is short of RAM. Here a freed region above the heap goes on a keep list with the time it was freed; its resident pages stay resident. - Re-allocated (hos_region_alloc over the same address space, even a part of it): the new region must read as zero (the game maps pages in it with ...",
+   "comment": "STALL2, 22 Nov 2026) HL_REGION_KEEP=<seconds> (off by default; 0 off): a freed address region is not discarded at once. The owner's session and the step-0 runs showed the churn: when the game frees a zone's address region (nn::os:: FreeAddressRegion), hos_mem.c discards its pages (DiscardVirtualMemory: out of the working set, back to demand-zero), and the next zone's loaders (ARes_Loading_*) first-touch the same address space again: in the Market 3.47 GB discarded in 63 s of play, 372 K pages (1.45 GB) faulted straight back, 84 of the 130 stutters. Windows spends about 10 us a fault when the PC is short of RAM. Here a freed region above the heap goes on a keep list with the time it was freed; its resident pages stay resident. - Re-allocated (hos_region_alloc over the same address space, even a part of it): the new region must read as zero (the game maps pages in it with ...",
+   "documented_in": null,
+   "source": "comment at host/hos_regionkeep.c",
+   "documented": true,
+   "set_via": "In `hookshot_env.txt`, or in the environment.",
+   "use": null
+  },
+  {
+   "name": "HL_REGION_KEEP_LOWMEM_MB",
+   "area": "native",
+   "group": "Native engine",
+   "audience": "developer",
+   "files": [
+    {
+     "path": "host/hos_regionkeep.c",
+     "line": 55
+    }
+   ],
+   "default": "unset",
+   "values": "text",
+   "explanation": "That memset is the cost; no fault is taken by a loader, and nothing is read by the game that it did not write. - Not re-allocated for <seconds> (try 20): discarded as before, by a thread of its own (1 s granularity). - The list is capped at HL_REGION_KEEP_MB resident megabytes (default 2048): over it the oldest are discarded first. While the system's available RAM is under 1024 MB (HL_REGION_KEEP_LOWMEM_MB) the oldest are discarded too, one after another until it is not. - A region with pages the Vulkan back end imported, one that touches the guest-pages substrate (HOS_GUEST_PAGES) and one with under 1 MB resident are discarded at once, as before. One line a second when anything moved: \"hl keep: ...\": kept, reused and discarded MB (aged, over the cap, under pressure) and what is on the list.",
+   "comment": "That memset is the cost; no fault is taken by a loader, and nothing is read by the game that it did not write. - Not re-allocated for <seconds> (try 20): discarded as before, by a thread of its own (1 s granularity). - The list is capped at HL_REGION_KEEP_MB resident megabytes (default 2048): over it the oldest are discarded first. While the system's available RAM is under 1024 MB (HL_REGION_KEEP_LOWMEM_MB) the oldest are discarded too, one after another until it is not. - A region with pages the Vulkan back end imported, one that touches the guest-pages substrate (HOS_GUEST_PAGES) and one with under 1 MB resident are discarded at once, as before. One line a second when anything moved: \"hl keep: ...\": kept, reused and discarded MB (aged, over the cap, under pressure) and what is on the list.",
+   "documented_in": null,
+   "source": "comment at host/hos_regionkeep.c",
+   "documented": true,
+   "set_via": "In `hookshot_env.txt`, or in the environment.",
+   "use": null
+  },
+  {
+   "name": "HL_REGION_KEEP_MB",
+   "area": "native",
+   "group": "Native engine",
+   "audience": "developer",
+   "files": [
+    {
+     "path": "host/hos_regionkeep.c",
+     "line": 55
+    }
+   ],
+   "default": "unset",
+   "values": "text",
+   "explanation": "That memset is the cost; no fault is taken by a loader, and nothing is read by the game that it did not write. - Not re-allocated for <seconds> (try 20): discarded as before, by a thread of its own (1 s granularity). - The list is capped at HL_REGION_KEEP_MB resident megabytes (default 2048): over it the oldest are discarded first. While the system's available RAM is under 1024 MB (HL_REGION_KEEP_LOWMEM_MB) the oldest are discarded too, one after another until it is not. - A region with pages the Vulkan back end imported, one that touches the guest-pages substrate (HOS_GUEST_PAGES) and one with under 1 MB resident are discarded at once, as before.",
+   "comment": "That memset is the cost; no fault is taken by a loader, and nothing is read by the game that it did not write. - Not re-allocated for <seconds> (try 20): discarded as before, by a thread of its own (1 s granularity). - The list is capped at HL_REGION_KEEP_MB resident megabytes (default 2048): over it the oldest are discarded first. While the system's available RAM is under 1024 MB (HL_REGION_KEEP_LOWMEM_MB) the oldest are discarded too, one after another until it is not. - A region with pages the Vulkan back end imported, one that touches the guest-pages substrate (HOS_GUEST_PAGES) and one with under 1 MB resident are discarded at once, as before.",
+   "documented_in": null,
+   "source": "comment at host/hos_regionkeep.c",
    "documented": true,
    "set_via": "In `hookshot_env.txt`, or in the environment.",
    "use": null
@@ -4653,7 +4716,7 @@
    "files": [
     {
      "path": "host/hos_mem.c",
-     "line": 202
+     "line": 207
     }
    ],
    "default": "off (unset)",
@@ -6080,12 +6143,12 @@
    "files": [
     {
      "path": "host/hos_mem.c",
-     "line": 149
+     "line": 150
     }
    ],
    "default": "off (unset)",
    "values": "on or off (0, false, off, no and empty are off)",
-   "explanation": "undocumented: host/hos_mem.c:149 (in `discard_pages()`) reads it as an on/off switch: `if (keep < 0) keep = getenv(\"HOS_KEEP_FREED_PAGES\") != NULL;`. No comment in the source says what it changes.",
+   "explanation": "undocumented: host/hos_mem.c:150 (in `discard_pages()`) reads it as an on/off switch: `if (keep < 0) keep = getenv(\"HOS_KEEP_FREED_PAGES\") != NULL;`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -6323,7 +6386,7 @@
    "files": [
     {
      "path": "host/hos_mem.c",
-     "line": 370
+     "line": 375
     }
    ],
    "default": "unset",
@@ -7581,7 +7644,7 @@
    "files": [
     {
      "path": "host/hos_mem.c",
-     "line": 414
+     "line": 419
     }
    ],
    "default": "off (unset)",
@@ -7904,7 +7967,7 @@
    "files": [
     {
      "path": "host/hos_mem.c",
-     "line": 267
+     "line": 272
     }
    ],
    "default": "unset",
@@ -9676,7 +9739,7 @@
    "files": [
     {
      "path": "host/hos_mem.c",
-     "line": 431
+     "line": 436
     }
    ],
    "default": "off (unset)",

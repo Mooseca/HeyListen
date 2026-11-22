@@ -83,6 +83,13 @@ void hl_mem_init(void);
    job trace's table, filled while HL_STALL_WATCH or HOS_JOBTRACE runs); hos_hostsplit.c names the tagged range an address is in
    (the tags are kept while HOS_HOST_SPLIT or RX_VK_LEDGER is on). Each returns 1 when it knows */
 void hl_fw_note_discard(uint64_t bytes, int64_t ns);
+/* (STALL2, HL_REGION_KEEP, hos_regionkeep.c) a freed address region kept resident for a while: hos_keep_try puts it on the list (1: the
+   caller does not discard it), hos_keep_reuse zeroes what a new region takes of the kept address space, hos_keep_discard is hos_mem.c's
+   discard of a range */
+int hos_keep_enabled(void);
+int hos_keep_try(uint64_t addr, uint64_t size);
+void hos_keep_reuse(uint64_t lo, uint64_t hi);
+void hos_keep_discard(uint64_t addr, uint64_t size);
 int hos_jt_name_of_tid(unsigned long tid, char *out, int n);
 int hos_mem_tag_name(uint64_t addr, char *out, int n);
 /* (hl_drop.c, HL_MEM_DROP) the drop module: started after the memory module; told of decodes, of guest memory handed to

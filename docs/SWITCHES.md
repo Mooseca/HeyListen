@@ -10,7 +10,7 @@ python -I engine/scripts/list_switches.py
 
 and commit both files. A test (`engine/tests/test_switches_documented.py`) fails when a switch read in the source is missing here or the data file is out of date.
 
-1422 switches: 56 players may be told to use, 377 diagnostic, 989 developer-only; 1216 have a real explanation and 206 are marked `undocumented`.
+1425 switches: 56 players may be told to use, 377 diagnostic, 992 developer-only; 1219 have a real explanation and 206 are marked `undocumented`.
 
 ## How to set a switch
 
@@ -69,7 +69,7 @@ The entries below say what each one does, its values and default, and when it is
 | [Memory and textures](#memory-and-textures) | 190 | 10 | 0 | 180 |
 | [Audio](#audio) | 14 | 5 | 9 | 0 |
 | [Input and controllers](#input-and-controllers) | 13 | 1 | 12 | 0 |
-| [Native engine (`HL_*`)](#native-engine-hl_) | 91 | 1 | 36 | 54 |
+| [Native engine (`HL_*`)](#native-engine-hl_) | 94 | 1 | 36 | 57 |
 | [Host and OS (`HOS_*` and the system's variables)](#host-and-os-hos_-and-the-systems-variables) | 138 | 10 | 0 | 128 |
 | [Telemetry and crash reports](#telemetry-and-crash-reports) | 12 | 0 | 12 | 0 |
 | [Diagnostics and logging](#diagnostics-and-logging) | 294 | 0 | 294 | 0 |
@@ -7079,13 +7079,13 @@ The heaps: not while hos_heapsplit.c measures their coldness itself (HOS_HEAP_SP
 
 #### `HOS_KEEP_FREED_PAGES` - developer
 
-undocumented: host/hos_mem.c:149 (in `discard_pages()`) reads it as an on/off switch: `if (keep < 0) keep = getenv("HOS_KEEP_FREED_PAGES") != NULL;`. No comment in the source says what it changes.
+undocumented: host/hos_mem.c:150 (in `discard_pages()`) reads it as an on/off switch: `if (keep < 0) keep = getenv("HOS_KEEP_FREED_PAGES") != NULL;`. No comment in the source says what it changes.
 
 **Values:** on or off (0, false, off, no and empty are off). **Default:** off (unset).
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_mem.c:149`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_mem.c:150`.
 
 #### `HOS_LARGE_PAGES` - developer
 
@@ -7135,7 +7135,7 @@ A diagnostic: `AllocateMemoryPages` is refused past the console's total (heap an
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_mem.c:414`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_mem.c:419`.
 
 #### `HOS_SHADOW_BUCKET` - developer
 
@@ -7175,7 +7175,7 @@ HOS_TEST_ALLOC_REFUSE=<text>: every allocation through here whose label contains
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_mem.c:431`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_mem.c:436`.
 
 #### `RX_GPU_FRAMES_AHEAD` - developer
 
@@ -8089,7 +8089,7 @@ As above; the last lets every device count while the window is behind another on
 
 ## Native engine (`HL_*`)
 
-91 switches of the native engine (`HL_*`).
+94 switches of the native engine (`HL_*`).
 
 ### Main loop
 
@@ -8891,6 +8891,36 @@ HL_RB_LAG_CHECK=1: the old path runs and the ring is compared with what it read 
 
 **Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_memory.cpp:5964`.
 
+#### `HL_REGION_KEEP` - developer
+
+STALL2, 22 Nov 2026) HL_REGION_KEEP=<seconds> (off by default; 0 off): a freed address region is not discarded at once. The owner's session and the step-0 runs showed the churn: when the game frees a zone's address region (nn::os:: FreeAddressRegion), hos_mem.c discards its pages (DiscardVirtualMemory: out of the working set, back to demand-zero), and the next zone's loaders (ARes_Loading_*) first-touch the same address space again: in the Market 3.47 GB discarded in 63 s of play, 372 K pages (1.45 GB) faulted straight back, 84 of the 130 stutters. Windows spends about 10 us a fault when the PC is short of RAM. Here a freed region above the heap goes on a keep list with the time it was freed; its resident pages stay resident. - Re-allocated (hos_region_alloc over the same address space, even a part of it): the new region must read as zero (the game maps pages in it with ...
+
+**Values:** text. **Default:** unset.
+
+**When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
+
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_regionkeep.c:54`.
+
+#### `HL_REGION_KEEP_LOWMEM_MB` - developer
+
+That memset is the cost; no fault is taken by a loader, and nothing is read by the game that it did not write. - Not re-allocated for <seconds> (try 20): discarded as before, by a thread of its own (1 s granularity). - The list is capped at HL_REGION_KEEP_MB resident megabytes (default 2048): over it the oldest are discarded first. While the system's available RAM is under 1024 MB (HL_REGION_KEEP_LOWMEM_MB) the oldest are discarded too, one after another until it is not. - A region with pages the Vulkan back end imported, one that touches the guest-pages substrate (HOS_GUEST_PAGES) and one with under 1 MB resident are discarded at once, as before. One line a second when anything moved: "hl keep: ...": kept, reused and discarded MB (aged, over the cap, under pressure) and what is on the list.
+
+**Values:** text. **Default:** unset.
+
+**When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
+
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_regionkeep.c:55`.
+
+#### `HL_REGION_KEEP_MB` - developer
+
+That memset is the cost; no fault is taken by a loader, and nothing is read by the game that it did not write. - Not re-allocated for <seconds> (try 20): discarded as before, by a thread of its own (1 s granularity). - The list is capped at HL_REGION_KEEP_MB resident megabytes (default 2048): over it the oldest are discarded first. While the system's available RAM is under 1024 MB (HL_REGION_KEEP_LOWMEM_MB) the oldest are discarded too, one after another until it is not. - A region with pages the Vulkan back end imported, one that touches the guest-pages substrate (HOS_GUEST_PAGES) and one with under 1 MB resident are discarded at once, as before.
+
+**Values:** text. **Default:** unset.
+
+**When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
+
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_regionkeep.c:55`.
+
 #### `HL_SHIPPED_STATES` - developer
 
 (HL_SHIPPED_STATES) The shipped list's contents by a hash, and the hash state_list_prepare last went through, in hookshot_pipeline_states_shipped.done: a list that came after the shaders were prepared (a list shipped later, or a folder prepared before it had one) was never noted, the prepare being done for that translator and seed, and its pipelines were all made in play. 0: no list.
@@ -9187,7 +9217,7 @@ TICK-062 B1, HOS_CV_SIGNAL_FAST=1: a signal with no waiter changes nothing a lat
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_mem.c:202`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_mem.c:207`.
 
 #### `HOS_JOBTRACE` - developer
 
@@ -9933,7 +9963,7 @@ The used memory the game is told (`QueryMemoryInfo`, svc `GetInfo` 7 and 22) is 
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_mem.c:370`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_mem.c:375`.
 
 #### `HOS_MKW_INTERVAL` - developer
 
@@ -10203,7 +10233,7 @@ HOS_PREFAULT=1 (experiment): the new heap pages touched now (a zero written to f
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_mem.c:267`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_mem.c:272`.
 
 #### `HOS_REALTIME_STEP` - developer
 

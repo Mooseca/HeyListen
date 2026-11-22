@@ -128,6 +128,7 @@ ARGS = {
     "tests/test_short_sleep_timer.py": ["--cc", "gcc"],
     "tests/test_sdl_audio_reopen.py": ["--cc", "gcc"],
     "tests/test_guestpages.py": ["--cc", "gcc"],
+    "tests/test_region_keep.py": ["--cc", "gcc"],
     "tests/test_hl_trace.py": ["--cc", "gcc"],
     "tests/test_windows_display_startup.py": ["--cc", "gcc"],
     "tests/test_texture_handle_banks.py": ["--cxx", "{cxx}"],
