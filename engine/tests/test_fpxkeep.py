@@ -28,6 +28,7 @@ Skipped (exit 0) on a host that is not x86-64 or has no C/C++ compiler; a build 
 import argparse
 import os
 import platform
+import shutil
 import sys
 import tempfile
 import time
@@ -158,6 +159,10 @@ def main():
     a = p.parse_args()
     if platform.machine().lower() not in ("x86_64", "amd64"):
         fs.skip("not an x86-64 host: %s" % platform.machine())
+    if not os.environ.get("HOOKSHOT_MINGW") and os.name == "nt":   # (an llvm-mingw on PATH, as the tests are run here; as test_fpx_sticky.py)
+        w = shutil.which("clang++")
+        if w and os.path.isfile(os.path.join(os.path.dirname(w), "x86_64-w64-mingw32-clang++.exe")):
+            os.environ["HOOKSHOT_MINGW"] = os.path.dirname(os.path.dirname(w))
     cc = fs.compiler(a.cc, "CC", ("clang", "gcc", "cc"), "clang")
     cxx = fs.compiler(a.cxx, "CXX", ("clang++", "g++", "c++"), "clang++")
     if not cc or not cxx:

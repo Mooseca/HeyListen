@@ -29,6 +29,7 @@ caught a real fault while vecfp was written: the scalar FMAX/FMIN decode without
 import argparse
 import os
 import platform
+import shutil
 import sys
 import tempfile
 import time
@@ -262,6 +263,10 @@ def main():
     if platform.machine().lower() not in ("x86_64", "amd64"):
         print("vecfp: C checks skipped (not an x86-64 host)")
         return
+    if not os.environ.get("HOOKSHOT_MINGW") and os.name == "nt":   # (an llvm-mingw on PATH, as the tests are run here; as test_fpx_sticky.py)
+        w = shutil.which("clang++")
+        if w and os.path.isfile(os.path.join(os.path.dirname(w), "x86_64-w64-mingw32-clang++.exe")):
+            os.environ["HOOKSHOT_MINGW"] = os.path.dirname(os.path.dirname(w))
     cc = S.compiler(a.cc, "CC", ("clang", "gcc", "cc"), "clang")
     cxx = S.compiler(a.cxx, "CXX", ("clang++", "g++", "c++"), "clang++")
     if not cc or not cxx:
