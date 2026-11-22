@@ -2,7 +2,7 @@
  "schema": 1,
  "generated_by": "engine/scripts/list_switches.py",
  "scope": "C, C++ and headers under engine/ (engine/tests and vendored trees other than a64-kit excluded) and the Python the builder, the lifter and the scripts run: getenv, std::getenv, _wgetenv, the code's own env helpers and table-driven reads, and os.environ.",
- "count": 1432,
+ "count": 1433,
  "switches": [
   {
    "name": "A64_",
@@ -43,6 +43,31 @@
    "documented_in": null,
    "source": "undocumented",
    "documented": false,
+   "set_via": "In the build's environment (the builder or the command line), before the build runs.",
+   "use": null
+  },
+  {
+   "name": "A64_FPXKEEP",
+   "area": "build",
+   "group": "Lift (A64_*)",
+   "audience": "developer",
+   "files": [
+    {
+     "path": "nx2/fpxkeep.py",
+     "line": 261
+    },
+    {
+     "path": "nx2/fpxkeep.py",
+     "line": 266
+    }
+   ],
+   "default": "1",
+   "values": "a whole number (`0` in the description)",
+   "explanation": "(Longshot) results kept off the software bodies: NaN operands (N), infinite operands (I), exact-zero multiply-adds (Z); nx2/fpxkeep.py, A64_FPXKEEP. Each a64_fpxk_* is called inside FPX1's gate (RECOMP_FPX_OPEN: round to nearest, DN = 0, no traps, FPSR.IXC set) past its fast path; 1 with the Arm result in *v and its flags or-ed into FPSR, else 0 (nothing written: the exact body runs). ----.",
+   "comment": "(Longshot) results kept off the software bodies: NaN operands (N), infinite operands (I), exact-zero multiply-adds (Z); nx2/fpxkeep.py, A64_FPXKEEP. Each a64_fpxk_* is called inside FPX1's gate (RECOMP_FPX_OPEN: round to nearest, DN = 0, no traps, FPSR.IXC set) past its fast path; 1 with the Arm result in *v and its flags or-ed into FPSR, else 0 (nothing written: the exact body runs). ----.",
+   "documented_in": null,
+   "source": "comment at nx2/fpxkeep.py",
+   "documented": true,
    "set_via": "In the build's environment (the builder or the command line), before the build runs.",
    "use": null
   },

@@ -30,6 +30,7 @@ import nso2  # noqa: F401  (DT_RELR)
 import insn
 import fastvec   # (longshot #1576, Veix) TBL / EXT, vector loads and DUP as single vector instructions (A64_VBYTES, A64_VMOVES)
 import vecfp   # (longshot #1782, snaildev99) SSE fast paths for lane-by-lane float forms (A64_VECFP)
+import fpxkeep   # (longshot #1905, snaildev99) NaN, infinite operands and exact-zero multiply-adds kept off the software bodies (A64_FPXKEEP)
 import cmpflags   # (longshot #1871, dyst) a subtraction's V as N xor (a < b): A64_SUB_V
 import lift_fixes
 import chunks
@@ -46,6 +47,7 @@ import a64_rtgen
 insn.install()
 vecfp.install()   # (around insn's translate: the forms the kit's passes and the FP blocks leave, behind SSE fast paths)
 cmpflags.install()   # (around that translate: text only, after the forms are chosen)
+fpxkeep.install()   # (the kit's lane routes and wrappers, in a64_fpx.h's text)
 fastvec.install()   # (around the kit's hot_text, fpx_header and Lifter.emit_function: after the FP blocks)
 lift_fixes.install()
 

@@ -10,7 +10,7 @@ python -I engine/scripts/list_switches.py
 
 and commit both files. A test (`engine/tests/test_switches_documented.py`) fails when a switch read in the source is missing here or the data file is out of date.
 
-1432 switches: 56 players may be told to use, 378 diagnostic, 998 developer-only; 1224 have a real explanation and 208 are marked `undocumented`.
+1433 switches: 56 players may be told to use, 378 diagnostic, 999 developer-only; 1225 have a real explanation and 208 are marked `undocumented`.
 
 ## How to set a switch
 
@@ -73,7 +73,7 @@ The entries below say what each one does, its values and default, and when it is
 | [Host and OS (`HOS_*` and the system's variables)](#host-and-os-hos_-and-the-systems-variables) | 138 | 10 | 0 | 128 |
 | [Telemetry and crash reports](#telemetry-and-crash-reports) | 12 | 0 | 12 | 0 |
 | [Diagnostics and logging](#diagnostics-and-logging) | 295 | 0 | 295 | 0 |
-| [Build and lift time (`A64_*`, `RX_*` and `HOOKSHOT_*` the builder reads)](#build-and-lift-time-a64_-rx_-and-hookshot_-the-builder-reads) | 94 | 0 | 0 | 94 |
+| [Build and lift time (`A64_*`, `RX_*` and `HOOKSHOT_*` the builder reads)](#build-and-lift-time-a64_-rx_-and-hookshot_-the-builder-reads) | 95 | 0 | 0 | 95 |
 
 ## Renderer: upscaling, frame generation, HDR, V-Sync and presentation
 
@@ -13557,7 +13557,7 @@ The Khronos validation layer.
 
 ## Build and lift time (`A64_*`, `RX_*` and `HOOKSHOT_*` the builder reads)
 
-94 switches read by the builder or the lifter, in their environment.
+95 switches read by the builder or the lifter, in their environment.
 
 ### Lift (A64_*)
 
@@ -13580,6 +13580,16 @@ undocumented: third_party/a64-kit/lift/a64_lift.py:1381 reads it as a path: `pat
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
 **Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `third_party/a64-kit/lift/a64_lift.py:1381`.
+
+#### `A64_FPXKEEP` - developer
+
+(Longshot) results kept off the software bodies: NaN operands (N), infinite operands (I), exact-zero multiply-adds (Z); nx2/fpxkeep.py, A64_FPXKEEP. Each a64_fpxk_* is called inside FPX1's gate (RECOMP_FPX_OPEN: round to nearest, DN = 0, no traps, FPSR.IXC set) past its fast path; 1 with the Arm result in *v and its flags or-ed into FPSR, else 0 (nothing written: the exact body runs). ----.
+
+**Values:** a whole number (`0` in the description). **Default:** 1.
+
+**When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
+
+**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/fpxkeep.py:261` and 1 more place.
 
 #### `A64_FPX_BLOCK_CVT` - developer
 
