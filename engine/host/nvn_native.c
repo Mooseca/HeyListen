@@ -670,8 +670,16 @@ static int shadow_slot_layout(const nvn_texdesc *d, nvn_texlayout *out) {
         step = e ? atoi(e) : HOS_SHADOW_SLOT_STEP;
         if (step < 0) step = 0;
     }
-    const uint32_t side = hos_shadow_slot_side(d->target == NVN_TEXTURE_TARGET_2D, d->format, d->levels, d->depth, d->width,
-                                               d->height, (uint32_t)step);
+    /* (QUICK1) HOS_SHADOW_LADDER=1: the rungs of shadow_slot.h's ladder, also under 384, instead of the step */
+    static int ladder = -1;
+    if (ladder < 0) {
+        const char *e = getenv("HOS_SHADOW_LADDER");
+        ladder = e && atoi(e) != 0;
+    }
+    const uint32_t side = ladder ? hos_shadow_slot_side_ladder(d->target == NVN_TEXTURE_TARGET_2D, d->format, d->levels, d->depth,
+                                                               d->width, d->height)
+                                 : hos_shadow_slot_side(d->target == NVN_TEXTURE_TARGET_2D, d->format, d->levels, d->depth, d->width,
+                                                        d->height, (uint32_t)step);
     if (!side || side == d->width) return 0;
     nvn_texdesc slot = *d;
     slot.width = slot.height = side;
