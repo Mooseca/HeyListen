@@ -22,8 +22,8 @@ def main():
         if part not in mem:
             raise SystemExit("FAIL: hos_mem.c lacks: " + part)
     keep = (ROOT / "host/hos_regionkeep.c").read_text(encoding="utf-8")
-    if 'getenv("HL_REGION_KEEP")' not in keep or "keep_secs = e && e[0] && atoi(e) > 0 ? atoi(e) : 0;" not in keep:
-        raise SystemExit("FAIL: HL_REGION_KEEP is not off by default")
+    if 'getenv("HL_REGION_KEEP")' not in keep or "keep_secs = e && e[0] ? (atoi(e) > 0 ? atoi(e) : 0) : 20;" not in keep:
+        raise SystemExit("FAIL: HL_REGION_KEEP is not 20 s by default (0 off)")
     if os.name != "nt":
         print("skipped: Windows only")
         return 0

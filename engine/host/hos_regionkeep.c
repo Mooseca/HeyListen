@@ -55,7 +55,10 @@ int hos_keep_enabled(void) {
         const char *c = getenv("HL_REGION_KEEP_MB"), *l = getenv("HL_REGION_KEEP_LOWMEM_MB");
         keep_cap = (uint64_t)(c && c[0] ? atoll(c) : 2048) << 20;
         keep_low_mb = (uint64_t)(l && l[0] ? atoll(l) : 1024);
-        keep_secs = e && e[0] && atoi(e) > 0 ? atoi(e) : 0;
+        /* (20 s by default since 2026-11-22: a warp tour Market <-> Hyrule Field, 4 zone changes, A B B A: the RTX 3050 PC with
+           10-15 GB free gained 1.5 fps, -20% frames over 25 ms, -10% over 50 ms, longest stall 0.8 s against 1.1-1.3 s; the
+           RTX 5070 PC under memory pressure -19% stutters after a zone change; 5-6 GB of discards a tour gone) */
+        keep_secs = e && e[0] ? (atoi(e) > 0 ? atoi(e) : 0) : 20;
         HMODULE k32 = GetModuleHandleA("kernel32.dll");
         query_ws = (KeepQueryWsFn)(void *)GetProcAddress(k32, "K32QueryWorkingSetEx");
         discard_fn = (KeepDiscardFn)(void *)GetProcAddress(k32, "DiscardVirtualMemory");
