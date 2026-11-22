@@ -86,7 +86,7 @@ def main():
          "par_active goes off before every segment is done")
     need("defer_join_now();" in e[:e.index("jt_mark(13, 0);")] and "early_join(G);" in e and "defer_group = group;" in e,
          "the join is not made at the start of the next big command buffer, or not by early_join")
-    whole = e[e.index("if (used < 2 || !early) {"):e.index("*cut = true;")]
+    whole = e[e.index("if (used < 2 + P || !early) {"):e.index("*cut = true;")]
     need("par_active = false;" in whole and "record_segment(cmd, whole);" in whole, "no boundary reached: not recorded whole, serially")
 
     rh = function(rp, "const uint8_t* replay_handle(VkCommandBuffer& cmd, const uint8_t* h, bool may_stop)")
