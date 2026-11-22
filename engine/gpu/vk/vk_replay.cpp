@@ -2033,6 +2033,8 @@ bool wall_fine_on() {
     return v;
 }
 thread_local bool small_phase_on = false;   // (RX_VK_SMALL_LOG: set around a command buffer recorded whole, on the replay thread only)
+std::atomic<int64_t> small_pre_mismatch{0}, small_pre_recorded{0};   // (RX_VK_SMALL_PREFIX: recordings made by a prefix job; those whose draws and dispatches differ from the dry pass's)
+int64_t small_pend_n = 0, small_pend_flushed = 0, small_pend_used = 0, small_pend_jobs = 0;   // (replay_mu)
 int64_t small_phase_ns[3];   // (replay thread, under replay_mu: setup + first barrier, the ops, end of pass + last barrier)
 inline int64_t wall_now() { return std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count(); }
 struct WallAdd {   // (adds its scope's wall time to a counter; nothing when the switch is off)
@@ -2198,8 +2200,9 @@ void small_seq_note(int64_t work, bool stopped) {
     }
     if (small_seq.size() > 4000) small_seq.erase(0, small_seq.size() - 2000);
 }
+bool small_prefix_on();   // (below: RX_VK_SMALL_PREFIX)
 void small_log_report(double frames) {
-    if (!small_log_on()) return;
+    if (!small_log_on() && !small_prefix_on()) return;
     static SmallBucket last[6];
     static int64_t last_kinds[kOpKinds], l_subs, l_cbs;
     static const char* const nm[6] = {"0", "1-2", "3-7", "8-31", "32-127", "128+"};
@@ -2218,6 +2221,15 @@ void small_log_report(double frames) {
     logf("%s total %.1f cbs a frame, dry %.2f ms, record %.2f ms; submissions %.1f with %.1f command buffers each", line, all_n, all_dry,
          all_ms, (small_subs - l_subs) / frames, (small_subs - l_subs) ? (double)(small_cbs_all - l_cbs) / (small_subs - l_subs) : 0.0);
     l_subs = small_subs, l_cbs = small_cbs_all;
+    if (small_prefix_on()) {
+        static int64_t l_pn, l_pf, l_pu, l_pj, l_pm, l_pr;
+        const int64_t pm = small_pre_mismatch.load(), pr = small_pre_recorded.load();
+        logf("vk: a frame (RX_VK_SMALL_PREFIX): %.1f small command buffers left pending, %.1f recorded whole after all, %.1f given to a worker in %.1f jobs; "
+             "%lld of the worker's recordings (%lld in all) had other draws and dispatches than their dry pass counted",
+             (small_pend_n - l_pn) / frames, (small_pend_flushed - l_pf) / frames, (small_pend_used - l_pu) / frames, (small_pend_jobs - l_pj) / frames,
+             (long long)(pm - l_pm), (long long)pr);
+        l_pn = small_pend_n, l_pf = small_pend_flushed, l_pu = small_pend_used, l_pj = small_pend_jobs, l_pm = pm, l_pr = pr;
+    }
     static int64_t l_ph[3];
     logf("vk: a frame (small cbs recorded whole, phases): setup + barrier %.3f ms, ops %.3f ms, end of pass + barrier %.3f ms",
          (small_phase_ns[0] - l_ph[0]) / frames / 1e6, (small_phase_ns[1] - l_ph[1]) / frames / 1e6, (small_phase_ns[2] - l_ph[2]) / frames / 1e6);
@@ -3556,9 +3568,17 @@ bool defer_check_on() {
     }();
     return v;
 }
+/// (stream SMALL1, RX_VK_SMALL_PREFIX) a small command buffer whose dry pass is done and whose recording is left for a worker: its
+/// segment (the state at its start on the heap), and the draws and dispatches its dry pass counted (the check of the recording's)
+struct PendingSmall {
+    std::unique_ptr<NvnState> start;
+    Segment g;
+    int64_t work = 0;
+};
 struct EarlyJob {
     Recording* r;
     Segment g;
+    std::vector<PendingSmall> pre;   // (RX_VK_SMALL_PREFIX: not empty: the small command buffers this job records one after the other, in order, instead of g)
     NvnState s;   // (its starting state: the dry pass's points move as it goes on)
     uint64_t order;
     int index = 0;
@@ -3568,6 +3588,44 @@ struct EarlyJob {
     int64_t t0 = 0, t1 = 0;
     int64_t recorded = -1;   // (RX_VK_DEFER_JOIN_CHECK: the draws and dispatches its worker recorded)
 };
+// ---- (stream SMALL1) RX_VK_SMALL_PREFIX=1 (default off): small command buffers off the replay thread's serial chain ----
+// A command buffer under two segments' worth of draws and dispatches is recorded whole on the replay thread (replay_handle): its dry pass, then
+// its recording, one after the other, ~55 us each on the PC 3050's Market (17 a frame). With the switch on, the ones followed in the same
+// submission by a big command buffer that the early path cuts (RX_VK_SEG_EARLY) are only dry-passed (~4 us: the state, the render
+// conditions, the uniform updates, the events and counters in stream order) and left pending, each with the state at its start; the big one's
+// replay_handle_early then gives them to one job of its group, the first, which a worker records in order into a recording of its own
+// while the replay thread runs the big one's dry pass; its submit goes ahead of the big one's segments, in order, as any segment's. Pending
+// ones that no such big command buffer follows (the submission ends, a stop, a serial replay, a big one that is not cut) are recorded
+// whole right then, as before, in the recording they would have been (small_pend_flush).
+bool small_prefix_on() {
+    static const bool v = [] {
+        const char* e = getenv("RX_VK_SMALL_PREFIX");
+        const bool on = e && atoi(e) != 0;
+        if (on) logf("vk: small command buffers before a big one recorded by a worker beside its dry pass (RX_VK_SMALL_PREFIX)");
+        return on;
+    }();
+    return v;
+}
+std::vector<PendingSmall> small_pend;   // (replay_mu)
+bool small_later_big = false;           // (run_submit: a later command buffer of this submission has two segments' worth of work)
+/// The pending small command buffers recorded now, whole, into the recording that is open, in order
+void small_pend_flush() {
+    if (small_pend.empty()) return;
+    std::vector<PendingSmall> v = std::move(small_pend);
+    small_pend.clear();
+    for (PendingSmall& e : v) {
+        const int64_t t0 = small_log_on() ? wall_now() : 0;
+        small_phase_on = t0 != 0;
+        {
+            WallAdd wall_whole(rwall.whole_ns);
+            rwall.whole++;
+            record_segment(rec_cur->cmd, e.g);
+        }
+        small_phase_on = false;
+        if (t0) small_count(e.g.p, nullptr, e.work, 0, wall_now() - t0);
+        small_pend_flushed++;
+    }
+}
 /// One big command buffer's segments, on the heap: the pool's jobs and the join hold it, and the join may come after replay_handle_early
 struct EarlyGroup {
     std::vector<std::unique_ptr<EarlyJob>> jobs;
@@ -3580,7 +3638,7 @@ struct EarlyGroup {
     std::mutex seg_mu;
     bool init_lost = false;
     // (what the join needs)
-    size_t used = 0;
+    size_t used = 0, first = 0;   // (first: the jobs before the big command buffer's own segments, RX_VK_SMALL_PREFIX's)
     bool self_help = false, deferred = false;
     uint64_t serial0 = 0;
     int64_t total = 0;
@@ -3640,7 +3698,15 @@ void early_record_job(EarlyGroup& G, EarlyJob* j) {
     draw_begin_recording(j->r->slot, j->r->cmd, j->r->value);
     VkCommandBuffer c = j->r->cmd;
     const int64_t ta = par_stats_on ? now_ns() : 0;
-    record_segment(c, j->g);
+    if (j->pre.empty()) {
+        record_segment(c, j->g);
+    } else {
+        for (PendingSmall& e : j->pre) {   // (RX_VK_SMALL_PREFIX)
+            record_segment(c, e.g);
+            if (occ_wserial - e.g.serial != (uint64_t)e.work) small_pre_mismatch.fetch_add(1, std::memory_order_relaxed);
+            small_pre_recorded.fetch_add(1, std::memory_order_relaxed);
+        }
+    }
     const int64_t tc = par_stats_on ? now_ns() : 0;
     if (defer_check_on()) j->recorded = (int64_t)(occ_wserial - j->g.serial);   // (this thread's count: record_segment's draws and dispatches)
     j->uploads = texture_uploads_recorded();
@@ -3747,7 +3813,7 @@ void early_join(EarlyGroup& G) {
     {   // (the profile, as replay_handle keeps it)
         double from[kMaxBatch], to[kMaxBatch], ms[kMaxBatch];
         size_t m = 0;
-        for (size_t k = 0; k < used && k < (size_t)kMaxBatch && G.total > 0; k++, m++) {
+        for (size_t k = G.first; k < used && k < (size_t)kMaxBatch && G.total > 0; k++, m++) {
             const uint64_t end = k + 1 < used ? jobs[k + 1]->g.serial : G.serial0 + (uint64_t)G.total;
             from[m] = (double)(jobs[k]->g.serial - G.serial0) / (double)G.total, to[m] = (double)(end - G.serial0) / (double)G.total;
             ms[m] = (jobs[k]->t1 - jobs[k]->t0) / 1e6;
@@ -3772,7 +3838,8 @@ void defer_join_now() {
     early_join(*g);
 }
 const uint8_t* replay_handle_early(VkCommandBuffer& cmd, const uint8_t* h, bool may_stop, int nplan, const int64_t* plan,
-                                   bool self_help, mkwvk::segment_plan::Profile& profile, int64_t* total_out, bool* cut) {
+                                   bool self_help, mkwvk::segment_plan::Profile& profile, int64_t* total_out, bool* cut,
+                                   std::vector<PendingSmall> pre = {}) {
     NvnState& state = *cur_state;
     defer_join_now();   // (stream JOIN1: the pre-sync and the segments' tables are not shared with segments still recording)
     presync_kick_at = 0;   // (the pre-sync is made here, before the dry pass)
@@ -3780,7 +3847,11 @@ const uint8_t* replay_handle_early(VkCommandBuffer& cmd, const uint8_t* h, bool 
     EarlyWall early_wall;
     const auto t_dry0 = std::chrono::steady_clock::now();
     const size_t ub0 = ub_updates.size();
-    par_points.clear(), par_conds_reset(), dry_work = 0;
+    // (RX_VK_SMALL_PREFIX: the small command buffers before this one, their dry passes done: their render conditions stay, this one's follow)
+    const size_t P = pre.empty() ? 0 : 1;   // (the prefix is one job, the first)
+    par_points.clear(), dry_work = 0;
+    if (!P) par_conds_reset();
+    const size_t cond0 = par_conds_n.load(std::memory_order_acquire);
     const uint64_t serial0 = occ_serial;
     Recording& r = *rec_cur;
     feed_set(mkwvk::feed::kPresync);   // (stream REPLAY2)
@@ -3794,12 +3865,13 @@ const uint8_t* replay_handle_early(VkCommandBuffer& cmd, const uint8_t* h, bool 
     tl_ev("early+", (uint64_t)nplan, rec_cur_value);   // (stream ORDER3: the timeline's marks of a big command buffer's replay)
     feed_set(mkwvk::feed::kJobs);   // (stream REPLAY2)
     const uint64_t base = ++par_seq;
-    par_seq += (uint64_t)nplan;
-    memory_rb_segments_begin(base, (uint64_t)nplan);
+    par_seq += (uint64_t)nplan + P;
+    memory_rb_segments_begin(base, (uint64_t)nplan + P);
     const auto group = std::make_shared<EarlyGroup>();   // (heap: the join may come after this function has returned, RX_VK_DEFER_JOIN)
     EarlyGroup& G = *group;
+    G.first = P;
     std::vector<std::unique_ptr<EarlyJob>>& jobs = G.jobs;
-    for (int k = 0; k < nplan; k++) {
+    for (int k = 0; k < nplan + (int)P; k++) {
         auto j = std::make_unique<EarlyJob>();
         j->r = &begin_segment_recording(rec_cur_value);
         VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
@@ -3851,11 +3923,15 @@ const uint8_t* replay_handle_early(VkCommandBuffer& cmd, const uint8_t* h, bool 
     const auto now_ns = [] { return (int64_t)std::chrono::steady_clock::now().time_since_epoch().count(); };
     (void)now_ns;
     // the dry pass, handing segments out as it passes their ends
-    size_t open = 0;   // (the segment whose end is looked for)
-    jobs[0]->s = state;
-    jobs[0]->g = {h, nullptr, &jobs[0]->s, ub0, 0, serial0};
+    size_t open = P;   // (the segment whose end is looked for)
+    if (P) {   // (the prefix job: the small command buffers' segments, in order)
+        jobs[0]->g = pre[0].g;
+        jobs[0]->pre = std::move(pre);
+    }
+    jobs[P]->s = state;
+    jobs[P]->g = {h, nullptr, &jobs[P]->s, ub0, cond0, serial0};
     SegEarlyHook hook;
-    hook.wants = [&](int64_t work, const uint8_t* at) { return (int)open + 1 < nplan && work >= plan[open] && at != jobs[open]->g.p; };
+    hook.wants = [&](int64_t work, const uint8_t* at) { return (int)open + 1 < nplan + (int)P && work >= plan[open - P] && at != jobs[open]->g.p; };
     hook.on_point = [&](const ParPoint& q) {
         if (!hook.wants(q.work, q.p)) return;
         EarlyJob* j = jobs[open].get();
@@ -3878,6 +3954,18 @@ const uint8_t* replay_handle_early(VkCommandBuffer& cmd, const uint8_t* h, bool 
         par_active = true;   // (the dry pass's texture paths and marks take ParLock from here on)
         ub_growing.store(true, std::memory_order_relaxed);
         seg_early_hook = &hook;
+        if (P) {   // (RX_VK_SMALL_PREFIX: the small command buffers' job goes out now, to record beside the dry pass)
+            EarlyJob* j = jobs[0].get();
+            {
+                std::lock_guard lk(par_pool.mu);
+                par_pool.jobs.push_back([group, j] { early_record_job(*group, j); });
+                par_pool.pending++;
+            }
+            par_pool.posted.fetch_add(1, std::memory_order_release);
+            par_pool.cv.notify_one();
+            tl_ev("pre-out", (uint64_t)j->pre.size());
+            small_pend_used += (int64_t)j->pre.size(), small_pend_jobs++;
+        }
     }
     rmode = Mode::Dry;
     VkCommandBuffer none = cmd;
@@ -3904,14 +3992,33 @@ const uint8_t* replay_handle_early(VkCommandBuffer& cmd, const uint8_t* h, bool 
     const size_t used = open + 1;
     if (early)
         for (size_t k = used; k < jobs.size(); k++) texture_segment_end((int)k);   // (never reached: their init command buffers ended)
-    if (used < 2 || !early) {   // (no boundary reached, or no init command buffer: the whole command buffer here, into rec_cur)
+    if (used < 2 + P || !early) {   // (no boundary reached, or no init command buffer: the whole command buffer here, into rec_cur)
         if (early) {
-            texture_segment_end(0);
+            texture_segment_end((int)P);
+            if (P) {   // (RX_VK_SMALL_PREFIX: its job is waited for and submitted, ahead of what is recorded here)
+                EarlyJob* pj = jobs[0].get();
+                spin_before_sleep([pj] { return pj->done.load(std::memory_order_acquire); });
+                {
+                    std::unique_lock l(G.seg_mu);
+                    G.seg_cv.wait(l, [pj] { return pj->done.load(); });
+                }
+                {
+                    std::lock_guard sl(G.sub_mu);
+                    while (G.next_sub < P) early_submit_job(G, jobs[G.next_sub++].get());
+                }
+                {
+                    std::unique_lock lk(par_pool.mu);
+                    par_pool.done.wait(lk, [] { return par_pool.pending == 0; });
+                }
+                rec_parts += (int)P;
+            }
             par_active = false;
             texture_segments_begin(nullptr, 0);
+        } else if (P) {   // (no init command buffers: its small command buffers are recorded here, in order, before this one)
+            for (PendingSmall& e : jobs[0]->pre) record_segment(cmd, e.g);
         }
         es_whole_n++;
-        Segment whole = jobs[0]->g;
+        Segment whole = jobs[P]->g;
         whole.end = stop;
         whole.serial_end = UINT64_MAX;
         {
@@ -3985,6 +4092,11 @@ bool dry_lean_on() {
     }();
     return on;
 }
+/// The draws and dispatches one segment is cut at (replay_handle's `per`)
+int64_t par_seg_per() {
+    static const int64_t v = getenv("RX_VK_PARALLEL_SEG") ? std::max(32, atoi(getenv("RX_VK_PARALLEL_SEG"))) : fine_segments() ? 128 : 160;
+    return v;
+}
 /// The draws and dispatches of a command buffer's stream from h to its end, by the ops' headers alone (the ops replay() counts in
 /// dry_work, walked as replay() walks them: one after another to NOP_END)
 int64_t count_work(const uint8_t* p) {
@@ -4003,6 +4115,7 @@ const uint8_t* replay_handle(VkCommandBuffer& cmd, const uint8_t* h, bool may_st
     NvnState& state = *cur_state;
     suspend_at = nullptr;
     if (threads < 2 || !rec_cur || dump_on() || gprof_on() || probe_serial()) {
+        if (rec_cur) small_pend_flush();   // (stream SMALL1)
         defer_join_now();   // (stream JOIN1)
         suspend_ok = may_stop;
         {
@@ -4020,10 +4133,13 @@ const uint8_t* replay_handle(VkCommandBuffer& cmd, const uint8_t* h, bool may_st
     const size_t ub0 = ub_updates.size();
     // (stream JOIN1) a join pending (RX_VK_DEFER_JOIN): its segments read par_conds and the uniform updates, so this dry pass appends to
     // them (par_conds is not reset: this command buffer's conditions follow, from cond0) and holds ub_grow_mu as an early dry pass does
-    const size_t cond0 = defer_group ? par_conds_n.load(std::memory_order_acquire) : 0;
+    const bool pend_before = !small_pend.empty();   // (stream SMALL1: their render conditions stay: this one's follow)
+    const size_t cond0 = defer_group || pend_before ? par_conds_n.load(std::memory_order_acquire) : 0;
     if (defer_group) {
         par_points.clear(), dry_work = 0;
         ub_growing.store(true, std::memory_order_relaxed);
+    } else if (pend_before) {
+        par_points.clear(), dry_work = 0;
     } else {
         par_points.clear(), par_conds_reset(), dry_work = 0;
     }
@@ -4085,7 +4201,10 @@ const uint8_t* replay_handle(VkCommandBuffer& cmd, const uint8_t* h, bool may_st
             if (early_gpu_mode() >= 2) plan[0] = std::min(plan[0], early_gpu_first());   // (stream C1: the GPU's first work sooner)
             int64_t total_now = 0;
             bool cut = false;
-            const uint8_t* const ret = replay_handle_early(cmd, h, may_stop, nplan, plan, self_help, pk_profile[pk_this], &total_now, &cut);
+            std::vector<PendingSmall> pre;   // (stream SMALL1: the small command buffers before this one, for the first job of its group)
+            if (!small_pend.empty() && nplan + 1 <= kMaxBatch) pre = std::move(small_pend), small_pend.clear();
+            small_pend_flush();   // (none left, or too many segments for a job more)
+            const uint8_t* const ret = replay_handle_early(cmd, h, may_stop, nplan, plan, self_help, pk_profile[pk_this], &total_now, &cut, std::move(pre));
             pk_total[pk_this] = total_now;
             if (cut) pk_big_now |= 1ull << pk_this;
             seg_early_count(cut ? 0 : 1);
@@ -4200,7 +4319,19 @@ const uint8_t* replay_handle(VkCommandBuffer& cmd, const uint8_t* h, bool may_st
     presync_kick_at = 0;
     if (seg.size() > 1) pk_big_now |= 1ull << pk_this;
     if (presync_early.r) presync_early_finish(seg.size() > 1);   // (TICK-056: its copies ahead of rec_cur, on every path below)
+    if (seg.size() == 1 && small_later_big && small_prefix_on() && !stop && !occ_stop && !defer_group && small_pend.size() < 24) {
+        // (stream SMALL1) a big command buffer follows in this submission: only the dry pass is made here; the recording is a worker's
+        // (replay_handle_early's first job) or, if that does not come, small_pend_flush's
+        PendingSmall e;
+        e.start = std::make_unique<NvnState>(start);
+        e.g = {h, nullptr, e.start.get(), ub0, cond0, serial0};
+        e.work = total;
+        small_pend.push_back(std::move(e));
+        small_pend_n++;
+        return nullptr;
+    }
     if (seg.size() == 1) {   // (one segment: here, as the dry pass left the reports and conditions)
+        small_pend_flush();   // (stream SMALL1: the ones before it first, in order)
         defer_check_beside(kDeferSerialRecord);   // (stream JOIN1: pending only with RX_VK_DEFER_JOIN=2)
         const int64_t sm_t0 = small_log_on() ? wall_now() : 0;
         small_phase_on = sm_t0 != 0;
@@ -4213,6 +4344,7 @@ const uint8_t* replay_handle(VkCommandBuffer& cmd, const uint8_t* h, bool may_st
         if (sm_t0) small_count(h, stop, total, (int64_t)(std::chrono::duration<double, std::nano>(std::chrono::steady_clock::now() - t_dry0).count()) - (wall_now() - sm_t0), wall_now() - sm_t0);
         return occ_stop ? occ_go_on(cmd, occ_stop, may_stop, nullptr) : stop;
     }
+    small_pend_flush();   // (stream SMALL1: the small command buffers before it, recorded here as before)
     defer_join_now();   // (stream JOIN1: its own segments' tables and slots)
     if (!par_pool.started) {
         par_pool.started = true;
@@ -4912,6 +5044,10 @@ bool run_submit(const uint64_t* handles, int n, uint64_t value, uint64_t queue, 
     for (; cb < n; cb++, p = nullptr) {
         if (!handles[cb]) continue;
         feed_set(mkwvk::feed::kWhole);   // (stream REPLAY2)
+        small_later_big = false;
+        if (small_prefix_on())   // (stream SMALL1: a big command buffer later in this submission, by the headers)
+            for (int k = cb + 1; k < n && !small_later_big; k++)
+                if (handles[k]) small_later_big = count_work(reinterpret_cast<const uint8_t*>(handles[k])) >= 2 * par_seg_per();
         int64_t sq_d0 = 0, sq_di0 = 0;
         if (small_log_on()) {
             int64_t sk, pl;
@@ -4929,6 +5065,8 @@ bool run_submit(const uint64_t* handles, int n, uint64_t value, uint64_t queue, 
         }
         if (stop) break;
     }
+    small_pend_flush();   // (stream SMALL1: what no big command buffer took, recorded whole, before the recording's end)
+    small_later_big = false;
     if (small_log_on()) small_seq_note(-1, false);   // (the submission's end)
     defer_join_now();   // (stream JOIN1: a join never outlives the command buffers' loop: the recording's end below needs every segment)
     if (stop) {
