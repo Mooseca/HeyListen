@@ -1403,10 +1403,8 @@ int cap_only_gpu() {
 }
 std::vector<std::pair<uint64_t, uint64_t>> all_pool_ranges;   // (every game pool below 1 TB, merged; cap_ranges_mu)
 std::mutex cap_excl_mu;
-// (2026-11-22) bumped under cap_excl_mu at every change of cap_excl: a thread's copy of the ranges is current while its
-// generation is (cap_excl_hit)
-std::atomic<uint64_t> cap_excl_gen{1};
 std::vector<std::pair<uint64_t, uint64_t>> cap_excl;          // (the import ranges outside every pool and texture storage)
+std::atomic<uint64_t> cap_excl_gen{0};                        // (stream DRAW1: bumped, under cap_excl_mu, at each change of cap_excl)
 std::atomic<int64_t> st_excl_pages{0}, st_excl_reads{0}, st_cap_pages{0}, st_cap_presents{0}, st_cap_takes{0};
 std::vector<std::pair<uint64_t, uint64_t>> ranges_merged(std::vector<std::pair<uint64_t, uint64_t>> v) {
     std::sort(v.begin(), v.end());
@@ -1709,7 +1707,7 @@ std::vector<std::pair<uint64_t, uint64_t>> capture_union_locked() {
         {
             std::lock_guard lk(cap_excl_mu);
             cap_excl.swap(excl);
-            cap_excl_gen.fetch_add(1, std::memory_order_release);
+            cap_excl_gen.fetch_add(1, std::memory_order_acq_rel);
         }
         if (cap_only_gpu() == 1) imp = ranges_clip(imp, gpu, true);
     }
@@ -1727,14 +1725,37 @@ bool ranges_hit(const std::vector<std::pair<uint64_t, uint64_t>>& v, uint64_t lo
 /// of them, taken again under the lock only when they changed: every buffer binding asks (gpu_buffer_bind, before its
 /// memo), ~10 a draw on each recording thread, and the one mutex each of those took was shared by all of them
 bool cap_excl_hit(uint64_t lo, uint64_t hi) {
-    thread_local std::vector<std::pair<uint64_t, uint64_t>> mine;
-    thread_local uint64_t mine_gen = 0;
-    if (cap_excl_gen.load(std::memory_order_acquire) != mine_gen) {
-        std::lock_guard lk(cap_excl_mu);
-        mine = cap_excl;
-        mine_gen = cap_excl_gen.load(std::memory_order_relaxed);
+    // (stream DRAW1, RX_VK_DRAW_EXCL=0: under the lock at each call, as before) Every buffer binding asks, from every recording thread
+    // (about 10 a draw): the lock was taken ~25,000 times a frame to read a list that changes when a pool is made or the import list is
+    // scanned again. Each thread now searches its own copy, taken again when cap_excl_gen says the list moved
+    static const bool snap_on = !getenv("RX_VK_DRAW_EXCL") || strcmp(getenv("RX_VK_DRAW_EXCL"), "0") != 0;
+    if (snap_on) {
+        // (a plain thread_local pointer, kept for the thread's life: a thread_local vector costs the library's TLS init call at each use)
+        thread_local std::vector<std::pair<uint64_t, uint64_t>>* snap = nullptr;
+        thread_local uint64_t seen = ~0ull;
+        if (!snap) snap = new std::vector<std::pair<uint64_t, uint64_t>>();
+        if (cap_excl_gen.load(std::memory_order_acquire) != seen) {
+            std::lock_guard lk(cap_excl_mu);
+            *snap = cap_excl;
+            seen = cap_excl_gen.load(std::memory_order_relaxed);
+        }
+        const bool hit = ranges_hit(*snap, lo, hi);
+        // (RX_VK_DRAW_CHECK=1: and under the lock, as before; a pool made at that very moment may differ, a steady state does not)
+        static const bool check = getenv("RX_VK_DRAW_CHECK") && strcmp(getenv("RX_VK_DRAW_CHECK"), "0") != 0;
+        if (check) {
+            std::lock_guard lk(cap_excl_mu);
+            static std::atomic<int64_t> calls{0}, bad{0};
+            const bool locked = ranges_hit(cap_excl, lo, hi);
+            if (locked != hit && bad.fetch_add(1) < 8)
+                logf("vk: draw check: the kept left-out ranges answer %d, the locked list %d (%#llx +%#llx)", (int)hit, (int)locked,
+                     (unsigned long long)lo, (unsigned long long)(hi - lo));
+            if (calls.fetch_add(1) % 2000000 == 0)
+                logf("vk: draw check: left-out range lookups %lld, differing %lld", (long long)calls.load(), (long long)bad.load());
+        }
+        return hit;
     }
-    return ranges_hit(mine, lo, hi);
+    std::lock_guard lk(cap_excl_mu);
+    return ranges_hit(cap_excl, lo, hi);
 }
 /// (2026-11-14) a pool just made, [lo, hi): one of the pools at once, and out of the left-out ranges at once, so no binding
 /// of it can come before (the play session's reads into left-out ranges came after zone changes: pools made since the last
@@ -1757,7 +1778,7 @@ void cap_pool_born_now(uint64_t gpu, uint64_t size) {
         std::lock_guard lk(cap_ranges_mu);
         std::lock_guard ek(cap_excl_mu);
         cap_pool_born(all_pool_ranges, cap_excl, gpu, gpu + size);
-        cap_excl_gen.fetch_add(1, std::memory_order_release);
+        cap_excl_gen.fetch_add(1, std::memory_order_acq_rel);
         cap_ranges_ver++;
     }
     if (cap_only_gpu() == 1) {

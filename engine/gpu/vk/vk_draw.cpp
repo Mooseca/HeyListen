@@ -40,6 +40,7 @@
 #include "compat/hookshot_env.h"   // (env_value_off: the switches' one rule)
 #include "vk_paths.h"
 #include "vk_draw.h"
+#include "vk_draw_sample.h"
 #include "flat_map.h"
 #include "perf_report.h"   // (zone_note_program / zone_note_state: the per-zone key recorder, once a key per map)
 #include "dlss_actor.h"
@@ -123,14 +124,18 @@ T& tls_make(T*& slot) {
 // frame, the counts a draw. FT_*: the sections of the descriptor build (banks, c1, user uniform buffers, storage buffers, textures) and
 // of the commands (hazards and the pass, pipeline bind, descriptor push, push constants, dynamic state, vertex and index binds, the draw)
 enum FineT { FT_BANK, FT_C1, FT_UBO, FT_STORAGE, FT_TEX, FT_HAZARD, FT_BINDPL, FT_BINDDESC, FT_PUSHCALL, FT_PUSHC, FT_DYN, FT_VERTEX,
-             FT_DRAWCALL, FT_PROGRAM, FT_PIPELINE, FT_TEXMISS, FT_COUNT };
+             FT_DRAWCALL, FT_PROGRAM, FT_PIPELINE, FT_TEXMISS, FT_TOTAL, FT_BUILD, FT_PRE, FT_GATES, FT_CKPT, FT_POST, FT_COUNT };
 const char* const kFineT[] = {"banks", "c1", "user uniform buffers", "storage buffers", "textures", "hazards+pass", "bind pipeline",
                                       "bind descriptors", "of it the push call", "push constants", "dynamic state", "vertex+index binds",
-                                      "draw call", "program lookup", "pipeline lookup", "of textures: slot misses (view and sampler lookups)"};
+                                      "draw call", "program lookup", "pipeline lookup", "of textures: slot misses (view and sampler lookups)",
+                                      "draw() whole", "of it the descriptor build whole", "of it before the program lookup (targets, formats)",
+                                      "of it the checks between the pipeline and the descriptors", "of push constants: the checkpoint marker",
+                                      "of it between the descriptor build and the pipeline bind (hazards included), and the queries after the dynamic state"};
 enum FineC { FC_DRAWS, FC_BUILDS, FC_DESCS, FC_WRITES, FC_BANK_CALLS, FC_BANK_GEN, FC_BANK_FILLS, FC_BANK_FILL_BYTES, FC_BANK_SAME,
              FC_BANK_NEW, FC_BANK_NEW_BYTES, FC_C1_CALLS, FC_UBO_CALLS, FC_UBO_OVERLAY, FC_UBO_STREAM, FC_PUSH_FULL, FC_PUSH_DELTA,
              FC_PUSH_NONE, FC_PUSH_WRITES, FC_PUSH_DESCS, FC_BIND_PIPE, FC_DYN_FAST, FC_DYN_FULL, FC_DYN_CALLS, FC_VBIND, FC_IBIND,
-             FC_PUSHC, FC_PIPE_FAST, FC_PIPE_MAP, FC_POOL_SETS, FC_POOL_DESCS, FC_SSBO_DESCS, FC_TEX_HIT, FC_TEX_MISS, FC_COUNT };
+             FC_PUSHC, FC_PIPE_FAST, FC_PIPE_MAP, FC_POOL_SETS, FC_POOL_DESCS, FC_SSBO_DESCS, FC_TEX_HIT, FC_TEX_MISS,
+             FC_MISS_NEW, FC_MISS_HANDLE, FC_MISS_VERSION, FC_MISS_SAMPV, FC_MISS_DGEN, FC_FRONT_HIT, FC_COUNT };
 const char* const kFineC[] = {"draws", "descriptor builds", "descriptors", "descriptor writes", "bank calls",
                                       "bank kept by its stage's generation", "bank fills", "bank bytes filled", "bank refills equal",
                                       "bank copies into the stream", "bank bytes copied", "c1 calls", "user uniform buffer calls",
@@ -140,10 +145,41 @@ const char* const kFineC[] = {"draws", "descriptor builds", "descriptors", "desc
                                       "dynamic state worked out", "dynamic state commands", "vertex stream binds", "index buffer binds",
                                       "push constants", "pipeline keys from the fast pair", "pipeline keys from the thread's map",
                                       "sets allocated (over the push limit)", "descriptors in them", "storage buffer descriptors built",
-                                      "texture slots kept (a handle's view, tex and sampler)", "texture slots resolved again"};
+                                      "texture slots kept (a handle's view, tex and sampler)", "texture slots resolved again",
+                                      "of them the slot new or invalidated", "of them another handle in the slot", "of them the texture's registration anew",
+                                      "of them the sampler's registration anew", "of them a texture destroyed since",
+                                      "program picks answered from the kept answers (DRAW1)"};
 static_assert(std::size(kFineT) == FT_COUNT && std::size(kFineC) == FC_COUNT, "every section and count is named");
 const bool g_fine = getenv("RX_VK_PROF_FINE") != nullptr;
-int64_t fine_ns[FT_COUNT], fine_n[FC_COUNT];
+// (stream DRAW1) The sums are each thread's own: the recording threads of the parallel replay add at once, and a shared array lost
+// updates, so its sums did not describe the shipped configuration. A thread's arrays are made at its first use and never freed (the
+// report reads every thread's without a lock: plain 64-bit reads of counters that only that thread writes).
+// And, with RX_VK_PROF_FINE, draw() whole: each draw's time into buckets, the sections of the draws over 10 us, and a table by
+// program (the programs that cost most a draw and what the slot misses and descriptor builds are of it)
+constexpr int kDrawBuckets = 7, kProgSlots = 2048;
+constexpr int64_t kBucketNs[kDrawBuckets - 1] = {1000, 2000, 3000, 5000, 10000, 30000};
+struct FineProg { uint64_t key; int64_t n, ns, builds, misses, slow; };
+struct FineTls {
+    int64_t ns[FT_COUNT], n[FC_COUNT];
+    int64_t bucket_n[kDrawBuckets], bucket_ns[kDrawBuckets];
+    int64_t slow_sec[FT_COUNT];   // (the sections' sums over the draws of 10 us and more)
+    int sample_slot;              // (RX_VK_DRAW_SAMPLE: this thread's place in the sampler, -1 none)
+    FineProg prog[kProgSlots];
+};
+std::mutex fine_mu;
+std::vector<FineTls*> fine_all;
+FineTls& fine_t() {
+    thread_local FineTls* t = nullptr;
+    if (!t) {
+        t = new FineTls();   // (zeroed)
+        t->sample_slot = draw_sample::register_thread();
+        std::lock_guard lk(fine_mu);
+        fine_all.push_back(t);
+    }
+    return *t;
+}
+#define fine_ns (fine_t().ns)
+#define fine_n (fine_t().n)
 struct FineScope {
     int ph;
     int64_t t0;
@@ -155,28 +191,132 @@ struct FineScope {
 #define FINE_SCOPE(ph) FineScope fine_scope_##ph(ph)
 #define FINE_N(c, n) do { if (g_fine) fine_n[c] += (n); } while (0)
 #define FINE_X(c, n) (g_fine ? (void)(fine_n[c] += (n)) : (void)0)   // (the same, as an expression)
+// (stream DRAW1, RX_VK_DRAW_CHECK=1) The kept answers of the DRAW1 switches (RX_VK_DRAW_*) worked out the old way too and compared: the
+// mismatches counted and the first eight logged, "vk: draw check: N mismatches" with the frame statistics. Slower; for the checks only
+bool draw_check_on() {
+    static const bool on = getenv("RX_VK_DRAW_CHECK") && !env_value_off(getenv("RX_VK_DRAW_CHECK"));
+    return on;
+}
+std::atomic<int64_t> draw_check_bad{0}, draw_check_all{0};
+void draw_check_note(const char* what, uint64_t key) {
+    if (draw_check_bad.fetch_add(1, std::memory_order_relaxed) < 8)
+        logf("vk: draw check: %s differs from the old path (program %016llx)", what, (unsigned long long)key);
+}
+/// draw() whole: the draw's time, the sections it spent it in, and its program. Made first in draw(), so every return is counted
+struct FineDraw {
+    FineTls* t = nullptr;
+    int64_t t0 = 0, base_ns[FT_COUNT], misses0 = 0, builds0 = 0;
+    uint64_t key = 0;
+    FineDraw() {
+        if (!g_fine) return;
+        t = &fine_t();
+        std::memcpy(base_ns, t->ns, sizeof base_ns);
+        misses0 = t->n[FC_TEX_MISS], builds0 = t->n[FC_BUILDS];
+        t0 = prof_now();
+        draw_sample::enter(t->sample_slot);
+    }
+    ~FineDraw() {
+        if (!t) return;
+        draw_sample::leave(t->sample_slot);
+        const int64_t d = prof_now() - t0;
+        t->ns[FT_TOTAL] += d;
+        int b = 0;
+        while (b < kDrawBuckets - 1 && d >= kBucketNs[b]) b++;
+        t->bucket_n[b]++, t->bucket_ns[b] += d;
+        const bool slow = d >= 10000;
+        if (slow)
+            for (int i = 0; i < FT_COUNT; i++) t->slow_sec[i] += t->ns[i] - base_ns[i];
+        if (!key) return;
+        size_t at = (size_t)((key ^ key >> 17) * 0x9E3779B97F4A7C15ull >> 53);   // (2048 slots, linear probing over 8)
+        FineProg* e = &t->prog[at % kProgSlots];
+        for (int k = 0; k < 8 && e->key && e->key != key; k++) e = &t->prog[++at % kProgSlots];
+        if (e->key && e->key != key) return;
+        e->key = key, e->n++, e->ns += d, e->builds += t->n[FC_BUILDS] - builds0, e->misses += t->n[FC_TEX_MISS] - misses0, e->slow += slow;
+    }
+};
 /// The sums since the last report, as a frame's times and a draw's counts (the caller: every 120 frames)
 void fine_report(double frames) {
     if (!g_fine) return;
-    static int64_t last_ns[FT_COUNT], last_n[FC_COUNT];
+    draw_sample::report();
+    if (draw_check_on()) logf("vk: draw check: %lld mismatches so far", (long long)draw_check_bad.load());
+    static int64_t last_ns[FT_COUNT], last_n[FC_COUNT], last_bn[kDrawBuckets], last_bns[kDrawBuckets], last_slow[FT_COUNT];
+    int64_t sum_ns[FT_COUNT]{}, sum_n[FC_COUNT]{}, sum_bn[kDrawBuckets]{}, sum_bns[kDrawBuckets]{}, sum_slow[FT_COUNT]{};
+    std::unordered_map<uint64_t, FineProg> progs;
+    {
+        std::lock_guard lk(fine_mu);
+        for (const FineTls* t : fine_all) {
+            for (int i = 0; i < FT_COUNT; i++) sum_ns[i] += t->ns[i], sum_slow[i] += t->slow_sec[i];
+            for (int i = 0; i < FC_COUNT; i++) sum_n[i] += t->n[i];
+            for (int i = 0; i < kDrawBuckets; i++) sum_bn[i] += t->bucket_n[i], sum_bns[i] += t->bucket_ns[i];
+            for (const FineProg& e : t->prog) {
+                if (!e.key) continue;
+                FineProg& a = progs[e.key];
+                a.key = e.key, a.n += e.n, a.ns += e.ns, a.builds += e.builds, a.misses += e.misses, a.slow += e.slow;
+            }
+        }
+    }
     char line[1400];
     int k = snprintf(line, sizeof line, "vk: a frame (fine): ms:");
     for (int i = 0; i < FT_COUNT; i++) {
-        k += snprintf(line + k, sizeof line - k, " %s %.2f%s", kFineT[i], (fine_ns[i] - last_ns[i]) / frames / 1e6, i + 1 < FT_COUNT ? "," : "");
-        last_ns[i] = fine_ns[i];
+        k += snprintf(line + k, sizeof line - k, " %s %.2f%s", kFineT[i], (sum_ns[i] - last_ns[i]) / frames / 1e6, i + 1 < FT_COUNT ? "," : "");
+        if (k > 900) {
+            logf("%s", line);
+            k = snprintf(line, sizeof line, "vk: a frame (fine): ms:");
+        }
+        last_ns[i] = sum_ns[i];
     }
     logf("%s", line);
-    const double draws = std::max<double>(1.0, (double)(fine_n[FC_DRAWS] - last_n[FC_DRAWS]));
+    const double draws = std::max<double>(1.0, (double)(sum_n[FC_DRAWS] - last_n[FC_DRAWS]));
     k = snprintf(line, sizeof line, "vk: a frame (fine): %.0f draws; a draw:", draws / frames);
     for (int i = 1; i < FC_COUNT; i++) {
-        k += snprintf(line + k, sizeof line - k, " %s %.2f%s", kFineC[i], (fine_n[i] - last_n[i]) / draws, i + 1 < FC_COUNT ? "," : "");
+        k += snprintf(line + k, sizeof line - k, " %s %.2f%s", kFineC[i], (sum_n[i] - last_n[i]) / draws, i + 1 < FC_COUNT ? "," : "");
         if (k > 700) {
             logf("%s", line);
             k = snprintf(line, sizeof line, "vk: a frame (fine): a draw:");
         }
     }
     logf("%s", line);
-    for (int i = 0; i < FC_COUNT; i++) last_n[i] = fine_n[i];
+    for (int i = 0; i < FC_COUNT; i++) last_n[i] = sum_n[i];
+    {   // (DRAW1) the draws' time by size: draws a frame and ms a frame in each bucket
+        static const char* const names[kDrawBuckets] = {"<1us", "1-2us", "2-3us", "3-5us", "5-10us", "10-30us", ">=30us"};
+        k = snprintf(line, sizeof line, "vk: a frame (draw1): draws by time (a frame: draws / ms):");
+        for (int i = 0; i < kDrawBuckets; i++) {
+            k += snprintf(line + k, sizeof line - k, " %s %.0f/%.2f%s", names[i], (sum_bn[i] - last_bn[i]) / frames,
+                          (sum_bns[i] - last_bns[i]) / frames / 1e6, i + 1 < kDrawBuckets ? "," : "");
+            last_bn[i] = sum_bn[i], last_bns[i] = sum_bns[i];
+        }
+        logf("%s", line);
+        // the draws of 10 us and more: their sections (ms a frame)
+        k = snprintf(line, sizeof line, "vk: a frame (draw1): sections of the draws of 10 us and more (ms a frame):");
+        for (int i = 0; i < FT_COUNT; i++) {
+            k += snprintf(line + k, sizeof line - k, " %s %.2f%s", kFineT[i], (sum_slow[i] - last_slow[i]) / frames / 1e6, i + 1 < FT_COUNT ? "," : "");
+            if (k > 900) {
+                logf("%s", line);
+                k = snprintf(line, sizeof line, "vk: a frame (draw1): sections of the slow draws:");
+            }
+            last_slow[i] = sum_slow[i];
+        }
+        logf("%s", line);
+    }
+    {   // (DRAW1) the programs that cost most since the last report (draws, us a draw, slot misses and builds a draw, share of slow draws)
+        static std::unordered_map<uint64_t, FineProg> last_progs;
+        std::vector<FineProg> v;
+        for (const auto& [key, e] : progs) {
+            FineProg d = e;
+            if (const auto it = last_progs.find(key); it != last_progs.end()) {
+                d.n -= it->second.n, d.ns -= it->second.ns, d.builds -= it->second.builds, d.misses -= it->second.misses, d.slow -= it->second.slow;
+            }
+            if (d.n > 0) v.push_back(d);
+        }
+        last_progs = progs;
+        std::sort(v.begin(), v.end(), [](const FineProg& a, const FineProg& b) { return a.ns > b.ns; });
+        k = snprintf(line, sizeof line, "vk: a frame (draw1): programs by time, since the last report (key draws us/draw misses/draw builds/draw slow%%):");
+        for (size_t i = 0; i < v.size() && i < 14 && k < 1200; i++)
+            k += snprintf(line + k, sizeof line - k, " %016llx %lld %.1f %.2f %.2f %.0f%%;", (unsigned long long)v[i].key, (long long)v[i].n,
+                          v[i].ns / 1e3 / std::max<int64_t>(v[i].n, 1), (double)v[i].misses / std::max<int64_t>(v[i].n, 1),
+                          (double)v[i].builds / std::max<int64_t>(v[i].n, 1), 100.0 * v[i].slow / std::max<int64_t>(v[i].n, 1));
+        logf("%s", line);
+    }
 }
 
 bool no_a2c() {   // (RX_VK_NO_A2C, read once: it was a getenv on every alpha-to-coverage draw, the foliage's)
@@ -1757,7 +1897,16 @@ struct PipeFast {
     uint32_t formats[8]{}, vattr[16]{}, div[16]{};
     uint64_t blend[8]{};
 };
-thread_local PipeFast pipe_fast[2];
+// (stream DRAW1, RX_VK_DRAW_PIPEFAST=1, off by default: the last 16 pipelines, not the last two) The test is an exact equality of everything baked into the
+// pipeline (pipe_same), so an entry is as good as it was when it was made, however old. Half of a frame's draws went by the thread's
+// map after the pair missed (alternating pipelines of 3 or more): the last 16 now
+constexpr int kPipeFast = 16;
+thread_local PipeFast pipe_fast[kPipeFast];
+thread_local uint32_t pipe_fast_next = 0;
+bool pipe_fast_wide() {
+    static const bool on = env_on("RX_VK_DRAW_PIPEFAST");   // (off by default: the fast hits did not rise)
+    return on;
+}
 
 /// (hookshot) the stage a graphics pipeline's vertex input comes from (a fallback program's first stage is a compute one)
 const Shader::Info* vertex_info(const Program& p) {
@@ -1921,8 +2070,9 @@ PipeEntry* graphics_pipeline(const Program& p, const NvnState& s, const Targets&
     const int topo_c = topology_class(topo);
     const uint32_t blend_en = (uint32_t)s.color.blend_en, chmask = s.chmask.mask, poly = (uint32_t)s.poly.mode;
     const uint32_t clamp = s.depth_clamp ? 1u : 0u, a2c = s.ms.a2c ? 1u : 0u;
-    for (const PipeFast& f : pipe_fast)
-        if (f.on && f.pe &&
+    const int pipe_fast_n = pipe_fast_wide() ? kPipeFast : 2;
+    for (int fi = 0; fi < pipe_fast_n; fi++)
+        if (const PipeFast& f = pipe_fast[fi]; f.on && f.pe &&
             pipe_same((uint64_t)(uintptr_t)&p, p.variant, topo_c, (uint32_t)at.samples, at.n, (uint32_t)at.depth_format,
                       formats, s.nvattr, vattr, divs, blend_en, blend, chmask, poly, clamp, a2c, f.prog, f.variant, f.topo,
                       f.samples, f.n, f.depth, f.formats, f.nvattr, f.vattr, f.div, f.blend_en, f.blend, f.chmask, f.poly,
@@ -1934,8 +2084,18 @@ PipeEntry* graphics_pipeline(const Program& p, const NvnState& s, const Targets&
     auto remember = [&](PipeEntry* e, uint64_t pkey) {
         if (!e) return e;
         zone_note_state(pkey);   // (every slow-path lookup notes the pipeline's key: the set lookup, once a key per map)
-        if (!(pipe_fast[0].on && pipe_fast[0].pe == e)) pipe_fast[1] = pipe_fast[0];
-        PipeFast& f = pipe_fast[0];
+        PipeFast* slot = &pipe_fast[0];
+        if (pipe_fast_n > 2) {   // (the entry of this pipeline's older state, else the next in turn)
+            for (int fi = 0; fi < pipe_fast_n; fi++)
+                if (pipe_fast[fi].on && pipe_fast[fi].pe == e) {
+                    pipe_fast_next = (uint32_t)fi;
+                    break;
+                }
+            slot = &pipe_fast[pipe_fast_next++ % kPipeFast];
+        } else if (!(pipe_fast[0].on && pipe_fast[0].pe == e)) {
+            pipe_fast[1] = pipe_fast[0];
+        }
+        PipeFast& f = *slot;
         f.on = true, f.pe = e, f.key = pkey, f.prog = (uint64_t)(uintptr_t)&p, f.variant = p.variant, f.topo = topo_c;
         f.samples = (uint32_t)at.samples, f.n = at.n, f.depth = (uint32_t)at.depth_format, f.nvattr = s.nvattr;
         f.blend_en = blend_en, f.chmask = chmask, f.poly = poly, f.clamp = clamp, f.a2c = a2c;
@@ -3309,6 +3469,7 @@ constexpr size_t kTexWays = 4;   // (the handles kept a slot)
 struct ProgSlots {
     uint64_t key = 0;
     std::vector<TexSlot> tex;
+    std::vector<uint8_t> ptr;   // (stream DRAW1, RX_VK_DRAW_HPTR: a texture handle's "is a storage buffer's pointer" answer, a program's own: 0 not asked, 1 no, 2 yes)
 };
 TLS_OBJECT(prog_slots, std::unordered_map<const Program*, ProgSlots>)
 
@@ -3413,11 +3574,14 @@ void build_descriptors(const NvnState& s, const Program& p) {
     out.bufs.reserve(nbuf), out.imgs.reserve(nimg), out.views.reserve(nview);   // (stable pointers below)
     static const bool no_slot_cache = getenv("RX_VK_NO_SLOT_CACHE") != nullptr;
     TexSlot* slots = nullptr;
+    uint8_t* ptr_kept = nullptr;   // (RX_VK_DRAW_HPTR)
+    static const bool hptr_on = !getenv("RX_VK_DRAW_HPTR") || !env_value_off(getenv("RX_VK_DRAW_HPTR"));
     if (!no_slot_cache && ntex) {
         auto& table = prog_slots();
         ProgSlots& ps = table[&p];
-        if (ps.key != p.key || ps.tex.size() != ntex * kTexWays) ps.key = p.key, ps.tex.assign(ntex * kTexWays, TexSlot{});
+        if (ps.key != p.key || ps.tex.size() != ntex * kTexWays) ps.key = p.key, ps.tex.assign(ntex * kTexWays, TexSlot{}), ps.ptr.assign(ntex, 0);
         slots = ps.tex.data();
+        if (ps.ptr.size() == ntex) ptr_kept = ps.ptr.data();
     }
     size_t tslot = 0;
     const uint64_t dgen_now = slots ? texture_destroy_generation() : 0;
@@ -3747,9 +3911,20 @@ void build_descriptors(const NvnState& s, const Program& p) {
                 // (Handle tables now give those samples their own textures: this is for what the translation still cannot
                 // compute per draw)
                 static const bool all_stages = getenv("RX_VK_HANDLE_POINTER_ALL") != nullptr;
-                const uint32_t handle = is_table ? table[k]
-                                        : ((all_stages || st.vk_stage == VK_SHADER_STAGE_FRAGMENT_BIT) && handle_is_storage_pointer(info, d, k))
-                                            ? 0u : handle_of(s, st, d, k);
+                // (stream DRAW1, RX_VK_DRAW_HPTR=0: asked of the program's descriptors at every draw, a walk of the stage's storage buffers
+                // for each texture: what it answers is the program's own and the same at every build, kept with the slots)
+                bool at_pointer = false;
+                if (!is_table && (all_stages || st.vk_stage == VK_SHADER_STAGE_FRAGMENT_BIT)) {
+                    if (hptr_on && ptr_kept && tslot < ntex) {
+                        uint8_t& c = ptr_kept[tslot];
+                        if (!c) c = handle_is_storage_pointer(info, d, k) ? 2 : 1;
+                        at_pointer = c == 2;
+                        if (draw_check_on() && at_pointer != handle_is_storage_pointer(info, d, k)) draw_check_note("handle pointer", p.key);
+                    } else {
+                        at_pointer = handle_is_storage_pointer(info, d, k);
+                    }
+                }
+                const uint32_t handle = is_table ? table[k] : at_pointer ? 0u : handle_of(s, st, d, k);
                 desc_fp_note(handle);   // (RX_VK_DESC_SLOTGEN)
                 Texture* tex = nullptr;
                 upload_defer_ok = st.vk_stage != VK_SHADER_STAGE_COMPUTE_BIT;   // (a draw's: its new ASTC textures may wait a frame)
@@ -3787,6 +3962,9 @@ void build_descriptors(const NvnState& s, const Program& p) {
                     }
                 } else {
                     FINE_N(FC_TEX_MISS, 1);
+                    if (g_fine && sl)
+                        fine_n[!sl->valid ? FC_MISS_NEW : sl->handle != handle ? FC_MISS_HANDLE : sl->version != version ? FC_MISS_VERSION
+                                : sl->samp_version != samp_version ? FC_MISS_SAMPV : FC_MISS_DGEN]++;
                     FINE_SCOPE(FT_TEXMISS);
                     view = handle ? texture_view_of(handle, vt, ViewUse::Sample, VK_FORMAT_UNDEFINED, &tex) : VK_NULL_HANDLE;
                     // (Lichii bd0171f7) A depth-compare sample of a colour texture is undefined and differs between vendors: a
@@ -4122,6 +4300,7 @@ uint32_t checkpoint_seq() {
 thread_local uint32_t checkpoint_last = 0;   // (this thread's latest marker: checkpoint_work)
 void checkpoint(VkCommandBuffer cmd, const Program& p, char kind) {
     if (!checkpoints_on()) return;
+    FINE_SCOPE(FT_CKPT);
     const uint32_t seq = checkpoint_seq(), i = (seq - 1) & 0xFFFF;
     checkpoints[i] = {p.key, texture_frame_no(), seq, kind, 0, 0, 0, 0, 0};
     checkpoint_last = seq;
@@ -7637,7 +7816,106 @@ static bool writes_memory(const Program& p) {
     return false;
 }
 
+// ---- (stream DRAW1, RX_VK_DRAW_PROGFRONT) the draws' program picks kept longer ----
+// program_for (vk_shader.cpp, in the shader stamp: not touched) answers a draw from the two picks before it while the state its answer
+// was read from stands (prog_same: the program's stage code, the uniform buffers, the registrations, the vertex inputs, the colour types,
+// and for the stages whose textures the answers come from, those textures). A frame of ~2,350 draws over ~300 programs meets a third of
+// its draws outside those two (~330 draws of 10 us and more, 1.2 ms of the program lookup in them) and then pays the full pick: the
+// inputs' hash, the thread's map, the answers' handles read again and compared. Here the same test is made over the last 32 answers
+// instead of 2, with program_for's own rule for what stands (prog_same, by_tex, the tone map reset): an answer that program_for
+// gave is as valid here as it was in its pair, and entries are only filled from its answers. Off by default (no measurable gain);
+// RX_VK_DRAW_PROGFRONT=1: on.
+// RX_VK_DRAW_CHECK=1: program_for is asked too, and the draw takes its answer; the two compared and counted
+struct ProgFront {
+    bool on;
+    uint64_t serial, stages, bind, reg, ub;
+    int nvattr;
+    uint32_t vattr[16];
+    uint8_t ct[8];
+    const Program* p;
+    uint32_t amask;
+    uint64_t tex_gen[kNvnStages];
+};
+constexpr int kProgFront = 32;
+thread_local ProgFront prog_front[kProgFront];
+thread_local uint32_t prog_front_next = 0;
+thread_local int prog_front_tonemap = -1;
+bool prog_front_on() {
+    static const bool on = env_on("RX_VK_DRAW_PROGFRONT");   // (off by default: it answers a third of the draws and gained nothing measurable)
+    return on;
+}
+uint64_t prog_front_sig(const nvn_prog& p) {   // (vk_shader.cpp's prog_stage_sig)
+    uint64_t h = (uint64_t)p.nstage << 32 | p.magic;
+    for (int i = 0; i < 6; i++) h = h * 1099511628211ull ^ p.sd[i].data ^ (p.sd[i].control << 1);
+    return h ^ p.serial;
+}
+uint32_t prog_front_mask(const Program& p) {   // (vk_shader.cpp's answer_stage_mask)
+    uint32_t mask = 0;
+    for (const Program::Answer& a : p.answers) {
+        const Stage& st = p.stages[a.stage];
+        if (st.nvn_stage < 0 || st.nvn_stage > 4) return ~0u;
+        bool c2;
+        if (a.image) {
+            const auto& d = st.info.image_descriptors[a.desc];
+            c2 = d.handle_program == ~0U && d.cbuf_index == 2;
+        } else {
+            const auto& d = st.info.texture_descriptors[a.desc];
+            c2 = d.handle_program == ~0U && d.cbuf_index == 2 && (!d.has_secondary || d.secondary_cbuf_index == 2);
+        }
+        if (!c2) return ~0u;
+        mask |= 1u << st.nvn_stage;
+    }
+    return mask;
+}
+/// What a draw's state is, read before the pick (as program_for reads it: an entry kept for the answer must not be newer than it)
+struct ProgFrontNow {
+    uint64_t stages, bind, reg, ub;
+};
+/// The program a draw's state is answered with from the kept answers, or null
+const Program* prog_front_find(const NvnState& s, const uint8_t color_types[8], ProgFrontNow* now) {
+    const int tonemap = scene_tonemap_on() ? 1 : 0;
+    if (tonemap != prog_front_tonemap) {   // (program_for drops its picks then, and so do these)
+        prog_front_tonemap = tonemap;
+        for (ProgFront& f : prog_front) f.on = false;
+    }
+    const uint64_t stages = prog_front_sig(s.prog), bind = s.bind_gen, reg = registrations_generation(), ub = ub_generation();
+    *now = {stages, bind, reg, ub};
+    static const bool by_bind = getenv("RX_VK_PICK_BIND_GEN") != nullptr;
+    for (const ProgFront& f : prog_front) {
+        if (!f.on || f.serial != s.prog.serial || f.stages != stages || f.reg != reg || f.ub != ub || f.nvattr != s.nvattr) continue;
+        if (!(f.p && f.p->ready.load(std::memory_order_acquire) && !f.p->failed)) continue;
+        uint64_t fbind = f.bind;
+        if (fbind != bind && !by_bind && f.amask != ~0u) {
+            bool by_tex = true;
+            for (int k = 0; k < kNvnStages; k++)
+                if ((f.amask >> k & 1) && f.tex_gen[k] != s.tex_gen[k]) by_tex = false;
+            if (by_tex) fbind = bind;
+        }
+        if (fbind != bind) continue;
+        if (std::memcmp(f.vattr, s.vattr, sizeof f.vattr) || std::memcmp(f.ct, color_types, sizeof f.ct)) continue;
+        return f.p;
+    }
+    return nullptr;
+}
+/// The answer program_for gave for this state, kept (a ready program only: as its own pair)
+void prog_front_keep(const NvnState& s, const uint8_t color_types[8], const Program* p, const ProgFrontNow& now) {
+    if (!p || !p->ready.load(std::memory_order_acquire) || p->failed) return;
+    for (ProgFront& f : prog_front)   // (this program's older entry is replaced, not duplicated beside it)
+        if (f.on && f.p == p) {
+            prog_front_next = (uint32_t)(&f - prog_front);
+            break;
+        }
+    ProgFront& f = prog_front[prog_front_next++ % kProgFront];
+    f.on = true, f.serial = s.prog.serial, f.stages = now.stages, f.bind = now.bind, f.reg = now.reg;
+    f.ub = now.ub, f.nvattr = s.nvattr, f.p = p, f.amask = prog_front_mask(*p);
+    std::memcpy(f.tex_gen, s.tex_gen, sizeof f.tex_gen);
+    std::memcpy(f.vattr, s.vattr, sizeof f.vattr);
+    std::memcpy(f.ct, color_types, sizeof f.ct);
+}
+
 void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
+    FineDraw fine_draw;   // (DRAW1, RX_VK_PROF_FINE: the draw's whole time, by size, section and program)
+    const int64_t fine_pre_t0 = g_fine ? prof_now() : 0;
     Pass& ps = pass();   // (hookshot, once: the accessor is a call and a thread-local read at each use (__tls_get_addr in the shared library). The same object for the thread's life: draw_begin_recording resets it in place)
     if (par_stats_on) par_stats_draw();
     PROF_HOT(PROF_DRAW);
@@ -7676,12 +7954,24 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
         }
     }
     const Program* cp;
+    if (g_fine) fine_ns[FT_PRE] += prof_now() - fine_pre_t0;
     {
         PROF_HOT(PROF_PROGRAM);
         FINE_SCOPE(FT_PROGRAM);
         ParLock lk(d.mesh);   // (graphics programs: each thread's picks, program_pick's own lock)
-        cp = program_for(s, d.mesh ? ProgramKind::Mesh : ProgramKind::Graphics, types);
+        ProgFrontNow front_now{};
+        const bool use_front = !d.mesh && s.has_prog && prog_front_on();
+        const Program* front = use_front ? prog_front_find(s, types, &front_now) : nullptr;
+        if (front && !draw_check_on()) {
+            cp = front;
+            FINE_N(FC_FRONT_HIT, 1);
+        } else {
+            cp = program_for(s, d.mesh ? ProgramKind::Mesh : ProgramKind::Graphics, types);
+            if (front && cp != front) draw_check_note("program front", front->key);
+            if (use_front) prog_front_keep(s, types, cp, front_now);
+        }
     }
+    if (cp) fine_draw.key = cp->key;
     if (cp) zone_note_program(cp->key);   // (the zone recorder's set lookup: on the program pick's own path, once a key per map)
     {   // (hookshot, a test) RX_VK_NO_MESH=1: task / mesh draws left out, to see what they draw; =2: the others left out
         static const int no_mesh = getenv("RX_VK_NO_MESH") ? atoi(getenv("RX_VK_NO_MESH")) : 0;
@@ -7789,8 +8079,15 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
     // (hookshot, issue 47: and only where the next frame draws it again, targets_redrawn. RX_VK_SKIP_PARTS=1: as before, any draw
     // into targets that hold an earlier frame's picture)
     static const bool skip_parts = getenv("RX_VK_SKIP_PARTS") && atoi(getenv("RX_VK_SKIP_PARTS")) != 0;
-    const bool persistent = targets_persistent(at) && (skip_parts || targets_redrawn(at, s));
-    const bool may_skip = !always_wait && persistent;
+    // (stream DRAW1, RX_VK_DRAW_LAZY=0: worked out for every draw, as before) Only a draw whose program or pipeline is not ready asks
+    // whether it may be left out: the targets' ages and the viewport test were made for all ~2,350 draws of a frame. Worked out at the
+    // first question and kept for the draw, from the same targets and state
+    static const bool lazy_skip = !getenv("RX_VK_DRAW_LAZY") || !env_value_off(getenv("RX_VK_DRAW_LAZY"));
+    int may_skip_memo = lazy_skip ? -1 : (!always_wait && targets_persistent(at) && (skip_parts || targets_redrawn(at, s)) ? 1 : 0);
+    const auto may_skip_now = [&]() -> bool {
+        if (may_skip_memo < 0) may_skip_memo = !always_wait && targets_persistent(at) && (skip_parts || targets_redrawn(at, s)) ? 1 : 0;
+        return may_skip_memo != 0;
+    };
     auto wait_for = [&](const std::atomic<bool>& ready, bool shader) {
         PROF_EXACT();
         const auto t0 = std::chrono::steady_clock::now();
@@ -7819,7 +8116,7 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
         return;
     }
     if (!cp->ready.load(std::memory_order_acquire)) {
-        if (may_skip) {
+        if (may_skip_now()) {
             jobs_demand(cp->ready);   // (RX_VK_JOB_DEMAND: this frame's draw wants it: ahead of what no draw wants lately)
             return void(st_pending_skips++);
         }
@@ -7862,16 +8159,17 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
         // map, a new effect target), which wait as before so the picture never lacks it (user's choice, 2026-11-09: no flicker on a
         // first visit). RX_VK_PIPE_WAIT_FRESH=0: those are left out too (counted: st_pipe_fresh_skips); RX_VK_PIPE_SKIP=0: every draw waits
         static const bool wait_fresh = !getenv("RX_VK_PIPE_WAIT_FRESH") || strcmp(getenv("RX_VK_PIPE_WAIT_FRESH"), "0") != 0;
-        if (may_skip || !(always_wait || wait_fresh)) {
+        if (may_skip_now() || !(always_wait || wait_fresh)) {
             jobs_demand(pe->ready);   // (RX_VK_JOB_DEMAND, as the program's above)
             st_pending_skips++;
-            if (!may_skip) st_pipe_fresh_skips.fetch_add(1, std::memory_order_relaxed);
+            if (!may_skip_now()) st_pipe_fresh_skips.fetch_add(1, std::memory_order_relaxed);
             return;
         }
         wait_for(pe->ready, false);
     }
     const VkPipeline pl = pe->pipeline;
     if (!pl) SKIP_HERE();
+    const int64_t fine_gates_t0 = g_fine ? prof_now() : 0;
     cur_program = &p;
     dlss_trace_draw(s, p, d, at);
     skin_check(s, p, d, at);
@@ -7973,11 +8271,15 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
         if (told++ < 3) logf("vk: fallback: %016llx's descriptors built again after a dispatch", (unsigned long long)p.key);
     }
     if (same_desc && slotgen && last_desc_reg != reg_gen) st_desc_slotgen_saves++;   // (the global check would have rebuilt)
+    if (g_fine) fine_ns[FT_GATES] += prof_now() - fine_gates_t0;
     if (!same_desc) {
         PROF_HOT(PROF_DESC);
         FINE_N(FC_BUILDS, 1);
         trace_tex_hit = nullptr, trace_tex_mask = 0;
-        build_descriptors(s, p);   // (textures first used here are uploaded by the recording's upload command buffer)
+        {
+            FINE_SCOPE(FT_BUILD);
+            build_descriptors(s, p);   // (textures first used here are uploaded by the recording's upload command buffer)
+        }
         // (hookshot) A draw whose build held a sampled texture back: it would sample the placeholder, and the descriptor
         // set it built would keep doing so for the presents it is reused over — a storm hold's release drew the market
         // with the crowd's upload burst behind the budget, and the sky behind that stayed a washed placeholder for tens
@@ -8010,6 +8312,7 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
     }
     if (dump_on()) log_dump_draw(s, p, d);
     PROF_HOT(PROF_CMDS);
+    const int64_t fine_post_t0 = g_fine ? prof_now() : 0;
     texture_watch_prog(p.key);
     if (!same_desc) gfx_sampled() = draw_sampled();
     hdr_find(s, p, at);   // (RX_VK_HDR_FIND)
@@ -8127,6 +8430,7 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
         }
     }
     ps.written |= writes;
+    if (g_fine) fine_ns[FT_POST] += prof_now() - fine_post_t0;
     if (pl != last_pipeline) {
         FINE_SCOPE(FT_BINDPL);
         FINE_N(FC_BIND_PIPE, 1);
@@ -8212,6 +8516,7 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
                      d.indirect ? " indirect" : "", d.count);
         }
     }
+    const int64_t fine_post2_t0 = g_fine ? prof_now() : 0;
     StatsQuery stats_query(cmd, p.key, d);   // (EvilOOT, RX_VK_DRAW_STATS)
     OccQuery occ_query(cmd, p.key, d, stats_query.cmd != VK_NULL_HANDLE);   // (TICK-033, RX_VK_OCC_REAL)
     if (stats_frame_now() && stats_prog_wanted(p.key)) {   // (and the wanted programs' buffers: a mesh draw's stages, fragment)
@@ -8221,6 +8526,7 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
         static const bool gpu_dump_on = getenv("RX_VK_GPU_DUMP") != nullptr;
         if (stats_query.cmd && gpu_dump_on) stats_query.state = &s, stats_query.prog = p.key;
     }
+    if (g_fine) fine_ns[FT_POST] += prof_now() - fine_post2_t0;
     if (d.mesh) {
         if (p.fallback) {   // (hookshot: the generated vertex stage reads the records; one vertex a corner)
             {

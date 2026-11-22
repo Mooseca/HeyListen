@@ -61,17 +61,21 @@ inline void profile_add(Profile& p, const double* from, const double* to, const 
 }
 
 /// The n-1 boundaries (in draws and dispatches, out[0..n-2]) that cut the profile's time into n equal parts; even counts when
-/// the profile has nothing yet
-inline void balanced_targets(const Profile& p, int n, int64_t total, int64_t* out) {
+/// the profile has nothing yet. `tail` (stream ORDER2, RX_VK_SEG_TAIL): the last part's share against the others' 1.0 (0.5: half as
+/// long as each of them): it is the replay thread's own, recorded once the dry pass is over, and the others start earlier
+inline void balanced_targets(const Profile& p, int n, int64_t total, int64_t* out, double tail = 1.0) {
     if (n < 2) return;
+    if (!(tail > 0.05)) tail = 0.05;
+    if (tail > 1.0) tail = 1.0;
+    const double parts = (double)(n - 1) + tail;
     double sum = 0;
     for (int i = 0; i < kBins; i++) sum += p.valid && p.ms[i] > 0 ? p.ms[i] : 0;
     for (int k = 1; k < n; k++) {
         if (sum <= 0) {
-            out[k - 1] = total * k / n;
+            out[k - 1] = tail >= 1.0 ? total * k / n : (int64_t)((double)total * k / parts + 0.5);
             continue;
         }
-        const double want = sum * k / n;
+        const double want = sum * k / parts;
         double cum = 0, pos = 1;
         for (int i = 0; i < kBins; i++) {
             const double d = p.ms[i] > 0 ? p.ms[i] : 0;

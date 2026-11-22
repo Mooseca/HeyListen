@@ -12,7 +12,7 @@ def check_source():
     src = (ROOT / "gpu/vk/vk_replay.cpp").read_text(encoding="utf-8")
     for needle in ('#include "segment_plan.h"', "segment_plan::segment_count(total, per, recorders, seg_cap(), one_round)",
                    'getenv("RX_VK_PARALLEL_ROUNDS")', 'getenv("RX_VK_PARALLEL_SELF")', "if (self_rec) record_job(jobs[0].get());",
-                   'getenv("RX_VK_PARALLEL_SEG")'):
+                   'getenv("RX_VK_PARALLEL_SEG")', 'getenv("RX_VK_SEG_TAIL")', "balanced_targets(pk_profile[pk_this], nplan, last_total, plan, seg_tail())"):
         if needle not in src:
             raise SystemExit("vk_replay.cpp no longer has: " + needle)
 
