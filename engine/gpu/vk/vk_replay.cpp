@@ -1525,6 +1525,11 @@ struct UbUpdate {
 };
 std::deque<UbUpdate> ub_updates;   // in stream order, oldest first
 std::atomic<uint64_t> ub_list_epoch{1};   // (bumped when that deque gains or loses an update)
+// (stream REC1, docs/native-engine/recording-state.md) the recording state that segments still on the workers read, and what changes it from the
+// replay thread: the steps below note themselves here, and the check (RX_VK_DEFER_JOIN_CHECK, RX_VK_REC_OVERLAP_CHECK) counts those that ran while a
+// group's join was pending. Each must stay zero until the state is per-recording (the note's rule in the doc)
+enum RecShared { kRsUbPrune, kRsCondsReset, kRsBeginSubmission, kRsEndSubmission, kRsCount };
+void rec_shared_note(RecShared what);
 thread_local uint64_t ub_gen = 0;   // (each recording thread's: its draws' overlays change with what it passed)
 
 // ---- parallel replay (RX_VK_PARALLEL=<threads>): MKW hands over nearly a frame's draws in one command buffer with
@@ -1552,6 +1557,7 @@ bool grow_lock_plain() {
 /// par_conds emptied for a dry pass, with room for kCondRoom results kept (no segment reads it now: none is out)
 constexpr size_t kCondRoom = 8192;
 void par_conds_reset() {
+    rec_shared_note(kRsCondsReset);
     par_conds.clear();
     if (par_conds.capacity() < kCondRoom) par_conds.reserve(kCondRoom);
     par_conds_n.store(0, std::memory_order_release);
@@ -1660,6 +1666,7 @@ bool deferred_late() {   // (RX_VK_DEFERRED_LATE=1: deferred binds read from the
 }
 
 void ub_prune(uint64_t done) {
+    rec_shared_note(kRsUbPrune);
     if (ub_updates.empty() || ub_updates.front().value > done) return;
     while (!ub_updates.empty() && ub_updates.front().value <= done) {
         ub_updates.pop_front();
@@ -2906,11 +2913,13 @@ void split_part(VkCommandBuffer& cmd) {
         return e ? atoi(e) != 0 : dev.props.vendorID != 0x8086 || pools_mirrored();
     }();
     if (part_flush) flush_ub_updates(cmd);
+    rec_shared_note(kRsEndSubmission);
     memory_end_submission(cmd);
     full_barrier(cmd, "barrier (recording end)");
     submit_recording(*rec_cur, false);
     if (part_flush) ub_first_of_recording = ub_end();
     Recording& r = begin_recording(rec_cur_value);
+    rec_shared_note(kRsBeginSubmission);
     memory_begin_submission();
     full_barrier(r.cmd, "barrier (recording start)");
     rec_cur = &r;
@@ -2924,12 +2933,14 @@ bool occ_sync(VkCommandBuffer& cmd) {
     if (!rec_cur || rec_parts + 1 >= kMaxParts || dump_on()) return false;
     end_pass(cmd);
     flush_ub_updates(cmd);
+    rec_shared_note(kRsEndSubmission);
     memory_end_submission(cmd);
     full_barrier(cmd, "barrier (recording end)");
     Recording* old = rec_cur;
     submit_recording(*rec_cur, false);
     ub_first_of_recording = ub_end();
     Recording& r = begin_recording(rec_cur_value);
+    rec_shared_note(kRsBeginSubmission);
     memory_begin_submission();
     full_barrier(r.cmd, "barrier (recording start)");
     rec_cur = &r;
@@ -3341,11 +3352,14 @@ int defer_join_mode() {
     }();
     return v;
 }
+// (stream REC1) RX_VK_REC_OVERLAP_CHECK=1 (or RX_VK_DEFER_JOIN_CHECK=1): at each join of a big command buffer's segments, each segment's recorded draws and
+// dispatches are compared with the dry pass's plan, and the steps that changed shared recording state beside pending segments are counted (logged every 600 joins)
 bool defer_check_on() {
     static const bool v = [] {
         const char* e = getenv("RX_VK_DEFER_JOIN_CHECK");
-        const bool on = e && atoi(e) != 0;
-        if (on) logf("vk: the deferred join's check is on (RX_VK_DEFER_JOIN_CHECK)");
+        const char* e2 = getenv("RX_VK_REC_OVERLAP_CHECK");   // (stream REC1: the same check, named for the overlap)
+        const bool on = (e && atoi(e) != 0) || (e2 && atoi(e2) != 0);
+        if (on) logf("vk: the recording-overlap check is on (RX_VK_DEFER_JOIN_CHECK / RX_VK_REC_OVERLAP_CHECK)");
         return on;
     }();
     return v;
@@ -3384,9 +3398,17 @@ struct EarlyGroup {
 };
 std::shared_ptr<EarlyGroup> defer_group;   // (replay_mu: the group whose join is pending; null: none)
 enum DeferWhat { kDeferBegin, kDeferSerialRecord, kDeferDry, kDeferFinish, kDeferOther, kDeferWhats };
+// (stream REC1) what made the pending join be made: the places defer_join_now is called from
+enum DeferJoinWhy { kJoinEarlyStart, kJoinSerialPath, kJoinPresyncKick, kJoinMultiSeg, kJoinOcc, kJoinLoopEnd, kJoinWhys };
+const char* const kJoinWhyName[kJoinWhys] = {"next big command buffer", "serial replay", "early pre-sync", "multi-segment path", "occlusion stop",
+                                             "end of the command buffers' loop"};
 struct DeferStats {   // (RX_VK_DEFER_JOIN_CHECK, replay_mu)
-    int64_t joins = 0, mismatches = 0, beside[kDeferWhats] = {};
+    int64_t joins = 0, mismatches = 0, beside[kDeferWhats] = {}, shared[kRsCount] = {}, why[kJoinWhys] = {};
 } defer_stats;
+/// (stream REC1) a step that changes recording state the pending segments read, run while a join is pending: counted
+void rec_shared_note(RecShared what) {
+    if (defer_group && defer_check_on()) defer_stats.shared[what]++;
+}
 /// A step of the replay thread that runs while a join is pending (RX_VK_DEFER_JOIN_CHECK counts them)
 void defer_check_beside(DeferWhat what) {
     if (defer_group && defer_check_on()) defer_stats.beside[what]++;
@@ -3535,6 +3557,14 @@ void early_join(EarlyGroup& G) {
                  (long long)defer_stats.joins, (long long)defer_stats.mismatches, defer_stats.beside[kDeferBegin] / 600.0,
                  defer_stats.beside[kDeferSerialRecord] / 600.0, defer_stats.beside[kDeferDry] / 600.0,
                  defer_stats.beside[kDeferFinish] / 600.0, defer_stats.beside[kDeferOther] / 600.0);
+            logf("vk: DEFER_JOIN_CHECK: shared recording state changed beside pending segments, a join: ub_prune %.2f, par_conds_reset %.2f, "
+                 "memory_begin_submission %.2f, memory_end_submission %.2f; joins made by: %s %.2f, %s %.2f, %s %.2f, %s %.2f, %s %.2f, %s %.2f",
+                 defer_stats.shared[kRsUbPrune] / 600.0, defer_stats.shared[kRsCondsReset] / 600.0, defer_stats.shared[kRsBeginSubmission] / 600.0,
+                 defer_stats.shared[kRsEndSubmission] / 600.0, kJoinWhyName[0], defer_stats.why[0] / 600.0, kJoinWhyName[1], defer_stats.why[1] / 600.0,
+                 kJoinWhyName[2], defer_stats.why[2] / 600.0, kJoinWhyName[3], defer_stats.why[3] / 600.0, kJoinWhyName[4], defer_stats.why[4] / 600.0,
+                 kJoinWhyName[5], defer_stats.why[5] / 600.0);
+            std::fill(std::begin(defer_stats.shared), std::end(defer_stats.shared), 0);
+            std::fill(std::begin(defer_stats.why), std::end(defer_stats.why), 0);
             std::fill(std::begin(defer_stats.beside), std::end(defer_stats.beside), 0);
         }
     }
@@ -3558,8 +3588,9 @@ void early_join(EarlyGroup& G) {
     }
 }
 /// The pending join made now (a no-op when none is pending)
-void defer_join_now() {
+void defer_join_now(DeferJoinWhy why) {
     if (!defer_group) return;
+    if (defer_check_on()) defer_stats.why[why]++;
     const std::shared_ptr<EarlyGroup> g = std::move(defer_group);
     defer_group = nullptr;
     feed_set(mkwvk::feed::kJoin);
@@ -3568,7 +3599,7 @@ void defer_join_now() {
 const uint8_t* replay_handle_early(VkCommandBuffer& cmd, const uint8_t* h, bool may_stop, int nplan, const int64_t* plan,
                                    bool self_help, mkwvk::segment_plan::Profile& profile, int64_t* total_out, bool* cut) {
     NvnState& state = *cur_state;
-    defer_join_now();   // (stream JOIN1: the pre-sync and the segments' tables are not shared with segments still recording)
+    defer_join_now(kJoinEarlyStart);   // (stream JOIN1: the pre-sync and the segments' tables are not shared with segments still recording)
     presync_kick_at = 0;   // (the pre-sync is made here, before the dry pass)
     occ_stop_at = nullptr;
     EarlyWall early_wall;
@@ -3794,7 +3825,7 @@ const uint8_t* replay_handle(VkCommandBuffer& cmd, const uint8_t* h, bool may_st
     NvnState& state = *cur_state;
     suspend_at = nullptr;
     if (threads < 2 || !rec_cur || dump_on() || gprof_on() || probe_serial()) {
-        defer_join_now();   // (stream JOIN1)
+        defer_join_now(kJoinSerialPath);   // (stream JOIN1)
         suspend_ok = may_stop;
         {
             WallAdd wall_whole(rwall.whole_ns);
@@ -3822,7 +3853,7 @@ const uint8_t* replay_handle(VkCommandBuffer& cmd, const uint8_t* h, bool may_st
     // (TICK-056, RX_VK_PRESYNC_EARLY) the mirrors' pre-sync on a worker while the dry pass runs (once the workers are started): see
     // PresyncEarly
     presync_kick_at = par_pool.started ? presync_early_at() : 0;
-    if (presync_kick_at) defer_join_now();   // (stream JOIN1: its copies are made on a worker, ahead of rec_cur: not beside segments)
+    if (presync_kick_at) defer_join_now(kJoinPresyncKick);   // (stream JOIN1: its copies are made on a worker, ahead of rec_cur: not beside segments)
     presync_early.r = nullptr;
     // (and at the dry pass's start when this thread's command buffer of the same order in the last frame was cut into segments:
     // the frame's big ones come in the same places frame after frame)
@@ -3945,7 +3976,7 @@ const uint8_t* replay_handle(VkCommandBuffer& cmd, const uint8_t* h, bool may_st
     if (defer_group) {   // (stream JOIN1: this dry pass ran beside the segments of the command buffer before it; nothing is appended from here on)
         defer_check_beside(kDeferDry);
         ub_growing.store(false, std::memory_order_release);
-        if (defer_join_mode() == 1) defer_join_now();   // (1: its serial recording below is not beside them)
+        if (defer_join_mode() == 1) defer_join_now(kJoinSerialPath);   // (1: its serial recording below is not beside them)
     }
     const uint8_t* const occ_stop = suspend_at ? nullptr : occ_stop_at;   // (TICK-033: stopped for a report's count)
     const uint8_t* const stop = suspend_at ? suspend_at : occ_stop;     // (the segments end there)
@@ -3999,7 +4030,7 @@ const uint8_t* replay_handle(VkCommandBuffer& cmd, const uint8_t* h, bool may_st
         }
         return occ_stop ? occ_go_on(cmd, occ_stop, may_stop, nullptr) : stop;
     }
-    defer_join_now();   // (stream JOIN1: its own segments' tables and slots)
+    defer_join_now(kJoinMultiSeg);   // (stream JOIN1: its own segments' tables and slots)
     if (!par_pool.started) {
         par_pool.started = true;
         // (TICK-052) RX_VK_PARLOCK_SPIN=<n> (TICK-054: default 4000; 0: no spin): ParLock spins that many times before it sleeps. It is held ~0.1-0.6 us a
@@ -4310,7 +4341,7 @@ const uint8_t* replay_handle(VkCommandBuffer& cmd, const uint8_t* h, bool may_st
 /// submitted when last is its last segment's recording, else submitted here); the GPU waited for, the reports read, and the
 /// command buffer replayed on from the condition
 const uint8_t* occ_go_on(VkCommandBuffer& cmd, const uint8_t* at, bool may_stop, Recording* last) {
-    defer_join_now();   // (stream JOIN1)
+    defer_join_now(kJoinOcc);   // (stream JOIN1)
     if (last) recording_wait(*last);
     if (last || occ_sync(cmd)) occ_resolve_all();
     else occ_give_up();
@@ -4332,6 +4363,7 @@ void bench_replay(const std::vector<uint64_t>& handles) {
     rec_value_now = value;
     ub_first_of_recording = ub_end();
     Recording& first = begin_recording(value);
+    rec_shared_note(kRsBeginSubmission);
     memory_begin_submission();
     full_barrier(first.cmd);
     rec_cur = &first, rec_cur_value = value, rec_parts = 0, part_work = 0, part_end_wanted = false;
@@ -4342,6 +4374,7 @@ void bench_replay(const std::vector<uint64_t>& handles) {
     rec_cur = nullptr;
     end_pass(r.cmd);
     flush_ub_updates(r.cmd);
+    rec_shared_note(kRsEndSubmission);
     memory_end_submission(r.cmd);
     full_barrier(r.cmd);
     submit_recording(r, false);
@@ -4585,6 +4618,7 @@ void finish_recording(uint64_t value) {
     rec_cur = nullptr;
     end_pass(r.cmd);
     flush_ub_updates(r.cmd);
+    rec_shared_note(kRsEndSubmission);
     memory_end_submission(r.cmd);
     full_barrier(r.cmd, "barrier (recording end)");
     const uint64_t oldest = oldest_unfinished();
@@ -4686,6 +4720,7 @@ bool run_submit(const uint64_t* handles, int n, uint64_t value, uint64_t queue, 
         rec_value_now = tag;
         ub_first_of_recording = ub_end();
         Recording& first = begin_recording(tag);
+        rec_shared_note(kRsBeginSubmission);
         memory_begin_submission();
         full_barrier(first.cmd, "barrier (recording start)");
         rec_cur = &first, rec_cur_value = tag, rec_parts = 0, part_work = 0, part_end_wanted = false;
@@ -4702,7 +4737,7 @@ bool run_submit(const uint64_t* handles, int n, uint64_t value, uint64_t queue, 
         }
         if (stop) break;
     }
-    defer_join_now();   // (stream JOIN1: a join never outlives the command buffers' loop: the recording's end below needs every segment)
+    defer_join_now(kJoinLoopEnd);   // (stream JOIN1: a join never outlives the command buffers' loop: the recording's end below needs every segment)
     if (stop) {
         tl_ev("stop", value, queue, wait_at(stop).gpu);
         QueueRun& q = qruns[queue];
@@ -6453,6 +6488,7 @@ void do_present(const nvn_tex* t, const int crop[4]) {
         rec_value_now = value;
         ub_first_of_recording = ub_end();
         Recording& r = begin_recording(value);
+        rec_shared_note(kRsBeginSubmission);
         memory_begin_submission();
         Texture* tex = t ? texture_for_present(t) : nullptr;
         static int logged_p;
@@ -6579,6 +6615,7 @@ void do_present(const nvn_tex* t, const int crop[4]) {
                 vkCmdCopyImageToBuffer(r.cmd, shot_image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, shot_bufs[presents & 1], 1, &c);
             }
         }
+        rec_shared_note(kRsEndSubmission);
         memory_end_submission(r.cmd);
         full_barrier(r.cmd);
         submit_recording(r);   // (nothing is stopped at a present: drain)

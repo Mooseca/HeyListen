@@ -82,7 +82,7 @@ def main():
     need("early_submit_job(G, j);" in tail and tail.index("early_submit_job(G, j);") < tail.index("par_pool.done.wait("), "the segments' submits are out of place")
     need(tail.index("par_pool.done.wait(lk, [] { return par_pool.pending == 0; });") < tail.index("par_active = false;"),
          "par_active goes off before every segment is done")
-    need("defer_join_now();" in e[:e.index("jt_mark(13, 0);")] and "early_join(G);" in e and "defer_group = group;" in e,
+    need("defer_join_now(" in e[:e.index("jt_mark(13, 0);")] and "early_join(G);" in e and "defer_group = group;" in e,
          "the join is not made at the start of the next big command buffer, or not by early_join")
     whole = e[e.index("if (used < 2 || !early) {"):e.index("*cut = true;")]
     need("par_active = false;" in whole and "record_segment(cmd, whole);" in whole, "no boundary reached: not recorded whole, serially")
