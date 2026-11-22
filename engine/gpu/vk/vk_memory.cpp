@@ -3299,10 +3299,7 @@ void inherit_watch_print() {
     }
 }
 /// (stream REC1) A segment's worker: the value and epoch of the recording this segment belongs to, read at every use of them below until
-/// memory_recording_thread_end. memory_epoch() is what the replay thread's group takes when it begins
-uint64_t memory_epoch() {
-    return mirror_epoch;
-}
+/// memory_recording_thread_end. memory_epoch() (below, with memory_begin_submission) is what the replay thread's group takes when it begins
 void memory_recording_thread(uint64_t value, uint64_t epoch) {
     tl_rec_set = true, tl_rec_value = value, tl_rec_epoch = epoch;
 }
@@ -7177,6 +7174,11 @@ void memory_pool_finalized(uint64_t gpu, uint64_t size) {   // (the game's threa
     std::lock_guard lk(fin_mu);
     fin_notes.push_back({gpu, gpu + size, submits_queued.load(std::memory_order_acquire)});
     st_fin_notes++;
+}
+
+/// (stream REC1) the epoch of the submission being recorded: what a group of segments reads as its recordings' epoch
+uint64_t memory_epoch() {
+    return mirror_epoch;
 }
 
 void memory_begin_submission() {
