@@ -512,8 +512,10 @@ static void hos_env_notes_log(void) {
    (2.6 s at most) against 2-5 ms with the cache moved and enlarged. Our own VkPipelineCache (vk_draw.cpp pcache_init) holds what the
    driver hands back to it, ~1.1 GB, but the driver reports most precompiled pipelines as "not found in the app's cache" (~460 of
    ~12,900 here) and serves them from its own, so a driver cache that was evicted still costs a compile.
-   Set before anything loads Vulkan (the driver reads these when its library is loaded): HL_NV_CACHE_DIR=1 the folder
-   nv_shader_cache in the game's folder, =<path> that folder, unset or 0 off (off until measured). On NVIDIA only (its driver's
+   Set before anything loads Vulkan (the driver reads these when its library is loaded): HL_NV_CACHE_DIR unset or =1 the folder
+   nv_shader_cache in the game's folder (on by default since 2026-11-22, the owner's choice: with the driver's cache empty the
+   start-up precompile took 39.9 s against 7.0 s warm, and the shared default sits on C: at 1 GB), =<path> that folder, =0 off
+   (the driver's default). The first start after the change fills the new folder once (a cold driver cache). On NVIDIA only (its driver's
    library is there), and never over a value the environment already sets. __GL_SHADER_DISK_CACHE_SIZE 4 GB: four times the
    pipeline cache's size, so a driver update's new entries (they are keyed by driver version, the old ones stay) and the game's own
    do not push each other out; SKIP_CLEANUP=1 stops the driver deleting entries to stay under the size, which is what evicted ours. */
@@ -530,11 +532,9 @@ static int nvidia_driver_present(void) {
 }
 static void nv_cache_env(void) {
     const char *want = getenv("HL_NV_CACHE_DIR");
-    if (!want || !*want || !strcmp(want, "0")) return;
-    if (!nvidia_driver_present()) {
-        env_note("env: HL_NV_CACHE_DIR set, but no NVIDIA driver here: left alone");
-        return;
-    }
+    if (!want || !*want) want = "1";   // (on by default)
+    if (!strcmp(want, "0")) return;
+    if (!nvidia_driver_present()) return;   // (no NVIDIA driver: nothing to move)
     if (getenv("__GL_SHADER_DISK_CACHE_PATH")) {
         env_note("env: HL_NV_CACHE_DIR: __GL_SHADER_DISK_CACHE_PATH is set already (%s): left alone", getenv("__GL_SHADER_DISK_CACHE_PATH"));
         return;
