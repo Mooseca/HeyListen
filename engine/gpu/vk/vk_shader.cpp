@@ -33,6 +33,7 @@
 
 #include "shader_recompiler/backend/spirv/mma_layout.h"
 #include "shader_recompiler/ir_opt/oot_visual_workaround.h"
+#include "shader_recompiler/ir_opt/pseudo_fold.h"
 #include "shader_recompiler/ir_opt/passes.h"
 #include "shader_recompiler/ir_opt/scene_tonemap_pass.h"   // (HeyListen: PsychoV35, after Longshot ddb156df / 79a34381)
 #include "shader_recompiler/ir_opt/output_encode_pass.h"
@@ -484,6 +485,7 @@ public:
         }
         is_proprietary_driver = true;
     }
+    uint64_t code_key() const { return nvn.key; }   // (the stage's code, RX_VK_FOLD_PSEUDO_ONLY / _SKIP name programs by it)
     u64 ReadInstruction(u32 address) override {
         return address / 8 < nvn.code.size() ? nvn.code[address / 8] : 0;
     }
@@ -696,11 +698,19 @@ struct Translation {
 
 std::unique_ptr<Translation> translate(Env& env, bool graphics, bool one_exit = false) {
     auto t = std::make_unique<Translation>();
+    Shader::Optimization::g_fold_code_key = env.code_key();   // (the fold's selection, ir_opt/pseudo_fold.h, and its count)
+    Shader::Optimization::g_fold_seen = Shader::Optimization::g_fold_taken = 0;
     // (NVN2 task / mesh programs get one exit: their counts are set there, as Eden's pipeline cache does)
     Shader::Maxwell::Flow::CFG cfg{env, t->flow_blocks,
                                    env.StartAddress() + (graphics ? static_cast<u32>(sizeof(Shader::ProgramHeader)) : 0u),
                                    one_exit};
     t->program = Shader::Maxwell::TranslateProgram(t->insts, t->blocks, env, cfg, host_info());
+    {   // (RX_VK_FOLD_PSEUDO_LOG=1: what the fold took of each stage's flagged instructions, for the bisection and the count)
+        static const bool log_fold = getenv("RX_VK_FOLD_PSEUDO_LOG") != nullptr;
+        if (log_fold && Shader::Optimization::g_fold_seen)
+            logf("vk: fold: code %016llx took %u of %u flagged instructions", (unsigned long long)env.code_key(),
+                 Shader::Optimization::g_fold_taken, Shader::Optimization::g_fold_seen);
+    }
     return t;
 }
 
