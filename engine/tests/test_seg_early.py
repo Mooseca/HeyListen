@@ -75,13 +75,15 @@ def main():
     need("if (!hook.wants(q.work, q.p)) return;" in hook, "the hook takes a point the plan does not want")
     need("n->s = q.s;" in hook and "&n->s" in hook, "the next segment points into the moving points' vector")
     need(hook.index("j->g.end = q.p;") < hook.index("par_pool.jobs.push_back"), "a segment is handed out before its end is set")
-    need(e.index("submit_recording(r, false);") < e.index("record_job(last);"), "rec_cur is not submitted before the segments")
-    sj = e[e.index("const auto submit_job = [&init_lost](Job* j) {"):e.index("std::condition_variable seg_cv;")]
+    need(e.index("submit_recording(r, false);") < e.index("early_record_job(G, last);"), "rec_cur is not submitted before the segments")
+    sj = function(rp, "void early_submit_job(EarlyGroup& G, EarlyJob* j)")
     need("vkQueueSubmit2(dev.queue, 1, &si, j->r->fence)" in sj, "a segment's submit is not submit_job's")
-    tail = e[e.index("record_job(last);"):]
-    need("submit_job(j);" in tail and tail.index("submit_job(j);") < tail.index("par_pool.done.wait("), "the segments' submits are out of place")
-    need(e.index("par_pool.done.wait(lk, [] { return par_pool.pending == 0; });") < e.index("par_active = false;\n    texture_segments_begin(nullptr, 0);\n    seg_ms"),
+    tail = function(rp, "void early_join(EarlyGroup& G)")
+    need("early_submit_job(G, j);" in tail and tail.index("early_submit_job(G, j);") < tail.index("par_pool.done.wait("), "the segments' submits are out of place")
+    need(tail.index("par_pool.done.wait(lk, [] { return par_pool.pending == 0; });") < tail.index("par_active = false;\n    texture_segments_begin(nullptr, 0);"),
          "par_active goes off before every segment is done")
+    need("defer_join_now();" in e[:e.index("jt_mark(13, 0);")] and "early_join(G);" in e and "defer_group = group;" in e,
+         "the join is not made at the start of the next big command buffer, or not by early_join")
     whole = e[e.index("if (used < 2 || !early) {"):e.index("*cut = true;")]
     need("par_active = false;" in whole and "record_segment(cmd, whole);" in whole, "no boundary reached: not recorded whole, serially")
 

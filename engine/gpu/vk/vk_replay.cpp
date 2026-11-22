@@ -3314,9 +3314,253 @@ void seg_early_count(int kind) {
         logf("vk: early segments (RX_VK_SEG_EARLY): plans used %lld, used but no boundary reached (recorded whole) %lld, rejected "
              "(the old path) %lld", (long long)n[0], (long long)n[1], (long long)n[2]);
 }
+// ---- (stream JOIN1) RX_VK_DEFER_JOIN: the replay thread does not wait for a big command buffer's segments ----
+// 0 (default): as before: the replay thread records the last segment itself and waits for the others before replay_handle_early returns.
+// 1 / 2 (a diagnosis for the PC's measurements, NOT for play): the workers record every segment, the last one included, and the join
+// (the wait, the in-order submits, par_active off, the init command buffers' table reset, the profile) is made later, by the replay
+// thread, at the first of: the next command buffer's dry pass ended (1; its serial recording follows), the next big command buffer's
+// start, an occlusion stop, the end of run_submit's command buffer loop (the join never outlives replay_mu's hold). 2: only the last
+// three. Between the return and the join the replay thread begins the recording that follows (begin_recording: memory_table_begin,
+// memory_rb_recording_begun, texture_begin_recording) and, with 2, replays the next small command buffers serially: both beside
+// workers that are recording. That is state shared with them that has no protection yet (docs/native-engine/replay-cost.md, JOIN1);
+// RX_VK_DEFER_JOIN_CHECK=1 counts the steps that ran beside them and compares each segment's recorded work with the dry pass's plan.
+int defer_join_mode() {
+    static const int v = [] {
+        const char* e = getenv("RX_VK_DEFER_JOIN");
+        const int m = e ? std::clamp(atoi(e), 0, 2) : 0;
+        if (m) logf("vk: the join of a big command buffer's segments deferred (RX_VK_DEFER_JOIN=%d): a diagnosis, not for play", m);
+        return m;
+    }();
+    return v;
+}
+bool defer_check_on() {
+    static const bool v = [] {
+        const char* e = getenv("RX_VK_DEFER_JOIN_CHECK");
+        const bool on = e && atoi(e) != 0;
+        if (on) logf("vk: the deferred join's check is on (RX_VK_DEFER_JOIN_CHECK)");
+        return on;
+    }();
+    return v;
+}
+struct EarlyJob {
+    Recording* r;
+    Segment g;
+    NvnState s;   // (its starting state: the dry pass's points move as it goes on)
+    uint64_t order;
+    int index = 0;
+    std::atomic<bool> done{false};
+    bool uploads = false;
+    int inits = 0;
+    int64_t t0 = 0, t1 = 0;
+    int64_t recorded = -1;   // (RX_VK_DEFER_JOIN_CHECK: the draws and dispatches its worker recorded)
+};
+/// One big command buffer's segments, on the heap: the pool's jobs and the join hold it, and the join may come after replay_handle_early
+struct EarlyGroup {
+    std::vector<std::unique_ptr<EarlyJob>> jobs;
+    int egpu = 0;
+    std::mutex sub_mu;   // (RX_VK_EARLY_GPU: the segments done go out in order, by whichever thread finishes one)
+    size_t next_sub = 0;
+    bool sub_after_rd = false;
+    std::atomic<bool> dry_uploaded{false};
+    std::condition_variable seg_cv;
+    std::mutex seg_mu;
+    bool init_lost = false;
+    // (what the join needs)
+    size_t used = 0;
+    bool self_help = false, deferred = false;
+    uint64_t serial0 = 0;
+    int64_t total = 0;
+    mkwvk::segment_plan::Profile* profile = nullptr;
+    std::chrono::steady_clock::time_point t_seg0;
+};
+std::shared_ptr<EarlyGroup> defer_group;   // (replay_mu: the group whose join is pending; null: none)
+enum DeferWhat { kDeferBegin, kDeferSerialRecord, kDeferDry, kDeferFinish, kDeferOther, kDeferWhats };
+struct DeferStats {   // (RX_VK_DEFER_JOIN_CHECK, replay_mu)
+    int64_t joins = 0, mismatches = 0, beside[kDeferWhats] = {};
+} defer_stats;
+/// A step of the replay thread that runs while a join is pending (RX_VK_DEFER_JOIN_CHECK counts them)
+void defer_check_beside(DeferWhat what) {
+    if (defer_group && defer_check_on()) defer_stats.beside[what]++;
+}
+void early_submit_job(EarlyGroup& G, EarlyJob* j) {   // (a segment, in the queue's order: the caller's)
+    if (j->inits < 0) G.init_lost = true;   // (its init command buffer could not be ended: the replay stops, at the join)
+    if (G.init_lost) return;                // (nothing from it on is submitted)
+    VkCommandBufferSubmitInfo cb[3]{{VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO}, {VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO},
+                                    {VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO}};
+    uint32_t n = 0;
+    if (j->inits > 0) cb[n++].commandBuffer = j->r->init;
+    if (j->uploads) cb[n++].commandBuffer = j->r->upload;
+    cb[n++].commandBuffer = j->r->cmd;
+    VkSubmitInfo2 si{VK_STRUCTURE_TYPE_SUBMIT_INFO_2};
+    si.commandBufferInfoCount = n;
+    si.pCommandBufferInfos = cb;
+    late_fix_wait_unlocked();   // (TICK-060)
+    std::lock_guard lk(dev.present_mu);
+    queue_flush_locked();
+    gpu_time_segment_submitted(*j->r);   // (the blits' places among the timed recordings)
+    feed_note_sent(j->r->slot);
+    tl_ev("seg-submit", (uint64_t)j->index);
+    const VkResult res = vkQueueSubmit2(dev.queue, 1, &si, j->r->fence);
+    j->r->submitted = res == VK_SUCCESS;
+    if (j->r->submitted && comp_on()) comp_submit(*j->r);   // (stream ORDER2)
+    if (res != VK_SUCCESS) logf("vk: segment submit %llu failed (%d)", (unsigned long long)j->r->value, (int)res);
+    if (res == VK_ERROR_DEVICE_LOST) device_lost();
+}
+/// (RX_VK_EARLY_GPU) the segments that are done go out in order, by whichever thread finishes one; held while the dry pass runs
+/// once it has recorded an upload (rd must go first), until the replay thread submits rd at the dry pass's end (sub_after_rd). sub_mu held
+void early_submit_ready(EarlyGroup& G) {
+    while (G.next_sub < G.jobs.size() && G.jobs[G.next_sub]->done.load()) {
+        if (!G.sub_after_rd && G.dry_uploaded.load(std::memory_order_acquire)) return;
+        early_submit_job(G, G.jobs[G.next_sub++].get());
+    }
+}
+/// One segment recorded (a pool worker's, or the replay thread's own last one), as replay_handle's
+void early_record_job(EarlyGroup& G, EarlyJob* j) {
+    const auto now_ns = [] { return (int64_t)std::chrono::steady_clock::now().time_since_epoch().count(); };
+    j->t0 = now_ns();
+    tl_ev("seg+", (uint64_t)j->index);   // (stream ORDER3)
+    work_seg_begin();   // (TICK-061, D6: par_active is on while these segments record)
+    texture_set_segment(j->order);
+    texture_segment_worker(j->index);
+    texture_begin_recording(j->r->upload, j->r->value);
+    draw_begin_recording(j->r->slot, j->r->cmd, j->r->value);
+    VkCommandBuffer c = j->r->cmd;
+    const int64_t ta = par_stats_on ? now_ns() : 0;
+    record_segment(c, j->g);
+    const int64_t tc = par_stats_on ? now_ns() : 0;
+    if (defer_check_on()) j->recorded = (int64_t)(occ_wserial - j->g.serial);   // (this thread's count: record_segment's draws and dispatches)
+    j->uploads = texture_uploads_recorded();
+    j->inits = texture_segment_end(j->index);
+    texture_segment_worker(-1);
+    gpu_time_end(*j->r, j->uploads);   // (as replay_handle's)
+    host_read_barrier(c);
+    vkEndCommandBuffer(j->r->upload);
+    vkEndCommandBuffer(j->r->cmd);
+    work_seg_end();   // (TICK-061, D6)
+    j->t1 = now_ns();
+    feed_note_ready(j->r->slot, 1, j->t1);   // (stream ORDER3)
+    tl_ev("seg-", (uint64_t)j->index);
+    par_stats_segment_parts(j->t0, ta, tc, j->t1);
+    {
+        std::lock_guard l(G.seg_mu);
+        j->done = true;
+    }
+    G.seg_cv.notify_all();
+    if (G.egpu) {
+        std::lock_guard sl(G.sub_mu);
+        early_submit_ready(G);
+    }
+}
+double es_dry_ms, es_seg_ms, es_segs_n, es_slow_ms, es_wait_ms, es_self_ms, es_early_n, es_join_ms;   // (the early path's counters, per 240 command buffers)
+int64_t es_timed, es_whole_n;
+/// The wait for a big command buffer's segments, their submits in order, and what follows from it (par_active off, the init table reset, the
+/// profile, the counters): replay_handle_early's end, or later with RX_VK_DEFER_JOIN. Replay thread, replay_mu held
+void early_join(EarlyGroup& G) {
+    const auto now_ns = [] { return (int64_t)std::chrono::steady_clock::now().time_since_epoch().count(); };
+    const auto t_join0 = std::chrono::steady_clock::now();
+    const size_t used = G.used;
+    std::vector<std::unique_ptr<EarlyJob>>& jobs = G.jobs;
+    int64_t pt_wait_ns = 0;
+    for (size_t k = 0; k < used; k++) {   // (in order, each as soon as it is done)
+        EarlyJob* j = jobs[k].get();
+        while (G.self_help && !j->done.load()) {   // (RX_VK_PARALLEL_SELF=2: one no worker has started yet)
+            std::function<void()> fn;
+            {
+                std::lock_guard lk(par_pool.mu);
+                if (par_pool.jobs.empty()) break;
+                fn = std::move(par_pool.jobs.front());
+                par_pool.jobs.pop_front();
+            }
+            fn();
+            std::lock_guard lk(par_pool.mu);
+            if (--par_pool.pending == 0) par_pool.done.notify_all();
+        }
+        {
+            const int64_t w0 = now_ns();
+            jt_mark(9, (uint64_t)j->index);
+            spin_before_sleep([j] { return j->done.load(std::memory_order_acquire); });   // (stream ORDER3, RX_VK_POOL_SPIN)
+            std::unique_lock l(G.seg_mu);
+            G.seg_cv.wait(l, [j] { return j->done.load(); });
+            pt_wait_ns += now_ns() - w0;
+            jt_mark(10, (uint64_t)j->index);
+        }
+        if (G.egpu) {   // (this one and those before it, when no other thread has: all of them are done)
+            std::lock_guard sl(G.sub_mu);
+            early_submit_ready(G);
+        } else {
+            early_submit_job(G, j);
+        }
+    }
+    {
+        std::unique_lock lk(par_pool.mu);
+        par_pool.done.wait(lk, [] { return par_pool.pending == 0; });
+    }
+    if (G.init_lost)
+        replay_fatal("a parallel replay segment's init command buffer could not be ended: new images lost their first layout "
+                     "change, and the work after it may use them");
+    tl_ev("early-", used);
+    par_active = false;
+    texture_segments_begin(nullptr, 0);
+    es_seg_ms += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - G.t_seg0).count();
+    es_join_ms += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_join0).count();
+    if (wall_fine_on()) rwall.seg_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - G.t_seg0).count(), rwall.big++;
+    es_segs_n += (double)used, es_early_n += (double)(used - 1);
+    EarlyJob* const last = jobs[used - 1].get();
+    {
+        int64_t hi = 0;
+        for (size_t k = 0; k < used; k++) hi = std::max(hi, jobs[k]->t1 - jobs[k]->t0);
+        es_slow_ms += hi / 1e6, es_wait_ms += pt_wait_ns / 1e6, es_self_ms += (last->t1 - last->t0) / 1e6;
+    }
+    if (defer_check_on()) {   // (each segment recorded the draws and dispatches the dry pass planned for it)
+        defer_stats.joins++;
+        for (size_t k = 0; k < used; k++) {
+            const uint64_t end = k + 1 < used ? jobs[k + 1]->g.serial : G.serial0 + (uint64_t)G.total;
+            if (jobs[k]->recorded != (int64_t)(end - jobs[k]->g.serial) || !jobs[k]->done.load()) {
+                if (defer_stats.mismatches++ < 20)
+                    logf("vk: DEFER_JOIN_CHECK: segment %zu of %zu recorded %lld draws and dispatches, the dry pass planned %lld",
+                         k, used, (long long)jobs[k]->recorded, (long long)(end - jobs[k]->g.serial));
+            }
+        }
+        if (defer_stats.joins % 600 == 0) {
+            logf("vk: DEFER_JOIN_CHECK: %lld joins, %lld segments differ from the plan; steps that ran beside pending segments, a join: "
+                 "recording begun %.2f, small command buffer recorded serially %.2f, dry pass %.2f, finish %.2f, other %.2f",
+                 (long long)defer_stats.joins, (long long)defer_stats.mismatches, defer_stats.beside[kDeferBegin] / 600.0,
+                 defer_stats.beside[kDeferSerialRecord] / 600.0, defer_stats.beside[kDeferDry] / 600.0,
+                 defer_stats.beside[kDeferFinish] / 600.0, defer_stats.beside[kDeferOther] / 600.0);
+            std::fill(std::begin(defer_stats.beside), std::end(defer_stats.beside), 0);
+        }
+    }
+    {   // (the profile, as replay_handle keeps it)
+        double from[kMaxBatch], to[kMaxBatch], ms[kMaxBatch];
+        size_t m = 0;
+        for (size_t k = 0; k < used && k < (size_t)kMaxBatch && G.total > 0; k++, m++) {
+            const uint64_t end = k + 1 < used ? jobs[k + 1]->g.serial : G.serial0 + (uint64_t)G.total;
+            from[m] = (double)(jobs[k]->g.serial - G.serial0) / (double)G.total, to[m] = (double)(end - G.serial0) / (double)G.total;
+            ms[m] = (jobs[k]->t1 - jobs[k]->t0) / 1e6;
+        }
+        mkwvk::segment_plan::profile_add(*G.profile, from, to, ms, m, 0.25);
+    }
+    if (++es_timed % 240 == 0) {
+        logf("vk: parallel replay, early segments (RX_VK_SEG_EARLY), a command buffer: dry pass %.2f ms (segments out during it "
+             "%.1f), segments after it %.2f ms (%.1f of them), slowest %.2f ms, the replay thread recorded %.2f ms and waited %.2f ms, "
+             "the join itself %.2f ms; %lld recorded whole (no boundary reached)", es_dry_ms / 240, es_early_n / 240, es_seg_ms / 240,
+             es_segs_n / 240, es_slow_ms / 240, es_self_ms / 240, es_wait_ms / 240, es_join_ms / 240, (long long)es_whole_n);
+        es_dry_ms = es_seg_ms = es_segs_n = es_slow_ms = es_wait_ms = es_self_ms = es_early_n = es_join_ms = 0;
+        par_stats_log();
+    }
+}
+/// The pending join made now (a no-op when none is pending)
+void defer_join_now() {
+    if (!defer_group) return;
+    const std::shared_ptr<EarlyGroup> g = std::move(defer_group);
+    defer_group = nullptr;
+    feed_set(mkwvk::feed::kJoin);
+    early_join(*g);
+}
 const uint8_t* replay_handle_early(VkCommandBuffer& cmd, const uint8_t* h, bool may_stop, int nplan, const int64_t* plan,
                                    bool self_help, mkwvk::segment_plan::Profile& profile, int64_t* total_out, bool* cut) {
     NvnState& state = *cur_state;
+    defer_join_now();   // (stream JOIN1: the pre-sync and the segments' tables are not shared with segments still recording)
     presync_kick_at = 0;   // (the pre-sync is made here, before the dry pass)
     occ_stop_at = nullptr;
     EarlyWall early_wall;
@@ -3338,20 +3582,11 @@ const uint8_t* replay_handle_early(VkCommandBuffer& cmd, const uint8_t* h, bool 
     const uint64_t base = ++par_seq;
     par_seq += (uint64_t)nplan;
     memory_rb_segments_begin(base, (uint64_t)nplan);
-    struct Job {
-        Recording* r;
-        Segment g;
-        NvnState s;   // (its starting state: the dry pass's points move as it goes on)
-        uint64_t order;
-        int index = 0;
-        std::atomic<bool> done{false};
-        bool uploads = false;
-        int inits = 0;
-        int64_t t0 = 0, t1 = 0;
-    };
-    std::vector<std::unique_ptr<Job>> jobs;
+    const auto group = std::make_shared<EarlyGroup>();   // (heap: the join may come after this function has returned, RX_VK_DEFER_JOIN)
+    EarlyGroup& G = *group;
+    std::vector<std::unique_ptr<EarlyJob>>& jobs = G.jobs;
     for (int k = 0; k < nplan; k++) {
-        auto j = std::make_unique<Job>();
+        auto j = std::make_unique<EarlyJob>();
         j->r = &begin_segment_recording(rec_cur_value);
         VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
         bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
@@ -3387,7 +3622,8 @@ const uint8_t* replay_handle_early(VkCommandBuffer& cmd, const uint8_t* h, bool 
     // upload (dry_uploaded): an image the dry pass makes is made under ParLock, as the segments' lookups are, and the watch is set
     // before its first command is recorded, so no segment that could see it goes ahead of rd
     const int egpu = early ? early_gpu_mode() : 0;
-    std::atomic<bool> dry_uploaded{false};
+    G.egpu = egpu;
+    std::atomic<bool>& dry_uploaded = G.dry_uploaded;
     Recording* rd = nullptr;
     if (egpu) {
         submit_recording(r, false);   // (what came before, its uploads with the pre-sync: ahead of every segment in the queue)
@@ -3398,79 +3634,8 @@ const uint8_t* replay_handle_early(VkCommandBuffer& cmd, const uint8_t* h, bool 
         cmd = rd->cmd;   // (no boundary reached: the whole command buffer is recorded into rd, below)
         texture_upload_watch(&dry_uploaded);
     }
-    bool init_lost = false;
-    const auto submit_job = [&init_lost](Job* j) {   // (a segment, in the queue's order: the caller's)
-        if (j->inits < 0) init_lost = true;   // (its init command buffer could not be ended: the replay stops, below)
-        if (init_lost) return;                // (nothing from it on is submitted)
-        VkCommandBufferSubmitInfo cb[3]{{VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO}, {VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO},
-                                        {VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO}};
-        uint32_t n = 0;
-        if (j->inits > 0) cb[n++].commandBuffer = j->r->init;
-        if (j->uploads) cb[n++].commandBuffer = j->r->upload;
-        cb[n++].commandBuffer = j->r->cmd;
-        VkSubmitInfo2 si{VK_STRUCTURE_TYPE_SUBMIT_INFO_2};
-        si.commandBufferInfoCount = n;
-        si.pCommandBufferInfos = cb;
-        late_fix_wait_unlocked();   // (TICK-060)
-        std::lock_guard lk(dev.present_mu);
-        queue_flush_locked();
-        gpu_time_segment_submitted(*j->r);   // (the blits' places among the timed recordings)
-        feed_note_sent(j->r->slot);
-        tl_ev("seg-submit", (uint64_t)j->index);
-        const VkResult res = vkQueueSubmit2(dev.queue, 1, &si, j->r->fence);
-        j->r->submitted = res == VK_SUCCESS;
-        if (j->r->submitted && comp_on()) comp_submit(*j->r);   // (stream ORDER2)
-        if (res != VK_SUCCESS) logf("vk: segment submit %llu failed (%d)", (unsigned long long)j->r->value, (int)res);
-        if (res == VK_ERROR_DEVICE_LOST) device_lost();
-    };
-    // (RX_VK_EARLY_GPU) the segments that are done go out in order, by whichever thread finishes one; held while the dry pass runs
-    // once it has recorded an upload (rd must go first), until the replay thread submits rd at the dry pass's end (sub_after_rd)
-    std::mutex sub_mu;
-    size_t next_sub = 0;
-    bool sub_after_rd = false;
-    const auto submit_ready = [&] {   // (sub_mu held)
-        while (next_sub < jobs.size() && jobs[next_sub]->done.load()) {
-            if (!sub_after_rd && dry_uploaded.load(std::memory_order_acquire)) return;
-            submit_job(jobs[next_sub++].get());
-        }
-    };
-    std::condition_variable seg_cv;
-    std::mutex seg_mu;
     const auto now_ns = [] { return (int64_t)std::chrono::steady_clock::now().time_since_epoch().count(); };
-    const auto record_job = [&seg_cv, &seg_mu, &now_ns, &sub_mu, &submit_ready, egpu](Job* j) {   // (as replay_handle's)
-        j->t0 = now_ns();
-        tl_ev("seg+", (uint64_t)j->index);   // (stream ORDER3)
-        work_seg_begin();   // (TICK-061, D6: par_active is on while these segments record)
-        texture_set_segment(j->order);
-        texture_segment_worker(j->index);
-        texture_begin_recording(j->r->upload, j->r->value);
-        draw_begin_recording(j->r->slot, j->r->cmd, j->r->value);
-        VkCommandBuffer c = j->r->cmd;
-        const int64_t ta = par_stats_on ? now_ns() : 0;
-        record_segment(c, j->g);
-        const int64_t tc = par_stats_on ? now_ns() : 0;
-        j->uploads = texture_uploads_recorded();
-        j->inits = texture_segment_end(j->index);
-        texture_segment_worker(-1);
-        gpu_time_end(*j->r, j->uploads);   // (as replay_handle's)
-        host_read_barrier(c);
-        vkEndCommandBuffer(j->r->upload);
-        vkEndCommandBuffer(j->r->cmd);
-        work_seg_end();   // (TICK-061, D6)
-        j->t1 = now_ns();
-        feed_note_ready(j->r->slot, 1, j->t1);   // (stream ORDER3)
-        tl_ev("seg-", (uint64_t)j->index);
-        par_stats_segment_parts(j->t0, ta, tc, j->t1);
-        {
-            std::lock_guard l(seg_mu);
-            j->done = true;
-        }
-        seg_cv.notify_all();
-        if (egpu) {
-            std::lock_guard sl(sub_mu);
-            submit_ready();
-        }
-    };
+    (void)now_ns;
     // the dry pass, handing segments out as it passes their ends
     size_t open = 0;   // (the segment whose end is looked for)
     jobs[0]->s = state;
@@ -3479,18 +3644,18 @@ const uint8_t* replay_handle_early(VkCommandBuffer& cmd, const uint8_t* h, bool 
     hook.wants = [&](int64_t work, const uint8_t* at) { return (int)open + 1 < nplan && work >= plan[open] && at != jobs[open]->g.p; };
     hook.on_point = [&](const ParPoint& q) {
         if (!hook.wants(q.work, q.p)) return;
-        Job* j = jobs[open].get();
+        EarlyJob* j = jobs[open].get();
         j->g.end = q.p;
         {
             std::lock_guard lk(par_pool.mu);
-            par_pool.jobs.push_back([j, &record_job] { record_job(j); });
+            par_pool.jobs.push_back([group, j] { early_record_job(*group, j); });
             par_pool.pending++;
         }
         par_pool.posted.fetch_add(1, std::memory_order_release);
         par_pool.cv.notify_one();
         jt_mark(26, open);
         tl_ev("seg-out", open, (uint64_t)q.work);
-        Job* n = jobs[++open].get();
+        EarlyJob* n = jobs[++open].get();
         n->s = q.s;
         n->g = {q.p, nullptr, &n->s, q.ub, q.cond, serial0 + (uint64_t)q.work};
     };
@@ -3519,9 +3684,7 @@ const uint8_t* replay_handle_early(VkCommandBuffer& cmd, const uint8_t* h, bool 
     const uint8_t* const stop = suspend_at ? suspend_at : occ_stop;
     const int64_t total = dry_work;
     *total_out = total;
-    static double dry_ms, seg_ms, segs_n, slow_ms, wait_ms, self_ms, early_n;
-    static int64_t timed, whole_n;
-    dry_ms += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_dry0).count();
+    es_dry_ms += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_dry0).count();
     if (wall_fine_on()) rwall.dry_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - t_dry0).count();
     const size_t used = open + 1;
     if (early)
@@ -3532,7 +3695,7 @@ const uint8_t* replay_handle_early(VkCommandBuffer& cmd, const uint8_t* h, bool 
             par_active = false;
             texture_segments_begin(nullptr, 0);
         }
-        whole_n++;
+        es_whole_n++;
         Segment whole = jobs[0]->g;
         whole.end = stop;
         {
@@ -3544,13 +3707,13 @@ const uint8_t* replay_handle_early(VkCommandBuffer& cmd, const uint8_t* h, bool 
         return occ_stop ? occ_go_on(cmd, occ_stop, may_stop, nullptr) : stop;
     }
     *cut = true;
-    Job* last = jobs[open].get();
+    EarlyJob* last = jobs[open].get();
     last->g.end = stop;
     if (egpu) {   // (rd, the dry pass's uploads, ahead of every segment not submitted yet; those submitted before it never saw them)
-        std::lock_guard sl(sub_mu);
+        std::lock_guard sl(G.sub_mu);
         submit_recording(*rd, false);
-        sub_after_rd = true;
-        submit_ready();
+        G.sub_after_rd = true;
+        early_submit_ready(G);
         rec_parts++;
     } else {
         submit_recording(r, false);   // (what came before, its uploads with the pre-sync: ahead of every segment in the queue)
@@ -3558,85 +3721,37 @@ const uint8_t* replay_handle_early(VkCommandBuffer& cmd, const uint8_t* h, bool 
     }
     jt_mark(20, 0);
     early_wall.mark(6);
-    const auto t_seg0 = std::chrono::steady_clock::now();
+    G.used = used, G.self_help = self_help, G.serial0 = serial0, G.total = total, G.profile = &profile;
+    G.t_seg0 = std::chrono::steady_clock::now();
     jt_mark(17, used);
-    tl_ev("own+", used - 1);
-    feed_set(mkwvk::feed::kOwn);   // (stream REPLAY2)
-    record_job(last);   // (the replay thread's: the last one)
-    feed_set(mkwvk::feed::kJoin);
-    tl_ev("own-", used - 1);
-    jt_mark(18, 0);
-    early_wall.mark(7);
-    int64_t pt_wait_ns = 0;
-    for (size_t k = 0; k < used; k++) {   // (in order, each as soon as it is done)
-        Job* j = jobs[k].get();
-        while (self_help && !j->done.load()) {   // (RX_VK_PARALLEL_SELF=2: one no worker has started yet)
-            std::function<void()> fn;
-            {
-                std::lock_guard lk(par_pool.mu);
-                if (par_pool.jobs.empty()) break;
-                fn = std::move(par_pool.jobs.front());
-                par_pool.jobs.pop_front();
-            }
-            fn();
-            std::lock_guard lk(par_pool.mu);
-            if (--par_pool.pending == 0) par_pool.done.notify_all();
-        }
+    // (stream JOIN1, RX_VK_DEFER_JOIN) the last segment goes to the pool like the others and the join is left for later (EARLY_GPU's in-order
+    // submits by the finishing threads keep the GPU fed meanwhile)
+    const bool defer = egpu && !occ_stop && defer_join_mode() != 0;
+    if (defer) {
+        G.deferred = true;
+        tl_ev("own-out", used - 1);
         {
-            const int64_t w0 = now_ns();
-            jt_mark(9, (uint64_t)j->index);
-            spin_before_sleep([j] { return j->done.load(std::memory_order_acquire); });   // (stream ORDER3, RX_VK_POOL_SPIN)
-            std::unique_lock l(seg_mu);
-            seg_cv.wait(l, [j] { return j->done.load(); });
-            pt_wait_ns += now_ns() - w0;
-            jt_mark(10, (uint64_t)j->index);
+            std::lock_guard lk(par_pool.mu);
+            par_pool.jobs.push_back([group, last] { early_record_job(*group, last); });
+            par_pool.pending++;
         }
-        if (egpu) {   // (this one and those before it, when no other thread has: all of them are done)
-            std::lock_guard sl(sub_mu);
-            submit_ready();
-        } else {
-            submit_job(j);
-        }
-    }
-    {
-        std::unique_lock lk(par_pool.mu);
-        par_pool.done.wait(lk, [] { return par_pool.pending == 0; });
-    }
-    if (init_lost)
-        replay_fatal("a parallel replay segment's init command buffer could not be ended: new images lost their first layout "
-                     "change, and the work after it may use them");
-    early_wall.mark(8);
-    tl_ev("early-", used);
-    par_active = false;
-    texture_segments_begin(nullptr, 0);
-    seg_ms += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_seg0).count();
-    if (wall_fine_on()) rwall.seg_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - t_seg0).count(), rwall.big++;
-    segs_n += (double)used, early_n += (double)(used - 1);
-    {
-        int64_t hi = 0;
-        for (size_t k = 0; k < used; k++) hi = std::max(hi, jobs[k]->t1 - jobs[k]->t0);
-        slow_ms += hi / 1e6, wait_ms += pt_wait_ns / 1e6, self_ms += (last->t1 - last->t0) / 1e6;
-    }
-    {   // (the profile, as replay_handle keeps it)
-        double from[kMaxBatch], to[kMaxBatch], ms[kMaxBatch];
-        size_t m = 0;
-        for (size_t k = 0; k < used && k < (size_t)kMaxBatch && total > 0; k++, m++) {
-            const uint64_t end = k + 1 < used ? jobs[k + 1]->g.serial : serial0 + (uint64_t)total;
-            from[m] = (double)(jobs[k]->g.serial - serial0) / (double)total, to[m] = (double)(end - serial0) / (double)total;
-            ms[m] = (jobs[k]->t1 - jobs[k]->t0) / 1e6;
-        }
-        mkwvk::segment_plan::profile_add(profile, from, to, ms, m, 0.25);
-    }
-    if (++timed % 240 == 0) {
-        logf("vk: parallel replay, early segments (RX_VK_SEG_EARLY), a command buffer: dry pass %.2f ms (segments out during it "
-             "%.1f), segments after it %.2f ms (%.1f of them), slowest %.2f ms, the replay thread recorded %.2f ms and waited %.2f ms; "
-             "%lld recorded whole (no boundary reached)", dry_ms / 240, early_n / 240, seg_ms / 240, segs_n / 240, slow_ms / 240,
-             self_ms / 240, wait_ms / 240, (long long)whole_n);
-        dry_ms = seg_ms = segs_n = slow_ms = wait_ms = self_ms = early_n = 0;
-        par_stats_log();
+        par_pool.posted.fetch_add(1, std::memory_order_release);
+        par_pool.cv.notify_one();
+        defer_group = group;
+    } else {
+        tl_ev("own+", used - 1);
+        feed_set(mkwvk::feed::kOwn);   // (stream REPLAY2)
+        early_record_job(G, last);   // (the replay thread's: the last one)
+        feed_set(mkwvk::feed::kJoin);
+        tl_ev("own-", used - 1);
+        jt_mark(18, 0);
+        early_wall.mark(7);
+        early_join(G);
+        early_wall.mark(8);
     }
     feed_set(mkwvk::feed::kAfter);   // (stream REPLAY2)
     texture_set_segment(++par_seq);
+    defer_check_beside(kDeferBegin);
     Recording& nr = begin_recording(rec_cur_value);
     full_barrier(nr.cmd);
     rec_cur = &nr;
@@ -3672,6 +3787,7 @@ const uint8_t* replay_handle(VkCommandBuffer& cmd, const uint8_t* h, bool may_st
     NvnState& state = *cur_state;
     suspend_at = nullptr;
     if (threads < 2 || !rec_cur || dump_on() || gprof_on() || probe_serial()) {
+        defer_join_now();   // (stream JOIN1)
         suspend_ok = may_stop;
         {
             WallAdd wall_whole(rwall.whole_ns);
@@ -3686,11 +3802,20 @@ const uint8_t* replay_handle(VkCommandBuffer& cmd, const uint8_t* h, bool may_st
     const auto t_dry0 = std::chrono::steady_clock::now();
     const NvnState start = state;
     const size_t ub0 = ub_updates.size();
-    par_points.clear(), par_conds_reset(), dry_work = 0;
+    // (stream JOIN1) a join pending (RX_VK_DEFER_JOIN): its segments read par_conds and the uniform updates, so this dry pass appends to
+    // them (par_conds is not reset: this command buffer's conditions follow, from cond0) and holds ub_grow_mu as an early dry pass does
+    const size_t cond0 = defer_group ? par_conds_n.load(std::memory_order_acquire) : 0;
+    if (defer_group) {
+        par_points.clear(), dry_work = 0;
+        ub_growing.store(true, std::memory_order_relaxed);
+    } else {
+        par_points.clear(), par_conds_reset(), dry_work = 0;
+    }
     const uint64_t serial0 = occ_serial;   // (TICK-033: the segments' draws numbered from here)
     // (TICK-056, RX_VK_PRESYNC_EARLY) the mirrors' pre-sync on a worker while the dry pass runs (once the workers are started): see
     // PresyncEarly
     presync_kick_at = par_pool.started ? presync_early_at() : 0;
+    if (presync_kick_at) defer_join_now();   // (stream JOIN1: its copies are made on a worker, ahead of rec_cur: not beside segments)
     presync_early.r = nullptr;
     // (and at the dry pass's start when this thread's command buffer of the same order in the last frame was cut into segments:
     // the frame's big ones come in the same places frame after frame)
@@ -3810,6 +3935,11 @@ const uint8_t* replay_handle(VkCommandBuffer& cmd, const uint8_t* h, bool may_st
     }
     suspend_ok = false;
     rmode = Mode::Serial;
+    if (defer_group) {   // (stream JOIN1: this dry pass ran beside the segments of the command buffer before it; nothing is appended from here on)
+        defer_check_beside(kDeferDry);
+        ub_growing.store(false, std::memory_order_release);
+        if (defer_join_mode() == 1) defer_join_now();   // (1: its serial recording below is not beside them)
+    }
     const uint8_t* const occ_stop = suspend_at ? nullptr : occ_stop_at;   // (TICK-033: stopped for a report's count)
     const uint8_t* const stop = suspend_at ? suspend_at : occ_stop;     // (the segments end there)
     const int64_t total = dry_work;
@@ -3822,7 +3952,7 @@ const uint8_t* replay_handle(VkCommandBuffer& cmd, const uint8_t* h, bool may_st
     int64_t wants[kMaxBatch] = {};
     if (balance) mkwvk::segment_plan::balanced_targets(profile, nseg, total, wants, seg_tail());
     std::vector<Segment> seg;
-    seg.push_back({h, nullptr, &start, ub0, 0, serial0});
+    seg.push_back({h, nullptr, &start, ub0, cond0, serial0});
     // (RX_VK_PARALLEL_BOUNDARY=<k>, diagnosis: only the k-th boundary of each command buffer splits it, and its program's code keys are logged,
     // to find which boundary a wrong picture comes from)
     for (int k = 1; k < nseg; k++) {
@@ -3854,6 +3984,7 @@ const uint8_t* replay_handle(VkCommandBuffer& cmd, const uint8_t* h, bool may_st
     if (seg.size() > 1) pk_big_now |= 1ull << pk_this;
     if (presync_early.r) presync_early_finish(seg.size() > 1);   // (TICK-056: its copies ahead of rec_cur, on every path below)
     if (seg.size() == 1) {   // (one segment: here, as the dry pass left the reports and conditions)
+        defer_check_beside(kDeferSerialRecord);   // (stream JOIN1: pending only with RX_VK_DEFER_JOIN=2)
         {
             WallAdd wall_whole(rwall.whole_ns);
             rwall.whole++;
@@ -3861,6 +3992,7 @@ const uint8_t* replay_handle(VkCommandBuffer& cmd, const uint8_t* h, bool may_st
         }
         return occ_stop ? occ_go_on(cmd, occ_stop, may_stop, nullptr) : stop;
     }
+    defer_join_now();   // (stream JOIN1: its own segments' tables and slots)
     if (!par_pool.started) {
         par_pool.started = true;
         // (TICK-052) RX_VK_PARLOCK_SPIN=<n> (TICK-054: default 4000; 0: no spin): ParLock spins that many times before it sleeps. It is held ~0.1-0.6 us a
@@ -4172,6 +4304,7 @@ const uint8_t* replay_handle(VkCommandBuffer& cmd, const uint8_t* h, bool may_st
 /// submitted when last is its last segment's recording, else submitted here); the GPU waited for, the reports read, and the
 /// command buffer replayed on from the condition
 const uint8_t* occ_go_on(VkCommandBuffer& cmd, const uint8_t* at, bool may_stop, Recording* last) {
+    defer_join_now();   // (stream JOIN1)
     if (last) recording_wait(*last);
     if (last || occ_sync(cmd)) occ_resolve_all();
     else occ_give_up();
@@ -4563,6 +4696,7 @@ bool run_submit(const uint64_t* handles, int n, uint64_t value, uint64_t queue, 
         }
         if (stop) break;
     }
+    defer_join_now();   // (stream JOIN1: a join never outlives the command buffers' loop: the recording's end below needs every segment)
     if (stop) {
         tl_ev("stop", value, queue, wait_at(stop).gpu);
         QueueRun& q = qruns[queue];
