@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Sacrappy
+
 /* (heylisten) A frame's parts on the thread that presents (perf_report.cpp's parts_ms and its hitch causes): what the
    renderer measures itself. The parts are wall-clock times on the presenting thread, so they add up to the frame:
 

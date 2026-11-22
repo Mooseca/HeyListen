@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Sacrappy
+
 /* Guest threads: one host thread each, with its own Ctx, TLS block and thread-local region.
 
    TPIDR_EL0 (TLS): a 4 KB block per thread, TP in its middle. TOTK's main reads its one thread-local at TP+0x10

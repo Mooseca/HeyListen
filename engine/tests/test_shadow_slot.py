@@ -1,3 +1,5 @@
+# Copyright (C) 2026 Sacrappy
+
 """A character's shadow map reserves the storage of the next step of sides up, so the targets made after it keep their place.
 
 OoT sizes each near character's square depth map anew every frame (384 from far, up to 1920 near, a few pixels different each

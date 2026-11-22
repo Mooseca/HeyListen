@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Sacrappy
+
 /* The parallel replay's segments (vk_replay.cpp replay_handle): how many segments a large command buffer is cut into.
    TICK-050: with more segments than recording threads the last ones ran in a second round, one thread recording while
    the others idled; the cap can be the number of recorders instead, so that every segment is recorded at once. */

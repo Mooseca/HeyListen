@@ -1,3 +1,5 @@
+# Copyright (C) 2026 Sacrappy
+
 """The performance summary (gpu/vk/perf_report.h, perf_report.cpp), ported from Longshot's #983, with no game and no GPU.
 
 - tests/test_perf_report.cpp: the buckets, the interval, what a hitch is and what it waited on, the pacing misses, the JSON

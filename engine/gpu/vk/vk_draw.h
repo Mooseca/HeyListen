@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Sacrappy
+
 // Draws and dispatches (vk_draw.cpp).
 #pragma once
 

@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Sacrappy
+
 // The worker threads (vk_jobs.h). As many as a third of the hardware threads (2 to 4): the game itself runs six
 // virtual cores, and the replay thread is one of the busiest.
 #include <algorithm>

@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Sacrappy
+
 /* SDL3 or SDL2 behind one set of calls (hos_sdl.h). Each call is SDL3's or SDL2's, the same work under other names;
    SDL3 returns C's bool where SDL2 returned 0 for success or an SDL_bool, and the events and a few structures are laid
    out differently (both read here at their offsets: SDL_Event is 128 bytes in SDL3, 56 in SDL2). */

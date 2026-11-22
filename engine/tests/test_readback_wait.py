@@ -1,3 +1,5 @@
+# Copyright (C) 2026 Sacrappy
+
 """v0.4.4: what a CPU read of GPU results waited for, said in the hitch rows (gpu/vk/readback_wait.h), and the bounded strict wait
 on the light meter's page (RX_VK_STRICT_BOUND, RX_VK_STRICT_BOUND_MS), with no game and no GPU.
 

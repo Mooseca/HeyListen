@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Sacrappy
+
 /* The storage reserved for a character's shadow map (nvn_native.c nvnTextureBuilderGetStorageSize and ...Alignment).
    tests/test_shadow_slot.py
 

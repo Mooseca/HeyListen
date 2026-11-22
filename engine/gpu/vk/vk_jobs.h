@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Sacrappy
+
 // Background work of the back end (vk_jobs.cpp): shader translation and pipeline builds run on a few worker threads
 // at below-normal priority while the replay goes on, after totk-pc-recomp's vk_pipeline.c background builds. A draw
 // whose program or pipeline is not ready yet is left out of its frame, or waits for it (vk_draw.cpp decides).

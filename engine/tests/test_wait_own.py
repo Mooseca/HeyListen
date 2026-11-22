@@ -1,3 +1,5 @@
+# Copyright (C) 2026 Sacrappy
+
 """RX_VK_WAIT_OWN (gpu/vk/wait_own.h, v0.4.4): how far behind the GPU the replay lets the game run at each present on an AMD
 integrated GPU. Compiled with a small program: the mode by the switch, RX_VK_WAIT_GPU and the GPU's kind (3, the frame before's work and the frame's own after a texture upload, by default on an AMD integrated GPU; 2 the frame before's; 1 the frame's own, v0.4.3's rule; 0 none), and the value each present waits for. And, by the
 text, that the present waits for that value only (and not for its own on mode 2).

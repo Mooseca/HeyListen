@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Sacrappy
+
 /* Which renderer the rx_* calls go to (gpu/vk/vk_api.h): the WebGPU one in the executable (gpu/render, its
    functions renamed wgr_* by rx_wgpu_names.h) or, with RX_BACKEND=vulkan, the Vulkan one in mkw_vk.dll beside the
    executable. Decided at rx_start, before any other rx_* call; a DLL that is missing or finds no usable Vulkan

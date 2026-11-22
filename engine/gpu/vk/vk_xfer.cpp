@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Sacrappy
+
 // Texture <-> buffer and texture <-> texture copies, and texture clears: totk-pc-recomp's runtime/vk_exec_xfer.c
 // (MIT; sub_resolve, buffer_side, copy_buffer_image, copy_t2t, clear_tex), on the textures of vk_texture.cpp (an
 // image per texture: a copy addresses a level, its layers or slices, and a region).

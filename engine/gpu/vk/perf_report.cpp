@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Sacrappy
+
 // (heylisten) The performance summary (perf_report.h), ported from Longshot's #983: on only when the player chose "Send
 // performance statistics" in the menu (opts.send_perf, hookshot_options.ini's send_performance_stats=, OFF by default) AND the
 // build has an address to send to (nx2/addresses.ini's telemetry=, stamped into hookshot_version.txt, or HL_TELEMETRY_URL for a

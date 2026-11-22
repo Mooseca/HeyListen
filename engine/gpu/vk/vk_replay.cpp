@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Sacrappy
+
 // The NVN replay on Vulkan: the game's recorded command buffers (host/nvn_native.c, records in rx_nvn.h) at each
 // submit, recorded into a Vulkan command buffer and submitted with the next value of a timeline semaphore (the NVN
 // fences); and the window presents.

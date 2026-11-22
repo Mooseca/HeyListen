@@ -1,3 +1,5 @@
+# Copyright (C) 2026 Sacrappy
+
 """A texture's or a program's release gives the thread's virtual core up only while the back end would wait (host/rx_backend.c
 rx_nvn_texture_released, rx_nvn_program_released, v0.4.4; issue 67: OptimizeChangeBanc held a core for 2-2.5 s inside the renderer).
 

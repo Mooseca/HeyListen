@@ -1,3 +1,5 @@
+# Copyright (C) 2026 Sacrappy
+
 """A romfs folder without the game's heap sizes is told at boot, not crashed on (host/hos_main.c romfs_notice, issue 55).
 
 The game sizes the heap of each module from System/HeapSize/Product.Nin_Ounce_NVN2.HeapDef.byml.zs. Without it the third

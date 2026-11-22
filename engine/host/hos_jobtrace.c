@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Sacrappy
+
 /* (HeyListen, TICK-039) HOS_JOBTRACE=<path> (diagnostic): a time-stamped trace of every guest thread's blocking and
    waking for a short window, to rebuild the game's job chain offline (tools/bench/jobtrace.py): when each thread waits
    (light/normal events, condition variables, contended mutexes, message queues, semaphores, the kernel's arbitration

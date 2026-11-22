@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Sacrappy
+
 /* Horizon OS layer, native host: process start and boot.
 
    What rtld and nn::init::Start do on hardware (see ports/zelda-totk/PORT.md, "How the game starts"), done here:

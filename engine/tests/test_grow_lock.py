@@ -1,3 +1,5 @@
+# Copyright (C) 2026 Sacrappy
+
 """The parallel replay's dry pass appends render conditions and uniform updates while early segments read them, without
 waiting behind the workers' reads (gpu/vk/vk_replay.cpp; RX_VK_GROW_LOCK_PLAIN=1: as before).
 

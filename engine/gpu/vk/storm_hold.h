@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Sacrappy
+
 // (hookshot) The storm hold's state machine, with no game and no GPU behind it: a cold area's arrival queues hundreds
 // of shader translations (the fade rewrites the texture handles every game frame, each frame's picks pushing new
 // variants), and the frames drawn while the queue is that deep sample the fade's transient words — the white/cyan

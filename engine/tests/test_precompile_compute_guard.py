@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Sacrappy
 """Game-free Windows SEH check of the actual precompile compute arm.
 
 Extracts production code; fake Vulkan never loads a GPU driver. The thread and

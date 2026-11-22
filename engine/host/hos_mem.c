@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Sacrappy
+
 /* Guest memory map: the system region (our own objects), the heap, address regions.
    The whole 4 GB window is committed up front (hos_main.c), so "mapping" here is only bookkeeping and zeroing. */
 #include "hos.h"

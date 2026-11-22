@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Sacrappy
 // (hookshot, #1001, issue 2245; the switch from Longshot 8694e3c6) How the game's task and mesh programs run: 0 Automatic
 // (the GPU's own mesh shaders where it has them, the compute fallback where not, and on Linux with an RDNA 2 or RDNA 3.5 AMD GPU,
 // RADV, the compute path), 1 Native (the GPU's own mesh shaders, RADV's too), 2 Compute (the fallback on every GPU). Chosen by the

@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Sacrappy
+
 // Textures (vk_texture.cpp): one VkImage per texture storage, with every level and layer, the way the GPU sees the
 // game's memory. Draws sample views of it, passes render into views of one level and layer, copies and clears
 // address it by level and layer. Replaces the first version's image per level and layer (vk_image.cpp), which could

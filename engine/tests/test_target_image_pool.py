@@ -1,3 +1,5 @@
+# Copyright (C) 2026 Sacrappy
+
 """A render target's image whose texture is gone waits in a pool by its create info, and a new texture of that create info
 takes it, instead of each of OoT's shifting transient targets being a new image made and destroyed.
 

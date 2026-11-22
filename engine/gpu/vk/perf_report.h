@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Sacrappy
+
 /* (heylisten) The performance summary (perf_report.cpp gathers it, the launcher sends it: nx2/perf_report.py): what a
    player who ticked "Send performance statistics" in the launcher sends about their frames, split by the map they were
    on. Every few minutes and at the end the game writes one summary, the counts since the one before, into the game folder's

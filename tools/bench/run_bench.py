@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright (C) 2026 Sacrappy
+
 """Frametime benchmark harness for Hookshot and Lichii builds (TICK-001).
 
 Starts one build for a fixed wall-clock time, collects per-frame present

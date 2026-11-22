@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Sacrappy
+
 /* (HeyListen) HOS_HOST_SPLIT=<seconds>[,<every>]: where the process's memory is outside the game's own. The game's memory (the
    guest window) has its census in hos_memsplit.c (HOS_MEM_SPLIT); this is the rest: that long after the start, and then every
    <every> seconds (default: once), and at a normal exit, the whole address space is walked (VirtualQuery) and every committed

@@ -1,3 +1,5 @@
+# Copyright (C) 2026 Sacrappy
+
 """Game-free: the Button prompts setting has something to show (HeyListen issue #69). The icons are not shipped: nx2/prompt_assets.py
 draws them at the player's build (the game's own font and textures, with Kenney's CC0 faces), and only when the builder's Python has
 fontTools and the other pins of nx2/prompt_requirements.txt. A release whose Python part lacked them (v0.4.2's) built games with no

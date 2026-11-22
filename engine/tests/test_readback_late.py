@@ -1,3 +1,5 @@
+# Copyright (C) 2026 Sacrappy
+
 """RX_VK_READBACK_LATE (gpu/vk/readback_late.h): the rules that name the CPU reads of GPU results read without their wait.
 
 The header is compiled with a small program that parses rule lists and asks which ranges are late:
