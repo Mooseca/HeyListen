@@ -6663,6 +6663,7 @@ void StatsQuery::copy_args(VkCommandBuffer cmd, const DrawArgs& d, uint32_t inde
 thread_local int64_t occ_draw_slot = -1;   // (the replay: the serial of the draw it hands to draw(); -1: none)
 thread_local int64_t occ_gate_draw = -1;   // (OCC1, mode 6: the serial of the proxy the draw in hand is gated on; -1: none)
 thread_local uint64_t occ_gate_cov_lo = 0, occ_gate_cov_hi = 0;   // (the segment being recorded: the serials whose predicate words are current)
+
 // (OCC1) RX_VK_OCC_GATE=1 (off by default): the game's hidden objects are skipped by the GPU, and nothing the game reads changes. OoT tests
 // each object with a one-draw proxy (reset, draw, report) and gates the object's draw on that report. The report the game reads stays
 // the fixed value (RX_VK_OCC_FIXED), so the sun, the haze and every count the CPU reads are what they always were and cannot flicker. The
