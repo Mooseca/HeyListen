@@ -79,6 +79,12 @@ void hl_mem_pool_made(uint64_t addr, uint64_t size);
 void hl_mem_imported(uint64_t lo, uint64_t hi);
 void hl_mem_unimported(uint64_t lo, uint64_t hi);
 void hl_mem_init(void);
+/* (STALL2, HL_FAULT_WATCH) hos_mem.c tells hl_mem.c of each discard of freed guest pages; hos_jobtrace.c names a thread by its OS id (the
+   job trace's table, filled while HL_STALL_WATCH or HOS_JOBTRACE runs); hos_hostsplit.c names the tagged range an address is in
+   (the tags are kept while HOS_HOST_SPLIT or RX_VK_LEDGER is on). Each returns 1 when it knows */
+void hl_fw_note_discard(uint64_t bytes, int64_t ns);
+int hos_jt_name_of_tid(unsigned long tid, char *out, int n);
+int hos_mem_tag_name(uint64_t addr, char *out, int n);
 /* (hl_drop.c, HL_MEM_DROP) the drop module: started after the memory module; told of decodes, of guest memory handed to
    the kernel (hos_commit) and of the back end's imports */
 void hl_drop_init(void);

@@ -158,6 +158,7 @@ static void discard_pages(uint64_t addr, uint64_t size) {
         looked = 1;
         discard = (DiscardFn)(void *)GetProcAddress(GetModuleHandleA("kernel32.dll"), "DiscardVirtualMemory");
     }
+    const int64_t fw_t0 = hos_now_ns();
     /* (HOS_GUEST_PAGES: over dropped or restored granules, piece by piece; dropped ones wholly inside are forgotten) */
     if (hos_gp_ready() && hos_gp_touches(GP(lo), (size_t)(hi - lo))) hos_gp_reset(GP(lo), (size_t)(hi - lo));
     else {
@@ -166,6 +167,7 @@ static void discard_pages(uint64_t addr, uint64_t size) {
             VirtualAlloc(GP(lo), (SIZE_T)(hi - lo), MEM_RESET, PAGE_READWRITE);
         hos_gp_hold(0);
     }
+    hl_fw_note_discard(hi - lo, hos_now_ns() - fw_t0);
 #elif !defined(__EMSCRIPTEN__)
     extern int hos_posix_guest_discard(void *p, size_t n);   /* (hos_main.c: MADV_REMOVE on the memfd window) */
     extern int rx_guest_imported(uint64_t lo, uint64_t hi);

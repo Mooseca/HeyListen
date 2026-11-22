@@ -2,7 +2,7 @@
  "schema": 1,
  "generated_by": "engine/scripts/list_switches.py",
  "scope": "C, C++ and headers under engine/ (engine/tests and vendored trees other than a64-kit excluded) and the Python the builder, the lifter and the scripts run: getenv, std::getenv, _wgetenv, the code's own env helpers and table-driven reads, and os.environ.",
- "count": 1421,
+ "count": 1422,
  "switches": [
   {
    "name": "A64_DEVIRT",
@@ -936,6 +936,27 @@
    "use": null
   },
   {
+   "name": "HL_FAULT_WATCH",
+   "area": "native",
+   "group": "Native engine diagnostics",
+   "audience": "diagnostic",
+   "files": [
+    {
+     "path": "host/hl_mem.c",
+     "line": 808
+    }
+   ],
+   "default": "unset",
+   "values": "text",
+   "explanation": "HL_FAULT_WATCH=<poll ms> (diagnostic, off by default; STALL2, 22 Nov 2026): who takes the page faults, and on what memory. The owner's 23 minutes had 31 million faults (123 GB of 4 KB pages for a working set of 8 GB) and 132 stutters of 50 ms or more that were page faults at 9 to 12 us each; nothing said which thread faulted or which memory (the stall watch has each thread's CPU, not its faults).",
+   "comment": "HL_FAULT_WATCH=<poll ms> (diagnostic, off by default; STALL2, 22 Nov 2026): who takes the page faults, and on what memory. The owner's 23 minutes had 31 million faults (123 GB of 4 KB pages for a working set of 8 GB) and 132 stutters of 50 ms or more that were page faults at 9 to 12 us each; nothing said which thread faulted or which memory (the stall watch has each thread's CPU, not its faults).",
+   "documented_in": null,
+   "source": "comment at host/hl_mem.c",
+   "documented": true,
+   "set_via": "In `hookshot_env.txt`, or in the environment.",
+   "use": null
+  },
+  {
    "name": "HL_GFX",
    "area": "native",
    "group": "Hooks and tracing",
@@ -1484,7 +1505,7 @@
    "files": [
     {
      "path": "host/hl_mem.c",
-     "line": 565
+     "line": 804
     }
    ],
    "default": "unset",
@@ -1509,7 +1530,7 @@
     },
     {
      "path": "host/hl_mem.c",
-     "line": 568
+     "line": 811
     }
    ],
    "default": "unset",
@@ -1530,7 +1551,7 @@
    "files": [
     {
      "path": "host/hl_mem.c",
-     "line": 581
+     "line": 824
     }
    ],
    "default": "unset",
@@ -1551,13 +1572,13 @@
    "files": [
     {
      "path": "host/hl_mem.c",
-     "line": 581
+     "line": 824
     }
    ],
    "default": "unset",
    "values": "text",
-   "explanation": "HL_MEM_ACCOUNT=<seconds> the \"hl mem: account:\" lines (private commit and working set by owner) HL_MEM_COLD_FLAGS=<hex,...> the pool flags (default 24,64) HL_MEM_COLD_AGE=<seconds> the pools' age (default 10) Every 10 s two lines \"hl mem: cold pages (pools): ...\" and \"(heaps): ...\" give the counters (MB out now, taken out, came back and how often, the most that came back in 10 s).",
-   "comment": "HL_MEM_ACCOUNT=<seconds> the \"hl mem: account:\" lines (private commit and working set by owner) HL_MEM_COLD_FLAGS=<hex,...> the pool flags (default 24,64) HL_MEM_COLD_AGE=<seconds> the pools' age (default 10) Every 10 s two lines \"hl mem: cold pages (pools): ...\" and \"(heaps): ...\" give the counters (MB out now, taken out, came back and how often, the most that came back in 10 s).",
+   "explanation": "HL_MEM_ACCOUNT=<seconds> the \"hl mem: account:\" lines (private commit and working set by owner) HL_MEM_COLD_FLAGS=<hex,...> the pool flags (default 24,64) HL_MEM_COLD_AGE=<seconds> the pools' age (default 10) HL_FAULT_WATCH=<ms>: who takes the page faults, and on what memory (its comment, above hl_mem_init). Every 10 s two lines \"hl mem: cold pages (pools): ...\" and \"(heaps): ...\" give the counters (MB out now, taken out, came back and how often, the most that came back in 10 s).",
+   "comment": "HL_MEM_ACCOUNT=<seconds> the \"hl mem: account:\" lines (private commit and working set by owner) HL_MEM_COLD_FLAGS=<hex,...> the pool flags (default 24,64) HL_MEM_COLD_AGE=<seconds> the pools' age (default 10) HL_FAULT_WATCH=<ms>: who takes the page faults, and on what memory (its comment, above hl_mem_init). Every 10 s two lines \"hl mem: cold pages (pools): ...\" and \"(heaps): ...\" give the counters (MB out now, taken out, came back and how often, the most that came back in 10 s).",
    "documented_in": null,
    "source": "comment at host/hl_mem.c",
    "documented": true,
@@ -1572,13 +1593,13 @@
    "files": [
     {
      "path": "host/hl_mem.c",
-     "line": 598
+     "line": 841
     }
    ],
    "default": "unset",
    "values": "text (`1`, `0` named)",
-   "explanation": "HL_MEM_COLD=1 on (the default) HL_MEM_COLD=0 off: nothing here runs, as before HL_MEM_COLD_HEAPS=1 the heaps too (the default) HL_MEM_COLD_HEAPS=0 the pools only HL_MEM_COLD_PRESSURE=0 without the back-off: a pass of 500 ms or more stops all trimming for 60 s, and the pools wait out the quiet rule too (the default: the system is paging then, and what comes back is read from the page file) HL_MEM_COLD_LOWMEM=<MB> no trimming while the system's available RAM is under that (a quarter more to start again; default 0: never held, 3072 proposed). HL_MEM_ACCOUNT=<seconds> the \"hl mem: account:\" lines (private commit and working set by owner) HL_MEM_COLD_FLAGS=<hex,...> the pool flags (default 24,64) HL_MEM_COLD_AGE=<seconds> the pools' age (default 10) Every 10 s two lines \"hl mem: cold pages (pools): ...\" and \"(heaps): ...\" give the counters (MB out now, taken out, came back and how often, the ...",
-   "comment": "HL_MEM_COLD=1 on (the default) HL_MEM_COLD=0 off: nothing here runs, as before HL_MEM_COLD_HEAPS=1 the heaps too (the default) HL_MEM_COLD_HEAPS=0 the pools only HL_MEM_COLD_PRESSURE=0 without the back-off: a pass of 500 ms or more stops all trimming for 60 s, and the pools wait out the quiet rule too (the default: the system is paging then, and what comes back is read from the page file) HL_MEM_COLD_LOWMEM=<MB> no trimming while the system's available RAM is under that (a quarter more to start again; default 0: never held, 3072 proposed). HL_MEM_ACCOUNT=<seconds> the \"hl mem: account:\" lines (private commit and working set by owner) HL_MEM_COLD_FLAGS=<hex,...> the pool flags (default 24,64) HL_MEM_COLD_AGE=<seconds> the pools' age (default 10) Every 10 s two lines \"hl mem: cold pages (pools): ...\" and \"(heaps): ...\" give the counters (MB out now, taken out, came back and how often, the ...",
+   "explanation": "HL_MEM_COLD=1 on (the default) HL_MEM_COLD=0 off: nothing here runs, as before HL_MEM_COLD_HEAPS=1 the heaps too (the default) HL_MEM_COLD_HEAPS=0 the pools only HL_MEM_COLD_PRESSURE=0 without the back-off: a pass of 500 ms or more stops all trimming for 60 s, and the pools wait out the quiet rule too (the default: the system is paging then, and what comes back is read from the page file) HL_MEM_COLD_LOWMEM=<MB> no trimming while the system's available RAM is under that (a quarter more to start again; default 0: never held, 3072 proposed). HL_MEM_ACCOUNT=<seconds> the \"hl mem: account:\" lines (private commit and working set by owner) HL_MEM_COLD_FLAGS=<hex,...> the pool flags (default 24,64) HL_MEM_COLD_AGE=<seconds> the pools' age (default 10) HL_FAULT_WATCH=<ms>: who takes the page faults, and on what memory (its comment, above hl_mem_init).",
+   "comment": "HL_MEM_COLD=1 on (the default) HL_MEM_COLD=0 off: nothing here runs, as before HL_MEM_COLD_HEAPS=1 the heaps too (the default) HL_MEM_COLD_HEAPS=0 the pools only HL_MEM_COLD_PRESSURE=0 without the back-off: a pass of 500 ms or more stops all trimming for 60 s, and the pools wait out the quiet rule too (the default: the system is paging then, and what comes back is read from the page file) HL_MEM_COLD_LOWMEM=<MB> no trimming while the system's available RAM is under that (a quarter more to start again; default 0: never held, 3072 proposed). HL_MEM_ACCOUNT=<seconds> the \"hl mem: account:\" lines (private commit and working set by owner) HL_MEM_COLD_FLAGS=<hex,...> the pool flags (default 24,64) HL_MEM_COLD_AGE=<seconds> the pools' age (default 10) HL_FAULT_WATCH=<ms>: who takes the page faults, and on what memory (its comment, above hl_mem_init).",
    "documented_in": null,
    "source": "comment at host/hl_mem.c",
    "documented": true,
@@ -1593,7 +1614,7 @@
    "files": [
     {
      "path": "host/hl_mem.c",
-     "line": 603
+     "line": 846
     }
    ],
    "default": "unset",
@@ -1618,7 +1639,7 @@
     },
     {
      "path": "host/hl_mem.c",
-     "line": 456
+     "line": 487
     }
    ],
    "default": "0 (unset)",
@@ -1639,7 +1660,7 @@
    "files": [
     {
      "path": "host/hl_mem.c",
-     "line": 451
+     "line": 482
     }
    ],
    "default": "unset",
@@ -2319,11 +2340,11 @@
    "files": [
     {
      "path": "host/hos_jobtrace.c",
-     "line": 186
+     "line": 193
     },
     {
      "path": "host/hos_jobtrace.c",
-     "line": 284
+     "line": 291
     }
    ],
    "default": "unset",
@@ -2344,7 +2365,7 @@
    "files": [
     {
      "path": "host/hos_jobtrace.c",
-     "line": 204
+     "line": 211
     }
    ],
    "default": "unset",
@@ -2365,7 +2386,7 @@
    "files": [
     {
      "path": "host/hos_jobtrace.c",
-     "line": 290
+     "line": 297
     }
    ],
    "default": "unset",
@@ -2386,7 +2407,7 @@
    "files": [
     {
      "path": "host/hos_jobtrace.c",
-     "line": 193
+     "line": 200
     }
    ],
    "default": "unset",
@@ -2711,7 +2732,7 @@
     },
     {
      "path": "host/hl_mem.c",
-     "line": 496
+     "line": 527
     }
    ],
    "default": "unset",
@@ -4632,7 +4653,7 @@
    "files": [
     {
      "path": "host/hos_mem.c",
-     "line": 200
+     "line": 202
     }
    ],
    "default": "off (unset)",
@@ -5573,7 +5594,7 @@
    "files": [
     {
      "path": "host/hl_mem.c",
-     "line": 598
+     "line": 841
     },
     {
      "path": "host/hos_heapsplit.c",
@@ -5598,7 +5619,7 @@
    "files": [
     {
      "path": "host/hl_mem.c",
-     "line": 598
+     "line": 841
     },
     {
      "path": "host/hos_heapsplit.c",
@@ -5891,7 +5912,7 @@
    "files": [
     {
      "path": "host/hos_jobtrace.c",
-     "line": 301
+     "line": 308
     }
    ],
    "default": "unset",
@@ -5912,7 +5933,7 @@
    "files": [
     {
      "path": "host/hos_jobtrace.c",
-     "line": 96
+     "line": 103
     }
    ],
    "default": "unset",
@@ -5933,7 +5954,7 @@
    "files": [
     {
      "path": "host/hos_jobtrace.c",
-     "line": 96
+     "line": 103
     }
    ],
    "default": "unset",
@@ -6302,7 +6323,7 @@
    "files": [
     {
      "path": "host/hos_mem.c",
-     "line": 368
+     "line": 370
     }
    ],
    "default": "unset",
@@ -7560,7 +7581,7 @@
    "files": [
     {
      "path": "host/hos_mem.c",
-     "line": 412
+     "line": 414
     }
    ],
    "default": "off (unset)",
@@ -7883,7 +7904,7 @@
    "files": [
     {
      "path": "host/hos_mem.c",
-     "line": 265
+     "line": 267
     }
    ],
    "default": "unset",
@@ -9655,7 +9676,7 @@
    "files": [
     {
      "path": "host/hos_mem.c",
-     "line": 429
+     "line": 431
     }
    ],
    "default": "off (unset)",

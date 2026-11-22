@@ -10,7 +10,7 @@ python -I engine/scripts/list_switches.py
 
 and commit both files. A test (`engine/tests/test_switches_documented.py`) fails when a switch read in the source is missing here or the data file is out of date.
 
-1421 switches: 56 players may be told to use, 376 diagnostic, 989 developer-only; 1215 have a real explanation and 206 are marked `undocumented`.
+1422 switches: 56 players may be told to use, 377 diagnostic, 989 developer-only; 1216 have a real explanation and 206 are marked `undocumented`.
 
 ## How to set a switch
 
@@ -69,7 +69,7 @@ The entries below say what each one does, its values and default, and when it is
 | [Memory and textures](#memory-and-textures) | 190 | 10 | 0 | 180 |
 | [Audio](#audio) | 14 | 5 | 9 | 0 |
 | [Input and controllers](#input-and-controllers) | 13 | 1 | 12 | 0 |
-| [Native engine (`HL_*`)](#native-engine-hl_) | 90 | 1 | 35 | 54 |
+| [Native engine (`HL_*`)](#native-engine-hl_) | 91 | 1 | 36 | 54 |
 | [Host and OS (`HOS_*` and the system's variables)](#host-and-os-hos_-and-the-systems-variables) | 138 | 10 | 0 | 128 |
 | [Telemetry and crash reports](#telemetry-and-crash-reports) | 12 | 0 | 12 | 0 |
 | [Diagnostics and logging](#diagnostics-and-logging) | 294 | 0 | 294 | 0 |
@@ -7065,7 +7065,7 @@ The heaps: not while hos_heapsplit.c measures their coldness itself (HOS_HEAP_SP
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hl_mem.c:598` and 1 more place.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hl_mem.c:841` and 1 more place.
 
 #### `HOS_HEAP_SPLIT_COLD` - developer
 
@@ -7075,7 +7075,7 @@ The heaps: not while hos_heapsplit.c measures their coldness itself (HOS_HEAP_SP
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hl_mem.c:598` and 1 more place.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hl_mem.c:841` and 1 more place.
 
 #### `HOS_KEEP_FREED_PAGES` - developer
 
@@ -7135,7 +7135,7 @@ A diagnostic: `AllocateMemoryPages` is refused past the console's total (heap an
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_mem.c:412`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_mem.c:414`.
 
 #### `HOS_SHADOW_BUCKET` - developer
 
@@ -7175,7 +7175,7 @@ HOS_TEST_ALLOC_REFUSE=<text>: every allocation through here whose label contains
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_mem.c:429`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_mem.c:431`.
 
 #### `RX_GPU_FRAMES_AHEAD` - developer
 
@@ -8089,7 +8089,7 @@ As above; the last lets every device count while the window is behind another on
 
 ## Native engine (`HL_*`)
 
-90 switches of the native engine (`HL_*`).
+91 switches of the native engine (`HL_*`).
 
 ### Main loop
 
@@ -8309,6 +8309,16 @@ HL_EXPO_GPU=1: the exposure meter's sums come to the game's CPU from the engine'
 
 **Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_expo.cpp:166`.
 
+#### `HL_FAULT_WATCH` - diagnostic
+
+HL_FAULT_WATCH=<poll ms> (diagnostic, off by default; STALL2, 22 Nov 2026): who takes the page faults, and on what memory. The owner's 23 minutes had 31 million faults (123 GB of 4 KB pages for a working set of 8 GB) and 132 stutters of 50 ms or more that were page faults at 9 to 12 us each; nothing said which thread faulted or which memory (the stall watch has each thread's CPU, not its faults).
+
+**Values:** text. **Default:** unset.
+
+**When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
+
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hl_mem.c:808`.
+
 #### `HL_HITCH_LOG` - diagnostic
 
 HL_HITCH_LOG=<ms> (diagnostic): every frame of that many ms or more is logged with the numbers its cause was made of. HL_HITCH_LOG=rel:<ms> (diagnostic): every frame that is at least <ms> (default 2) and 1.25x over the median of the 30 frames before it, the same line; at most 20 lines a second, the lines dropped over that are counted on the next line logged.
@@ -8477,7 +8487,7 @@ HL_STALL_WATCH=<ms> (diagnostic): a gap of that many ms or more between presents
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_jobtrace.c:186` and 1 more place.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_jobtrace.c:193` and 1 more place.
 
 #### `HL_STALL_WATCH_AFTER` - diagnostic
 
@@ -8487,7 +8497,7 @@ HL_STALL_WATCH=<ms> (diagnostic, STALL1 22 Nov 2026): the same records kept all 
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_jobtrace.c:204`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_jobtrace.c:211`.
 
 #### `HL_STALL_WATCH_DIR` - diagnostic
 
@@ -8497,7 +8507,7 @@ HL_STALL_WATCH=<ms> (diagnostic, STALL1 22 Nov 2026): the same records kept all 
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In the process environment (or in a file named by `HOS_ENV_FILE`); `hookshot_env.txt` refuses this one. **Read at:** `host/hos_jobtrace.c:290`.
+**Set it:** In the process environment (or in a file named by `HOS_ENV_FILE`); `hookshot_env.txt` refuses this one. **Read at:** `host/hos_jobtrace.c:297`.
 
 #### `HL_STALL_WATCH_MAX` - diagnostic
 
@@ -8507,7 +8517,7 @@ HL_STALL_WATCH_MAX=<n> (diagnostic): the number of stall dumps written (default 
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_jobtrace.c:193`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_jobtrace.c:200`.
 
 #### `HL_STREAM_CHECK` - diagnostic
 
@@ -8669,7 +8679,7 @@ HL_MEM_ACCOUNT=<seconds> (off by default): where the process's private commit an
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hl_mem.c:565`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hl_mem.c:804`.
 
 #### `HL_MEM_COLD` - developer
 
@@ -8689,27 +8699,27 @@ The pools: those with the chosen flags made HL_MEM_COLD_AGE ago or more, from wh
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hl_mem.c:581`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hl_mem.c:824`.
 
 #### `HL_MEM_COLD_FLAGS` - developer
 
-HL_MEM_ACCOUNT=<seconds> the "hl mem: account:" lines (private commit and working set by owner) HL_MEM_COLD_FLAGS=<hex,...> the pool flags (default 24,64) HL_MEM_COLD_AGE=<seconds> the pools' age (default 10) Every 10 s two lines "hl mem: cold pages (pools): ..." and "(heaps): ..." give the counters (MB out now, taken out, came back and how often, the most that came back in 10 s).
+HL_MEM_ACCOUNT=<seconds> the "hl mem: account:" lines (private commit and working set by owner) HL_MEM_COLD_FLAGS=<hex,...> the pool flags (default 24,64) HL_MEM_COLD_AGE=<seconds> the pools' age (default 10) HL_FAULT_WATCH=<ms>: who takes the page faults, and on what memory (its comment, above hl_mem_init). Every 10 s two lines "hl mem: cold pages (pools): ..." and "(heaps): ..." give the counters (MB out now, taken out, came back and how often, the most that came back in 10 s).
 
 **Values:** text. **Default:** unset.
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hl_mem.c:581`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hl_mem.c:824`.
 
 #### `HL_MEM_COLD_HEAPS` - developer
 
-HL_MEM_COLD=1 on (the default) HL_MEM_COLD=0 off: nothing here runs, as before HL_MEM_COLD_HEAPS=1 the heaps too (the default) HL_MEM_COLD_HEAPS=0 the pools only HL_MEM_COLD_PRESSURE=0 without the back-off: a pass of 500 ms or more stops all trimming for 60 s, and the pools wait out the quiet rule too (the default: the system is paging then, and what comes back is read from the page file) HL_MEM_COLD_LOWMEM=<MB> no trimming while the system's available RAM is under that (a quarter more to start again; default 0: never held, 3072 proposed). HL_MEM_ACCOUNT=<seconds> the "hl mem: account:" lines (private commit and working set by owner) HL_MEM_COLD_FLAGS=<hex,...> the pool flags (default 24,64) HL_MEM_COLD_AGE=<seconds> the pools' age (default 10) Every 10 s two lines "hl mem: cold pages (pools): ..." and "(heaps): ..." give the counters (MB out now, taken out, came back and how often, the ...
+HL_MEM_COLD=1 on (the default) HL_MEM_COLD=0 off: nothing here runs, as before HL_MEM_COLD_HEAPS=1 the heaps too (the default) HL_MEM_COLD_HEAPS=0 the pools only HL_MEM_COLD_PRESSURE=0 without the back-off: a pass of 500 ms or more stops all trimming for 60 s, and the pools wait out the quiet rule too (the default: the system is paging then, and what comes back is read from the page file) HL_MEM_COLD_LOWMEM=<MB> no trimming while the system's available RAM is under that (a quarter more to start again; default 0: never held, 3072 proposed). HL_MEM_ACCOUNT=<seconds> the "hl mem: account:" lines (private commit and working set by owner) HL_MEM_COLD_FLAGS=<hex,...> the pool flags (default 24,64) HL_MEM_COLD_AGE=<seconds> the pools' age (default 10) HL_FAULT_WATCH=<ms>: who takes the page faults, and on what memory (its comment, above hl_mem_init).
 
 **Values:** text (`1`, `0` named). **Default:** unset.
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hl_mem.c:598`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hl_mem.c:841`.
 
 #### `HL_MEM_COLD_LISTED` - developer
 
@@ -8719,7 +8729,7 @@ HL_MEM_COLD=1 on (the default) HL_MEM_COLD=0 off: nothing here runs, as before H
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hl_mem.c:603`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hl_mem.c:846`.
 
 #### `HL_MEM_COLD_LOWMEM` - developer
 
@@ -8739,7 +8749,7 @@ HL_MEM_COLD=1 on (the default) HL_MEM_COLD=0 off: nothing here runs, as before H
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hl_mem.c:451`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hl_mem.c:482`.
 
 #### `HL_MEM_DROP` - developer
 
@@ -9177,7 +9187,7 @@ TICK-062 B1, HOS_CV_SIGNAL_FAST=1: a signal with no waiter changes nothing a lat
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_mem.c:200`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_mem.c:202`.
 
 #### `HOS_JOBTRACE` - developer
 
@@ -9187,7 +9197,7 @@ TICK-062 B1, HOS_CV_SIGNAL_FAST=1: a signal with no waiter changes nothing a lat
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_jobtrace.c:301`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_jobtrace.c:308`.
 
 #### `HOS_JOBTRACE_AT` - developer
 
@@ -9197,7 +9207,7 @@ Everything between a thread's waits is work (guest code and the runtime under it
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_jobtrace.c:96`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_jobtrace.c:103`.
 
 #### `HOS_JOBTRACE_SECS` - developer
 
@@ -9207,7 +9217,7 @@ Everything between a thread's waits is work (guest code and the runtime under it
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_jobtrace.c:96`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_jobtrace.c:103`.
 
 #### `HOS_JOB_ORDER` - developer
 
@@ -9923,7 +9933,7 @@ The used memory the game is told (`QueryMemoryInfo`, svc `GetInfo` 7 and 22) is 
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_mem.c:368`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_mem.c:370`.
 
 #### `HOS_MKW_INTERVAL` - developer
 
@@ -10193,7 +10203,7 @@ HOS_PREFAULT=1 (experiment): the new heap pages touched now (a zero written to f
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_mem.c:265`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_mem.c:267`.
 
 #### `HOS_REALTIME_STEP` - developer
 

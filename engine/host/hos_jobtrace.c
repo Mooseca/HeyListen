@@ -66,6 +66,13 @@ static int thread_idx(void) {
     return i;
 }
 
+int hos_jt_name_of_tid(unsigned long tid, char *out, int n) {
+    const LONG m = nths < 512 ? nths : 512;
+    for (LONG i = 0; i < m; i++)
+        if (ths[i].tid == tid) { snprintf(out, (size_t)n, "%s", ths[i].name); return 1; }
+    return 0;
+}
+
 static int sw_ring;   /* (HL_STALL_WATCH: the records wrap) */
 static volatile int64_t sw_last_present;
 void hos_jt_rec(int type, uint64_t a, uint64_t b) {
