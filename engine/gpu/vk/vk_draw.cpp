@@ -6653,7 +6653,7 @@ void StatsQuery::copy_args(VkCommandBuffer cmd, const DrawArgs& d, uint32_t inde
 //      report of a frame tests the same object as the k-th of the frame before (99% of zero / non-zero agree, standing).
 //      Key: the program bound at the report, its window's draws, and its place among the frame's reports with those two.
 //      The count measured for that key at most 3 frames before is written; the fixed value until there is one.
-//   6 (RX_VK_OCC_GATE=1, OCC1): the reports the game's CPU reads stay the fixed value (no wait, no late count, nothing that
+//   6 (the OCC1 gate, see occ_gate_env): the reports the game's CPU reads stay the fixed value (no wait, no late count, nothing that
 //      moves from frame to frame). The GPU gates the objects: a draw that follows a render condition on a report of one draw
 //      (OoT's proxy tests: reset, one draw, report) is recorded inside VK_EXT_conditional_rendering on that proxy's own
 //      occlusion count, copied into a predicate word on the GPU at the start of each segment that has such draws. Count 0:
@@ -6663,10 +6663,18 @@ void StatsQuery::copy_args(VkCommandBuffer cmd, const DrawArgs& d, uint32_t inde
 thread_local int64_t occ_draw_slot = -1;   // (the replay: the serial of the draw it hands to draw(); -1: none)
 thread_local int64_t occ_gate_draw = -1;   // (OCC1, mode 6: the serial of the proxy the draw in hand is gated on; -1: none)
 thread_local uint64_t occ_gate_cov_lo = 0, occ_gate_cov_hi = 0;   // (the segment being recorded: the serials whose predicate words are current)
+// (OCC1) RX_VK_OCC_GATE=1 (off by default): the game's hidden objects are skipped by the GPU, and nothing the game reads changes. OoT tests
+// each object with a one-draw proxy (reset, draw, report) and gates the object's draw on that report. The report the game reads stays
+// the fixed value (RX_VK_OCC_FIXED), so the sun, the haze and every count the CPU reads are what they always were and cannot flicker. The
+// draw is recorded inside a Vulkan conditional block (VK_EXT_conditional_rendering) on the proxy's own occlusion count, and the GPU
+// skips it when the proxy passed no sample. A count that is not there, a proxy of several draws or a device without the extension:
+// the object is drawn. Works with the parallel replay only; RX_VK_OCC_GATE_LOG=1 counts what the GPU skipped.
+bool occ_gate_env() {
+    static const bool on = getenv("RX_VK_OCC_GATE") && atoi(getenv("RX_VK_OCC_GATE")) != 0;
+    return on;
+}
 int occ_mode() {
-    // (OCC1: RX_VK_OCC_GATE=1 is mode 6 below; RX_VK_OCC_REAL, when set, comes first)
-    static const int m = getenv("RX_VK_OCC_REAL") ? atoi(getenv("RX_VK_OCC_REAL"))
-                         : getenv("RX_VK_OCC_GATE") && atoi(getenv("RX_VK_OCC_GATE")) != 0 ? 6 : 0;
+    static const int m = getenv("RX_VK_OCC_REAL") ? atoi(getenv("RX_VK_OCC_REAL")) : occ_gate_env() ? 6 : 0;
     return m;
 }
 namespace {
@@ -6692,6 +6700,9 @@ VkBuffer occ_gate_buf = VK_NULL_HANDLE, occ_gate_host = VK_NULL_HANDLE;   // (th
 VmaAllocation occ_gate_mem = nullptr, occ_gate_host_mem = nullptr;
 const uint32_t* occ_gate_host_ptr = nullptr;
 bool occ_gate_ok = false;
+// (OCC1) RX_VK_OCC_GATE_LOG=1 (with RX_VK_OCC_GATE=1): the gate's predicate read back to the CPU five frames late, and every 600 presents one
+// log line: render conditions on reports, how many tested a one-draw proxy, draws gated, predicate copies, and the share of the gated
+// draws (and of their indices) the GPU skipped.
 bool occ_gate_log_on() {
     static const bool on = getenv("RX_VK_OCC_GATE_LOG") && atoi(getenv("RX_VK_OCC_GATE_LOG")) != 0;
     return on;
