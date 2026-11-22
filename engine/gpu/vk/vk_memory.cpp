@@ -724,6 +724,138 @@ uint64_t memory_guest_pages() {
     return guest_pages_address;
 }
 
+// ---- (relink, pixl27, 0.7.9.2; ported by hand) The PCIe link, measured at start: each frame the replay copies tens of MB between the
+// game's memory and VRAM (at Hyrule Castle, ReLink counted 12 MB synced into the mirrors and 64 MB written back a frame). On a PC whose
+// link is a PCIe 3.0 x16 that is a few ms of copies; on an x8 card in a PCIe 3.0 board (RTX 3050, 4060, RX 6600, 7600) or a laptop's x4
+// it is two to four times that, on the GPU's timeline. Rather than ask each vendor's driver for the link, 32 MB are copied each way
+// three times on the device's queue and timed by its timestamps (the fastest of each kind kept, the first may run at idle clocks), and
+// the line says GB/s to VRAM and from VRAM. Here it only says: nothing reads link_slow yet (ReLink's deferred write-back, RX_VK_WB_LAZY,
+// is not taken). pcie_link.h reads the link from sysfs (Linux) and NVML gives its width and generation (diff_mode, below); this is the
+// link as the copies find it, whatever the vendor. RX_VK_SLOW_LINK_GBPS=<GB/s> (default 9) is the line below which link_slow is set.
+// RX_VK_LINK_PROBE=0: not measured ----
+double link_h2d_gbps = 0, link_d2h_gbps = 0;
+bool link_slow = false;
+namespace {
+uint32_t link_memory_type(uint32_t bits, VkMemoryPropertyFlags want, VkMemoryPropertyFlags avoid) {
+    VkPhysicalDeviceMemoryProperties mp;
+    vkGetPhysicalDeviceMemoryProperties(dev.physical, &mp);
+    for (uint32_t i = 0; i < mp.memoryTypeCount; i++)
+        if ((bits >> i & 1u) && (mp.memoryTypes[i].propertyFlags & want) == want && !(mp.memoryTypes[i].propertyFlags & avoid)) return i;
+    return UINT32_MAX;
+}
+}   // namespace
+void link_probe() {
+    if (const char* e = getenv("RX_VK_LINK_PROBE"); e && atoi(e) == 0) return;
+    constexpr VkDeviceSize kBytes = 32ull << 20;
+    constexpr int kRounds = 3;
+    VkBuffer hb = VK_NULL_HANDLE, db = VK_NULL_HANDLE;
+    VkDeviceMemory hm = VK_NULL_HANDLE, dm = VK_NULL_HANDLE;
+    VkCommandPool pool = VK_NULL_HANDLE;
+    VkQueryPool qp = VK_NULL_HANDLE;
+    VkFence fence = VK_NULL_HANDLE;
+    const auto done = [&] {
+        if (fence) vkDestroyFence(dev.device, fence, nullptr);
+        if (qp) vkDestroyQueryPool(dev.device, qp, nullptr);
+        if (pool) vkDestroyCommandPool(dev.device, pool, nullptr);
+        if (hb) vkDestroyBuffer(dev.device, hb, nullptr);
+        if (db) vkDestroyBuffer(dev.device, db, nullptr);
+        if (hm) vkFreeMemory(dev.device, hm, nullptr);
+        if (dm) vkFreeMemory(dev.device, dm, nullptr);
+    };
+    const auto fail = [&](const char* what) {
+        logf("vk: PCIe link not measured (%s): taken as fast", what);
+        done();
+    };
+    VkBufferCreateInfo bi{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+    bi.size = kBytes;
+    bi.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    if (vkCreateBuffer(dev.device, &bi, nullptr, &hb) != VK_SUCCESS || vkCreateBuffer(dev.device, &bi, nullptr, &db) != VK_SUCCESS)
+        return fail("buffers");
+    for (int side = 0; side < 2; side++) {
+        VkBuffer b = side ? db : hb;
+        VkMemoryRequirements mr;
+        vkGetBufferMemoryRequirements(dev.device, b, &mr);
+        uint32_t type = side ? link_memory_type(mr.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT)
+                             : link_memory_type(mr.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT,
+                                                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        if (type == UINT32_MAX)
+            type = side ? link_memory_type(mr.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, 0)
+                        : link_memory_type(mr.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        if (type == UINT32_MAX) return fail("memory type");
+        VkMemoryAllocateInfo ai{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+        ai.allocationSize = mr.size;
+        ai.memoryTypeIndex = type;
+        VkDeviceMemory& m = side ? dm : hm;
+        if (vkAllocateMemory(dev.device, &ai, nullptr, &m) != VK_SUCCESS || vkBindBufferMemory(dev.device, b, m, 0) != VK_SUCCESS)
+            return fail("memory");
+    }
+    VkCommandPoolCreateInfo pi{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
+    pi.queueFamilyIndex = dev.queue_family;
+    pi.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
+    VkQueryPoolCreateInfo qi{VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
+    qi.queryType = VK_QUERY_TYPE_TIMESTAMP;
+    qi.queryCount = 4 * kRounds;
+    VkFenceCreateInfo fi{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+    if (vkCreateCommandPool(dev.device, &pi, nullptr, &pool) != VK_SUCCESS || vkCreateQueryPool(dev.device, &qi, nullptr, &qp) != VK_SUCCESS ||
+        vkCreateFence(dev.device, &fi, nullptr, &fence) != VK_SUCCESS)
+        return fail("pool");
+    VkCommandBuffer cb = VK_NULL_HANDLE;
+    VkCommandBufferAllocateInfo cai{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+    cai.commandPool = pool;
+    cai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    cai.commandBufferCount = 1;
+    if (vkAllocateCommandBuffers(dev.device, &cai, &cb) != VK_SUCCESS) return fail("command buffer");
+    VkCommandBufferBeginInfo cbi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+    cbi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    vkBeginCommandBuffer(cb, &cbi);
+    vkCmdResetQueryPool(cb, qp, 0, 4 * kRounds);
+    VkMemoryBarrier2 mb{VK_STRUCTURE_TYPE_MEMORY_BARRIER_2};
+    mb.srcStageMask = VK_PIPELINE_STAGE_2_COPY_BIT;
+    mb.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+    mb.dstStageMask = VK_PIPELINE_STAGE_2_COPY_BIT;
+    mb.dstAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT;
+    VkDependencyInfo di{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
+    di.memoryBarrierCount = 1, di.pMemoryBarriers = &mb;
+    const VkBufferCopy all{0, 0, kBytes};
+    for (int r = 0; r < kRounds; r++) {
+        for (int dir = 0; dir < 2; dir++) {   // (0: system memory -> VRAM, 1: VRAM -> system memory)
+            vkCmdPipelineBarrier2(cb, &di);
+            vkCmdWriteTimestamp2(cb, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, qp, 4 * r + 2 * dir);
+            vkCmdCopyBuffer(cb, dir ? db : hb, dir ? hb : db, 1, &all);
+            vkCmdWriteTimestamp2(cb, VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT, qp, 4 * r + 2 * dir + 1);
+        }
+    }
+    vkEndCommandBuffer(cb);
+    VkCommandBufferSubmitInfo cbs{VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO};
+    cbs.commandBuffer = cb;
+    VkSubmitInfo2 si{VK_STRUCTURE_TYPE_SUBMIT_INFO_2};
+    si.commandBufferInfoCount = 1;
+    si.pCommandBufferInfos = &cbs;
+    if (vkQueueSubmit2(dev.queue, 1, &si, fence) != VK_SUCCESS) return fail("submit");
+    if (vkWaitForFences(dev.device, 1, &fence, VK_TRUE, 3000000000ull) != VK_SUCCESS) return fail("timed out");
+    uint64_t t[4 * kRounds] = {};
+    if (vkGetQueryPoolResults(dev.device, qp, 0, 4 * kRounds, sizeof t, t, 8, VK_QUERY_RESULT_64_BIT) != VK_SUCCESS)
+        return fail("timestamps");
+    double best[2] = {0, 0};
+    for (int r = 0; r < kRounds; r++)
+        for (int dir = 0; dir < 2; dir++) {
+            const uint64_t a = t[4 * r + 2 * dir], b = t[4 * r + 2 * dir + 1];
+            if (b <= a) continue;
+            const double ns = (double)(b - a) * (double)dev.props.limits.timestampPeriod;
+            best[dir] = std::max(best[dir], (double)kBytes / ns);   // (bytes a ns = GB/s)
+        }
+    done();
+    if (best[0] <= 0 || best[1] <= 0) {
+        logf("vk: PCIe link not measured (no timing): taken as fast");
+        return;
+    }
+    link_h2d_gbps = best[0], link_d2h_gbps = best[1];
+    const double line = getenv("RX_VK_SLOW_LINK_GBPS") ? atof(getenv("RX_VK_SLOW_LINK_GBPS")) : 9.0;
+    link_slow = link_d2h_gbps < line;
+    logf("vk: PCIe link measured: %.1f GB/s to VRAM, %.1f GB/s from VRAM: %s (RX_VK_SLOW_LINK_GBPS=%.1f; RX_VK_LINK_PROBE=0: not measured)",
+         link_h2d_gbps, link_d2h_gbps, link_slow ? "slow" : "fast", line);
+}
+
 bool memory_init() {
     if (!dev.external_memory_host) {
         logf("vk: no VK_EXT_external_memory_host: the guest memory cannot be imported (needed for now)");
@@ -741,6 +873,7 @@ bool memory_init() {
     align = std::max<uint64_t>(hp.minImportedHostPointerAlignment, 4096);
     max_import_size = std::min(p11.maxMemoryAllocationSize, p13.maxBufferSize);
     logf("vk: guest memory imported in place (alignment %llu)", (unsigned long long)align);
+    link_probe();
     return true;
 }
 
