@@ -99,7 +99,9 @@ static void no_power_throttling(void) {
 static void ws_floor(void) {
     uint64_t mb, ram_mb;
     unsigned long err;
-    const int r = ws_floor_apply(getenv("HOS_WS_FLOOR_MB"), &mb, &ram_mb, &err);
+    /* (STALL1, 22 Nov: off unless HOS_WS_FLOOR_MB is set; the floor was the worst run on both benches under a memory hog) */
+    const char *floor_env = getenv("HOS_WS_FLOOR_MB");
+    const int r = ws_floor_apply(floor_env && *floor_env ? floor_env : "0", &mb, &ram_mb, &err);
     if (r > 0)
         hos_log("mem: the working set's minimum is %llu MB of the PC's %llu MB: Windows keeps that much of the game in RAM before "
                 "it trims below it (HOS_WS_FLOOR_MB=0: Windows' own)", (unsigned long long)mb, (unsigned long long)ram_mb);

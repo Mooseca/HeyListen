@@ -442,7 +442,7 @@ static DWORD WINAPI account_main(void *arg) {
 }
 
 static int pressure_on = 1;
-static uint64_t lowmem_mb = 0;   /* (HL_MEM_COLD_LOWMEM=<MB>: available RAM under which nothing is taken out; 0, the default: never held. 3072 is the proposal) */
+static uint64_t lowmem_mb = 3072;   /* (HL_MEM_COLD_LOWMEM=<MB>: available RAM under which nothing is taken out; 0: never held. Default 3072 since STALL1, 22 Nov: the PC 3050's hog run with it had 56 frames over 50 ms against 77 with the pages taken out as before) */
 static int lowmem_held;
 static int64_t lowmem_since, lowmem_ns, lowmem_passes;
 static int64_t pressure_until;

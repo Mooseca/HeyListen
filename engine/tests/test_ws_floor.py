@@ -66,7 +66,7 @@ int main(void) {
         CHECK(hi >= lo);
         CHECK(fl & QUOTA_LIMITS_HARDWS_MIN_DISABLE);
         CHECK(fl & QUOTA_LIMITS_HARDWS_MAX_DISABLE);
-        CHECK(ws_floor_apply(NULL, &mb, &ram, &err) == 1 && mb == ws_floor_mb(ram, NULL));
+        CHECK(ws_floor_apply("on", &mb, &ram, &err) == 1 && mb == ws_floor_mb(ram, "on"));   /* (the host passes "0" when the switch is not set: STALL1) */
         GetProcessWorkingSetSizeEx(GetCurrentProcess(), &lo, &hi, &fl);
         CHECK(lo == ((SIZE_T)mb << 20));
     }
@@ -115,7 +115,7 @@ def check_wired():
     src = (ROOT / "host" / "hos_main.c").read_text(encoding="utf-8")
     ok = True
     for needle, what in (('#include "ws_floor.h"', "the header included"),
-                         ('ws_floor_apply(getenv("HOS_WS_FLOOR_MB")', "the call with the switch's value"),
+                         ('ws_floor_apply(floor_env && *floor_env ? floor_env : "0"', "the call with the switch's value (off when not set)"),
                          ("ws_floor();", "the call at start")):
         if needle not in src:
             print("FAIL: hos_main.c: %s (%s)" % (what, needle))

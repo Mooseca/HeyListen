@@ -2,7 +2,7 @@
  "schema": 1,
  "generated_by": "engine/scripts/list_switches.py",
  "scope": "C, C++ and headers under engine/ (engine/tests and vendored trees other than a64-kit excluded) and the Python the builder, the lifter and the scripts run: getenv, std::getenv, _wgetenv, the code's own env helpers and table-driven reads, and os.environ.",
- "count": 1397,
+ "count": 1398,
  "switches": [
   {
    "name": "A64_DEVIRT",
@@ -1623,8 +1623,8 @@
    ],
    "default": "0 (unset)",
    "values": "a whole number (`true` in the description)",
-   "explanation": "(HL_MEM_COLD_LOWMEM=<MB>: available RAM under which nothing is taken out; 0, the default: never held. 3072 is the proposal).",
-   "comment": "(HL_MEM_COLD_LOWMEM=<MB>: available RAM under which nothing is taken out; 0, the default: never held. 3072 is the proposal).",
+   "explanation": "(HL_MEM_COLD_LOWMEM=<MB>: available RAM under which nothing is taken out; 0: never held. Default 3072 since STALL1, 22 Nov: the PC 3050's hog run with it had 56 frames over 50 ms against 77 with the pages taken out as before).",
+   "comment": "(HL_MEM_COLD_LOWMEM=<MB>: available RAM under which nothing is taken out; 0: never held. Default 3072 since STALL1, 22 Nov: the PC 3050's hog run with it had 56 frames over 50 ms against 77 with the pages taken out as before).",
    "documented_in": null,
    "source": "comment at host/hl_mem.c",
    "documented": true,
@@ -1900,6 +1900,27 @@
    "comment": null,
    "documented_in": "development.md",
    "source": "development.md",
+   "documented": true,
+   "set_via": "In `hookshot_env.txt`, or in the environment.",
+   "use": null
+  },
+  {
+   "name": "HL_PREFAULT",
+   "area": "native",
+   "group": "Native engine",
+   "audience": "developer",
+   "files": [
+    {
+     "path": "host/mkw_glue.c",
+     "line": 36
+    }
+   ],
+   "default": "unset",
+   "values": "text (`1` named)",
+   "explanation": "(STALL1, HL_PREFAULT=1, off by default) A megabyte committed on first touch is also populated at once, in one kernel call (VirtualLock then VirtualUnlock: the pages are made resident in a batch), instead of 256 page faults taken one at a time by whichever loader thread writes it. The zone loads first-touch 300,000 pages in a second (host/hos_jobtrace.c's stall dumps: ARes_Loading_* and the renderer's order thread running while every other thread waits for them); a fault costs the trap and the zeroing, the batch only the zeroing. Costs the megabyte's memory even where the game would have left part of it alone, so it stays off until measured. VirtualLock needs a working-set minimum above the locked size: the soft minimum of ws_floor.h (512 MB) is asked for once; if either call is refused the batch turns itself off.",
+   "comment": "(STALL1, HL_PREFAULT=1, off by default) A megabyte committed on first touch is also populated at once, in one kernel call (VirtualLock then VirtualUnlock: the pages are made resident in a batch), instead of 256 page faults taken one at a time by whichever loader thread writes it. The zone loads first-touch 300,000 pages in a second (host/hos_jobtrace.c's stall dumps: ARes_Loading_* and the renderer's order thread running while every other thread waits for them); a fault costs the trap and the zeroing, the batch only the zeroing. Costs the megabyte's memory even where the game would have left part of it alone, so it stays off until measured. VirtualLock needs a working-set minimum above the locked size: the soft minimum of ws_floor.h (512 MB) is asked for once; if either call is refused the batch turns itself off.",
+   "documented_in": null,
+   "source": "comment at host/mkw_glue.c",
    "documented": true,
    "set_via": "In `hookshot_env.txt`, or in the environment.",
    "use": null
@@ -2903,7 +2924,7 @@
     },
     {
      "path": "host/hos_main.c",
-     "line": 343
+     "line": 345
     },
     {
      "path": "host/hos_update.c",
@@ -3506,7 +3527,7 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 1459
+     "line": 1461
     }
    ],
    "default": "unset",
@@ -3956,7 +3977,7 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 1781
+     "line": 1783
     }
    ],
    "default": "unset",
@@ -4439,7 +4460,7 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 470
+     "line": 472
     },
     {
      "path": "host/nn_os_sync.c",
@@ -4552,7 +4573,7 @@
     },
     {
      "path": "host/hos_main.c",
-     "line": 1610
+     "line": 1612
     }
    ],
    "default": "off (unset)",
@@ -4594,7 +4615,7 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 509
+     "line": 511
     }
    ],
    "default": "unset",
@@ -4657,7 +4678,7 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 1805
+     "line": 1807
     }
    ],
    "default": "unset",
@@ -5231,7 +5252,7 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 199
+     "line": 201
     }
    ],
    "default": "unset",
@@ -5373,19 +5394,19 @@
     },
     {
      "path": "host/hos_main.c",
-     "line": 1497
+     "line": 1499
     },
     {
      "path": "host/hos_main.c",
-     "line": 1535
+     "line": 1537
     },
     {
      "path": "host/hos_main.c",
-     "line": 1568
+     "line": 1570
     },
     {
      "path": "host/mkw_glue.c",
-     "line": 70
+     "line": 106
     },
     {
      "path": "host/nn_video.c",
@@ -5962,7 +5983,7 @@
     },
     {
      "path": "host/hos_main.c",
-     "line": 170
+     "line": 172
     }
    ],
    "default": "unset",
@@ -5987,7 +6008,7 @@
     },
     {
      "path": "host/mkw_glue.c",
-     "line": 29
+     "line": 65
     }
    ],
    "default": "unset",
@@ -6176,7 +6197,7 @@
    "files": [
     {
      "path": "host/mkw_glue.c",
-     "line": 1185
+     "line": 1221
     }
    ],
    "default": "off (unset)",
@@ -6218,12 +6239,12 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 559
+     "line": 561
     }
    ],
    "default": "unset",
    "values": "text",
-   "explanation": "undocumented: host/hos_main.c:559 (in `submit_thread_at_start()`) reads it as a text value: `const char *user = hos_submit_thread_user_value(mesa, getenv(HOS_SUBMIT_THREAD_MARK));`. No comment in the source says what it changes.",
+   "explanation": "undocumented: host/hos_main.c:561 (in `submit_thread_at_start()`) reads it as a text value: `const char *user = hos_submit_thread_user_value(mesa, getenv(HOS_SUBMIT_THREAD_MARK));`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -6729,7 +6750,7 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 253
+     "line": 255
     }
    ],
    "default": "off (unset)",
@@ -7283,7 +7304,7 @@
     },
     {
      "path": "host/hos_main.c",
-     "line": 1602
+     "line": 1604
     }
    ],
    "default": "unset",
@@ -7304,12 +7325,12 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 1016
+     "line": 1018
     }
    ],
    "default": "unset",
    "values": "text",
-   "explanation": "undocumented: host/hos_main.c:1016 (in `oot_teleport()`) reads it as a text value: `const char *event_env = getenv(\"HOS_OOT_TELEPORT_EVENT\");`. No comment in the source says what it changes.",
+   "explanation": "undocumented: host/hos_main.c:1018 (in `oot_teleport()`) reads it as a text value: `const char *event_env = getenv(\"HOS_OOT_TELEPORT_EVENT\");`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -7325,12 +7346,12 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 1018
+     "line": 1020
     }
    ],
    "default": "unset",
    "values": "text",
-   "explanation": "undocumented: host/hos_main.c:1018 (in `oot_teleport()`) reads it as a text value: `const char *starter_env = getenv(\"HOS_OOT_TELEPORT_STARTER\");`. No comment in the source says what it changes.",
+   "explanation": "undocumented: host/hos_main.c:1020 (in `oot_teleport()`) reads it as a text value: `const char *starter_env = getenv(\"HOS_OOT_TELEPORT_STARTER\");`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -7820,11 +7841,11 @@
    "files": [
     {
      "path": "host/mkw_glue.c",
-     "line": 762
+     "line": 798
     },
     {
      "path": "host/mkw_glue.c",
-     "line": 1116
+     "line": 1152
     },
     {
      "path": "host/posix/prof.c",
@@ -8025,7 +8046,7 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 1618
+     "line": 1620
     }
    ],
    "default": "unset",
@@ -8092,7 +8113,7 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 1531
+     "line": 1533
     }
    ],
    "default": "unset",
@@ -8134,7 +8155,7 @@
    "files": [
     {
      "path": "host/mkw_glue.c",
-     "line": 1118
+     "line": 1154
     },
     {
      "path": "host/posix/prof.c",
@@ -8159,7 +8180,7 @@
    "files": [
     {
      "path": "host/mkw_glue.c",
-     "line": 1120
+     "line": 1156
     },
     {
      "path": "host/posix/prof.c",
@@ -8184,7 +8205,7 @@
    "files": [
     {
      "path": "host/mkw_glue.c",
-     "line": 792
+     "line": 828
     },
     {
      "path": "host/posix/prof.c",
@@ -8209,7 +8230,7 @@
    "files": [
     {
      "path": "host/mkw_glue.c",
-     "line": 1105
+     "line": 1141
     }
    ],
    "default": "off (unset)",
@@ -8251,7 +8272,7 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 1804
+     "line": 1806
     }
    ],
    "default": "off (unset)",
@@ -8339,7 +8360,7 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 470
+     "line": 472
     },
     {
      "path": "host/hos_thread.c",
@@ -8506,7 +8527,7 @@
    "files": [
     {
      "path": "host/mkw_glue.c",
-     "line": 687
+     "line": 723
     }
    ],
    "default": "unset",
@@ -8590,7 +8611,7 @@
    "files": [
     {
      "path": "host/mkw_glue.c",
-     "line": 95
+     "line": 131
     }
    ],
    "default": "unset",
@@ -8611,7 +8632,7 @@
    "files": [
     {
      "path": "host/mkw_glue.c",
-     "line": 251
+     "line": 287
     }
    ],
    "default": "0 (unset)",
@@ -8674,7 +8695,7 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 249
+     "line": 251
     }
    ],
    "default": "unset",
@@ -8695,7 +8716,7 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 470
+     "line": 472
     },
     {
      "path": "host/hos_thread.c",
@@ -8720,7 +8741,7 @@
    "files": [
     {
      "path": "host/mkw_glue.c",
-     "line": 1114
+     "line": 1150
     },
     {
      "path": "host/posix/prof.c",
@@ -8808,7 +8829,7 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 1735
+     "line": 1737
     }
    ],
    "default": "off (unset)",
@@ -9270,7 +9291,7 @@
    "files": [
     {
      "path": "host/mkw_glue.c",
-     "line": 1122
+     "line": 1158
     },
     {
      "path": "host/posix/prof.c",
@@ -9441,15 +9462,15 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 102
+     "line": 103
     },
     {
      "path": "host/ws_floor.h",
      "line": 38
     }
    ],
-   "default": "off (unset)",
-   "values": "on or off (0, false, off, no and empty are off)",
+   "default": "unset",
+   "values": "text",
    "explanation": "Sets this process's working-set minimum by the rule above, from env (getenv(\"HOS_WS_FLOOR_MB\")): 1 set, 0 none asked for, -1 refused (*err the error). *mb and *ram_mb: the minimum and the PC's RAM, MB.",
    "comment": "Sets this process's working-set minimum by the rule above, from env (getenv(\"HOS_WS_FLOOR_MB\")): 1 set, 0 none asked for, -1 refused (*err the error). *mb and *ram_mb: the minimum and the PC's RAM, MB.",
    "documented_in": null,
@@ -9616,12 +9637,12 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 558
+     "line": 560
     }
    ],
    "default": "unset",
    "values": "text",
-   "explanation": "undocumented: host/hos_main.c:558 (in `submit_thread_at_start()`) reads it as a text value: `const char *mesa = getenv(\"MESA_VK_ENABLE_SUBMIT_THREAD\");`. No comment in the source says what it changes.",
+   "explanation": "undocumented: host/hos_main.c:560 (in `submit_thread_at_start()`) reads it as a text value: `const char *mesa = getenv(\"MESA_VK_ENABLE_SUBMIT_THREAD\");`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -9788,7 +9809,7 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 596
+     "line": 598
     }
    ],
    "default": "unset",
@@ -15874,7 +15895,7 @@
     },
     {
      "path": "host/hos_main.c",
-     "line": 470
+     "line": 472
     }
    ],
    "default": "unset",
@@ -16696,7 +16717,7 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 470
+     "line": 472
     },
     {
      "path": "host/rx_backend.c",
@@ -17927,7 +17948,7 @@
     },
     {
      "path": "host/hos_main.c",
-     "line": 470
+     "line": 472
     }
    ],
    "default": "unset",
@@ -18888,7 +18909,7 @@
     },
     {
      "path": "host/hos_main.c",
-     "line": 470
+     "line": 472
     }
    ],
    "default": "off (unset)",
@@ -20090,7 +20111,7 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 599
+     "line": 601
     }
    ],
    "default": "unset",
@@ -22932,7 +22953,7 @@
     },
     {
      "path": "host/hos_main.c",
-     "line": 470
+     "line": 472
     }
    ],
    "default": "off (unset)",
@@ -23321,7 +23342,7 @@
     },
     {
      "path": "host/hos_main.c",
-     "line": 223
+     "line": 225
     }
    ],
    "default": "unset",
@@ -24326,7 +24347,7 @@
     },
     {
      "path": "host/hos_main.c",
-     "line": 470
+     "line": 472
     }
    ],
    "default": "unset",
@@ -26250,7 +26271,7 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 565
+     "line": 567
     },
     {
      "path": "host/hos_submit_thread.h",
@@ -26451,7 +26472,7 @@
     },
     {
      "path": "host/hos_main.c",
-     "line": 470
+     "line": 472
     }
    ],
    "default": "0",
@@ -26920,7 +26941,7 @@
     },
     {
      "path": "host/hos_main.c",
-     "line": 470
+     "line": 472
     }
    ],
    "default": "off (unset)",
@@ -26987,7 +27008,7 @@
     },
     {
      "path": "host/hos_main.c",
-     "line": 470
+     "line": 472
     }
    ],
    "default": "unset",
@@ -27075,7 +27096,7 @@
     },
     {
      "path": "host/hos_main.c",
-     "line": 470
+     "line": 472
     }
    ],
    "default": "unset",
@@ -27834,7 +27855,7 @@
     },
     {
      "path": "host/hos_main.c",
-     "line": 470
+     "line": 472
     }
    ],
    "default": "unset",
@@ -30109,7 +30130,7 @@
     },
     {
      "path": "host/hos_main.c",
-     "line": 470
+     "line": 472
     }
    ],
    "default": "unset",
@@ -30845,7 +30866,7 @@
     },
     {
      "path": "host/hos_main.c",
-     "line": 343
+     "line": 345
     },
     {
      "path": "host/hos_update.c",
