@@ -2,7 +2,7 @@
  "schema": 1,
  "generated_by": "engine/scripts/list_switches.py",
  "scope": "C, C++ and headers under engine/ (engine/tests and vendored trees other than a64-kit excluded) and the Python the builder, the lifter and the scripts run: getenv, std::getenv, _wgetenv, the code's own env helpers and table-driven reads, and os.environ.",
- "count": 1365,
+ "count": 1366,
  "switches": [
   {
    "name": "A64_DEVIRT",
@@ -3331,7 +3331,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_main.cpp",
-     "line": 1096
+     "line": 1103
     }
    ],
    "default": "off (unset)",
@@ -7762,11 +7762,11 @@
    "files": [
     {
      "path": "host/rx_backend.c",
-     "line": 592
+     "line": 599
     },
     {
      "path": "host/rx_backend.c",
-     "line": 685
+     "line": 692
     }
    ],
    "default": "off (unset)",
@@ -8415,7 +8415,7 @@
    "files": [
     {
      "path": "host/rx_backend.c",
-     "line": 581
+     "line": 588
     }
    ],
    "default": "off (unset)",
@@ -8915,6 +8915,27 @@
    "comment": "(Hookshot) The window's textures as the console's display queue has them: each present is shown at its display time, the later of its present and one interval after the frame shown before it, and a texture is free again once the frame presented after it is shown. The acquire of a frame waits for its texture: with `active` textures, the texture of the frame `active` back, freed when the frame after that one is shown. With three (OoT) a frame slower than the display waits for nothing and a fast one is held to the display's rate, two frames queued at most; the acquire waited for one interval after the last present before (two textures' behaviour), which held every frame over 16.7 ms to the next vsync step (gameplay at 27 ms frames, 5 ms of them in this sleep). HOS_VI_DOUBLE=1: that behaviour.",
    "documented_in": null,
    "source": "comment at host/nn_vi.c",
+   "documented": true,
+   "set_via": "In `hookshot_env.txt`, or in the environment.",
+   "use": null
+  },
+  {
+   "name": "HOS_VK_FALLBACK_WEBGPU",
+   "area": "host",
+   "group": "System and services",
+   "audience": "developer",
+   "files": [
+    {
+     "path": "host/rx_backend.c",
+     "line": 459
+    }
+   ],
+   "default": "unset",
+   "values": "text",
+   "explanation": "(V0.4.2 and v0.4.3: three players whose vkCreateInstance failed fell through to the WebGPU renderer, which panicked inside wgpu_native.dll (an uncaught C++ exception, KERNELBASE 0xe06d7363) and ended as a crash report. That renderer was never made for this game: a PC with no usable Vulkan driver is told so, and the log keeps the reason the back end gave. RX_BACKEND=webgpu (or any other value) still reaches it).",
+   "comment": "(V0.4.2 and v0.4.3: three players whose vkCreateInstance failed fell through to the WebGPU renderer, which panicked inside wgpu_native.dll (an uncaught C++ exception, KERNELBASE 0xe06d7363) and ended as a crash report. That renderer was never made for this game: a PC with no usable Vulkan driver is told so, and the log keeps the reason the back end gave. RX_BACKEND=webgpu (or any other value) still reaches it).",
+   "documented_in": null,
+   "source": "comment at host/rx_backend.c",
    "documented": true,
    "set_via": "In `hookshot_env.txt`, or in the environment.",
    "use": null
@@ -14613,7 +14634,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_main.cpp",
-     "line": 315
+     "line": 322
     }
    ],
    "default": "off (unset)",
@@ -16261,11 +16282,11 @@
     },
     {
      "path": "gpu/vk/vk_main.cpp",
-     "line": 449
+     "line": 456
     },
     {
      "path": "gpu/vk/vk_main.cpp",
-     "line": 452
+     "line": 459
     }
    ],
    "default": "on (unless set to 0, false, off or no)",
@@ -16861,7 +16882,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_main.cpp",
-     "line": 343
+     "line": 350
     }
    ],
    "default": "unset",
@@ -18365,11 +18386,11 @@
    "files": [
     {
      "path": "gpu/vk/vk_main.cpp",
-     "line": 953
+     "line": 960
     },
     {
      "path": "gpu/vk/vk_main.cpp",
-     "line": 1583
+     "line": 1590
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
@@ -18800,7 +18821,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_main.cpp",
-     "line": 423
+     "line": 430
     }
    ],
    "default": "unset",
@@ -19865,11 +19886,11 @@
    "files": [
     {
      "path": "gpu/vk/vk_main.cpp",
-     "line": 954
+     "line": 961
     },
     {
      "path": "gpu/vk/vk_main.cpp",
-     "line": 1583
+     "line": 1590
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
@@ -21902,7 +21923,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_main.cpp",
-     "line": 423
+     "line": 430
     }
    ],
    "default": "off (unset)",
@@ -22418,7 +22439,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_main.cpp",
-     "line": 460
+     "line": 467
     }
    ],
    "default": "unset",
@@ -23117,11 +23138,11 @@
    "files": [
     {
      "path": "gpu/vk/vk_main.cpp",
-     "line": 743
+     "line": 750
     },
     {
      "path": "gpu/vk/vk_main.cpp",
-     "line": 751
+     "line": 758
     }
    ],
    "default": "unset",
@@ -23142,7 +23163,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_main.cpp",
-     "line": 1456
+     "line": 1463
     }
    ],
    "default": "unset",
@@ -23464,12 +23485,12 @@
    "files": [
     {
      "path": "gpu/vk/vk_main.cpp",
-     "line": 706
+     "line": 713
     }
    ],
    "default": "unset",
    "values": "text",
-   "explanation": "undocumented: gpu/vk/vk_main.cpp:706 (in `create_device()`) reads it as a text value: `const bool pin = f13.subgroupSizeControl && sc.minSubgroupSize <= 32 && sc.maxSubgroupSize >= 32 && !getenv(\"RX_VK_NO...`. No comment in the source says what it changes.",
+   "explanation": "undocumented: gpu/vk/vk_main.cpp:713 (in `create_device()`) reads it as a text value: `const bool pin = f13.subgroupSizeControl && sc.minSubgroupSize <= 32 && sc.maxSubgroupSize >= 32 && !getenv(\"RX_VK_NO...`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -25162,7 +25183,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_main.cpp",
-     "line": 544
+     "line": 551
     }
    ],
    "default": "0 (unset)",
@@ -25564,12 +25585,12 @@
    "files": [
     {
      "path": "gpu/vk/vk_main.cpp",
-     "line": 520
+     "line": 527
     }
    ],
    "default": "off (unset)",
    "values": "on or off (0, false, off, no and empty are off)",
-   "explanation": "undocumented: gpu/vk/vk_main.cpp:520 (in `create_device()`) reads it as an on/off switch: `const float priorities[2] = {getenv(\"RX_VK_QUEUE_PRIO\") ? (float)atof(getenv(\"RX_VK_QUEUE_PRIO\")) : 1.0f, 1.0f};`. No comment in the source says what it changes.",
+   "explanation": "undocumented: gpu/vk/vk_main.cpp:527 (in `create_device()`) reads it as an on/off switch: `const float priorities[2] = {getenv(\"RX_VK_QUEUE_PRIO\") ? (float)atof(getenv(\"RX_VK_QUEUE_PRIO\")) : 1.0f, 1.0f};`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -26176,7 +26197,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_main.cpp",
-     "line": 643
+     "line": 650
     }
    ],
    "default": "0 (unset)",
@@ -26892,12 +26913,12 @@
    "files": [
     {
      "path": "gpu/vk/vk_main.cpp",
-     "line": 766
+     "line": 773
     }
    ],
    "default": "off (unset)",
    "values": "on or off (0, false, off, no and empty are off)",
-   "explanation": "undocumented: gpu/vk/vk_main.cpp:766 (in `create_device()`) reads it as an on/off switch: `f.features.sparseResidencyImage2D && !(getenv(\"RX_VK_SPARSE\") && !atoi(getenv(\"RX_VK_SPARSE\")));`. No comment in the source says what it changes.",
+   "explanation": "undocumented: gpu/vk/vk_main.cpp:773 (in `create_device()`) reads it as an on/off switch: `f.features.sparseResidencyImage2D && !(getenv(\"RX_VK_SPARSE\") && !atoi(getenv(\"RX_VK_SPARSE\")));`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -26934,7 +26955,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_main.cpp",
-     "line": 561
+     "line": 568
     }
    ],
    "default": "0 (unset)",
@@ -27148,7 +27169,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_main.cpp",
-     "line": 1121
+     "line": 1128
     }
    ],
    "default": "unset",
@@ -27169,7 +27190,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_main.cpp",
-     "line": 1224
+     "line": 1231
     }
    ],
    "default": "0 (unset)",
@@ -27912,7 +27933,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_main.cpp",
-     "line": 750
+     "line": 757
     }
    ],
    "default": "unset",
@@ -28210,7 +28231,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_main.cpp",
-     "line": 476
+     "line": 483
     },
     {
      "path": "gpu/vk/vk_replay.cpp",
@@ -28285,7 +28306,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_main.cpp",
-     "line": 522
+     "line": 529
     },
     {
      "path": "gpu/vk/vk_replay.cpp",
@@ -28314,7 +28335,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_main.cpp",
-     "line": 476
+     "line": 483
     },
     {
      "path": "gpu/vk/vk_replay.cpp",
@@ -28942,7 +28963,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_main.cpp",
-     "line": 716
+     "line": 723
     }
    ],
    "default": "off (unset)",
@@ -30192,11 +30213,11 @@
    "files": [
     {
      "path": "gpu/vk/vk_main.cpp",
-     "line": 470
+     "line": 477
     },
     {
      "path": "gpu/vk/vk_main.cpp",
-     "line": 472
+     "line": 479
     }
    ],
    "default": "unset",

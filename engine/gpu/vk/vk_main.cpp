@@ -286,8 +286,15 @@ bool create_instance() {
     // RX_VK_VALIDATION=1: the Khronos validation layer (when installed)
     const char* layer = "VK_LAYER_KHRONOS_validation";
     if (getenv("RX_VK_VALIDATION")) ci.enabledLayerCount = 1, ci.ppEnabledLayerNames = &layer;
-    if (vkCreateInstance(&ci, nullptr, &dev.instance) != VK_SUCCESS) {
-        logf("vk: vkCreateInstance failed");
+    if (const VkResult made = vkCreateInstance(&ci, nullptr, &dev.instance); made != VK_SUCCESS) {
+        // (-9 VK_ERROR_INCOMPATIBLE_DRIVER: no Vulkan driver for any GPU of this PC, or one older than 1.3; -6 VK_ERROR_LAYER_NOT_PRESENT and
+        // -7 VK_ERROR_EXTENSION_NOT_PRESENT: a broken or overlay-injected layer; -1/-2 out of memory; -3 VK_ERROR_INITIALIZATION_FAILED)
+        logf("vk: vkCreateInstance failed (VkResult %d: %s)", (int)made,
+             made == VK_ERROR_INCOMPATIBLE_DRIVER      ? "no Vulkan driver for this PC's GPU, or one older than Vulkan 1.3"
+             : made == VK_ERROR_INITIALIZATION_FAILED ? "the driver's start failed"
+             : made == VK_ERROR_LAYER_NOT_PRESENT     ? "a layer that is not there"
+             : made == VK_ERROR_EXTENSION_NOT_PRESENT ? "an instance extension that is not there"
+                                                      : "see the Vulkan specification's VkResult");
         return false;
     }
     load_instance(dev.instance);
