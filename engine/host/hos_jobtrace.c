@@ -18,7 +18,8 @@
    <ms> (default 40) it takes the process's page-fault count and working set, each thread's CPU time and where each thread is
    running (the instruction pointer: module + offset), and when the present does come it writes the records of the gap (and 3 ms
    before it) to <HL_STALL_WATCH_DIR>/stall_<n>.jt in the HOS_JOBTRACE format and logs the gap's per-thread CPU time, page
-   faults and working-set change: what every thread did while the presenting thread's wait lasted. 24 gaps at most. */
+   faults and working-set change: what every thread did while the presenting thread's wait lasted. 80 dumps at most, none before
+   HL_STALL_WATCH_AFTER seconds (the start-up's gaps). */
 #include "hos.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -127,12 +128,14 @@ void hos_sw_present(void) {
     if (sw_ring) sw_last_present = hos_now_ns();
 }
 
-typedef struct { int64_t user, kern; } SwCpu;
+typedef struct { int64_t user, kern; uint64_t cyc; } SwCpu;   /* (GetThreadTimes ticks at 15.6 ms: the cycles are the exact figure) */
 static int64_t ft_ns(FILETIME f) { return (int64_t)((uint64_t)f.dwHighDateTime << 32 | f.dwLowDateTime) * 100; }
 static void sw_cpu_all(HANDLE *hs, SwCpu *out, LONG m) {
     for (LONG i = 0; i < m; i++) {
         FILETIME c, e, k, u;
         out[i].user = out[i].kern = -1;
+        out[i].cyc = 0;
+        if (hs[i]) QueryThreadCycleTime(hs[i], &out[i].cyc);
         if (hs[i] && GetThreadTimes(hs[i], &c, &e, &k, &u)) out[i].user = ft_ns(u), out[i].kern = ft_ns(k);
     }
 }
@@ -176,10 +179,15 @@ static DWORD WINAPI sw_thread(void *p) {
     memset(&pm0, 0, sizeof pm0);
     int64_t cur = 0;   /* (the present the running gap began at; 0: none) */
     int dumped = 0;
+    const char *af = getenv("HL_STALL_WATCH_AFTER");   /* (seconds since the first present before dumps are written: the start-up's gaps fill the quota) */
+    const int after_s = af && *af ? atoi(af) : 0;
+    int64_t first = 0;
     for (;;) {
         Sleep(1);
         const int64_t now = hos_now_ns(), lp = sw_last_present;
         if (!lp) continue;
+        if (!first) first = lp;
+        const int now_s = (int)((now - first) / 1000000000LL);
         const LONG m = nths < 512 ? nths : 512;
         for (LONG i = 0; i < m; i++)
             if (!hs[i] && ths[i].tid) hs[i] = OpenThread(THREAD_QUERY_LIMITED_INFORMATION | THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT, FALSE, ths[i].tid);
@@ -194,10 +202,11 @@ static DWORD WINAPI sw_thread(void *p) {
             for (LONG i = 0; i < m; i++) {
                 if (c0[i].user < 0 || c1[i].user < 0) continue;
                 const double u = (c1[i].user - c0[i].user) / 1e6, k = (c1[i].kern - c0[i].kern) / 1e6;
-                if (u + k >= 0.5) hos_log("stallwatch:   %-28s cpu %.1f ms (user %.1f kernel %.1f); then at %s", ths[i].name, u + k, u, k,
-                                          have[i] ? where[i] : "-");
+                const double mc = (double)(c1[i].cyc - c0[i].cyc) / 1e6;   /* (millions of cycles: about 4.5 per ms) */
+                if (u + k >= 0.5 || mc >= 0.5) hos_log("stallwatch:   %-28s %.1f Mcycles (cpu ticks user %.1f kernel %.1f ms); then at %s", ths[i].name, mc, u, k,
+                                                       have[i] ? where[i] : "-");
             }
-            if (dumped < 24) sw_dump(dir, dumped++, cur - 3000000LL, lp + 1000000LL);
+            if (dumped < 80 && now_s >= after_s) sw_dump(dir, dumped++, cur - 3000000LL, lp + 1000000LL);
             cur = 0;
         }
         if (!cur && now - lp >= (int64_t)thr_ms * 1000000LL) {   /* a gap reached the threshold: where every thread is */

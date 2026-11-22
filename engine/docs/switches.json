@@ -2,7 +2,7 @@
  "schema": 1,
  "generated_by": "engine/scripts/list_switches.py",
  "scope": "C, C++ and headers under engine/ (engine/tests and vendored trees other than a64-kit excluded) and the Python the builder, the lifter and the scripts run: getenv, std::getenv, _wgetenv, the code's own env helpers and table-driven reads, and os.environ.",
- "count": 1392,
+ "count": 1397,
  "switches": [
   {
    "name": "A64_DEVIRT",
@@ -2270,6 +2270,73 @@
    "use": null
   },
   {
+   "name": "HL_STALL_WATCH",
+   "area": "native",
+   "group": "Native engine diagnostics",
+   "audience": "diagnostic",
+   "files": [
+    {
+     "path": "host/hos_jobtrace.c",
+     "line": 172
+    },
+    {
+     "path": "host/hos_jobtrace.c",
+     "line": 237
+    }
+   ],
+   "default": "unset",
+   "values": "text",
+   "explanation": "(HL_STALL_WATCH=<ms>: the ring and the watcher; see the top of the file).",
+   "comment": "(HL_STALL_WATCH=<ms>: the ring and the watcher; see the top of the file).",
+   "documented_in": null,
+   "source": "comment at host/hos_jobtrace.c",
+   "documented": true,
+   "set_via": "In `hookshot_env.txt`, or in the environment.",
+   "use": null
+  },
+  {
+   "name": "HL_STALL_WATCH_AFTER",
+   "area": "native",
+   "group": "Native engine diagnostics",
+   "audience": "diagnostic",
+   "files": [
+    {
+     "path": "host/hos_jobtrace.c",
+     "line": 182
+    }
+   ],
+   "default": "unset",
+   "values": "text",
+   "explanation": "HL_STALL_WATCH=<ms> (diagnostic, STALL1 22 Nov 2026): the same records kept all the time in a ring (4 M records, the last seconds of a busy game), and a watcher thread that looks at the presenting thread's cadence: when no present has come for <ms> (default 40) it takes the process's page-fault count and working set, each thread's CPU time and where each thread is running (the instruction pointer: module + offset), and when the present does come it writes the records of the gap (and 3 ms before it) to <HL_STALL_WATCH_DIR>/stall_<n>.jt in the HOS_JOBTRACE format and logs the gap's per-thread CPU time, page faults and working-set change: what every thread did while the presenting thread's wait lasted. 80 dumps at most, none before HL_STALL_WATCH_AFTER seconds (the start-up's gaps).",
+   "comment": "HL_STALL_WATCH=<ms> (diagnostic, STALL1 22 Nov 2026): the same records kept all the time in a ring (4 M records, the last seconds of a busy game), and a watcher thread that looks at the presenting thread's cadence: when no present has come for <ms> (default 40) it takes the process's page-fault count and working set, each thread's CPU time and where each thread is running (the instruction pointer: module + offset), and when the present does come it writes the records of the gap (and 3 ms before it) to <HL_STALL_WATCH_DIR>/stall_<n>.jt in the HOS_JOBTRACE format and logs the gap's per-thread CPU time, page faults and working-set change: what every thread did while the presenting thread's wait lasted. 80 dumps at most, none before HL_STALL_WATCH_AFTER seconds (the start-up's gaps).",
+   "documented_in": null,
+   "source": "comment at host/hos_jobtrace.c",
+   "documented": true,
+   "set_via": "In `hookshot_env.txt`, or in the environment.",
+   "use": null
+  },
+  {
+   "name": "HL_STALL_WATCH_DIR",
+   "area": "native",
+   "group": "Native engine diagnostics",
+   "audience": "diagnostic",
+   "files": [
+    {
+     "path": "host/hos_jobtrace.c",
+     "line": 243
+    }
+   ],
+   "default": "unset",
+   "values": "a path (text)",
+   "explanation": "HL_STALL_WATCH=<ms> (diagnostic, STALL1 22 Nov 2026): the same records kept all the time in a ring (4 M records, the last seconds of a busy game), and a watcher thread that looks at the presenting thread's cadence: when no present has come for <ms> (default 40) it takes the process's page-fault count and working set, each thread's CPU time and where each thread is running (the instruction pointer: module + offset), and when the present does come it writes the records of the gap (and 3 ms before it) to <HL_STALL_WATCH_DIR>/stall_<n>.jt in the HOS_JOBTRACE format and logs the gap's per-thread CPU time, page faults and working-set change: what every thread did while the presenting thread's wait lasted. 80 dumps at most, none before HL_STALL_WATCH_AFTER seconds (the start-up's gaps).",
+   "comment": "HL_STALL_WATCH=<ms> (diagnostic, STALL1 22 Nov 2026): the same records kept all the time in a ring (4 M records, the last seconds of a busy game), and a watcher thread that looks at the presenting thread's cadence: when no present has come for <ms> (default 40) it takes the process's page-fault count and working set, each thread's CPU time and where each thread is running (the instruction pointer: module + offset), and when the present does come it writes the records of the gap (and 3 ms before it) to <HL_STALL_WATCH_DIR>/stall_<n>.jt in the HOS_JOBTRACE format and logs the gap's per-thread CPU time, page faults and working-set change: what every thread did while the presenting thread's wait lasted. 80 dumps at most, none before HL_STALL_WATCH_AFTER seconds (the start-up's gaps).",
+   "documented_in": null,
+   "source": "comment at host/hos_jobtrace.c",
+   "documented": true,
+   "set_via": "In the process environment (or in a file named by `HOS_ENV_FILE`); `hookshot_env.txt` refuses this one.",
+   "use": null
+  },
+  {
    "name": "HL_STEP_SCAN",
    "area": "native",
    "group": "Timing and frame rate",
@@ -2631,7 +2698,7 @@
     },
     {
      "path": "host/nvn_native.c",
-     "line": 2999
+     "line": 3000
     }
    ],
    "default": "unset",
@@ -2836,7 +2903,7 @@
     },
     {
      "path": "host/hos_main.c",
-     "line": 326
+     "line": 343
     },
     {
      "path": "host/hos_update.c",
@@ -3439,7 +3506,7 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 1442
+     "line": 1459
     }
    ],
    "default": "unset",
@@ -3889,7 +3956,7 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 1764
+     "line": 1781
     }
    ],
    "default": "unset",
@@ -4372,7 +4439,7 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 453
+     "line": 470
     },
     {
      "path": "host/nn_os_sync.c",
@@ -4485,7 +4552,7 @@
     },
     {
      "path": "host/hos_main.c",
-     "line": 1593
+     "line": 1610
     }
    ],
    "default": "off (unset)",
@@ -4527,7 +4594,7 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 492
+     "line": 509
     }
    ],
    "default": "unset",
@@ -4590,7 +4657,7 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 1788
+     "line": 1805
     }
    ],
    "default": "unset",
@@ -5164,7 +5231,7 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 182
+     "line": 199
     }
    ],
    "default": "unset",
@@ -5306,15 +5373,15 @@
     },
     {
      "path": "host/hos_main.c",
-     "line": 1480
+     "line": 1497
     },
     {
      "path": "host/hos_main.c",
-     "line": 1518
+     "line": 1535
     },
     {
      "path": "host/hos_main.c",
-     "line": 1551
+     "line": 1568
     },
     {
      "path": "host/mkw_glue.c",
@@ -5677,7 +5744,7 @@
    "files": [
     {
      "path": "host/hos_jobtrace.c",
-     "line": 114
+     "line": 253
     }
    ],
    "default": "unset",
@@ -5698,7 +5765,7 @@
    "files": [
     {
      "path": "host/hos_jobtrace.c",
-     "line": 76
+     "line": 89
     }
    ],
    "default": "unset",
@@ -5719,7 +5786,7 @@
    "files": [
     {
      "path": "host/hos_jobtrace.c",
-     "line": 76
+     "line": 89
     }
    ],
    "default": "unset",
@@ -5895,7 +5962,7 @@
     },
     {
      "path": "host/hos_main.c",
-     "line": 153
+     "line": 170
     }
    ],
    "default": "unset",
@@ -6151,12 +6218,12 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 542
+     "line": 559
     }
    ],
    "default": "unset",
    "values": "text",
-   "explanation": "undocumented: host/hos_main.c:542 (in `submit_thread_at_start()`) reads it as a text value: `const char *user = hos_submit_thread_user_value(mesa, getenv(HOS_SUBMIT_THREAD_MARK));`. No comment in the source says what it changes.",
+   "explanation": "undocumented: host/hos_main.c:559 (in `submit_thread_at_start()`) reads it as a text value: `const char *user = hos_submit_thread_user_value(mesa, getenv(HOS_SUBMIT_THREAD_MARK));`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -6662,7 +6729,7 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 236
+     "line": 253
     }
    ],
    "default": "off (unset)",
@@ -6981,7 +7048,7 @@
    "files": [
     {
      "path": "host/nvn_native.c",
-     "line": 3643
+     "line": 3644
     }
    ],
    "default": "off (unset)",
@@ -7216,7 +7283,7 @@
     },
     {
      "path": "host/hos_main.c",
-     "line": 1585
+     "line": 1602
     }
    ],
    "default": "unset",
@@ -7237,12 +7304,12 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 999
+     "line": 1016
     }
    ],
    "default": "unset",
    "values": "text",
-   "explanation": "undocumented: host/hos_main.c:999 (in `oot_teleport()`) reads it as a text value: `const char *event_env = getenv(\"HOS_OOT_TELEPORT_EVENT\");`. No comment in the source says what it changes.",
+   "explanation": "undocumented: host/hos_main.c:1016 (in `oot_teleport()`) reads it as a text value: `const char *event_env = getenv(\"HOS_OOT_TELEPORT_EVENT\");`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -7258,12 +7325,12 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 1001
+     "line": 1018
     }
    ],
    "default": "unset",
    "values": "text",
-   "explanation": "undocumented: host/hos_main.c:1001 (in `oot_teleport()`) reads it as a text value: `const char *starter_env = getenv(\"HOS_OOT_TELEPORT_STARTER\");`. No comment in the source says what it changes.",
+   "explanation": "undocumented: host/hos_main.c:1018 (in `oot_teleport()`) reads it as a text value: `const char *starter_env = getenv(\"HOS_OOT_TELEPORT_STARTER\");`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -7606,12 +7673,12 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 83
+     "line": 84
     }
    ],
    "default": "unset",
    "values": "text",
-   "explanation": "undocumented: host/hos_main.c:83 (in `no_power_throttling()`) reads it as a text value: `const char *e = getenv(\"HOS_POWER_THROTTLING\");`. No comment in the source says what it changes.",
+   "explanation": "undocumented: host/hos_main.c:84 (in `no_power_throttling()`) reads it as a text value: `const char *e = getenv(\"HOS_POWER_THROTTLING\");`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -7958,7 +8025,7 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 1601
+     "line": 1618
     }
    ],
    "default": "unset",
@@ -8025,7 +8092,7 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 1514
+     "line": 1531
     }
    ],
    "default": "unset",
@@ -8184,7 +8251,7 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 1787
+     "line": 1804
     }
    ],
    "default": "off (unset)",
@@ -8272,7 +8339,7 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 453
+     "line": 470
     },
     {
      "path": "host/hos_thread.c",
@@ -8607,7 +8674,7 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 232
+     "line": 249
     }
    ],
    "default": "unset",
@@ -8628,7 +8695,7 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 453
+     "line": 470
     },
     {
      "path": "host/hos_thread.c",
@@ -8741,7 +8808,7 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 1718
+     "line": 1735
     }
    ],
    "default": "off (unset)",
@@ -9346,6 +9413,52 @@
    "use": "The window is too large or too small for the screen: `1280x720` (or another size) for one run."
   },
   {
+   "name": "HOS_WS_FLOOR_HARD",
+   "area": "host",
+   "group": "System and services",
+   "audience": "developer",
+   "files": [
+    {
+     "path": "host/ws_floor.h",
+     "line": 63
+    }
+   ],
+   "default": "unset",
+   "values": "text (`1` named)",
+   "explanation": "(The maximum at least the minimum: the call's rule) (STALL1, HOS_WS_FLOOR_HARD=1, diagnostic: a hard minimum, which Windows never trims below, even when the PC runs short).",
+   "comment": "(The maximum at least the minimum: the call's rule) (STALL1, HOS_WS_FLOOR_HARD=1, diagnostic: a hard minimum, which Windows never trims below, even when the PC runs short).",
+   "documented_in": null,
+   "source": "comment at host/ws_floor.h",
+   "documented": true,
+   "set_via": "In `hookshot_env.txt`, or in the environment.",
+   "use": null
+  },
+  {
+   "name": "HOS_WS_FLOOR_MB",
+   "area": "host",
+   "group": "System and services",
+   "audience": "developer",
+   "files": [
+    {
+     "path": "host/hos_main.c",
+     "line": 102
+    },
+    {
+     "path": "host/ws_floor.h",
+     "line": 38
+    }
+   ],
+   "default": "off (unset)",
+   "values": "on or off (0, false, off, no and empty are off)",
+   "explanation": "Sets this process's working-set minimum by the rule above, from env (getenv(\"HOS_WS_FLOOR_MB\")): 1 set, 0 none asked for, -1 refused (*err the error). *mb and *ram_mb: the minimum and the PC's RAM, MB.",
+   "comment": "Sets this process's working-set minimum by the rule above, from env (getenv(\"HOS_WS_FLOOR_MB\")): 1 set, 0 none asked for, -1 refused (*err the error). *mb and *ram_mb: the minimum and the PC's RAM, MB.",
+   "documented_in": null,
+   "source": "comment at host/ws_floor.h",
+   "documented": true,
+   "set_via": "In `hookshot_env.txt`, or in the environment.",
+   "use": null
+  },
+  {
    "name": "HOS_ZERO_ALL_PAGES",
    "area": "memory",
    "group": "Guest memory and captures",
@@ -9503,12 +9616,12 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 541
+     "line": 558
     }
    ],
    "default": "unset",
    "values": "text",
-   "explanation": "undocumented: host/hos_main.c:541 (in `submit_thread_at_start()`) reads it as a text value: `const char *mesa = getenv(\"MESA_VK_ENABLE_SUBMIT_THREAD\");`. No comment in the source says what it changes.",
+   "explanation": "undocumented: host/hos_main.c:558 (in `submit_thread_at_start()`) reads it as a text value: `const char *mesa = getenv(\"MESA_VK_ENABLE_SUBMIT_THREAD\");`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -9675,7 +9788,7 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 579
+     "line": 596
     }
    ],
    "default": "unset",
@@ -15761,7 +15874,7 @@
     },
     {
      "path": "host/hos_main.c",
-     "line": 453
+     "line": 470
     }
    ],
    "default": "unset",
@@ -16583,7 +16696,7 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 453
+     "line": 470
     },
     {
      "path": "host/rx_backend.c",
@@ -17814,7 +17927,7 @@
     },
     {
      "path": "host/hos_main.c",
-     "line": 453
+     "line": 470
     }
    ],
    "default": "unset",
@@ -18775,7 +18888,7 @@
     },
     {
      "path": "host/hos_main.c",
-     "line": 453
+     "line": 470
     }
    ],
    "default": "off (unset)",
@@ -19977,7 +20090,7 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 582
+     "line": 599
     }
    ],
    "default": "unset",
@@ -22819,7 +22932,7 @@
     },
     {
      "path": "host/hos_main.c",
-     "line": 453
+     "line": 470
     }
    ],
    "default": "off (unset)",
@@ -23208,7 +23321,7 @@
     },
     {
      "path": "host/hos_main.c",
-     "line": 206
+     "line": 223
     }
    ],
    "default": "unset",
@@ -24213,7 +24326,7 @@
     },
     {
      "path": "host/hos_main.c",
-     "line": 453
+     "line": 470
     }
    ],
    "default": "unset",
@@ -26137,7 +26250,7 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 548
+     "line": 565
     },
     {
      "path": "host/hos_submit_thread.h",
@@ -26338,7 +26451,7 @@
     },
     {
      "path": "host/hos_main.c",
-     "line": 453
+     "line": 470
     }
    ],
    "default": "0",
@@ -26807,7 +26920,7 @@
     },
     {
      "path": "host/hos_main.c",
-     "line": 453
+     "line": 470
     }
    ],
    "default": "off (unset)",
@@ -26874,7 +26987,7 @@
     },
     {
      "path": "host/hos_main.c",
-     "line": 453
+     "line": 470
     }
    ],
    "default": "unset",
@@ -26962,7 +27075,7 @@
     },
     {
      "path": "host/hos_main.c",
-     "line": 453
+     "line": 470
     }
    ],
    "default": "unset",
@@ -27721,7 +27834,7 @@
     },
     {
      "path": "host/hos_main.c",
-     "line": 453
+     "line": 470
     }
    ],
    "default": "unset",
@@ -29996,7 +30109,7 @@
     },
     {
      "path": "host/hos_main.c",
-     "line": 453
+     "line": 470
     }
    ],
    "default": "unset",
@@ -30732,7 +30845,7 @@
     },
     {
      "path": "host/hos_main.c",
-     "line": 326
+     "line": 343
     },
     {
      "path": "host/hos_update.c",

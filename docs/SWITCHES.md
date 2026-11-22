@@ -10,7 +10,7 @@ python -I engine/scripts/list_switches.py
 
 and commit both files. A test (`engine/tests/test_switches_documented.py`) fails when a switch read in the source is missing here or the data file is out of date.
 
-1392 switches: 56 players may be told to use, 370 diagnostic, 966 developer-only; 1188 have a real explanation and 204 are marked `undocumented`.
+1397 switches: 56 players may be told to use, 373 diagnostic, 968 developer-only; 1193 have a real explanation and 204 are marked `undocumented`.
 
 ## How to set a switch
 
@@ -69,8 +69,8 @@ The entries below say what each one does, its values and default, and when it is
 | [Memory and textures](#memory-and-textures) | 187 | 10 | 0 | 177 |
 | [Audio](#audio) | 14 | 5 | 9 | 0 |
 | [Input and controllers](#input-and-controllers) | 13 | 1 | 12 | 0 |
-| [Native engine (`HL_*`)](#native-engine-hl_) | 84 | 1 | 31 | 52 |
-| [Host and OS (`HOS_*` and the system's variables)](#host-and-os-hos_-and-the-systems-variables) | 131 | 10 | 0 | 121 |
+| [Native engine (`HL_*`)](#native-engine-hl_) | 87 | 1 | 34 | 52 |
+| [Host and OS (`HOS_*` and the system's variables)](#host-and-os-hos_-and-the-systems-variables) | 133 | 10 | 0 | 123 |
 | [Telemetry and crash reports](#telemetry-and-crash-reports) | 12 | 0 | 12 | 0 |
 | [Diagnostics and logging](#diagnostics-and-logging) | 292 | 0 | 292 | 0 |
 | [Build and lift time (`A64_*`, `RX_*` and `HOOKSHOT_*` the builder reads)](#build-and-lift-time-a64_-rx_-and-hookshot_-the-builder-reads) | 91 | 0 | 0 | 91 |
@@ -503,7 +503,7 @@ Over the options file: the output resolution (0 2048x1152, 1 2560x1440, 2 3840x2
 
 **When a player would use it:** An ultrawide monitor: `HOS_ASPECT=2.3889` gives the wider 21:9 picture for one run.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_main.c:1764`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_main.c:1781`.
 
 #### `HOS_DPI_UNAWARE` - player
 
@@ -523,7 +523,7 @@ undocumented: host/display.c:113 (in `dpi_aware_thread()`) reads it as an on/off
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_main.c:1788`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_main.c:1805`.
 
 #### `HOS_FS_OVERLAY` - developer
 
@@ -2135,7 +2135,7 @@ One consumer: with Vulkan the WebGPU renderer never runs. (HeyListen, TICK-061, 
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_main.c:453` and 1 more place.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_main.c:470` and 1 more place.
 
 #### `RX_VK_COMPILE_AT_ONCE` - developer
 
@@ -2625,7 +2625,7 @@ Linux, RADV: keeps `RADV_FORCE_VRS_CONFIG_FILE`. The Steam Deck's Game Mode sets
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_main.c:582`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_main.c:599`.
 
 #### `RX_VK_HANDLES_LIVE` - developer
 
@@ -3715,7 +3715,7 @@ The log says which rule decided after its first line, `env: Mesa's submit thread
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_main.c:548` and 1 more place.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_main.c:565` and 1 more place.
 
 #### `RX_VK_RB_PROF` - developer
 
@@ -6905,7 +6905,7 @@ undocumented: host/nn_libc.c:7 (in `guest_libc()`) reads it as an on/off switch:
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_main.c:182`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_main.c:199`.
 
 #### `HOS_GUEST_PAGES` - developer
 
@@ -7949,7 +7949,7 @@ As above; the last lets every device count while the window is behind another on
 
 ## Native engine (`HL_*`)
 
-84 switches of the native engine (`HL_*`).
+87 switches of the native engine (`HL_*`).
 
 ### Main loop
 
@@ -8328,6 +8328,36 @@ HL_STAGES_CHECK=1: the protocol's invariants are counted, each registration is c
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
 **Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hl_jobs.c:169`.
+
+#### `HL_STALL_WATCH` - diagnostic
+
+(HL_STALL_WATCH=<ms>: the ring and the watcher; see the top of the file).
+
+**Values:** text. **Default:** unset.
+
+**When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
+
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_jobtrace.c:172` and 1 more place.
+
+#### `HL_STALL_WATCH_AFTER` - diagnostic
+
+HL_STALL_WATCH=<ms> (diagnostic, STALL1 22 Nov 2026): the same records kept all the time in a ring (4 M records, the last seconds of a busy game), and a watcher thread that looks at the presenting thread's cadence: when no present has come for <ms> (default 40) it takes the process's page-fault count and working set, each thread's CPU time and where each thread is running (the instruction pointer: module + offset), and when the present does come it writes the records of the gap (and 3 ms before it) to <HL_STALL_WATCH_DIR>/stall_<n>.jt in the HOS_JOBTRACE format and logs the gap's per-thread CPU time, page faults and working-set change: what every thread did while the presenting thread's wait lasted. 80 dumps at most, none before HL_STALL_WATCH_AFTER seconds (the start-up's gaps).
+
+**Values:** text. **Default:** unset.
+
+**When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
+
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_jobtrace.c:182`.
+
+#### `HL_STALL_WATCH_DIR` - diagnostic
+
+HL_STALL_WATCH=<ms> (diagnostic, STALL1 22 Nov 2026): the same records kept all the time in a ring (4 M records, the last seconds of a busy game), and a watcher thread that looks at the presenting thread's cadence: when no present has come for <ms> (default 40) it takes the process's page-fault count and working set, each thread's CPU time and where each thread is running (the instruction pointer: module + offset), and when the present does come it writes the records of the gap (and 3 ms before it) to <HL_STALL_WATCH_DIR>/stall_<n>.jt in the HOS_JOBTRACE format and logs the gap's per-thread CPU time, page faults and working-set change: what every thread did while the presenting thread's wait lasted. 80 dumps at most, none before HL_STALL_WATCH_AFTER seconds (the start-up's gaps).
+
+**Values:** a path (text). **Default:** unset.
+
+**When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
+
+**Set it:** In the process environment (or in a file named by `HOS_ENV_FILE`); `hookshot_env.txt` refuses this one. **Read at:** `host/hos_jobtrace.c:243`.
 
 #### `HL_STREAM_CHECK` - diagnostic
 
@@ -8803,7 +8833,7 @@ HOS_OPT_PERF_PACE, gpu/vk/perf_parts.h (what this thread waited on since its las
 
 ## Host and OS (`HOS_*` and the system's variables)
 
-131 switches of the Horizon OS layer, the window and the system.
+133 switches of the Horizon OS layer, the window and the system.
 
 ### Frame rate and timing
 
@@ -8957,7 +8987,7 @@ TICK-062 B1, HOS_CV_SIGNAL_FAST=1: a signal with no waiter changes nothing a lat
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_main.c:453` and 1 more place.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_main.c:470` and 1 more place.
 
 #### `HOS_CV_WAKE_SKIP` - developer
 
@@ -8987,7 +9017,7 @@ TICK-062 B1, HOS_CV_SIGNAL_FAST=1: a signal with no waiter changes nothing a lat
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_jobtrace.c:114`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_jobtrace.c:253`.
 
 #### `HOS_JOBTRACE_AT` - developer
 
@@ -8997,7 +9027,7 @@ Everything between a thread's waits is work (guest code and the runtime under it
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_jobtrace.c:76`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_jobtrace.c:89`.
 
 #### `HOS_JOBTRACE_SECS` - developer
 
@@ -9007,7 +9037,7 @@ Everything between a thread's waits is work (guest code and the runtime under it
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_jobtrace.c:76`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_jobtrace.c:89`.
 
 #### `HOS_JOB_ORDER` - developer
 
@@ -9031,13 +9061,13 @@ At the Market, ~15 actor calcs are level-0 jobs pushed in one burst, Link's last
 
 #### `HOS_MESA_SUBMIT_THREAD_SET` - developer
 
-undocumented: host/hos_main.c:542 (in `submit_thread_at_start()`) reads it as a text value: `const char *user = hos_submit_thread_user_value(mesa, getenv(HOS_SUBMIT_THREAD_MARK));`. No comment in the source says what it changes.
+undocumented: host/hos_main.c:559 (in `submit_thread_at_start()`) reads it as a text value: `const char *user = hos_submit_thread_user_value(mesa, getenv(HOS_SUBMIT_THREAD_MARK));`. No comment in the source says what it changes.
 
 **Values:** text. **Default:** unset.
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_main.c:542`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_main.c:559`.
 
 #### `HOS_PIN_BY_CORE` - developer
 
@@ -9097,7 +9127,7 @@ TICK-062 B4, HOS_SHORT_SLEEP_PAUSE=1: one yield, then a PAUSE loop to the deadli
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_main.c:453` and 1 more place.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_main.c:470` and 1 more place.
 
 #### `HOS_SHORT_SLEEP_TIMER` - player
 
@@ -9147,7 +9177,7 @@ TICK-062 B2: hos_thread_of is a linear scan of every thread under a shared lock.
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_main.c:453` and 1 more place.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_main.c:470` and 1 more place.
 
 #### `HOS_VCORES` - developer
 
@@ -9221,13 +9251,13 @@ The web has no high-resolution timer, and its clock is a call into JavaScript: s
 
 #### `MESA_VK_ENABLE_SUBMIT_THREAD` - developer
 
-undocumented: host/hos_main.c:541 (in `submit_thread_at_start()`) reads it as a text value: `const char *mesa = getenv("MESA_VK_ENABLE_SUBMIT_THREAD");`. No comment in the source says what it changes.
+undocumented: host/hos_main.c:558 (in `submit_thread_at_start()`) reads it as a text value: `const char *mesa = getenv("MESA_VK_ENABLE_SUBMIT_THREAD");`. No comment in the source says what it changes.
 
 **Values:** text. **Default:** unset.
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In the process environment (or in a file named by `HOS_ENV_FILE`); `hookshot_env.txt` refuses this one. **Read at:** `host/hos_main.c:541`.
+**Set it:** In the process environment (or in a file named by `HOS_ENV_FILE`); `hookshot_env.txt` refuses this one. **Read at:** `host/hos_main.c:558`.
 
 ### Files, paths and folders
 
@@ -9249,7 +9279,7 @@ undocumented: gpu/vk/vk_dlss.cpp:207 (in `runtime_dirs()`) reads it as a path: `
 
 **When a player would use it:** The switches should come from another file than `hookshot_env.txt`.
 
-**Set it:** In the process environment (or in a file named by `HOS_ENV_FILE`); `hookshot_env.txt` refuses this one. **Read at:** `host/hos_main.c:492`.
+**Set it:** In the process environment (or in a file named by `HOS_ENV_FILE`); `hookshot_env.txt` refuses this one. **Read at:** `host/hos_main.c:509`.
 
 #### `HOS_MODS` - player
 
@@ -9279,7 +9309,7 @@ The build reads your game and never changes it. It writes to the folder you choo
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In the process environment (or in a file named by `HOS_ENV_FILE`); `hookshot_env.txt` refuses this one. **Read at:** `host/hos_main.c:579`.
+**Set it:** In the process environment (or in a file named by `HOS_ENV_FILE`); `hookshot_env.txt` refuses this one. **Read at:** `host/hos_main.c:596`.
 
 #### `TMPDIR` - developer
 
@@ -9431,7 +9461,7 @@ HOS_NVN_REC_SHIFT=12: by page.
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/nvn_native.c:3643`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/nvn_native.c:3644`.
 
 ### System and services
 
@@ -9793,7 +9823,7 @@ undocumented: host/hos_thread.c:137 (in `hos_thread_boost()`) reads it as an on/
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_main.c:236`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_main.c:253`.
 
 #### `HOS_NR_DIFF_EVERY` - developer
 
@@ -9867,23 +9897,23 @@ To enable the debug tools, turn **Debug tools** on in the menu's Debug tab (or a
 
 #### `HOS_OOT_TELEPORT_EVENT` - developer
 
-undocumented: host/hos_main.c:999 (in `oot_teleport()`) reads it as a text value: `const char *event_env = getenv("HOS_OOT_TELEPORT_EVENT");`. No comment in the source says what it changes.
+undocumented: host/hos_main.c:1016 (in `oot_teleport()`) reads it as a text value: `const char *event_env = getenv("HOS_OOT_TELEPORT_EVENT");`. No comment in the source says what it changes.
 
 **Values:** text. **Default:** unset.
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_main.c:999`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_main.c:1016`.
 
 #### `HOS_OOT_TELEPORT_STARTER` - developer
 
-undocumented: host/hos_main.c:1001 (in `oot_teleport()`) reads it as a text value: `const char *starter_env = getenv("HOS_OOT_TELEPORT_STARTER");`. No comment in the source says what it changes.
+undocumented: host/hos_main.c:1018 (in `oot_teleport()`) reads it as a text value: `const char *starter_env = getenv("HOS_OOT_TELEPORT_STARTER");`. No comment in the source says what it changes.
 
 **Values:** text. **Default:** unset.
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_main.c:1001`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_main.c:1018`.
 
 #### `HOS_OS_YIELD` - developer
 
@@ -9917,13 +9947,13 @@ HOS_PIN=<name part>=<hex mask>,...[,*=<hex mask>] (experiment): host CPU affinit
 
 #### `HOS_POWER_THROTTLING` - developer
 
-undocumented: host/hos_main.c:83 (in `no_power_throttling()`) reads it as a text value: `const char *e = getenv("HOS_POWER_THROTTLING");`. No comment in the source says what it changes.
+undocumented: host/hos_main.c:84 (in `no_power_throttling()`) reads it as a text value: `const char *e = getenv("HOS_POWER_THROTTLING");`. No comment in the source says what it changes.
 
 **Values:** text. **Default:** unset.
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_main.c:83`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_main.c:84`.
 
 #### `HOS_PRECOPY_KICK` - developer
 
@@ -9963,7 +9993,7 @@ Over the options file: Resolution 100% (non-zero: Auto), Game speed Per frame (1
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_main.c:1601`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_main.c:1618`.
 
 #### `HOS_SCAN_DT` - developer
 
@@ -9983,7 +10013,7 @@ HOS_SCAN_DT=<file prefix> (diagnostic): writes every float in guest memory betwe
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_main.c:1787`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_main.c:1804`.
 
 #### `HOS_TEXT_SPEED` - player
 
@@ -10003,7 +10033,7 @@ Over the options file: Resolution 100% (non-zero: Auto), Game speed Per frame (1
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_main.c:232`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_main.c:249`.
 
 #### `HOS_TICK_CONVERT_192` - developer
 
@@ -10084,6 +10114,26 @@ HOS_WAKE_LAT=1 (diagnostic): for event and message queue waits by thread, every 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
 **Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/nn_os_sync.c:815`.
+
+#### `HOS_WS_FLOOR_HARD` - developer
+
+(The maximum at least the minimum: the call's rule) (STALL1, HOS_WS_FLOOR_HARD=1, diagnostic: a hard minimum, which Windows never trims below, even when the PC runs short).
+
+**Values:** text (`1` named). **Default:** unset.
+
+**When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
+
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/ws_floor.h:63`.
+
+#### `HOS_WS_FLOOR_MB` - developer
+
+Sets this process's working-set minimum by the rule above, from env (getenv("HOS_WS_FLOOR_MB")): 1 set, 0 none asked for, -1 refused (*err the error). *mb and *ram_mb: the minimum and the PC's RAM, MB.
+
+**Values:** on or off (0, false, off, no and empty are off). **Default:** off (unset).
+
+**When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
+
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_main.c:102` and 1 more place.
 
 #### `LONGSHOT_PREPARE_ONLY` - developer
 
@@ -10567,7 +10617,7 @@ Every Horizon call logged, as `--trace` does.
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_main.c:1718`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_main.c:1735`.
 
 #### `HOS_VCORE_LOG` - diagnostic
 
@@ -13053,7 +13103,7 @@ undocumented: host/nvn_native.c:1199 (in `held_init()`) reads it as an on/off sw
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_main.c:1514`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_main.c:1531`.
 
 #### `RX_CHECK_ATTRS` - diagnostic
 
@@ -13611,7 +13661,7 @@ No look for a newer release at the start.
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `host/hos_main.c:1442`.
+**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `host/hos_main.c:1459`.
 
 #### `HOOKSHOT_OWN_APP` - developer
 
