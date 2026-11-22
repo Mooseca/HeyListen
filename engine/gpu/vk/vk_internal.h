@@ -245,6 +245,11 @@ bool probe_serial();
 void probe_dump_all(const char* why);
 void probe_log(uint64_t frame);
 void memory_end_submission(VkCommandBuffer cmd);
+/// (WBL1, RX_VK_WB_LAZY; ProjectReLink, pixl27) pages whose write-back was put off wait for the frame's flush; and that flush queued into
+/// the recording being made (between its memory_begin_submission and memory_end_submission)
+bool memory_wb_pending();
+void memory_wb_flush_queue();
+bool memory_wb_flush_own();
 /// The game made a memory pool (gpu address, bytes): imported in the background, before it is used
 /// RX_VK_CHECKPOINTS: the draws the GPU reached, logged once the device is lost (vk_draw.cpp)
 void checkpoints_report();

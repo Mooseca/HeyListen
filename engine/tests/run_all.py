@@ -82,6 +82,7 @@ ARGS = {
     "tests/test_capture_copy_runs.py": ["--cxx", "{cxx}"],
     "tests/test_msync_fast.py": ["--cxx", "{cxx}"],
     "tests/test_wb_pool_eager.py": ["--cxx", "{cxx}"],
+    "tests/test_wb_defer.py": ["--cxx", "{cxx}"],
     "tests/test_grow_lock.py": ["--cxx", "{cxx}"],
     "tests/test_readback_ticket.py": ["--cxx", "{cxx}"],
     "tests/test_capture_claim.py": ["--cxx", "{cxx}"],
