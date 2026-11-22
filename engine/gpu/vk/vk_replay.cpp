@@ -4097,13 +4097,15 @@ bool dry_lean_on() {
     }();
     return on;
 }
-/// (stream SMALL1) RX_VK_MID_SEG=<work> (default 0: off): a command buffer of at least that many draws and dispatches is cut into two segments
+/// (stream SMALL1) RX_VK_MID_SEG=<work> (default 128; 0: off): a command buffer of at least that many draws and dispatches is cut into two segments
 /// even when it has under two segments' worth (256 with the fine segments: the market's 105 and the castle's 159 and 201 are recorded whole
 /// on the replay thread, 0.35 and 0.7 ms each on the RTX 5070), so that a second thread records half of it
 int64_t mid_seg_min() {
     static const int64_t v = [] {
         const char* e = getenv("RX_VK_MID_SEG");
-        const int64_t n = e ? std::max<int64_t>(0, atoll(e)) : 0;
+        // (128 by default since 2026-11-23: RTX 5070, 3 rounds: castle-move 111.0 -> 125.5 fps, p99 13.8 -> 11.5 ms, frames over 50 ms
+        // 15 -> 3; kokiri-idle 104.7 -> 113.7; the Market within its spread. =0 off)
+        const int64_t n = e ? std::max<int64_t>(0, atoll(e)) : 128;
         if (n) logf("vk: command buffers of %lld draws and dispatches and more cut in two at least (RX_VK_MID_SEG)", (long long)n);
         return n;
     }();
