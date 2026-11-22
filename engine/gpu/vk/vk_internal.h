@@ -348,6 +348,10 @@ void memory_capture_submit();
 bool memory_take_capture(uint64_t value, uint64_t completed);
 void memory_trace_counts(int64_t* late_ns, int64_t* late_n, int64_t* scatter_bytes);   // (TICK-051, RX_VK_FRAME_TRACE)
 bool memory_capture_now(uint64_t value, uint64_t completed);   // (hookshot: made and taken at once)
+/// (stream R3, RX_VK_FRAMES_IN_FLIGHT) the CPU's event signals in the capture sequence, with the submits' captures, in the CPU's order
+bool memory_capture_signal(uint64_t gpu, uint32_t value, bool with_capture);
+bool memory_signals_pending();
+void memory_take_signals(uint64_t value, uint64_t completed, std::vector<std::pair<uint64_t, uint32_t>>& out);
 /// The submission the replay records next (bindings note it: a pool's mirror is in use until it is done)
 void memory_recording_value(uint64_t value, uint64_t completed);
 /// RX_VK_TEX_CAPTURE (on with the capture; =0 off): the storage of a texture uploaded from guest memory joins the
@@ -471,6 +475,11 @@ bool rbring_quiet(uint64_t guest, uint64_t size);
 void rbring_quiet_result(uint64_t size, bool changed);
 void rbring_apply(uint64_t gpu, uint64_t size);
 void rbring_check(uint64_t gpu, uint64_t size);
+/// (FIF1, vk_replay.cpp) the ring's frame count: presents_now, or with RX_VK_FRAMES_IN_FLIGHT the game's own count of presents; an entry's
+/// tag (the count at its submission's submit); and the wait (bounded) for the replay to have staged the frames a read at frame c may get
+int64_t rb_frame_now();
+int64_t rb_tag_for(uint64_t value);
+void rb_wait_staged(int64_t c, unsigned lag);
 /// (vk_replay.cpp) The GPU's progress on the recordings' timeline, and a wait for it to reach v
 uint64_t vk_timeline_completed();
 /// (longshot #442) The timeline's value without the write-backs it applies: a plain read, safe under the replay's lock

@@ -995,7 +995,17 @@ struct Capture {
     std::vector<uint8_t> gmask;
 };
 std::mutex cap_mu;
-std::deque<std::unique_ptr<Capture>> captures;
+// (stream R3, RX_VK_FRAMES_IN_FLIGHT) the captures in the order the CPU made them: a submit's, and a CPU event signal's (`sig`: the
+// event and its value, a capture only where a queue is stopped at a wait the signal meets). The replay takes them from the front
+// in this order, whichever thread it runs on, so a signal's capture holds the writes up to the signal and no later ones
+struct CapItem {
+    std::unique_ptr<Capture> c;
+    bool sig = false;
+    uint64_t gpu = 0;
+    uint32_t value = 0;
+};
+std::deque<CapItem> captures;
+std::atomic<int> signals_queued{0};   // (the signal items in `captures`, for the replay's quick look)
 std::vector<std::unique_ptr<Capture>> spare;   // (taken ones, their buffers kept)
 // ---- the captures' pages, for the mirror syncs ----
 // A capture takes the pages written since the last submit; a pool its submission does not bind is synced at a later
@@ -2533,9 +2543,23 @@ void memory_capture_submit() {
     std::unique_ptr<Capture> c = capture_make();
     if (!c) return;
     std::lock_guard lk(cap_mu);
-    captures.push_back(std::move(c));
+    captures.push_back(CapItem{std::move(c)});
     submits_queued.fetch_add(1, std::memory_order_release);
 }
+/// (stream R3) A CPU event signal into the capture sequence: its capture made now (`with_capture`: the CPU's writes up to the
+/// signal) or none. The caller holds the lock that orders it with the submits' captures (vk_replay.cpp submit_order_mu). False:
+/// capture is off, the signal is not queued here
+bool memory_capture_signal(uint64_t gpu, uint32_t value, bool with_capture) {
+    if (!capture_on()) return false;
+    std::unique_ptr<Capture> c;
+    if (with_capture) c = capture_make();
+    std::lock_guard lk(cap_mu);
+    captures.push_back(CapItem{std::move(c), true, gpu, value});
+    signals_queued.fetch_add(1, std::memory_order_release);
+    submits_queued.fetch_add(1, std::memory_order_release);
+    return true;
+}
+bool memory_signals_pending() { return signals_queued.load(std::memory_order_acquire) > 0; }
 // ---- (TICK-043) the submit's scan of the write marks on the copy helpers: RX_VK_CAPTURE_SCAN_SPLIT=1 ----
 // The scan (collect_in over ~1,500 ranges, ~3.4 GB of guest memory: ~830 KB of marks) is ~0.07 ms a submit on the submitting
 // thread, six submits a frame. Split by pages between it and the copy helpers; the parts' pages joined in range order (the
@@ -3983,14 +4007,32 @@ bool take_capture(std::unique_ptr<Capture> c, uint64_t value, uint64_t completed
     }
     return true;
 }
+/// (stream R3) The CPU's signals at the front of the sequence, taken in order (each one's capture, if it has one) and handed back
+/// with their events and values; the first submit's capture stops it. The replay applies them and lets the stopped queues go on
+void memory_take_signals(uint64_t value, uint64_t completed, std::vector<std::pair<uint64_t, uint32_t>>& out) {
+    if (completed > mem_completed) mem_completed = completed;
+    for (;;) {
+        CapItem it;
+        {
+            std::lock_guard lk(cap_mu);
+            if (captures.empty() || !captures.front().sig) return;
+            it = std::move(captures.front());
+            captures.pop_front();
+            signals_queued.fetch_sub(1, std::memory_order_release);
+            submits_taken.fetch_add(1, std::memory_order_release);
+        }
+        out.emplace_back(it.gpu, it.value);
+        if (it.c) take_capture(std::move(it.c), value, completed);
+    }
+}
 bool memory_take_capture(uint64_t value, uint64_t completed) {
     if (completed > mem_completed) mem_completed = completed;
     if (!capture_on()) return false;
     std::unique_ptr<Capture> c;
     {
         std::lock_guard lk(cap_mu);
-        if (captures.empty()) return false;
-        c = std::move(captures.front());
+        if (captures.empty() || captures.front().sig) return false;   // (a signal in front: the replay takes those first)
+        c = std::move(captures.front().c);
         captures.pop_front();
         submits_taken.fetch_add(1, std::memory_order_release);
     }

@@ -108,6 +108,43 @@ const char* rb_thread_label() {
     }
     return name;
 }
+// ---- (stream R3) RX_VK_WAIT_LOG=1: every wait of a thread inside the renderer, by site and thread, a line every 300 presents ----
+// (the pipeline question: does a game thread ever wait on the slot ring (uploads), a mirror sync, a capture's write-back or the replay's
+// lock, and for how long. Sites nest: a readback's wait_value sits inside its wait_recorded; each is its own total. Logging only)
+enum WaitSite { WS_SLOT, WS_VALUE, WS_RECORDED, WS_LOCK_SUBMIT, WS_LOCK_PRESENT, WS_DRAIN, WS_TICKET, WS_CAPTURE_WB, WS_CAPTURE_COPY, WS_COUNT };
+const char* const kWaitSite[WS_COUNT] = {"slot ring (recording_wait)", "wait_value", "wait_recorded", "replay lock (submit)", "replay lock (present)",
+                                         "present drain", "readback ticket", "capture's write-back wait", "capture copy (not a wait)"};
+struct WaitAgg { int64_t n = 0, slow = 0, ns = 0, max = 0; };
+bool wait_log_on() {
+    static const bool v = getenv("RX_VK_WAIT_LOG") != nullptr;
+    return v;
+}
+std::mutex wl_mu;
+std::map<std::pair<std::string, int>, WaitAgg> wl_agg;
+int64_t wl_from = 0, wl_next = 0;
+void wait_note(int site, int64_t ns);
+struct WaitScope {
+    int site;
+    int64_t t0 = 0;
+    explicit WaitScope(int s) : site(s) { if (wait_log_on()) t0 = std::chrono::steady_clock::now().time_since_epoch().count(); }
+    ~WaitScope() { if (t0) wait_note(site, std::chrono::steady_clock::now().time_since_epoch().count() - t0); }
+};
+void wait_note(int site, int64_t ns) {
+    std::lock_guard lk(wl_mu);
+    if (!wl_from) wl_from = presents_now, wl_next = presents_now + 300;
+    WaitAgg& a = wl_agg[{rb_thread_label(), site}];
+    a.n++, a.ns += ns, a.max = std::max(a.max, ns);
+    if (ns > 50000) a.slow++;
+    if (presents_now < wl_next) return;
+    const double frames = (double)std::max<int64_t>(1, presents_now - wl_from);
+    static int logged = 0;
+    if (logged++ < 60)
+        for (const auto& [k, v] : wl_agg)
+            logf("vk: waitlog %lld presents: %-26s %-30s %.2f ms/frame, %.2f waits/frame (%.2f over 50 us), max %.2f ms", (long long)frames,
+                 k.first.c_str(), kWaitSite[k.second], v.ns / 1e6 / frames, v.n / frames, v.slow / frames, v.max / 1e6);
+    wl_agg.clear();
+    wl_from = presents_now, wl_next = presents_now + 300;
+}
 // ---- (stream R2) RX_VK_TL=<present>: a timeline of what the renderer's threads do over 3 frames from that present on (threads by
 // name, times in ms from the window's start): the submits and their replays, the CPU's event signals, the stops at event
 // waits, the presents and their drains, the fence waits, the readbacks with their waits. Logging only ----
@@ -287,6 +324,7 @@ int recording_index = 0;
 /// (a recording slot's last submit done: before it is used again)
 void recording_wait(Recording& r) {
     if (!r.submitted) return;
+    WaitScope wait_scope(WS_SLOT);
     if (r.batch) {
         if (batch_flushed < r.batch) late_fix_wait_unlocked();   // (TICK-060; a stale read only waits or not for a fix)
         {
@@ -574,6 +612,7 @@ void queue_flush_poll() {
 } // namespace
 namespace {
 void wait_value(uint64_t v) {
+    WaitScope wait_scope(WS_VALUE);
     queue_flush_for(FR_VALUE);
     VkSemaphoreWaitInfo wi{VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO};
     wi.semaphoreCount = 1;
@@ -1218,6 +1257,17 @@ bool watch_kick_on() {
     return v;
 }
 std::unordered_set<uint64_t> cpu_events;   // (events the CPU has signalled, nvnEventSignal; ev_cpu_mu)
+// (stream R3, RX_VK_FRAMES_IN_FLIGHT) With the game's CPU a frame ahead of the replay, a capture taken when a stopped queue goes on
+// holds the next frame's writes. So the CPU's event signals go into the capture sequence (vk_memory.cpp: `captures`) at the moment
+// the CPU makes them, in the CPU's order with the submits' captures, a signal that meets a wait a submission is stopped at with its
+// capture; the replay takes them in that order and applies the event then (consume_signals), never later than the next replay.
+// RX_VK_SIGNAL_CAPTURE=0: off (the signals go the way they did)
+bool signal_capture_on() {
+    static const bool v = getenv("RX_VK_FRAMES_IN_FLIGHT") && atoi(getenv("RX_VK_FRAMES_IN_FLIGHT")) > 1 &&
+                          (!getenv("RX_VK_SIGNAL_CAPTURE") || atoi(getenv("RX_VK_SIGNAL_CAPTURE")) != 0);
+    return v;
+}
+std::unordered_set<uint64_t> captured_events;   // (events whose signal's capture the replay has just taken: sync_order_mu)
 void ev_cpu_apply() {
     if (!ev_cpu_any.load(std::memory_order_acquire)) return;
     std::lock_guard lk(ev_cpu_mu);
@@ -4213,15 +4263,17 @@ void resume_queue(uint64_t queue, bool forced) {
             // console's GPU reads memory after its wait; the capture taken at the submit had the frame before's: the fog and
             // exposure of the frame before, for a frame. A capture now, for what follows the wait. RX_VK_RESUME_CAPTURE=0: none
             static const bool resume_capture = !getenv("RX_VK_RESUME_CAPTURE") || atoi(getenv("RX_VK_RESUME_CAPTURE")) != 0;
-            bool cpu_event = false;
+            bool cpu_event = false, taken = false;
             if (resume_capture && !forced) {
                 std::lock_guard ek(ev_cpu_mu);
-                cpu_event = cpu_events.count(wait_at(q.p).gpu) != 0;
+                const uint64_t ev = wait_at(q.p).gpu;
+                cpu_event = cpu_events.count(ev) != 0;
+                taken = captured_events.count(ev) != 0;   // (its capture was taken at the signal's place in the sequence)
             }
             if (cpu_event) {
                 std::lock_guard lk(replay_mu);
                 if (rec_cur) finish_recording(burst_open ? burst_value : q.value);   // (its mirrors synced again after)
-                memory_capture_now(q.value, completed());
+                if (!taken) memory_capture_now(q.value, completed());
                 st_resume_captures++;
             }
             q.waiting = false;
@@ -4238,20 +4290,42 @@ void resume_queue(uint64_t queue, bool forced) {
         if (!run_submit(s.handles.data(), (int)s.handles.size(), s.value, queue, false, 0, nullptr, true)) return;
     }
 }
+/// (stream R3) The CPU's signals the capture sequence has at its front: each one's capture taken, its event set, in the CPU's
+/// order; the recording open is ended first (the mirrors sync again for what follows, as at a resume). True: any (sync_order_mu)
+bool consume_signals(uint64_t value) {
+    if (!signal_capture_on() || !memory_signals_pending()) return false;
+    static std::vector<std::pair<uint64_t, uint32_t>> got;
+    got.clear();
+    {
+        std::lock_guard lk(replay_mu);
+        if (rec_cur) finish_recording(burst_open ? burst_value : value);
+        memory_take_signals(value, completed(), got);
+    }
+    if (got.empty()) return false;
+    std::lock_guard ek(ev_cpu_mu);
+    for (const auto& [gpu, v] : got) {
+        ev_values[gpu] = v;
+        cpu_events.insert(gpu);
+        captured_events.insert(gpu);
+    }
+    return true;
+}
 /// The stopped queues whose events are reached go on, until none can
 void schedule() {
     for (bool moved = true; moved;) {
         moved = false;
+        consume_signals(q_values.load());
         for (auto& [queue, q] : qruns)
             if (q.waiting && wait_met_at(q.p)) {
                 resume_queue(queue, false);
                 moved = true;
             }
     }
+    captured_events.clear();   // (taken for the queues that went on above; none is kept for a later stop)
 }
 /// Every stopped queue on now (why: an index of st_forced): in turn as their waits allow; when all of them wait, the
 /// oldest past its wait
-void drain(int why) {
+void drain(int why, uint64_t limit = UINT64_MAX) {   // (limit, stream R3: only queues stopped at a submission up to this value are forced)
     if (oldest_unfinished() == UINT64_MAX) return;
     st_forced[why]++;
     st_stopped_max_ms = std::max(st_stopped_max_ms,
@@ -4261,7 +4335,7 @@ void drain(int why) {
         schedule();
         uint64_t best = UINT64_MAX, bq = 0;
         for (const auto& [queue, q] : qruns)
-            if (q.blocked() && q.oldest() < best) best = q.oldest(), bq = queue;
+            if (q.blocked() && q.oldest() < best && q.oldest() <= limit) best = q.oldest(), bq = queue;
         if (best == UINT64_MAX) break;
         resume_queue(bq, qruns[bq].waiting);
     }
@@ -4327,6 +4401,7 @@ void order_ticket_take() {
 void order_ticket_wait() {
     const uint64_t t = order_ticket.load(std::memory_order_seq_cst);
     if (sync_order_mu.left.load(std::memory_order_acquire) >= t) return;
+    WaitScope wait_scope(WS_TICKET);
     jt_mark(36, 1);   // (36/37 with 1: the readback waiting for its ticket's section)
     {
         std::unique_lock lk(order_wait_mu);
@@ -4380,6 +4455,11 @@ void sync_watch() {
 /// A submit on the replay thread: replayed as far as its waits allow, or (its queue stopped) after its queue's
 void submit_job(std::vector<uint64_t>& handles, uint64_t value, uint64_t queue) {
     const bool may_stop = event_waits_on() && !dump_on();
+    if (consume_signals(value)) {   // (the CPU's signals made before this submit: the stopped ones they let on go first)
+        burst_begin(0);
+        schedule();
+        burst_end();
+    }
     if (!may_stop) drain(2);
     auto it = qruns.find(queue);
     if (it != qruns.end() && it->second.blocked()) {   // (its memory work now, in the order of the submits)
@@ -4405,6 +4485,7 @@ uint64_t get_replayed() {
 /// timeline: true when that recording is known (the result in *ok), false when it is not (f not finished yet)
 bool wait_recorded(uint64_t f, uint64_t timeout_ns, int* ok) {
     if (!rec_timeline || per_queue_fences_off()) return false;
+    WaitScope wait_scope(WS_RECORDED);
     uint64_t seq = 0;
     {
         std::lock_guard mk(rec_map_mu);
@@ -7128,13 +7209,90 @@ bool replay_behind() {
     return !q_jobs.empty() || q_busy || blocked_n.load() > 0;
 }
 
-std::mutex submit_order_mu;   // (captures and submits queued in the same order)
+int frames_in_flight() {
+    static const int n = std::clamp(getenv("RX_VK_FRAMES_IN_FLIGHT") ? atoi(getenv("RX_VK_FRAMES_IN_FLIGHT")) : 1, 1, 3);
+    return n;
+}
+// ---- (FIF1) the frame count of the readback ring (vk_rbring.cpp) with the CPU a frame ahead of the replay ----
+// The ring tags an entry with the frame count and serves one `lag` frames old. With the present handed over, the replay's own count
+// (presents_now, the presents shown) depends on how far the present thread has got when a thread looks, and a submission's replay
+// (the heavy one, stopped at the CPU's signal) runs after the CPU has begun the next frame: the same read would see different entries
+// from run to run. So with frames in flight both ends use the GAME's frame count: `rb_clock`, counted at each present call; an entry's tag
+// is the clock at its submission's submit (rb_value_tag), a read's frame is the clock at the read; and a read first waits (bounded)
+// for the replay to have shown the presents whose entries it may be handed (the replay stages them before it shows the frame), which
+// costs nothing when lag >= frames in flight + 1. Without frames in flight: presents_now for both, as before, bit for bit.
+std::atomic<int64_t> rb_clock{0};
+struct RbValueTag {
+    std::atomic<uint64_t> value{0};
+    std::atomic<int64_t> tag{0};
+};
+RbValueTag rb_value_tags[1024];
+std::atomic<int64_t> st_rb_staged_waits{0}, st_rb_staged_wait_ns{0}, st_rb_staged_late{0};
+bool rb_fif_on() {
+    static const bool v = frames_in_flight() > 1 && !async_on() && sync_waits_on();
+    return v;
+}
+void rb_note_value(uint64_t value) {
+    if (!rb_fif_on()) return;
+    RbValueTag& s = rb_value_tags[value & 1023];
+    s.tag.store(rb_clock.load(std::memory_order_relaxed), std::memory_order_relaxed);
+    s.value.store(value, std::memory_order_release);
+}
+std::mutex submit_order_mu;   // (the captures of submits and of the CPU's signals queued in the order the CPU made them)
+// ---- (stream R3) the waits a submission is stopped at that the CPU's signal will meet, noted when it is submitted (as Longshot's
+// render thread does, 82886e89): a signal that meets one is captured, any other only queued. The last 256 waits (~14 a frame).
+// submit_order_mu
+struct NotedWait {
+    uint64_t gpu = 0;
+    uint32_t mode = 0, value = 0;
+    bool open = false;
+};
+NotedWait noted_waits[256];
+size_t noted_n = 0;
+std::unordered_map<uint64_t, uint32_t> cpu_signal_value;   // (the events the CPU has signalled, and their last value)
+std::condition_variable signal_cv;
+int64_t st_sig_caps = 0;
+void note_waits(const uint64_t* handles, int n) {
+    for (int cb = 0; cb < n; cb++) {
+        if (!handles[cb]) continue;
+        for (const uint8_t* o = reinterpret_cast<const uint8_t*>(handles[cb]);; o = op_next(o)) {
+            nvn_op_hdr h;
+            std::memcpy(&h, o, sizeof h);
+            if (h.op == NOP_END || h.size < sizeof h) break;
+            if (h.op != NOP_WAIT_EVENT) continue;
+            const nvn_p_wait_event w = wait_at(o);
+            const auto it = cpu_signal_value.find(w.gpu);
+            if (it != cpu_signal_value.end() && event_wait_met(it->second, w.mode, w.value)) continue;   // (met: its submit's capture)
+            noted_waits[noted_n++ % 256] = {w.gpu, w.mode, w.value, true};
+        }
+    }
+}
+bool signal_meets(uint64_t gpu, uint32_t value) {
+    cpu_signal_value[gpu] = value;
+    bool any = false;
+    for (NotedWait& w : noted_waits)
+        if (w.open && w.gpu == gpu && event_wait_met(value, w.mode, w.value)) w.open = false, any = true;
+    return any;
+}
+/// Whether a submission waits for an event the CPU signals that it has not brought to the value yet: its frame is not all written
+bool cpu_wait_open() {
+    for (const NotedWait& w : noted_waits) {
+        if (!w.open) continue;
+        const auto it = cpu_signal_value.find(w.gpu);
+        if (it != cpu_signal_value.end() && !event_wait_met(it->second, w.mode, w.value)) return true;
+    }
+    return false;
+}
 void submit_q(const uint64_t* handles, int n, uint64_t queue) {
     perf_parts::Scope perf_entry(perf_parts::t_render);   // (the renderer's entry on this thread: the summary's render part)
     tl_ev("submit+", queue, n);
     struct TlSub { ~TlSub() { tl_ev("submit-"); } } tl_sub;
     if (!async_on()) {
-        std::lock_guard order(sync_order_mu);
+        std::unique_lock order(sync_order_mu, std::defer_lock);
+        {
+            WaitScope wait_scope(WS_LOCK_SUBMIT);
+            order.lock();
+        }
         tl_ev("submit-locked");
         ReplayPin pin;   // (the capture and the replay on the replay's core)
         // (the replay here is on the submitting thread, but the game's other threads go on writing their next frames: a pool
@@ -7147,7 +7305,16 @@ void submit_q(const uint64_t* handles, int n, uint64_t queue) {
         jt_mark(11, 0);
         lag_bq_enter();   // (RX_VK_LAG_LOG)
         tl_ev("capture+");
-        if (capture) memory_capture_submit();
+        if (capture) {
+            WaitScope wait_scope(WS_CAPTURE_COPY);
+            if (signal_capture_on()) {   // (stream R3: in the sequence with the CPU's signals' captures, and its waits noted)
+                std::lock_guard so(submit_order_mu);
+                memory_capture_submit();
+                note_waits(handles, n);
+            } else {
+                memory_capture_submit();
+            }
+        }
         tl_ev("capture-");
         jt_mark(12, 0);
         // (RX_VK_SUBMIT_DELAY_US=<us> (a test): a console's GPU starts later than this replay does. Does what a submission reads
@@ -7162,6 +7329,7 @@ void submit_q(const uint64_t* handles, int n, uint64_t queue) {
             std::call_once(watch, [] { std::thread(sync_watch).detach(); });
             std::vector<uint64_t> h(handles, handles + std::max(n, 0));
             const uint64_t value = ++q_values;
+            rb_note_value(value);
             lag_submit(value);
             if (queue) {
                 q_last[queue] = value;
@@ -7184,6 +7352,94 @@ void submit_q(const uint64_t* handles, int n, uint64_t queue) {
 void submit(const uint64_t* handles, int n) {
     submit_q(handles, n, 0);
 }
+// ---- (stream R3) RX_VK_FRAMES_IN_FLIGHT=<k> (default 1: the present returns when the frame is replayed and shown, as before) ----
+// With k > 1 the present is handed to a thread of its own (the frame's work whole, then the blit and the present, as present()
+// does inline) and returns at once while fewer than k-1 earlier presents are still being replayed: the game's CPU phase of frame
+// N+1 runs while frame N's heavy submission replays and the GPU draws it. The replay still starts frame N's stopped work only
+// when the main thread has signalled it (that is where the heavy queue waits), so the frame is whole before it replays (Longshot
+// 82886e89 found the lit scene drawn black for a frame without that, and gates its render thread so); the capture of its pages is
+// taken at the submit, on the game's thread, before this hand-over. Needs HOS_PRESENT_NOWAIT=1 in the host (set with it) or the
+// game's present poll holds the game for the frame's event
+struct PresentJob {
+    uint64_t upto = 0;   // (the newest submission handed over when the game presented: the frame's, the next frame's are not forced)
+    nvn_tex tex;
+    bool has_tex = false, has_crop = false;
+    int crop[4] = {0, 0, 0, 0};
+};
+std::mutex pj_mu;
+std::condition_variable pj_cv, pj_space;
+std::deque<PresentJob> pj_jobs;
+int pj_pending = 0;   // (handed over and not yet shown, the one in progress included)
+int64_t pj_held_ns = 0, pj_held_n = 0;
+void present_job_main() {
+    SetThreadDescription(GetCurrentThread(), L"mkw_vk present");
+    for (;;) {
+        PresentJob j;
+        {
+            std::unique_lock lk(pj_mu);
+            pj_cv.wait(lk, [] { return !pj_jobs.empty(); });
+            j = std::move(pj_jobs.front());
+            pj_jobs.pop_front();
+        }
+        if (signal_capture_on()) {   // (the frame whole before it is shown: the CPU's signal its work waits for, made by the main thread)
+            static int64_t n_waited = 0, n_late = 0, n = 0;
+            std::unique_lock lk(submit_order_mu);
+            if (cpu_wait_open()) {
+                n_waited++;
+                if (!signal_cv.wait_for(lk, std::chrono::milliseconds(200), [] { return !cpu_wait_open(); })) n_late++;
+            }
+            if (++n % 600 == 0)
+                logf("vk: presents after the CPU's signal (600): %lld waited for it, %lld let go after 200 ms; %lld signal captures so far",
+                     (long long)n_waited, (long long)n_late, (long long)st_sig_caps), n_waited = n_late = 0;
+        }
+        {
+            tl_ev("present-wait-lock");
+            std::lock_guard order(sync_order_mu);
+            tl_ev("present-locked");
+            ReplayPin pin;
+            drain(0, j.upto);   // (the frame's work whole before it is shown)
+            tl_ev("present-drained");
+            update_blocked();
+            present_value = ++q_values;
+            if (ubo_check_on()) ubo_check_frame();
+            do_present(j.has_tex ? &j.tex : nullptr, j.has_crop ? j.crop : nullptr);
+        }
+        {
+            std::lock_guard lk(pj_mu);
+            pj_pending--;
+        }
+        pj_space.notify_all();
+    }
+}
+/// hands the present over; false: not in this mode (the caller presents inline)
+bool present_handed_over(const nvn_tex* t, const int crop[4]) {
+    const int k = frames_in_flight();
+    if (k <= 1 || async_on() || !sync_waits_on()) return false;
+    static std::once_flag once;
+    std::call_once(once, [k] {
+        std::thread(present_job_main).detach();
+        logf("vk: the present is handed to a thread of its own, %d frames in flight (RX_VK_FRAMES_IN_FLIGHT)", k);
+    });
+    PresentJob j;
+    j.upto = q_values.load();
+    if (t) j.tex = *t, j.has_tex = true;
+    if (crop) std::memcpy(j.crop, crop, sizeof j.crop), j.has_crop = true;
+    {
+        std::unique_lock lk(pj_mu);
+        const int64_t t0 = std::chrono::steady_clock::now().time_since_epoch().count();
+        pj_space.wait(lk, [k] { return pj_pending < k; });
+        pj_held_ns += std::chrono::steady_clock::now().time_since_epoch().count() - t0, pj_held_n++;
+        pj_pending++;
+        pj_jobs.push_back(std::move(j));
+        if (pj_held_n % 600 == 0)
+            logf("vk: presents handed over (600): the game's thread waited %.2f ms a present for a free slot; readback ring: %lld reads waited for "
+                 "the replay to stage their frame (%.2f ms in all), %lld let go after 200 ms (totals)",
+                 pj_held_ns / 1e6 / 600, (long long)st_rb_staged_waits.load(), st_rb_staged_wait_ns.load() / 1e6, (long long)st_rb_staged_late.load()),
+                pj_held_ns = 0;
+    }
+    pj_cv.notify_one();
+    return true;
+}
 void present(const nvn_tex* t, const int crop[4]) {
     perf_parts::Scope perf_entry(perf_parts::t_render);   // (the renderer's entry on this thread: the summary's render part)
     tl_at_present(presents_now);
@@ -7193,13 +7449,22 @@ void present(const nvn_tex* t, const int crop[4]) {
     if (lag_on() && presents % 600 == 0) log_order_stats();
     memory_precopy_present();
     memory_cap_present();
+    if (rb_fif_on()) rb_clock.fetch_add(1, std::memory_order_release);   // (FIF1: the game's frame count)
+    if (present_handed_over(t, crop)) return;
     if (!async_on()) {
         tl_ev("present-wait-lock");
-        std::lock_guard order(sync_order_mu);
+        std::unique_lock order(sync_order_mu, std::defer_lock);
+        {
+            WaitScope wait_scope(WS_LOCK_PRESENT);
+            order.lock();
+        }
         tl_ev("present-locked");
         ReplayPin pin;   // (the frame's last replays and the present on the replay's core)
         if (sync_waits_on()) {
-            drain(0);   // (the frame's work whole before it is shown)
+            {
+                WaitScope wait_scope(WS_DRAIN);
+                drain(0);   // (the frame's work whole before it is shown)
+            }
             tl_ev("present-drained");
             update_blocked();
             present_value = ++q_values;
@@ -7280,6 +7545,16 @@ void register_texture_queued(int id, const nvn_tex* t, const nvn_view* v) {
 void event_signal_queued(uint64_t gpu, uint32_t value) {
     tl_ev("cpu-signal", gpu, value);
     if (!async_on()) {
+        if (signal_capture_on()) {   // (stream R3: its place in the capture sequence, and its capture where a queue waits for it)
+            std::lock_guard so(submit_order_mu);
+            const bool meets = signal_meets(gpu, value);
+            if (memory_capture_signal(gpu, value, meets)) {
+                if (meets) st_sig_caps++;
+                if (watch_kick_on()) SetEvent(watch_kick_event());
+                signal_cv.notify_all();
+                return;
+            }
+        }
         std::lock_guard lk(ev_cpu_mu);
         ev_cpu_pending.emplace_back(gpu, value);
         ev_cpu_any.store(true, std::memory_order_release);
@@ -7333,6 +7608,32 @@ bool init_pools_make(const VkCommandPoolCreateInfo& pi) {
 }
 
 } // namespace
+int64_t rb_frame_now() { return rb_fif_on() ? rb_clock.load(std::memory_order_acquire) : presents_now; }
+int64_t rb_tag_for(uint64_t value) {
+    if (!rb_fif_on()) return presents_now;
+    const RbValueTag& s = rb_value_tags[value & 1023];
+    const int64_t tag = s.tag.load(std::memory_order_relaxed);
+    return s.value.load(std::memory_order_acquire) == value ? tag : rb_clock.load(std::memory_order_acquire);
+}
+/// A read at game frame c may be handed entries up to tag c - lag: they are all staged once the replay has shown present number
+/// (c - lag + 1) (tag t belongs to the frame ended by present t + 1). Waits for that, 200 ms at most; counted
+void rb_wait_staged(int64_t c, unsigned lag) {
+    if (!rb_fif_on()) return;
+    const int64_t need = c - (int64_t)lag + 1;
+    if (presents_now >= need) return;
+    const int64_t t0 = std::chrono::steady_clock::now().time_since_epoch().count();
+    bool ok = false;
+    while (std::chrono::steady_clock::now().time_since_epoch().count() - t0 < 200000000ll) {
+        if (presents_now >= need) {
+            ok = true;
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::microseconds(100));
+    }
+    st_rb_staged_waits.fetch_add(1), st_rb_staged_wait_ns.fetch_add(std::chrono::steady_clock::now().time_since_epoch().count() - t0);
+    if (!ok) st_rb_staged_late.fetch_add(1);
+}
+
 
 /// (longshot d12ddf69b, Jer9, #1833) A recording's upload command buffer ended, submitted, waited for and begun again in place (vk_texture.cpp
 /// upload_chunk_flush, RX_VK_ASTC_CHUNK_MPX): a big ASTC upload goes to the GPU in bounded submissions, none of them past Windows' 2 s TDR.
