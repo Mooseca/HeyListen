@@ -102,3 +102,17 @@ learned, so the next session need not read it again:
   that orders it before the next submission's first `submit_recording`. The next submission's first submit waits for that order (the queue's order: N's segments, N's last recording, then N+1's first). The write-back list, the synced list and the
   write-back notes (`writebacks`, `mirror_synced`, `wb_pages_note`'s per-value ranges) would be per submission with the epoch.
 - Not touched: `vk_draw.cpp` and the descriptor code (DRAW1's). A state move forced no change there: the workers read the value and epoch through `vk_memory.cpp`'s accessors; the draw code calls `memory_*` as before.
+
+## Results (main PC, RTX 5070, `HL_RB_LAG=2 HL_GFX_VAR=1 RX_VK_FEED_LOG=1`, `market-spin` from `market-mid` unless said; build rec1 against join1 (= feed1's code, switches off))
+
+Stage A, no behaviour change (the speed series lost round 3 to another agent's build, runguard exit 11, and A round 2 to a failed copy of the exe; round 1 of rec1 R was a slow start of a new exe: the play window began at 89 s, 105 frames):
+| arm | fps (rounds with a clean window) | p95 ms | GPU feed: busy / idle / replay not ready ms | draws, dispatches, passes, barriers, submits a frame |
+|---|---|---|---|---|
+| A join1, off | 82.2 | 17.0 | 7.54 / 3.63 / 3.12 | 2364 / 160 / 169 / 167 / 6 |
+| R rec1, off | 83.8 | 16.4 | 7.56 / 3.75 / 3.19 | 2327 / 165 / 166 / 167 / 6 |
+| C rec1 + `RX_VK_REC_OVERLAP_CHECK=1` | 73.8 (a 2.1 s hitch), 85.3 | 17.5, 17.0 | 7.49 / 3.42 / 2.81 and 7.55 / 3.54 / 3.04 | 2352 / 159 / 165 / 165 / 6 and 2426 / 166 / 167 / 168 / 6 |
+Same frame, same speed within the spread (fps is a sanity figure). The proof of an unchanged command stream is the check: with every switch off, 13,800 joins in one run, **0 segments differ from the dry pass's plan**; 41.8 million reads of the submission's value and epoch by segment workers, **0 differ** from the replay thread's. The same in Kakariko, Lost Woods and Inside the Deku Tree (`kokiri-idle`, 14-48 million reads each, 0 differences). Pictures were not compared: `RX_VK_SHOTS` writes nothing in these windowed bench runs (JOIN1 saw the same; not investigated again), the rb ring's hash log is not run-to-run deterministic in the harness scenes (`readback-ring.md` 4.2), so the draw, dispatch, pass and barrier counts and the plan check stand for the command stream. No crash, hang, device loss in any of the 11 runs (no validation layer was on).
+
+Stage B, what forces the join (`RX_VK_DEFER_JOIN=2 RX_VK_REC_OVERLAP_CHECK=1`, Market, Kakariko, Lost Woods, Deku Tree, ~9,000 joins in Market): per join, **1.00 made at the end of run_submit's command buffers loop, 0.00 by every other cause**; steps beside pending segments: recording begun 1.00, serial small command buffer 0.00, dry pass 0.00; ub_prune, par_conds_reset, memory_begin_submission, memory_end_submission beside pending segments 0.00. The big command buffer is the last of its submission in every scene, so there is no next command buffer in the same submission to overlap with: **the overlap has to cross submissions**, which needs pieces 8 and 9 and the per-submission write-back and synced lists first (above). Numbers for the deferred arm are not a gain figure (it is the JOIN1 diagnosis): Market 75.3 fps against 77.0, Kakariko 70.3 against 97.1 (a lost round for the plain arm in the same place: other runs of that scene gave 97-100), Lost Woods 83.4 against 83.0, Deku Tree 135.4 against 128.1.
+
+`RX_VK_REC_OVERLAP` (Stage B) is not built.
