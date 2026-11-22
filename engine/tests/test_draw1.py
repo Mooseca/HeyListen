@@ -3,8 +3,8 @@ and its check; source-shape test, no game or GPU required.
 
 RX_VK_DRAW_LAZY      the "may this draw be left out" test is made only for a draw whose program or pipeline is not ready
 RX_VK_DRAW_HPTR      a texture handle's "is a storage buffer's pointer" answer kept with the program's texture slots
-RX_VK_DRAW_PROGFRONT the program picks answered from the last 32 answers (program_for's rule), program_for itself when none stands
-RX_VK_DRAW_PIPEFAST  the last 16 pipelines (exact state equality) tried before the thread's map, not the last 2
+RX_VK_DRAW_PROGFRONT (off by default) the program picks answered from the last 32 answers (program_for's rule), program_for itself when none stands
+RX_VK_DRAW_PIPEFAST  (off by default) the last 16 pipelines (exact state equality) tried before the thread's map, not the last 2
 RX_VK_DRAW_EXCL      the capture's left-out ranges searched in a per-thread copy, not under cap_excl_mu at every buffer binding
 RX_VK_DRAW_CHECK     the old answer worked out too, compared and counted (mismatches logged)
 RX_VK_DRAW_SAMPLE    the sampler of where draw() spends its time (diagnosis)
@@ -30,7 +30,7 @@ def need(text, what, needles):
 def main():
     draw = read("vk_draw.cpp")
     need(draw, "vk_draw.cpp", [
-        'getenv("RX_VK_DRAW_LAZY")', 'getenv("RX_VK_DRAW_HPTR")', 'getenv("RX_VK_DRAW_PROGFRONT")', 'getenv("RX_VK_DRAW_PIPEFAST")', 'getenv("RX_VK_DRAW_CHECK")',
+        'getenv("RX_VK_DRAW_LAZY")', 'getenv("RX_VK_DRAW_HPTR")', 'env_on("RX_VK_DRAW_PROGFRONT")', 'env_on("RX_VK_DRAW_PIPEFAST")', 'getenv("RX_VK_DRAW_CHECK")',
         "may_skip_now()", "prog_front_find(", "prog_front_keep(", "draw_check_note(", "struct FineDraw", "fine_t()",
     ])
     # the picks kept here follow program_for's own rule: its helpers' bodies are copied, so a change there must come here

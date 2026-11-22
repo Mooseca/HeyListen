@@ -1897,14 +1897,14 @@ struct PipeFast {
     uint32_t formats[8]{}, vattr[16]{}, div[16]{};
     uint64_t blend[8]{};
 };
-// (stream DRAW1, RX_VK_DRAW_PIPEFAST=0: the last two pipelines, as before) The test is an exact equality of everything baked into the
+// (stream DRAW1, RX_VK_DRAW_PIPEFAST=1, off by default: the last 16 pipelines, not the last two) The test is an exact equality of everything baked into the
 // pipeline (pipe_same), so an entry is as good as it was when it was made, however old. Half of a frame's draws went by the thread's
 // map after the pair missed (alternating pipelines of 3 or more): the last 16 now
 constexpr int kPipeFast = 16;
 thread_local PipeFast pipe_fast[kPipeFast];
 thread_local uint32_t pipe_fast_next = 0;
 bool pipe_fast_wide() {
-    static const bool on = !getenv("RX_VK_DRAW_PIPEFAST") || !env_value_off(getenv("RX_VK_DRAW_PIPEFAST"));
+    static const bool on = env_on("RX_VK_DRAW_PIPEFAST");   // (off by default: the fast hits did not rise)
     return on;
 }
 
@@ -7823,7 +7823,8 @@ static bool writes_memory(const Program& p) {
 // its draws outside those two (~330 draws of 10 us and more, 1.2 ms of the program lookup in them) and then pays the full pick: the
 // inputs' hash, the thread's map, the answers' handles read again and compared. Here the same test is made over the last 32 answers
 // instead of 2, with program_for's own rule for what stands (prog_same, by_tex, the tone map reset): an answer that program_for
-// gave is as valid here as it was in its pair, and entries are only filled from its answers. RX_VK_DRAW_PROGFRONT=0: as before.
+// gave is as valid here as it was in its pair, and entries are only filled from its answers. Off by default (no measurable gain);
+// RX_VK_DRAW_PROGFRONT=1: on.
 // RX_VK_DRAW_CHECK=1: program_for is asked too, and the draw takes its answer; the two compared and counted
 struct ProgFront {
     bool on;
@@ -7840,7 +7841,7 @@ thread_local ProgFront prog_front[kProgFront];
 thread_local uint32_t prog_front_next = 0;
 thread_local int prog_front_tonemap = -1;
 bool prog_front_on() {
-    static const bool on = !getenv("RX_VK_DRAW_PROGFRONT") || !env_value_off(getenv("RX_VK_DRAW_PROGFRONT"));
+    static const bool on = env_on("RX_VK_DRAW_PROGFRONT");   // (off by default: it answers a third of the draws and gained nothing measurable)
     return on;
 }
 uint64_t prog_front_sig(const nvn_prog& p) {   // (vk_shader.cpp's prog_stage_sig)

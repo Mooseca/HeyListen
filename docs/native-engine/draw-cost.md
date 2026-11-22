@@ -37,8 +37,8 @@ Do not combine the sampler with `RX_VK_PARLOCK_STATS=1`: that run rendered 0 fps
 | Switch | What | Check |
 |---|---|---|
 | `RX_VK_DRAW_EXCL` | `cap_excl_hit` took a global mutex at every buffer binding; each thread searches its own copy (vk_memory.cpp) | 100,000,001 lookups, 0 differing |
-| `RX_VK_DRAW_PROGFRONT` | 32 kept program picks with program_for's own rule (it is in the shader stamp and untouched) | 0 differing pointers; answers 0.33 of the draws |
-| `RX_VK_DRAW_PIPEFAST` | the last 16 pipelines, not 2 | exact equality; fast hits stayed 0.58 a draw (no gain) |
+| `RX_VK_DRAW_PROGFRONT` (off by default) | 32 kept program picks with program_for's own rule (it is in the shader stamp and untouched) | 0 differing pointers; answers 0.33 of the draws |
+| `RX_VK_DRAW_PIPEFAST` (off by default) | the last 16 pipelines, not 2 | exact equality; fast hits stayed 0.58 a draw (no gain) |
 | `RX_VK_DRAW_HPTR` | a texture handle's storage-pointer test kept with the program's slots | in DRAW_CHECK |
 | `RX_VK_DRAW_LAZY` | the "may be left out" test only for a draw whose program or pipeline is not ready | pure function of the same state |
 
@@ -52,5 +52,11 @@ Do not combine the sampler with `RX_VK_PARLOCK_STATS=1`: that run rendered 0 fps
 (ms a frame, summed over threads for draw, descriptors, commands, programs.) The replay's draw CPU falls 7.5% and the replay thread's
 submit 0.27 ms; frame rate and p95 do not move (the frame is not CPU-bound here). PROF_FINE with everything on: draw() whole 13.45 ms
 against 14.1 before, program lookup 1.85 (unchanged: the front answers a third of the draws and the rest are real picks).
+
+PC 3050 (all-on build draw1b, run through that PC's own session): DRAW_CHECK 0 mismatches; fps 47.9 -> 48.0 at 1440p and 56.2 -> 56.2 at
+1080p (GPU-bound); the replay's summed draw 27.1 -> 25.6 ms and descriptors 12.4 -> 10.6 ms a frame.
+
+Defaults (coordinator, default-on rule): EXCL, HPTR and LAZY on; PROGFRONT and PIPEFAST off (no measurable gain), =1 turns them on. The
+8.5% / 14% figures above were measured with all five on; the per-switch split was not measured.
 
 Not done: pictures in the four scenes, the 3050 runs, per-switch gains (section "Per switch" below if filled in).
