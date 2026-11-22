@@ -1644,7 +1644,14 @@ bool dry_wanted_only() {
     return on;
 }
 SegEarlyHook* seg_early_hook = nullptr;
-size_t ub_first_of_recording = 0;  // (the current recording's first entry)
+// (stream REC1) The positions in the uniform updates' list are absolute: ub_base is how many entries ub_prune has popped from its front, an
+// entry's position is ub_base + its place in the deque, and every position kept elsewhere (ub_limit, a segment's `ub`, a dry-pass point's,
+// ub_first_of_recording) is one of these. A prune then moves nothing a recording that has begun holds: before, each of them was a place in
+// the deque that a pop_front shifted, which is why nothing could be pruned while workers read the list
+size_t ub_base = 0;
+size_t ub_end() { return ub_base + ub_updates.size(); }   // (the position the next update will take)
+const UbUpdate& ub_at(size_t pos) { return ub_updates[pos - ub_base]; }
+size_t ub_first_of_recording = 0;  // (the current recording's first entry: a position)
 uint64_t rec_value_now = 0;
 
 bool deferred_late() {   // (RX_VK_DEFERRED_LATE=1: deferred binds read from the game's arrays at the replay)
@@ -1656,7 +1663,7 @@ void ub_prune(uint64_t done) {
     if (ub_updates.empty() || ub_updates.front().value > done) return;
     while (!ub_updates.empty() && ub_updates.front().value <= done) {
         ub_updates.pop_front();
-        if (ub_first_of_recording) ub_first_of_recording--;
+        ub_base++;
     }
     ub_list_epoch.fetch_add(1, std::memory_order_relaxed);
 }
@@ -1712,8 +1719,8 @@ bool ub_try_gap(size_t first, size_t lim, uint64_t addr, uint64_t n) {
     dst.reserve(lim - first);
     end.reserve(lim - first);
     for (size_t i = first; i < lim; i++) {
-        dst.push_back(ub_updates[i].dst);
-        end.push_back(ub_updates[i].dst + ub_updates[i].bytes.size());
+        dst.push_back(ub_at(i).dst);
+        end.push_back(ub_at(i).dst + ub_at(i).bytes.size());
     }
     uint64_t lo = 0, hi = 0;
     if (!ub_gap(dst.data(), end.data(), (int)dst.size(), addr, n, &lo, &hi)) return false;
@@ -1732,7 +1739,7 @@ thread_local UbWord ub_words[128];
 bool ub_word_hit(uint64_t addr, size_t lim, uint32_t* out) {
     UbWord& w = ub_words[(addr >> 2) & 127];
     if (!w.on || w.addr != addr || w.rec != rec_value_now || w.page != memory_page_stamp(addr)) return false;
-    if (!ub_gap_holds(addr, 4, 0, lim)) return false;
+    if (!ub_gap_holds(addr, 4, ub_base, lim)) return false;
     *out = w.v;
     return true;
 }
@@ -1767,9 +1774,9 @@ void ub_copy_keep(uint64_t addr, uint64_t n, const uint8_t* base, size_t first, 
 uint64_t ub_overlay(uint64_t addr, uint64_t n, uint8_t* base, const std::function<uint64_t(uint64_t)>& alloc) {
     UbReadGuard ug;   // (TICK-056: the list may grow meanwhile, RX_VK_SEG_EARLY)
     // (a worker: those before its place in the stream; a background thread: none, not even the list's size)
-    const size_t lim = ub_limit ? std::min(ub_limit, ub_updates.size()) : 0;
+    const size_t lim = ub_limit ? std::min(ub_limit, ub_end()) : 0;
     static const bool cur_only = getenv("RX_VK_UB_CUR_ONLY") != nullptr;   // (A/B: this submission's updates only)
-    const size_t first = cur_only ? std::min(ub_first_of_recording, lim) : 0;
+    const size_t first = cur_only ? std::min(ub_first_of_recording, lim) : ub_base;
     if (ub_gap_holds(addr, n, first, lim)) return UINT64_MAX;
     const uint64_t view = memory_capture_view();
     uint64_t kept = 0;
@@ -1778,7 +1785,7 @@ uint64_t ub_overlay(uint64_t addr, uint64_t n, uint8_t* base, const std::functio
     const uint64_t epoch = ub_list_epoch.load(std::memory_order_relaxed);
     bool any = false;
     for (size_t i = first; i < lim; i++) {
-        const UbUpdate& u = ub_updates[i];
+        const UbUpdate& u = ub_at(i);
         if (u.dst < addr + n && addr < u.dst + u.bytes.size()) {
             any = true;
             break;
@@ -1790,7 +1797,7 @@ uint64_t ub_overlay(uint64_t addr, uint64_t n, uint8_t* base, const std::functio
     uint8_t* p = base + at;
     if (!memory_read_as_submitted(addr, p, n)) std::memset(p, 0, n);
     for (size_t i = first; i < lim; i++) {
-        const UbUpdate& u = ub_updates[i];
+        const UbUpdate& u = ub_at(i);
         const uint64_t lo = std::max(addr, u.dst), hi = std::min(addr + n, u.dst + u.bytes.size());
         if (lo < hi) std::memcpy(p + (lo - addr), u.bytes.data() + (lo - u.dst), hi - lo);
     }
@@ -1803,12 +1810,12 @@ uint64_t ub_overlay(uint64_t addr, uint64_t n, uint8_t* base, const std::functio
 /// bytes): what ub_overlay puts over the bytes as submitted
 void ub_overlay_onto(uint64_t addr, uint64_t n, uint8_t* p) {
     UbReadGuard ug;
-    const size_t lim = ub_limit ? std::min(ub_limit, ub_updates.size()) : 0;
+    const size_t lim = ub_limit ? std::min(ub_limit, ub_end()) : 0;
     static const bool cur_only = getenv("RX_VK_UB_CUR_ONLY") != nullptr;
-    const size_t first = cur_only ? std::min(ub_first_of_recording, lim) : 0;
+    const size_t first = cur_only ? std::min(ub_first_of_recording, lim) : ub_base;
     if (ub_gap_holds(addr, n, first, lim) || ub_try_gap(first, lim, addr, n)) return;
     for (size_t i = first; i < lim; i++) {
-        const UbUpdate& u = ub_updates[i];
+        const UbUpdate& u = ub_at(i);
         const uint64_t lo = std::max(addr, u.dst), hi = std::min(addr + n, u.dst + u.bytes.size());
         if (lo < hi) std::memcpy(p + (lo - addr), u.bytes.data() + (lo - u.dst), hi - lo);
     }
@@ -1819,7 +1826,7 @@ void ub_overlay_onto(uint64_t addr, uint64_t n, uint8_t* p) {
 /// the GPU's sake (handles in uniform and storage buffers): the game's memory now may be its next frames'.
 bool ub_read(uint64_t addr, void* dst, uint64_t n) {
     UbReadGuard ug;   // (TICK-056: the list may grow meanwhile, RX_VK_SEG_EARLY)
-    const size_t lim = ub_limit ? std::min(ub_limit, ub_updates.size()) : 0;
+    const size_t lim = ub_limit ? std::min(ub_limit, ub_end()) : 0;
     if (n == 4) {
         uint32_t v = 0;
         if (ub_word_hit(addr, lim, &v)) {
@@ -1831,7 +1838,7 @@ bool ub_read(uint64_t addr, void* dst, uint64_t n) {
     if (!memory_read_as_submitted(addr, dst, n)) return false;
     // (most words are not inside an inline update: the scan that finds that is kept for the gap, and the next words
     // in the gap do not walk the list. A word kept from that gap is the capture's own bytes)
-    if (ub_gap_holds(addr, n, 0, lim) || ub_try_gap(0, lim, addr, n)) {
+    if (ub_gap_holds(addr, n, ub_base, lim) || ub_try_gap(ub_base, lim, addr, n)) {
         if (n == 4 && page == memory_page_stamp(addr)) {
             UbWord& w = ub_words[(addr >> 2) & 127];
             uint32_t v = 0;
@@ -1841,8 +1848,8 @@ bool ub_read(uint64_t addr, void* dst, uint64_t n) {
         }
         return true;
     }
-    for (size_t i = 0; i < lim; i++) {
-        const UbUpdate& u = ub_updates[i];
+    for (size_t i = ub_base; i < lim; i++) {
+        const UbUpdate& u = ub_at(i);
         const uint64_t lo = std::max(addr, u.dst), hi = std::min(addr + n, u.dst + u.bytes.size());
         if (lo < hi) std::memcpy((uint8_t*)dst + (lo - addr), u.bytes.data() + (lo - u.dst), hi - lo);
     }
@@ -1884,11 +1891,12 @@ void ub_disjoint_writes(const Updates& ups, size_t first, size_t end, Write&& wr
 }
 
 void flush_ub_updates(VkCommandBuffer cmd) {
-    if (ub_first_of_recording >= ub_updates.size()) return;
+    const size_t first = std::max(ub_first_of_recording, ub_base);   // (a position: ub_updates' index is first - ub_base)
+    if (first >= ub_end()) return;
     GprofSpan gp(cmd, "ubupd (the stream's uniform updates -> guest memory, with its barriers)");
-    gp.items = (int)(ub_updates.size() - ub_first_of_recording);
+    gp.items = (int)(ub_end() - first);
     full_barrier(cmd);
-    ub_disjoint_writes(ub_updates, ub_first_of_recording, ub_updates.size(), [&](uint64_t dst, const uint8_t* bytes, uint64_t n) {
+    ub_disjoint_writes(ub_updates, first - ub_base, ub_updates.size(), [&](uint64_t dst, const uint8_t* bytes, uint64_t n) {
         gpu_write(cmd, dst, bytes, n), gp.bytes += n;
     });
     full_barrier(cmd);
@@ -2750,7 +2758,7 @@ void replay(VkCommandBuffer& cmd, NvnState& s, const uint8_t* p, const uint8_t* 
                     if (seg_early_hook && dry_wanted_only() && !seg_early_hook->wants(dry_work, p + h.size)) {
                         // (not a boundary)
                     } else {
-                        par_points.push_back({p + h.size, s, ub_updates.size(), par_conds.size(), dry_work});
+                        par_points.push_back({p + h.size, s, ub_end(), par_conds.size(), dry_work});
                         if (seg_early_hook) seg_early_hook->on_point(par_points.back());   // (TICK-056, RX_VK_SEG_EARLY)
                     }
                 }
@@ -2901,7 +2909,7 @@ void split_part(VkCommandBuffer& cmd) {
     memory_end_submission(cmd);
     full_barrier(cmd, "barrier (recording end)");
     submit_recording(*rec_cur, false);
-    if (part_flush) ub_first_of_recording = ub_updates.size();
+    if (part_flush) ub_first_of_recording = ub_end();
     Recording& r = begin_recording(rec_cur_value);
     memory_begin_submission();
     full_barrier(r.cmd, "barrier (recording start)");
@@ -2920,7 +2928,7 @@ bool occ_sync(VkCommandBuffer& cmd) {
     full_barrier(cmd, "barrier (recording end)");
     Recording* old = rec_cur;
     submit_recording(*rec_cur, false);
-    ub_first_of_recording = ub_updates.size();
+    ub_first_of_recording = ub_end();
     Recording& r = begin_recording(rec_cur_value);
     memory_begin_submission();
     full_barrier(r.cmd, "barrier (recording start)");
@@ -3565,7 +3573,7 @@ const uint8_t* replay_handle_early(VkCommandBuffer& cmd, const uint8_t* h, bool 
     occ_stop_at = nullptr;
     EarlyWall early_wall;
     const auto t_dry0 = std::chrono::steady_clock::now();
-    const size_t ub0 = ub_updates.size();
+    const size_t ub0 = ub_end();
     par_points.clear(), par_conds_reset(), dry_work = 0;
     const uint64_t serial0 = occ_serial;
     Recording& r = *rec_cur;
@@ -3800,7 +3808,7 @@ const uint8_t* replay_handle(VkCommandBuffer& cmd, const uint8_t* h, bool may_st
     occ_stop_at = nullptr;
     const auto t_dry0 = std::chrono::steady_clock::now();
     const NvnState start = state;
-    const size_t ub0 = ub_updates.size();
+    const size_t ub0 = ub_end();
     // (stream JOIN1) a join pending (RX_VK_DEFER_JOIN): its segments read par_conds and the uniform updates, so this dry pass appends to
     // them (par_conds is not reset: this command buffer's conditions follow, from cond0) and holds ub_grow_mu as an early dry pass does
     const size_t cond0 = defer_group ? par_conds_n.load(std::memory_order_acquire) : 0;
@@ -4322,7 +4330,7 @@ std::atomic<uint64_t> replayed_hold{0};             // (0: none)
 void bench_replay(const std::vector<uint64_t>& handles) {
     const uint64_t value = pushed.load();   // (reached already: no slot waits on it)
     rec_value_now = value;
-    ub_first_of_recording = ub_updates.size();
+    ub_first_of_recording = ub_end();
     Recording& first = begin_recording(value);
     memory_begin_submission();
     full_barrier(first.cmd);
@@ -4676,7 +4684,7 @@ bool run_submit(const uint64_t* handles, int n, uint64_t value, uint64_t queue, 
         use_queue_state(queue);
         ub_prune(completed());
         rec_value_now = tag;
-        ub_first_of_recording = ub_updates.size();
+        ub_first_of_recording = ub_end();
         Recording& first = begin_recording(tag);
         memory_begin_submission();
         full_barrier(first.cmd, "barrier (recording start)");
@@ -6443,7 +6451,7 @@ void do_present(const nvn_tex* t, const int crop[4]) {
         const uint64_t value = present_value ? present_value : ++q_values;
         present_value = 0;
         rec_value_now = value;
-        ub_first_of_recording = ub_updates.size();
+        ub_first_of_recording = ub_end();
         Recording& r = begin_recording(value);
         memory_begin_submission();
         Texture* tex = t ? texture_for_present(t) : nullptr;

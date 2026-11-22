@@ -56,7 +56,7 @@ def main():
          "the dry pass moves par_conds' buffer unguarded")
     i = rep.index("s.render_enabled = cond_at < par_conds_n.load(std::memory_order_acquire) ? par_conds[cond_at] != 0 : true;")
     need("UbReadGuard ug;" in rep[i - 200:i], "a worker reads a render condition unguarded")
-    i = rep.index("par_points.push_back({p + h.size, s, ub_updates.size(), par_conds.size(), dry_work});")
+    i = rep.index("par_points.push_back({p + h.size, s, ub_end(), par_conds.size(), dry_work});")
     need("if (seg_early_hook) seg_early_hook->on_point(par_points.back());" in rep[i:i + 300], "the hook is not called after a point")
     need("seg_early_hook && dry_wanted_only() && !seg_early_hook->wants(dry_work, p + h.size)" in rep[i - 400:i],
          "the dry pass copies the state at points no boundary takes (RX_VK_DRY_WANTED)")
