@@ -142,3 +142,20 @@ What the pieces do **not** cover (Stage B, in this order):
 4. `memory_end_submission(cmd)` consumes `sub_cur` and many globals (`lazy_release`, `rbring_flush`, `mirror_upload = false`, the write-back staging) and is called from `finish_recording`, which uses `rec_cur`, `done_max`, `signaled`, `ub_first_of_recording` and `flush_ub_updates`. For the last worker to run it after the next submission began, those must travel with the group (a `Recording*`, the submission's value, the first ub position, its `MemSub`), and `memory_end_submission` must take its `MemSub` as an argument. `ub_first_of_recording` is a replay-thread global the next `run_submit` rewrites.
 5. The order of `vkQueueSubmit`: the group's segments are submitted in order by whichever thread finishes one (`early_submit_ready`); the group's tail recording and every later recording must wait for the completion that submits it, under one lock; the timeline `signaled`/`done_max`/`rec_open_values` bookkeeping in `run_submit`/`finish_recording` is then updated by the completing thread.
 6. Every wait the game makes (fence poll, `wait_value`, `wait_queue_empty`, event poll, `sync_drain`, present, `dump_pending`) must find the pending submission submitted, or join it first: one function `sub_join()` called at their entries (`replay_mu`/`sync_order_mu` holders).
+
+## SUB1 Stage B (22 Nov 2026): RX_VK_SUB_OVERLAP, built, off by default
+
+What it does: a submission whose last command buffer's group (RX_VK_EARLY_GPU, deferred) still has segments recording returns without joining it. The game's submissions replay in bursts (`burst_begin` in `submit_q`),
+so the handoff is made where the recording is finished: `finish_recording_deferred` (run_submit's end outside a burst, `burst_end` inside one). The replay thread ends the last recording, makes its submit ready
+(`SubmitPrep`: command buffers, timeline signals, recording numbers, in the submit order), fixes the memory end's generation (`memory_submission_handoff`) and goes on. The thread that puts the group's last segment
+in the queue (`group_tail_send`, under the group's `sub_mu`) records the write-backs into the recording's `tail` command buffer (`memory_end_submission_of`: the submission's own value, epoch, lists and readback-ring
+requests, `RbPending` per submission) and sends the last recording with them in one vkQueueSubmit2. Completed before the next submission's capture (`sub_complete_before_submit`), before any recording of it goes to the queue,
+at the next big command buffer's start, and by every other `replay_mu` holder (`ReplayLock`). `pushed` moves at the handoff: a wait on the value waits for the send. Not used with a stop, a dump, a held batch, or a group that is not early-GPU.
+
+Check (`RX_VK_SUB_OVERLAP_CHECK=1`, with REC1's): Market, Kakariko, Lost Woods, Deku Tree, 6,000-8,000 handoffs each: 0 segments differ from the plan, all "per submission (SUB1)" counts 0, per-frame draws/dispatches/passes/barriers/submits as without
+(Market 2370/165/169/169/6), no crash, hang or device loss, no validation layer on. Mean window (handoff to completion) 1.2-2.3 ms; ends sent by a worker in most (Deku 8066 of 8085), by the replay thread in half in Kakariko (3047 of 6200).
+Pictures not compared (RX_VK_SHOTS writes nothing in windowed bench runs; not investigated again).
+
+Speed (RTX 5070, speed lease, Market `market-spin`, rounds 2-4 after a warm-up round, Stage A against Stage B on): fps 88.8 / 87.6 (same within the spread), p95 15.7 / 15.5 ms; "replay not ready for segments" 1.08 -> 0.79 ms a frame, gaps 3.0 -> 2.1 a frame,
+GPU idle between recordings 3.4 -> 2.8 ms, GPU busy 7.65 -> 8.09 ms: the idle that went was paid back as busy time, and the capture's wait for the submission before (it comes first, so the overlap is only the setup and the small command buffers) bounds the window.
+Next: overlap the capture (late pages make it wait for the write-backs of the submission before: they need the tail sent from a thread that holds no pools_mu) and keep the next big command buffer's dry pass beside the pending group (par_conds per group).
