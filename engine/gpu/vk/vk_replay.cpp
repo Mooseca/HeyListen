@@ -3536,7 +3536,7 @@ void early_submit_ready(EarlyGroup& G) {
 /// recorded into a command buffer of its own (memory_end_submission_of, as the submission's own: its value, epoch, lists), then its last recording
 /// and that one sent in one vkQueueSubmit2 with the timeline signals made ready at its end
 struct SubStats {
-    std::atomic<int64_t> handoffs{0}, by_worker{0}, by_replay{0}, window_ns{0}, joined[kJoinWhys + 1] = {};
+    std::atomic<int64_t> handoffs{0}, by_worker{0}, by_replay{0}, window_ns{0}, joined[kJoinWhys + 1] = {}, not_ok[8] = {};
 } sub_stats;
 void group_tail_send(EarlyGroup& G) {
     if (!G.tail_set.load(std::memory_order_acquire) || G.tail_sent || G.next_sub < G.used) return;
@@ -3703,6 +3703,9 @@ void early_join(EarlyGroup& G) {
                      (long long)sub_stats.joined[2].load(), kJoinWhyName[3], (long long)sub_stats.joined[3].load(), kJoinWhyName[4],
                      (long long)sub_stats.joined[4].load(), kJoinWhyName[5], (long long)sub_stats.joined[5].load(), kJoinWhyName[6],
                      (long long)sub_stats.joined[6].load(), h ? sub_stats.window_ns.load() / 1e6 / (double)h : 0.0);
+                logf("vk: SUB_OVERLAP_CHECK: submissions that could not be left pending, by why: stop %lld, no group %lld, group not deferred %lld, not early-GPU %lld, no recording %lld, dump %lld, batch %lld",
+                     (long long)sub_stats.not_ok[0].load(), (long long)sub_stats.not_ok[1].load(), (long long)sub_stats.not_ok[2].load(), (long long)sub_stats.not_ok[3].load(),
+                     (long long)sub_stats.not_ok[4].load(), (long long)sub_stats.not_ok[5].load(), (long long)sub_stats.not_ok[6].load());
             }
             std::fill(std::begin(defer_stats.shared), std::end(defer_stats.shared), 0);
             std::fill(std::begin(defer_stats.why), std::end(defer_stats.why), 0);
@@ -4800,8 +4803,17 @@ void finish_recording_deferred(uint64_t value) {
 void burst_end() {
     if (!burst_open) return;
     burst_open = false;
-    ReplayLock lk;
-    if (rec_cur) finish_recording(burst_value);
+    ReplayLock lk(false);   // (stream SUB1: a pending group is handed off with the burst's last recording, or completed first)
+    if (!rec_cur) {
+        sub_complete_now();
+        return;
+    }
+    if (sub_overlap_on() && defer_group && defer_group->deferred && defer_group->egpu && !dump_pending() && !batch_on()) {
+        finish_recording_deferred(burst_value);
+        return;
+    }
+    sub_complete_now();
+    finish_recording(burst_value);
 }
 
 /// The recording being made: ended and submitted, the timeline signalled as far as no older submission is unfinished
@@ -4932,9 +4944,17 @@ bool run_submit(const uint64_t* handles, int n, uint64_t value, uint64_t queue, 
     }
     // (stream SUB1, RX_VK_SUB_OVERLAP) the join that ends the loop is left to the next submission's first need of the queue (or any thread's wait) when the
     // submission's last group is deferred and nothing here needs it done: no stop, no burst, no dump, no held batch
-    const bool overlap = sub_overlap_on() && !stop && !burst_open && defer_group && defer_group->deferred && defer_group->egpu && rec_cur &&
-                         !dump_pending() && !batch_on();
-    if (!overlap) defer_join_now(kJoinLoopEnd);   // (stream JOIN1: a join never outlives the command buffers' loop: the recording's end below needs every segment)
+    const bool pend_ok = sub_overlap_on() && !stop && defer_group && defer_group->deferred && defer_group->egpu && rec_cur && !dump_pending() && !batch_on();
+    const bool overlap = pend_ok && !burst_open;   // (in a burst the recording goes on: its end is made at the burst's end, burst_end)
+    if (!pend_ok && sub_overlap_on() && defer_check_on()) {   // (why not: stop, no group, not deferred, not early-GPU, no recording, a dump, a held batch)
+        const int why = stop ? 0 : !defer_group ? 1 : !defer_group->deferred ? 2 : !defer_group->egpu ? 3 : !rec_cur ? 4 : dump_pending() ? 5 : 6;
+        sub_stats.not_ok[why].fetch_add(1, std::memory_order_relaxed);
+    }
+    if (!pend_ok) defer_join_now(kJoinLoopEnd);
+    else if (burst_open) {   // (the group stays pending past this piece: whatever takes replay_mu or submits completes it first)
+        sub_pend = true, sub_pend_value = value, sub_pend_flag.store(true, std::memory_order_release);
+        sub_pend_t0 = std::chrono::steady_clock::now().time_since_epoch().count();
+    }   // (stream JOIN1: a join never outlives the command buffers' loop: the recording's end below needs every segment)
     if (stop) {
         tl_ev("stop", value, queue, wait_at(stop).gpu);
         QueueRun& q = qruns[queue];
