@@ -920,9 +920,18 @@ static void sleep_ns(int64_t ns, int guest) {
         /* TICK-062 B4, HOS_SHORT_SLEEP_PAUSE=1: one yield, then a PAUSE loop to the deadline (SwitchToThread in a loop
            keeps calling into the kernel and bounces the SMT sibling's work) */
         static int pause_spin = -1;
-        if (pause_spin < 0) pause_spin = getenv("HOS_SHORT_SLEEP_PAUSE") && atoi(getenv("HOS_SHORT_SLEEP_PAUSE")) != 0;
+        /* (QUICK1, HOS_SHORT_SLEEP_PAUSE=2: the clock read once per eight pauses instead of four, one QPC read less in two;
+           idea: Rekarina's notes, 2026-11; off until measured: 1 stays four) */
+        if (pause_spin < 0) pause_spin = getenv("HOS_SHORT_SLEEP_PAUSE") ? atoi(getenv("HOS_SHORT_SLEEP_PAUSE")) : 0;
         if (pause_spin) {
             if (hos_now_ns() < until) SwitchToThread();
+            if (pause_spin >= 2) {
+                while (hos_now_ns() < until) {
+                    YieldProcessor(); YieldProcessor(); YieldProcessor(); YieldProcessor();
+                    YieldProcessor(); YieldProcessor(); YieldProcessor(); YieldProcessor();
+                }
+                return;
+            }
             while (hos_now_ns() < until) { YieldProcessor(); YieldProcessor(); YieldProcessor(); YieldProcessor(); }
             return;
         }
