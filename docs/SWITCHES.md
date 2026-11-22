@@ -10,7 +10,7 @@ python -I engine/scripts/list_switches.py
 
 and commit both files. A test (`engine/tests/test_switches_documented.py`) fails when a switch read in the source is missing here or the data file is out of date.
 
-1430 switches: 56 players may be told to use, 378 diagnostic, 996 developer-only; 1223 have a real explanation and 207 are marked `undocumented`.
+1432 switches: 56 players may be told to use, 378 diagnostic, 998 developer-only; 1224 have a real explanation and 208 are marked `undocumented`.
 
 ## How to set a switch
 
@@ -73,7 +73,7 @@ The entries below say what each one does, its values and default, and when it is
 | [Host and OS (`HOS_*` and the system's variables)](#host-and-os-hos_-and-the-systems-variables) | 138 | 10 | 0 | 128 |
 | [Telemetry and crash reports](#telemetry-and-crash-reports) | 12 | 0 | 12 | 0 |
 | [Diagnostics and logging](#diagnostics-and-logging) | 295 | 0 | 295 | 0 |
-| [Build and lift time (`A64_*`, `RX_*` and `HOOKSHOT_*` the builder reads)](#build-and-lift-time-a64_-rx_-and-hookshot_-the-builder-reads) | 92 | 0 | 0 | 92 |
+| [Build and lift time (`A64_*`, `RX_*` and `HOOKSHOT_*` the builder reads)](#build-and-lift-time-a64_-rx_-and-hookshot_-the-builder-reads) | 94 | 0 | 0 | 94 |
 
 ## Renderer: upscaling, frame generation, HDR, V-Sync and presentation
 
@@ -13557,9 +13557,19 @@ The Khronos validation layer.
 
 ## Build and lift time (`A64_*`, `RX_*` and `HOOKSHOT_*` the builder reads)
 
-92 switches read by the builder or the lifter, in their environment.
+94 switches read by the builder or the lifter, in their environment.
 
 ### Lift (A64_*)
+
+#### `A64_` - developer
+
+undocumented: nx2/fastvec.py:22 reads it as a text value: `return os.environ.get("A64_" + name, "1").strip().lower() not in ("0", "off", "false", "no")`. No comment in the source says what it changes.
+
+**Values:** text (`0` named). **Default:** unset.
+
+**When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
+
+**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/fastvec.py:22`.
 
 #### `A64_DEVIRT` - developer
 
@@ -13760,6 +13770,16 @@ undocumented: nx2/cmpflags.py:39 reads it as a number: `v = os.environ.get("A64_
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
 **Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/cmpflags.py:39` and 1 more place.
+
+#### `A64_VECFP` - developer
+
+(Longshot) SSE fast paths for lane-by-lane float forms (A64_VECFP, nx2/vecfp.py) ---- Each a64_vfx_<form> writes its destination and returns 1 only when every lane's native result is provably Arm's (FPX1's rules, a64_suyu.h); else it writes nothing and returns 0, and the instruction's own C runs.
+
+**Values:** a whole number. **Default:** 1.
+
+**When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
+
+**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/vecfp.py:54` and 1 more place.
 
 ### Builder and toolchain
 

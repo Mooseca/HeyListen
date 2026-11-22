@@ -2,8 +2,29 @@
  "schema": 1,
  "generated_by": "engine/scripts/list_switches.py",
  "scope": "C, C++ and headers under engine/ (engine/tests and vendored trees other than a64-kit excluded) and the Python the builder, the lifter and the scripts run: getenv, std::getenv, _wgetenv, the code's own env helpers and table-driven reads, and os.environ.",
- "count": 1430,
+ "count": 1432,
  "switches": [
+  {
+   "name": "A64_",
+   "area": "build",
+   "group": "Lift (A64_*)",
+   "audience": "developer",
+   "files": [
+    {
+     "path": "nx2/fastvec.py",
+     "line": 22
+    }
+   ],
+   "default": "unset",
+   "values": "text (`0` named)",
+   "explanation": "undocumented: nx2/fastvec.py:22 reads it as a text value: `return os.environ.get(\"A64_\" + name, \"1\").strip().lower() not in (\"0\", \"off\", \"false\", \"no\")`. No comment in the source says what it changes.",
+   "comment": null,
+   "documented_in": null,
+   "source": "undocumented",
+   "documented": false,
+   "set_via": "In the build's environment (the builder or the command line), before the build runs.",
+   "use": null
+  },
   {
    "name": "A64_DEVIRT",
    "area": "build",
@@ -441,6 +462,31 @@
    "documented_in": null,
    "source": "undocumented",
    "documented": false,
+   "set_via": "In the build's environment (the builder or the command line), before the build runs.",
+   "use": null
+  },
+  {
+   "name": "A64_VECFP",
+   "area": "build",
+   "group": "Lift (A64_*)",
+   "audience": "developer",
+   "files": [
+    {
+     "path": "nx2/vecfp.py",
+     "line": 54
+    },
+    {
+     "path": "nx2/vecfp.py",
+     "line": 63
+    }
+   ],
+   "default": "1",
+   "values": "a whole number",
+   "explanation": "(Longshot) SSE fast paths for lane-by-lane float forms (A64_VECFP, nx2/vecfp.py) ---- Each a64_vfx_<form> writes its destination and returns 1 only when every lane's native result is provably Arm's (FPX1's rules, a64_suyu.h); else it writes nothing and returns 0, and the instruction's own C runs.",
+   "comment": "(Longshot) SSE fast paths for lane-by-lane float forms (A64_VECFP, nx2/vecfp.py) ---- Each a64_vfx_<form> writes its destination and returns 1 only when every lane's native result is provably Arm's (FPX1's rules, a64_suyu.h); else it writes nothing and returns 0, and the instruction's own C runs.",
+   "documented_in": null,
+   "source": "comment at nx2/vecfp.py",
+   "documented": true,
    "set_via": "In the build's environment (the builder or the command line), before the build runs.",
    "use": null
   },
