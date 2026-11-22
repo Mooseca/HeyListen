@@ -7233,7 +7233,7 @@ void memory_pool_finalized(uint64_t gpu, uint64_t size) {   // (the game's threa
     st_fin_notes++;
 }
 
-// ---- (HeyListen, 2026-11-22, #121) pools of zones left behind: RX_VK_ACCUM_RETIRE (default 0; =1 on), RX_VK_ACCUM_DIAG=1 ----
+// ---- (HeyListen, 2026-11-22, #121) pools of zones left behind: RX_VK_ACCUM_RETIRE (default 1; =0 off), RX_VK_ACCUM_DIAG=1 ----
 // Players' logs after an hour of play: the replay's and the GPU's time per frame grew with the session and a restart brought them
 // back. What grows is the pool table: a chunk (an import of 16 MB around a binding, with its VRAM mirror) left it only when a larger
 // import took it in, and the game's end of a pool (RX_VK_POOL_FINALIZE, off by default) was the only other way out. Every zone
@@ -7246,7 +7246,7 @@ void memory_pool_finalized(uint64_t gpu, uint64_t size) {   // (the game's threa
 bool accum_retire_on() {
     static const bool v = [] {
         const char* e = getenv("RX_VK_ACCUM_RETIRE");
-        const bool on = e && atoi(e) != 0;
+        const bool on = !e || atoi(e) != 0;   // (on by default since the owner's 55-minute session gave back 843 MB with no picture problem)
         logf("vk: chunks with no live game pool left, idle, retired by a sweep: %s (RX_VK_ACCUM_RETIRE)", on ? "on" : "off");
         return on;
     }();
