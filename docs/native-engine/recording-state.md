@@ -82,7 +82,23 @@ Every piece was read from the code, not from the JOIN1 list; the first row corre
   an earlier order finds the pool not synced for it. The pool then needs a short list of (epoch, order) syncs, not one pair, because two recordings' copies are both live in the queue. This is the largest change in `vk_memory.cpp` and is
   not made.
 
-## Stage B: what was learned about overlap (see the results below)
+### 9. The capture (`vk_memory.cpp`, `memory_read_as_submitted`, `cap_entry`, `cap_bufs`, `cap_view_gen`) - found in this pass, not moved
+- Every uniform word, handle and storage-buffer word the replay reads on the CPU for the GPU's sake (`ub_read`, the descriptor code, program lookups) comes from "guest memory as it was at the submission": a page's newest
+  capture (`cap_entry(page)`, valid while `e.gen == page_gen(page)`), else guest memory. The table is global, and `memory_capture_submit` (the capture of the next submission, ~0.13-0.2 ms, in the "setup" before the first
+  command buffer) replaces its entries. A worker still recording the last submission's segment would read the next submission's pages.
+- Rule to build: a capture view per submission, taken by the group like the epoch (the table's entries keep the generation they belong to: a read for submission N must take entries with generation <= N's and skip newer ones, or
+  `cap_bufs` keep the older version until the group is joined). `cap_view_gen` and the `submitted_pages` caches key on the view already, so they follow. This is the piece that decides whether the next submission's capture can run beside
+  the last one's segments, and it is not small: do it before anything below.
 
-`RX_VK_DEFER_JOIN` (JOIN1) already runs `begin_recording` beside pending segments, and the dry pass of the next big command buffer beside them is built (`par_conds` continued, `ub_grow_mu`). What forces the join, counted by
-`RX_VK_REC_OVERLAP_CHECK` ("joins made by" in the "shared recording state" line): see the results.
+## Stage B: what is needed, from the code (not built)
+
+Stage B is not built: a recording may not begin beside the workers of the one before until pieces 8 (the pool's sync pair) and 9 (the capture) are per submission, and `memory_begin_submission`'s lists below are per submission too. What was
+learned, so the next session need not read it again:
+- `RX_VK_DEFER_JOIN` (JOIN1) already runs `begin_recording` beside pending segments, and the dry pass of the next big command buffer beside them is built (`par_conds` continued, `ub_grow_mu`). In the frames measured the join is
+  always forced at once (JOIN1); `RX_VK_REC_OVERLAP_CHECK` now says by which step ("joins made by"; see the results below).
+- The gain is in the steps between one big command buffer's join and the next recording's first need of the GPU's order: the next submission's capture and setup (0.13-0.2 + 0.2-0.25 ms), its small command buffers (0.4-0.45 ms), the dry pass of
+  its big one (0.26-0.3 ms), per REPLAY2's split of what the GPU waits for. They sit behind `finish_recording` (`memory_end_submission` of the submission before, which needs every write-back the workers note) and behind `memory_begin_submission`.
+- The join would then be made by the last worker to finish a segment (completion-driven: its group's in-order submits are already made by whichever thread finishes one, `early_submit_ready`), which runs `finish_recording` of its submission under a lock
+  that orders it before the next submission's first `submit_recording`. The next submission's first submit waits for that order (the queue's order: N's segments, N's last recording, then N+1's first). The write-back list, the synced list and the
+  write-back notes (`writebacks`, `mirror_synced`, `wb_pages_note`'s per-value ranges) would be per submission with the epoch.
+- Not touched: `vk_draw.cpp` and the descriptor code (DRAW1's). A state move forced no change there: the workers read the value and epoch through `vk_memory.cpp`'s accessors; the draw code calls `memory_*` as before.
