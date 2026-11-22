@@ -234,6 +234,7 @@ ARGS = {
     "nx2/test_texture_init_barrier.py": ["--headers", "{vulkan_headers}"],
     "tests/test_parallel_init_order.py": ["--cxx", "{cxx}", "--headers", "{vulkan_headers}"],
     "tests/test_vertex_bind_range.py": ["--cxx", "{cxx}"],
+    "tests/test_stutter_report.py": ["--cxx", "{cxx}"],
     "tests/test_device_lost_exit.py": ["--cxx", "{cxx}"],
     "tests/test_mesh_unreachable_outputs.py": ["--cxx", "{cxx}", "--headers", "{spirv_headers}", "--spirv-val", "{spirv_val}"],
     "nx2/test_default_point_size.py": ["--headers", "{spirv_headers}", "--spirv-val", "{spirv_val}"],
