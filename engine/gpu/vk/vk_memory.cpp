@@ -481,6 +481,29 @@ bool import_pool(uint64_t lo, uint64_t hi, Pool& p) {
                                      getenv("RX_VK_WATCH_CPU") || getenv("RX_VK_VERIFY_DIM");
     // (HOS_GUEST_PAGES, host/hos_guestpages.c: not while a drop splits the window's reservation, which fails commits in it
     // meanwhile. An exe without the export, or the switch off: nothing)
+    {   // (RX_VK_IMPORT_VQ=1, diagnostic; ReLink's HOS_COMMIT_MARK_MB asks for it: Windows answers VirtualQuery with the run of pages after
+        // the address that share its state, found by walking them, ~2.3 ms a GB on ReLink's PC, and the heap is one committed run of
+        // many GB.) What a VirtualQuery of this pool's first page costs here, and the run it answers with; the first 40 imports, then
+        // any over 1 ms. The host's commit marks (HOS_COMMIT_MARK_MB) are worth taking only when this is slow
+        static const bool vq_probe = getenv("RX_VK_IMPORT_VQ") && atoi(getenv("RX_VK_IMPORT_VQ")) != 0;
+        if (vq_probe) {
+            static std::atomic<int> n{0}, slow{0};
+            static std::atomic<int64_t> total_ns{0};
+            MEMORY_BASIC_INFORMATION mi{};
+            const auto q0 = clk::now();
+            const SIZE_T got = VirtualQuery(ptr, &mi, sizeof mi);
+            const int64_t ns = std::chrono::duration_cast<std::chrono::nanoseconds>(clk::now() - q0).count();
+            const int k = n++;
+            total_ns += ns;
+            if (ns > 1000000) slow++;
+            if (k < 40 || ns > 1000000)
+                logf("vk: import VirtualQuery probe: %#llx (%llu MB pool) answered in %.3f ms with a run of %llu MB (state %#lx, protect %#lx); "
+                     "%d probes, %d over 1 ms, %.2f ms in all",
+                     (unsigned long long)lo, (unsigned long long)(bytes >> 20), ns / 1e6,
+                     (unsigned long long)(got ? ((mi.RegionSize + (uintptr_t)mi.BaseAddress - (uintptr_t)ptr) >> 20) : 0),
+                     (unsigned long)mi.State, (unsigned long)mi.Protect, k + 1, slow.load(), total_ns.load() / 1e6);
+        }
+    }
     using Hold = void (*)(int);
     static const Hold hold = (Hold)(void*)GetProcAddress(GetModuleHandleA(nullptr), "hos_gp_hold");
     if (hold) hold(1);
