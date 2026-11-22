@@ -6664,14 +6664,14 @@ thread_local int64_t occ_draw_slot = -1;   // (the replay: the serial of the dra
 thread_local int64_t occ_gate_draw = -1;   // (OCC1, mode 6: the serial of the proxy the draw in hand is gated on; -1: none)
 thread_local uint64_t occ_gate_cov_lo = 0, occ_gate_cov_hi = 0;   // (the segment being recorded: the serials whose predicate words are current)
 
-// (OCC1) RX_VK_OCC_GATE=1 (off by default): the game's hidden objects are skipped by the GPU, and nothing the game reads changes. OoT tests
+// (OCC1) RX_VK_OCC_GATE (on by default, =0 off): the game's hidden objects are skipped by the GPU, and nothing the game reads changes. OoT tests
 // each object with a one-draw proxy (reset, draw, report) and gates the object's draw on that report. The report the game reads stays
 // the fixed value (RX_VK_OCC_FIXED), so the sun, the haze and every count the CPU reads are what they always were and cannot flicker. The
 // draw is recorded inside a Vulkan conditional block (VK_EXT_conditional_rendering) on the proxy's own occlusion count, and the GPU
 // skips it when the proxy passed no sample. A count that is not there, a proxy of several draws or a device without the extension:
 // the object is drawn. Works with the parallel replay only; RX_VK_OCC_GATE_LOG=1 counts what the GPU skipped.
 bool occ_gate_env() {
-    static const bool on = getenv("RX_VK_OCC_GATE") && atoi(getenv("RX_VK_OCC_GATE")) != 0;
+    static const bool on = !getenv("RX_VK_OCC_GATE") || atoi(getenv("RX_VK_OCC_GATE")) != 0;   // (on unless =0)
     return on;
 }
 int occ_mode() {
@@ -6692,7 +6692,7 @@ const char* occ_log_dir() {
     static const char* d = getenv("RX_VK_OCC_LOG");
     return d && *d ? d : nullptr;
 }
-// ---- (OCC1) RX_VK_OCC_GATE=1: the objects gated on the GPU by their proxy's own count ----
+// ---- (OCC1) RX_VK_OCC_GATE (on by default, =0 off): the objects gated on the GPU by their proxy's own count ----
 // The predicate: one 32-bit word a slot of the query ring, 0 where the proxy's draw passed no sample, other where it did and
 // where the count is not there (the range is first filled with 1s, then the query results copied over it: the copy leaves
 // the words of queries that are not available alone). VK_EXT_conditional_rendering skips a gated draw whose word is 0.
@@ -6701,7 +6701,7 @@ VkBuffer occ_gate_buf = VK_NULL_HANDLE, occ_gate_host = VK_NULL_HANDLE;   // (th
 VmaAllocation occ_gate_mem = nullptr, occ_gate_host_mem = nullptr;
 const uint32_t* occ_gate_host_ptr = nullptr;
 bool occ_gate_ok = false;
-// (OCC1) RX_VK_OCC_GATE_LOG=1 (with RX_VK_OCC_GATE=1): the gate's predicate read back to the CPU five frames late, and every 600 presents one
+// (OCC1) RX_VK_OCC_GATE_LOG=1 (with the gate on, RX_VK_OCC_GATE): the gate's predicate read back to the CPU five frames late, and every 600 presents one
 // log line: render conditions on reports, how many tested a one-draw proxy, draws gated, predicate copies, and the share of the gated
 // draws (and of their indices) the GPU skipped.
 bool occ_gate_log_on() {
