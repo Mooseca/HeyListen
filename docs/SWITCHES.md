@@ -10,7 +10,7 @@ python -I engine/scripts/list_switches.py
 
 and commit both files. A test (`engine/tests/test_switches_documented.py`) fails when a switch read in the source is missing here or the data file is out of date.
 
-1429 switches: 56 players may be told to use, 378 diagnostic, 995 developer-only; 1223 have a real explanation and 206 are marked `undocumented`.
+1430 switches: 56 players may be told to use, 378 diagnostic, 996 developer-only; 1223 have a real explanation and 207 are marked `undocumented`.
 
 ## How to set a switch
 
@@ -73,7 +73,7 @@ The entries below say what each one does, its values and default, and when it is
 | [Host and OS (`HOS_*` and the system's variables)](#host-and-os-hos_-and-the-systems-variables) | 138 | 10 | 0 | 128 |
 | [Telemetry and crash reports](#telemetry-and-crash-reports) | 12 | 0 | 12 | 0 |
 | [Diagnostics and logging](#diagnostics-and-logging) | 295 | 0 | 295 | 0 |
-| [Build and lift time (`A64_*`, `RX_*` and `HOOKSHOT_*` the builder reads)](#build-and-lift-time-a64_-rx_-and-hookshot_-the-builder-reads) | 91 | 0 | 0 | 91 |
+| [Build and lift time (`A64_*`, `RX_*` and `HOOKSHOT_*` the builder reads)](#build-and-lift-time-a64_-rx_-and-hookshot_-the-builder-reads) | 92 | 0 | 0 | 92 |
 
 ## Renderer: upscaling, frame generation, HDR, V-Sync and presentation
 
@@ -13557,7 +13557,7 @@ The Khronos validation layer.
 
 ## Build and lift time (`A64_*`, `RX_*` and `HOOKSHOT_*` the builder reads)
 
-91 switches read by the builder or the lifter, in their environment.
+92 switches read by the builder or the lifter, in their environment.
 
 ### Lift (A64_*)
 
@@ -13750,6 +13750,16 @@ undocumented: third_party/a64-kit/lift/a64_lift.py:578 reads it as an on/off swi
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
 **Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `third_party/a64-kit/rt/a64_rt.c:148` and 1 more place.
+
+#### `A64_SUB_V` - developer
+
+undocumented: nx2/cmpflags.py:39 reads it as a number: `v = os.environ.get("A64_SUB_V", "1").strip().lower()`. No comment in the source says what it changes.
+
+**Values:** a whole number. **Default:** 1.
+
+**When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
+
+**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/cmpflags.py:39` and 1 more place.
 
 ### Builder and toolchain
 

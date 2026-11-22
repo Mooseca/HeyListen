@@ -28,6 +28,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # (python -I le
 import kit
 import nso2  # noqa: F401  (DT_RELR)
 import insn
+import cmpflags   # (longshot #1871, dyst) a subtraction's V as N xor (a < b): A64_SUB_V
 import lift_fixes
 import chunks
 import standalone
@@ -41,6 +42,7 @@ import a64_lift
 import a64_rtgen
 
 insn.install()
+cmpflags.install()   # (around insn's translate: text only, after the forms are chosen)
 lift_fixes.install()
 
 

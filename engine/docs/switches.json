@@ -2,7 +2,7 @@
  "schema": 1,
  "generated_by": "engine/scripts/list_switches.py",
  "scope": "C, C++ and headers under engine/ (engine/tests and vendored trees other than a64-kit excluded) and the Python the builder, the lifter and the scripts run: getenv, std::getenv, _wgetenv, the code's own env helpers and table-driven reads, and os.environ.",
- "count": 1429,
+ "count": 1430,
  "switches": [
   {
    "name": "A64_DEVIRT",
@@ -416,6 +416,31 @@
    "documented_in": null,
    "source": "comment at third_party/a64-kit/rt/a64_rt.c",
    "documented": true,
+   "set_via": "In the build's environment (the builder or the command line), before the build runs.",
+   "use": null
+  },
+  {
+   "name": "A64_SUB_V",
+   "area": "build",
+   "group": "Lift (A64_*)",
+   "audience": "developer",
+   "files": [
+    {
+     "path": "nx2/cmpflags.py",
+     "line": 39
+    },
+    {
+     "path": "nx2/cmpflags.py",
+     "line": 44
+    }
+   ],
+   "default": "1",
+   "values": "a whole number",
+   "explanation": "undocumented: nx2/cmpflags.py:39 reads it as a number: `v = os.environ.get(\"A64_SUB_V\", \"1\").strip().lower()`. No comment in the source says what it changes.",
+   "comment": null,
+   "documented_in": null,
+   "source": "undocumented",
+   "documented": false,
    "set_via": "In the build's environment (the builder or the command line), before the build runs.",
    "use": null
   },
