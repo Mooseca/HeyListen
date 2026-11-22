@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Sacrappy
+
 // Textures: one VkImage per texture storage (vk_texture.h). After totk-pc-recomp's runtime/vk_texture.c (MIT,
 // Copyright (c) 2026 the totk-pc-recomp authors): the cache keyed by storage address plus descriptor, uploads on first
 // use and when page write generations show the storage written, the GPU-owned rule (an image the GPU wrote is the

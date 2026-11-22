@@ -1,3 +1,5 @@
+# Copyright (C) 2026 Sacrappy
+
 """(TICK-061, D2/D3) RX_VK_DRY_LEAN: keeping only the dry pass's points next to the planned boundaries picks the same boundaries.
 
 Two parts.

@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Sacrappy
+
 // A parallel replay's new images in queue order: the production upload command buffer state, create()'s initialization,
 // bc_scratch_layout, the texture segment hooks, replay_handle's segment jobs and submits and the init pools' startup,
 // included from the init_*.inc files tests/test_parallel_init_order.py cuts from the source. Vulkan is a spy: commands

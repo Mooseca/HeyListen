@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Sacrappy
+
 // jobs_set_boost (gpu/vk/vk_jobs.cpp, RX_VK_STORM_WORKERS=4, RX_VK_WORKERS=1): the extra workers take jobs only while the storm
 // hold is on. Built against stand-ins for the renderer's headers (tests/test_jobs_wait_runs_queued.py).
 #include "vk_jobs.h"

@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Sacrappy
+
 /* nvdrv: NVIDIA's kernel-driver interface, below the real NVN driver.
 
    The NVN driver and NVIDIA's resource manager (NvRm*) are lifted SDK code and run unchanged. They reach the GPU only

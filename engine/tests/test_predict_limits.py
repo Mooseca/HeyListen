@@ -1,3 +1,5 @@
+# Copyright (C) 2026 Sacrappy
+
 """The prediction's limits (gpu/vk/predict_limits.h): the header against the sizes measured on the PC 3050, and the wiring in
 vk_draw.cpp's predict_run (what is left out for its size, where the commit is looked at, that the builds in hand are waited for).
 python -I -B tests/test_predict_limits.py [--cxx clang++]"""

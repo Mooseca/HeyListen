@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Sacrappy
+
 // Draws and dispatches: a program's pipeline layout (its stages' descriptors in Eden's order, as the SPIR-V back end
 // numbered them, one push-descriptor set when they fit), graphics pipelines (whatever Vulkan 1.3 and
 // VK_EXT_extended_dynamic_state3 take as dynamic state is dynamic; the rest is the key), each draw's descriptors

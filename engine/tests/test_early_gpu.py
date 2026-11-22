@@ -1,3 +1,5 @@
+# Copyright (C) 2026 Sacrappy
+
 """(stream C1) RX_VK_EARLY_GPU: a big command buffer's work goes to the GPU as it is recorded, in the queue's order.
 
 replay_handle_early's submit rule (the submit_ready lambda of gpu/vk/vk_replay.cpp) is cut out and compiled with stub segments

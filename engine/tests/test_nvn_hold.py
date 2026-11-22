@@ -1,3 +1,5 @@
+# Copyright (C) 2026 Sacrappy
+
 """(TICK-054) HOS_NVN_HOLD=2 (host/nvn_native.c): the submits of threads other than the presenting one are held and replayed by
 the presenting thread before its own next submit, or by whoever needs them first. The source must keep: the mode read as a
 number (2 is a mode of its own); the presenting thread learned at the present; its own submit flushing the held ones under

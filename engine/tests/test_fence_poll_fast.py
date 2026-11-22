@@ -1,3 +1,5 @@
+# Copyright (C) 2026 Sacrappy
+
 """(TICK-058) RX_VK_FENCE_POLL_FAST: a fence poll (a wait of timeout 0) on a submission finished whole on its queue answers
 without sync_order_mu, with the locked path's answer.
 

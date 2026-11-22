@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Sacrappy
+
 // (HeyListen, v0.4.4) What a CPU read of GPU results waited for, said in the hitch rows, and when the light meter's strict wait is
 // bounded. Plain functions: tests/test_readback_wait.py compiles this header and checks them.
 //

@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Sacrappy
+
 // (HeyListen, v0.4.4) RX_VK_WAIT_OWN: how far behind the GPU the replay lets the game run at each present, for the hazard of a GPU
 // that reads guest memory where it is (an integrated GPU: no VRAM mirror, vk_memory.cpp mirror_on) and a game that rewrites its HUD's
 // records before a pass has read them (a Radeon 890M, ROG Xbox Ally X: icons flashing, the minimap drawn with another texture).

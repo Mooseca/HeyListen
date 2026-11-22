@@ -1,3 +1,5 @@
+# Copyright (C) 2026 Sacrappy
+
 """A guest thread that escaped a long wait for a virtual core (host/hos_thread.c vc_acquire: it runs without one) takes a
 core again after its next block, like every other thread (issue 1929). The actual HosThread, hos_thread_core and the whole
 virtual-core block (from vc_lock to hos_cv_sleep) are compiled with a single-threaded harness: a clock the waits advance,

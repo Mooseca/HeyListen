@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Sacrappy
+
 /* (HeyListen native engine) What the OS layer's files for the native modules share (host/hl_host.c): how a native module
    answers a guest function at its address, and what the native side (engine/native, reached only through hl/c/) is given
    to work in the guest's memory and on its threads. One file a module: hl_jobs.c, and the next ones beside it. */

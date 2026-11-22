@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Sacrappy
+
 // The Vulkan back end's start: vulkan-1.dll, the instance, the device (Vulkan 1.3 and the extensions the NVN replay
 // wants where the GPU has them: mesh shaders, host memory import, graphics pipeline libraries), the window's
 // swapchain, and the rx_* table (vk_api.h). The NVN replay itself is vk_replay.cpp.

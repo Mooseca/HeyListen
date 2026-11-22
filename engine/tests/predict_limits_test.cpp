@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Sacrappy
+
 // The prediction's limits (gpu/vk/predict_limits.h): which programs are left to the draw that needs them, and when the prediction
 // stops for want of commit. The sizes are the ones the PC 3050's run measured: 1014k and 502k words took the driver's compiler over three
 // minutes and past 11 GB; the largest of the others, 133k words, 25 s.

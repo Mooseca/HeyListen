@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Sacrappy
+
 // (HeyListen) What the prediction of pipelines (predict_run, vk_draw.cpp) holds itself to. The pipelines it makes are built for the
 // driver's own cache and let go, so none of them is needed before the game: they are speculative, and a start that is cold (no program
 // cache, every shader prepared) runs them all in one go. On the PC 3050 (RTX 3050, 32 GB) two programs of the game's, 502k and 1014k

@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Sacrappy
+
 /* (HeyListen native engine) The OS layer's side of the graphics front end (engine/native, hl/c/hl_gfx.h;
    docs/native-engine/gfx-record-job.md).
 

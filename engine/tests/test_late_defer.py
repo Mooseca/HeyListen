@@ -1,3 +1,5 @@
+# Copyright (C) 2026 Sacrappy
+
 """(HeyListen TICK-060) RX_VK_LATE_DEFER: the late pages' wait moved from the capture's take to the queue, read from the source.
 
 - vk_memory.cpp take_capture: on by default since the PC 3050 confirm (=0: off); a take does not wait only when the switch is on, LATE_MERGE is off, the late value is

@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Sacrappy
+
 /* The native NVN layer's API (HOS_NVN_NATIVE=1): TOTK's NVN calls are answered here instead of by the lifted NVN
    driver over an emulated Switch GPU (hos/gpu.c). See gpu/render/rx_nvn.h for the design; the replay of what is
    recorded here is gpu/render/rx_nvn.cpp.

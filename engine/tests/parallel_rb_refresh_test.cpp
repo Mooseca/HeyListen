@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Sacrappy
+
 // The readback refresh (PR 430) in a parallel replay's submission: the production memory_rb_refresh and its bookkeeping,
 // texture_begin_recording / texture_uploads_recorded, the write-back note at the end of gpu_buffer_bind and vk_draw.cpp's
 // storage-descriptor binding, included from rb_actual.inc (tests/test_parallel_rb_refresh.py cuts them from the source).

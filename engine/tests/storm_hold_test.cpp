@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Sacrappy
+
 // The storm hold's state machine (gpu/vk/storm_hold.h), with no game, no GPU and no environment behind it: the latch,
 // its engage depth, its floor and its quiet rule, and the depth rule the first version used. Built by
 // tests/test_storm_hold_present.py.

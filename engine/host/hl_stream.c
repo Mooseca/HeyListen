@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Sacrappy
+
 /* (HeyListen native engine) The OS layer's side of the stream module (engine/native, hl/c/hl_stream.h;
    docs/native-engine/stream-boundary.md): the game's decode of a resource file, answered natively.
 

@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Sacrappy
+
 // tests/test_perf_report.py: gpu/vk/perf_report.h, the performance summary: its interval, its buckets, what a hitch is and what it waited on,
 // the pacing misses, the JSON the relay takes, and what a frame costs to add
 #include "../gpu/vk/perf_report.h"

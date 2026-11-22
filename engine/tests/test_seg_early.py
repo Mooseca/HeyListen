@@ -1,3 +1,5 @@
+# Copyright (C) 2026 Sacrappy
+
 """(TICK-056) RX_VK_SEG_EARLY: a big command buffer's segments handed out while its dry pass still runs keep what they read stable.
 
 By the text of gpu/vk/vk_replay.cpp and vk_draw.cpp:

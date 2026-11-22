@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Sacrappy
+
 // The Vulkan back end's shared state (gpu/vk).
 #pragma once
 

@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Sacrappy
+
 // The Insert menu. Drawn with Dear ImGui over the window's image at the last step of a present (menu_record; vk_imgui.h, in the
 // game's style: vk_ui.h), so it costs nothing while closed and it never touches the game's picture, nor what frame interpolation
 // sees. The FPS counter and the start-up screen are drawn the same way. Insert or F1 opens and closes it by default.

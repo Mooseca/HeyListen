@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Sacrappy
+
 // Guest memory for the GPU: each NVN memory pool imported as host memory (VK_EXT_external_memory_host) with one
 // buffer over it. The GPU reads the game's memory where it is and its writes land there: no mirrored copies, no
 // write-backs, no upload streams. A GPU address (a guest address for the native pools) maps to (buffer, offset).

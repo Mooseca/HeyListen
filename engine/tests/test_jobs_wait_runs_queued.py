@@ -1,3 +1,5 @@
+# Copyright (C) 2026 Sacrappy
+
 """A waited-for job still in the queue runs on the waiting thread at once (gpu/vk/vk_jobs.cpp jobs_wait; no game/GPU).
 
 vk_jobs.cpp is compiled beside stand-ins for vk_internal.h and vk_draw.h (logging, the thread calls, ub_thread_off) and

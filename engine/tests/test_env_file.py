@@ -1,3 +1,5 @@
+# Copyright (C) 2026 Sacrappy
+
 """HOS_ENV_FILE names the switches file a run reads instead of hookshot_env.txt beside the game.
 
 A scripted or A/B test run brings its own switches this way, and the player's hookshot_env.txt is neither read nor

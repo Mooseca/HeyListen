@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Sacrappy
+
 /* The Vulkan back end (mkw_vk.dll) and the game executable: what each gives the other.
 
    The executable records the game's NVN command buffers (host/nvn_native.c) and calls a renderer through the rx_*

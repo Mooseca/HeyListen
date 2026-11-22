@@ -1,3 +1,5 @@
+# Copyright (C) 2026 Sacrappy
+
 """Compile and run the parallel replay's segment count (vk_replay.cpp replay_handle, TICK-050; no game/GPU required)."""
 import argparse
 import subprocess

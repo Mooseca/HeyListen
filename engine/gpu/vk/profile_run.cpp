@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Sacrappy
+
 // (heylisten) The detailed performance profile's runtime: see profile_run.h and profile_report.h.
 #include "profile_run.h"
 

@@ -1,3 +1,5 @@
+# Copyright (C) 2026 Sacrappy
+
 """The storm hold's state machine and its two holds (gpu/vk/storm_hold.h; no game/GPU).
 
 Compiles the header with tests/storm_hold_test.cpp and drives it: the latch engages at RX_VK_STORM_HOLD jobs and not

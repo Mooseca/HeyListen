@@ -1,3 +1,5 @@
+# Copyright (C) 2026 Sacrappy
+
 """(TICK-059) RX_VK_READBACK_TICKET: a fast fence poll notes the sync_order_mu section in progress (a ticket), and a CPU
 readback waits until that section has left: the order the poll's lock gave it, without the poll waiting.
 

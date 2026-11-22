@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Sacrappy
+
 // Authored SDL and thread stubs. Production startup code is extracted by the
 // driver; no SDL library, OS window, renderer, game, or real thread is started.
 #include <cstdarg>

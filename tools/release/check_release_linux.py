@@ -1,3 +1,5 @@
+# Copyright (C) 2026 Sacrappy
+
 """Check the Linux files of a HeyListen release before they are published (tools/release/make_release_linux.sh runs it in CI).
 
     python3 -I tools/release/check_release_linux.py <tag> <dir>

@@ -1,3 +1,5 @@
+# Copyright (C) 2026 Sacrappy
+
 """Build a HeyListen release locally: the HeyListen Builder setup and its parts, checksums, release notes and the user guide.
 No game data is involved: the builder is built from engine/ and the tools come from their official releases (as upstream
 Hookshot's .github/workflows/windows-builder.yml does it, which this follows step by step).

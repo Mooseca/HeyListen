@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Sacrappy
+
 /* (HeyListen native engine) The OS layer's side of the memory module (engine/native, hl/c/hl_mem.h;
    docs/native-engine/memory-boundary.md, sections 8 and 11): cold pages of CPU-cached GPU pools and of the game's heaps
    leave the process's working set.

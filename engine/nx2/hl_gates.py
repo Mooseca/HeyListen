@@ -1,3 +1,5 @@
+# Copyright (C) 2026 Sacrappy
+
 """(HeyListen native engine) Entry gates: a guest function the game calls directly, answered by a native module.
 
     python -I nx2/hl_gates.py <gen>            make the lifted code's gates what host/hl_*.c asks for (idempotent)
