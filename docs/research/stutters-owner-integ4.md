@@ -406,3 +406,58 @@ HyruleField, Market, HyruleField) before reading anything from it:
 
 and a second run of the same with `HL_MEM_COLD_LOWMEM=0` for rank 1 of the RAM list. Kakariko and Death Mountain Trail need the
 owner's hands: one session of ten minutes over that route with the same switches.
+
+## 9. Step 1 built: `HL_REGION_KEEP=<seconds>` (perf/stall2, host/hos_regionkeep.c, hooks in hos_mem.c)
+
+**What it does.** When the game frees an address region (`FreeAddressRegion`, `hos_region_free`) above the heap, the region is not
+discarded: it goes on a keep list with its resident bytes and the time. A later `hos_region_alloc` that takes any part of that address
+space gets it zeroed in place before it returns (the overlap only; what is left of the entry stays kept, split in two if the new
+region lies inside it). A region not re-allocated for `<seconds>` is discarded as before, by a thread of its own (1 s granularity).
+Off by default (`HL_REGION_KEEP` unset or 0: the old path, byte for byte).
+
+- `HL_REGION_KEEP_MB` (default 2048): resident MB on the list; over it the oldest are discarded first.
+- `HL_REGION_KEEP_LOWMEM_MB` (default 1024): while the system's available RAM is under it the oldest are discarded one after another
+  until it is not.
+- Not kept (discarded at once, as before): a region with pages the Vulkan back end imported (`rx_guest_imported`), one while the
+  guest-pages substrate is on (`hos_gp_ready`), one with under 1 MB resident, one when the 256-entry list is full.
+- One log line a second when anything moved: `hl keep: this second: kept N MB, reused N MB (zeroed in X ms), discarded N MB (aged,
+  over the cap, under pressure); on the list: N MB resident in N regions`.
+
+**What the game expects (checked in the source).** `AllocateAddressRegion` only hands out address space (hos_mem.c). The game maps
+pages in a region with `AllocateMemoryPages`, and above 4 GB that is `hos_commit(a, n)`: "A commit leaves committed pages as they are
+and gives fresh ones zeroed" (the comment at the call, after the Horizon rule: only newly mapped pages read as zero). So a region
+re-allocated over kept, still committed pages would show the game the old zone's bytes through `hos_commit`: the zeroing at
+allocation is not optional, and it is what the new region would have read after the discard (demand-zero). Below 4 GB nothing is
+kept (the keep is only for `freed >= HOS_HEAP_BASE`). The zeroing is a `memset` over the resident committed pages (no fault) and a
+`DiscardVirtualMemory` over committed pages that are **not** resident (trimmed or paged out, their backing may hold the old bytes), with
+`HOS_WRITTEN` after it (the soft write watch). It runs on the thread that called `hos_region_alloc`, which is the game's resource
+memory thread, not the render or the main thread, and in the unit test it costs 0.3 ms for 8 MB, against about 2.5 ms a MB for faults
+at the measured 10 us a page. The game never reads a byte it did not write, as with a discard.
+
+**Not done, on purpose.** Lazy zeroing (zero on first touch by a handler) is not possible here: the pages are committed memory the CPU
+touches without a handler. Zeroing on a worker ahead of the allocation would need a guess of which kept region the game takes next, and
+a region allocated again before the worker reached it would have to wait: the synchronous memset on the resource thread is what is built.
+
+**Test.** `tests/test_region_keep.py` builds `hos_regionkeep.c` with `-DHK_TEST` (a stub header, a 128 MB window) and runs
+`tests/region_keep_test.c`: an 8 MB region kept with its bytes; a new region over its middle 2 MB reads zero while the two ends stay;
+a new region over the rest is zero and a second use of the same range does not zero what the game wrote; under 1 MB resident not kept;
+aged out by the thread after the time (not before); the cap discards the oldest; the other kept region is unchanged. PASS here.
+
+**A/B (to run on the main PC, speed lease; slot c, build = this branch).** Common switches (both arms):
+`HL_FAULT_WATCH=10 HL_STALL_WATCH=rel:8 HL_STALL_WATCH_MAX=400 HL_HITCH_LOG=rel:8 HL_MEM_ACCOUNT=30`. B adds `HL_REGION_KEEP=20`.
+
+1. The scripted tour (Market, Hyrule Field, Market, Hyrule Field; unverified route), order A B B A, 4 runs of 260 s:
+   `HL_RUN_SECONDS=260 HL_BENCH_LIMIT_S=300 HL_INPUT_SCRIPT="30:A,34:A,38:A,42:A,46:A,50:A,54:A,58:A,62:A,66:A,70:A,72:B,73:B,74:B,75:B,100:LUP/2500,150:LDOWN/2500,200:LUP/2500,240:LDOWN/2500" bash build/s5run.sh --slot c --save build/s5/savelib/market kt-<A1|B1|B2|A2> castle-move <common> [HL_REGION_KEEP=20]`
+2. The Market entry, `market-spin`, order A B A B A B, 110 s: `bash build/s5run.sh --slot c --save build/s5/savelib/market km-<A1|B1|A2|B2|A3|B3> market-spin <common> [HL_REGION_KEEP=20]`.
+3. **Before reading anything** from a tour run: `grep -n "map: " build/s5/kt-A1/game_log.txt` must show Market_Child, HyruleField_Child, Market_Child,
+   HyruleField_Child. If it does not, stop and say so: the script's legs need changing.
+4. The report: `python -I -B engine/scripts/keep_ab_report.py A=build/s5/kt-A1,build/s5/kt-A2 B=build/s5/kt-B1,build/s5/kt-B2` (and
+   the same for `km-*`): per run the zone changes it read, fps from play+10 s, the stutters from play (all, page-fault class, 50 ms and
+   over), and the count and excess ms in the 30 s after each zone change (the first map line, the start's own load, left out). In B the
+   `hl keep:` lines say kept, reused and discarded MB: reused should be most of what is freed, and `discards logged` (the fault
+   watch's discards) should fall by that much. A change in `guest: address regions` pages of `ARes_Loading_*` in the `hl fault:` lines is the direct
+   proof.
+
+**What would show it does not work.** Reused MB near 0 with kept MB high (the game takes other addresses: first-fit top-down hands the
+same address only if the sizes fit; then the age rule just delays the discard, and resident RAM rises for nothing), or the working set
+growing by the kept amount with stutters unchanged, or a visual fault in the zone after (stale data: the zeroing is wrong).
