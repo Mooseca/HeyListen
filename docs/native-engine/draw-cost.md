@@ -57,6 +57,6 @@ PC 3050 (all-on build draw1b, run through that PC's own session): DRAW_CHECK 0 m
 1080p (GPU-bound); the replay's summed draw 27.1 -> 25.6 ms and descriptors 12.4 -> 10.6 ms a frame.
 
 Defaults (coordinator, default-on rule): EXCL, HPTR and LAZY on; PROGFRONT and PIPEFAST off (no measurable gain), =1 turns them on. The
-8.5% / 14% figures above were measured with all five on; the per-switch split was not measured.
+7.5% / 14% figures above were measured with all five on; the per-switch split was not measured.
 
 Not done: pictures in the four scenes, the 3050 runs, per-switch gains (section "Per switch" below if filled in).

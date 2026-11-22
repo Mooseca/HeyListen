@@ -7971,7 +7971,8 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
             if (use_front) prog_front_keep(s, types, cp, front_now);
         }
     }
-    if (cp) fine_draw.key = cp->key, zone_note_program(cp->key);   // (the zone recorder's set lookup: on the program pick's own path, once a key per map)
+    if (cp) fine_draw.key = cp->key;
+    if (cp) zone_note_program(cp->key);   // (the zone recorder's set lookup: on the program pick's own path, once a key per map)
     {   // (hookshot, a test) RX_VK_NO_MESH=1: task / mesh draws left out, to see what they draw; =2: the others left out
         static const int no_mesh = getenv("RX_VK_NO_MESH") ? atoi(getenv("RX_VK_NO_MESH")) : 0;
         if ((no_mesh == 1 && d.mesh) || (no_mesh == 2 && !d.mesh)) return;
