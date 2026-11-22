@@ -292,3 +292,117 @@ once, off-thread). Where the memory is the driver's or Windows' it is not ours t
 - `engine/scripts/stutter_report.py` (copied to `build/s5`): `align()`, the three labels, the new default rule and classes, doc.
 - `engine/tests/test_stutter_report.py`: the old fixtures with explicit old rule, a test of the new default and of `align()`.
 - This file. No game code, no build, no run.
+
+## 8. Step 0 measured (build stall2 = perf/stall2 8bcbb2ad7, slot c, 22 Nov evening)
+
+Runs: `build/s5/s2f-market` (market save, `market-spin`, 84.4 fps from play, play began 49.3 s after the start) and
+`build/s5/s2f-hyrule-field` (hyrule-field save, `castle-move`, 74.8 fps, play at 55.6 s), 116 s each, with `HL_FAULT_WATCH=10
+HL_STALL_WATCH=rel:8 MAX=400 HL_HITCH_LOG=rel:8 HL_MEM_ACCOUNT=30 HOS_HOST_SPLIT=40,30 RX_VK_LEDGER=30`. They are short: the Market
+run holds one zone entry (the load, then 63 s of play), the field run one load and 21 s of play. There is no zone tour, so no growth
+over a session here (the 23 minutes of section 1 and MEM1's sections 17 and 21 of memory-boundary.md are the growth data). Scripts:
+`E:\OOT\scratch-stall2\fw_an.py` and `join.py`. `HL_FAULT_WATCH` found its buffer too small 0 times. Its per-second lines list the 6
+largest threads and memories, so the sums below are lower bounds; the 30 s lines are exact for their top 10 cells.
+
+### 8.1 Thread x memory x phase (pages added to the working set, 4 KB, from the seconds with 2000 pages or more)
+
+| run, phase | pages (MB) | loaders (`ARes_Loading_*`, `Resource_Memory`) | host/driver tids | render + replay | OptimizeChangeBanc | game logic | guest address regions | guest GPU pool | host private, no owner | guest heap |
+|---|---|---|---|---|---|---|---|---|---|---|
+| Market, load (12 to 49 s) | 758 K (2960) | 350 K | 216 K | 23 K | 35 K | 29 K | 370 K | 50 K | 251 K | 58 K |
+| **Market, play (63 s)** | 638 K (2490) | **545 K** | 22 K | 15 K | 29 K | 3 K | **372 K** | **219 K** | 24 K | 2 K |
+| Field, load | 830 K (3240) | 420 K | 189 K + 48 K | 6 K | 33 K | 27 K | 421 K | 71 K | 239 K | 66 K |
+| Field, play (21 s) | 184 K (719) | 54 K | 72 K | 8 K | 11 K | 6 K | 65 K | 64 K | 28 K | 6 K |
+
+- **Loads.** `ARes_Loading_0/1` first-touch the guest's address regions (the loaded files' buffers: `ReadFile` into fresh memory, so
+  the faults are inside the kernel's read) and the GPU pools. The "host private, no owner" 250 K pages by unnamed host threads are the
+  driver and `ucrtbase` (shader and pipeline compile of a cold start; code in `nvoglv64.dll`): load phase only.
+- **Market play.** The faults are the loaders': 545 K of 638 K pages, on guest regions (372 K = 1.45 GB) and GPU pools (219 K), for
+  the whole 63 s while the Market streams in; the render thread takes 13 K. 122 of the 130 stutters of the Market's play phase (over
+  16.7 ms and 2x) fall in a second where the loaders on guest regions or pools were the largest faulters: 84 on regions (2.2 s of
+  excess frame time), 38 on pools (0.8 s). The stutters of 50 ms and over in play are at 18.2, 21.3, 22.9, 24.9, 41.5, 51.9, 52.9 and
+  55.0 s, each with `ARes_Loading_0` at 4 to 10 K pages in that second.
+- **Field play.** In the first seconds of play (1.3 to 3.9 s) the largest faulters are `host:mkw_vk order`, `host:mkw_vk replay
+  worker` and `Presentation_Thread` on **guest GPU pools** (10 to 15 K pages a second): 29 stutters, 4.2 s of excess, with the 1.58 s
+  and 1.03 s frames. The replay reads pool pages the game has not written yet, or that the cold pass has taken out; the watch cannot
+  say which (next diagnostic: the cold pass's trims a second). The first 1.3 s of the Market run (572, 202, 195, 121 ms; `host:
+  image` 2000 pages a second) are the exe's `.text` being paged in as the lifted code first runs: 6 stutters, 1.1 s, once a start.
+
+### 8.2 Discards against trims
+
+`hos_mem.c discard_pages` (`DiscardVirtualMemory` on each region the guest frees) is logged with the faults:
+
+| phase | discards (calls, MB, wall ms) | guest-region pages faulted back |
+|---|---|---|
+| Market load | 760, 808 MB, 233 ms | 370 K (1445 MB) |
+| **Market play** | **638, 3467 MB, 601 ms** | **372 K (1453 MB)** |
+| Field load | 912, 1824 MB, 302 ms | 421 K |
+| Field play | 35, 4 MB, 23 ms | 65 K |
+
+The Market streams: the game frees and allocates regions all the time (55 MB a second freed, a discard every 100 ms), and the
+loaders fault 42 percent of the freed bytes straight back. `HL_MEM_COLD` took out only 138 MB of pools and 54 MB of heaps in the
+Market run: its pass was **held** while free RAM was under 3072 MB ("held, 2883 MB of RAM free"); in the field run it took out
+1889 MB of pools and 563 MB of heaps (RAM above the line at first). The system's own trims cannot be seen from the process, but in
+the Market the working-set falls come from our discards (3.5 GB against 0.2 GB of cold pages). **The falls are discards, then first
+touches of the same address space**: the owner's three kinds of page-fault stutter (first touch in a grown zone, fall then
+re-touch, flat) are one thing, the zone's memory churn.
+
+### 8.3 Footprint, from HOS_HOST_SPLIT (censuses at 40, 71 and 102 s), RX_VK_LEDGER and HL_MEM_ACCOUNT
+
+Market run, MB (RAM = resident, commit = charged):
+
+| category | 40 s | 71 s | 102 s (RAM / commit) | grows? | reclaimable? |
+|---|---|---|---|---|---|
+| guest window | 4249 RAM | 6713 | 6768 / 7488 | with the zone (owner: guest heap 1.4 to 4.5 GB, regions 1.7 to 7.3 GB in 23 min) | pools 3471 RAM once uploaded: `HL_MEM_COLD` (held under 3 GB free); regions: keep rather than discard (8.4) |
+| driver arenas (private 512 MB and up, 4 allocations) | 3501 RAM | 2255 | 2261 / 3841 | flat at 4 blocks (owner 4.3 to 5.0 GB) | owner not named; the driver's, not ours to free |
+| driver 32 to 128 MB regions (182 allocations) | 17 RAM / 889 commit | 18 / 5561 | **20 / 5840** | **yes, with the VMA blocks** (owner: 1.0 to 9.5 GB) | commit only (0.3 percent resident): `RX_VK_BLOCK_RECLAIM` (MEM1, unmerged) saves commit, not RAM |
+| back end's tagged memory (captures, staging, streams) | 283 | 330 | 346 (captures 218, staging 140) | slowly (captures made 49 to 3955 in a session, 70 to 120 MB kept) | spares already trimmed; small |
+| C and Windows heaps | 332 | 433 | 443 (628 commit) | +0.4 GB over a session (MEM1) | no |
+| images | 201 | 270 | 273 | no | no |
+| job-trace ring (HL_STALL_WATCH) | 128 | 128 | 128 | diagnostic only | off |
+| total RAM counted (= working set) | 8740 | 10201 | 10310 | | |
+| commit charge | 11366 | 18870 | 19092 | **+7.7 GB in 60 s, 5.0 of it the driver's 32 to 128 MB regions** | |
+
+VRAM ledger at the end (Market): texture images 2994, mirrors 1474, write-back shadows 229, staging 140, BC scratch 160, free inside
+VMA blocks 567 (image 140, render-target 353), 34 retired chunks waiting for the GPU (1496 MB). Field run: images 2187, mirrors
+1578, 15 retired chunks (654 MB), free in blocks 440.
+
+**Who else holds the RAM** (the account line, queryable processes only): 8.0 to 8.25 GB in all: Spotify 1.1 to 1.2 GB, two
+`claude.exe` at 1.0 and 1.1 GB, Discord 0.9 GB, opera 0.3 GB, the rest under 0.3 GB each. With the game at 10.3 GB that is 18.5 of
+31.9 GB, and available RAM was **1.0 to 2.4 GB in the Market run and 2.0 to 3.9 GB in the field run**: about 12 GB of the PC is in
+neither (kernel and driver memory, the modified list, the compressed store, processes this one cannot query: the agents' sessions
+and builds share this PC). The owner's pressure is the same regime. The game is not the cause of those 12 GB and cannot cure them; its
+10.3 GB working set and its commit-only driver memory are the part we control.
+
+Growth without bound over a session (MEM1's long runs and the owner's 23 minutes): live imports (4 to 229, 6.6 GB), the driver's
+16 to 64 MB commit that follows the VMA blocks (1.0 to 9.5 GB), free space inside VMA image blocks (0.2 to 3.5 GB), cold units left
+in for good. Bounded: BC cache (1 GB), captures, the spill, pipelines, C heaps, the arenas. This pair adds the rate: **+5 GB of
+commit-only driver memory in the first minute of a zone**, then flat.
+
+### 8.4 Fixes, ranked
+
+By stutter time saved (the owner's baseline: 132 page-fault stutters, 20.9 s; the Market's play phase here: 4.2 s of excess in 130):
+
+| rank | fix | stutter effect (evidence) | RAM effect | effort, risk |
+|---|---|---|---|---|
+| 1 | **`HL_REGION_KEEP`**: keep a zone's freed regions resident instead of `discard_pages`, zero them off the critical thread (`Resource_Memory` or a worker); on only while available RAM is over 6 GB | the loaders' region faults: 84 of the Market play's 130 stutters (2.2 s of 4.2 s), 372 K pages (1.45 GB) re-touched after 3.47 GB discarded; most of the owner's 30 s-after-entry page-fault time | costs RAM, up to the churn set (0.5 to 1.5 GB resident that Windows would have reused); off below 6 GB, so it does not apply to the owner's pressured PC (1 to 2.4 GB available) | about 120 lines, medium (zero semantics) |
+| 2 | the replay's pool faults at the start of play (field: 29 stutters, 4.2 s, the 1.58 s and 1.03 s frames): find out which of never-written and cold-taken-out; if the cold pass, an age rule that keeps what the replay reads; if never written, skip untouched pages in the capture's copy | the largest single stutters of play start | neutral | one more diagnostic, then about 60 lines |
+| 3 | commit-ahead and a `lock or` pre-touch of the heap on a worker | the first 4 GB of heap only, the first minutes of a run | neutral or negative | 60 lines, low, small |
+
+By RAM saved (none changes the Market's region churn):
+
+| rank | fix | RAM | commit | evidence |
+|---|---|---|---|---|
+| 1 | the cold pass for pools also under 3 GB free (`HL_MEM_COLD_LOWMEM=0`, or hold only the heaps) | up to 3.3 GB of the pools' CPU copies (3471 resident in the Market, 3176 in the field) | 0 | pools are uploaded and mirrored in VRAM; STALL1's 3050 hog test went the other way (56 against 77 frames over 50 ms), so A/B first |
+| 2 | `RX_VK_BLOCK_RECLAIM`, idle pool-mirror give-back, imports given back (MEM1, unmerged, function-validated only) | small (driver commit) | 2 to 5 GB of the 5.8 GB driver commit, and 6.6 GB of imports over a session | commit was 70.7 of 103 GB; at the limit the game dies out of commit, not RAM |
+| 3 | tag the four 1 GB driver arenas (2.3 to 3.6 GB RAM) with `hos_mem_tag` at each `vkAllocateMemory`, then decide | unknown | | the largest unnamed block in RAM |
+| 4 | captures (218 MB cached) | under 0.2 GB | | already bounded |
+
+### 8.5 The zone tour
+
+The runs hold one entry each. There is no scripted route for Kakariko and Death Mountain Trail; the Market to Hyrule Field gate is a
+`LUP` leg of about 1.5 s (`run_bench.py`, TICK-031). A first command, **unverified**: check the `map:` lines of its log (Market,
+HyruleField, Market, HyruleField) before reading anything from it:
+
+`HL_RUN_SECONDS=260 HL_INPUT_SCRIPT="30:A,34:A,38:A,42:A,46:A,50:A,54:A,58:A,62:A,66:A,70:A,72:B,73:B,74:B,75:B,100:LUP/2500,150:LDOWN/2500,200:LUP/2500,240:LDOWN/2500" bash build/s5run.sh --slot c --save build/s5/savelib/market s2f-tour castle-move HL_FAULT_WATCH=10 HL_STALL_WATCH=rel:8 HL_STALL_WATCH_MAX=400 HL_HITCH_LOG=rel:8 HL_MEM_ACCOUNT=30 HOS_HOST_SPLIT=40,30 RX_VK_LEDGER=30`
+
+and a second run of the same with `HL_MEM_COLD_LOWMEM=0` for rank 1 of the RAM list. Kakariko and Death Mountain Trail need the
+owner's hands: one session of ten minutes over that route with the same switches.
