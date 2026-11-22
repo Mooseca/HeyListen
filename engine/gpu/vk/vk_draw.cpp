@@ -6653,11 +6653,20 @@ void StatsQuery::copy_args(VkCommandBuffer cmd, const DrawArgs& d, uint32_t inde
 //      report of a frame tests the same object as the k-th of the frame before (99% of zero / non-zero agree, standing).
 //      Key: the program bound at the report, its window's draws, and its place among the frame's reports with those two.
 //      The count measured for that key at most 3 frames before is written; the fixed value until there is one.
+//   6 (RX_VK_OCC_GATE=1, OCC1): the reports the game's CPU reads stay the fixed value (no wait, no late count, nothing that
+//      moves from frame to frame). The GPU gates the objects: a draw that follows a render condition on a report of one draw
+//      (OoT's proxy tests: reset, one draw, report) is recorded inside VK_EXT_conditional_rendering on that proxy's own
+//      occlusion count, copied into a predicate word on the GPU at the start of each segment that has such draws. Count 0:
+//      the GPU skips the draw. A count not there yet, a window of several draws, or a proxy in the segment itself: drawn.
 // RX_VK_OCC_LOG=<dir>: RX_VK_OCC_LOG_FRAMES frames (default 2) every RX_VK_OCC_LOG_EVERY presents (default 600) written to <dir>/occ_<present>.txt: every
 // report (window, draws, real count), every render condition, every draw in a window with its pipeline statistics.
 thread_local int64_t occ_draw_slot = -1;   // (the replay: the serial of the draw it hands to draw(); -1: none)
+thread_local int64_t occ_gate_draw = -1;   // (OCC1, mode 6: the serial of the proxy the draw in hand is gated on; -1: none)
+thread_local uint64_t occ_gate_cov_lo = 0, occ_gate_cov_hi = 0;   // (the segment being recorded: the serials whose predicate words are current)
 int occ_mode() {
-    static const int m = getenv("RX_VK_OCC_REAL") ? atoi(getenv("RX_VK_OCC_REAL")) : 0;
+    // (OCC1: RX_VK_OCC_GATE=1 is mode 6 below; RX_VK_OCC_REAL, when set, comes first)
+    static const int m = getenv("RX_VK_OCC_REAL") ? atoi(getenv("RX_VK_OCC_REAL"))
+                         : getenv("RX_VK_OCC_GATE") && atoi(getenv("RX_VK_OCC_GATE")) != 0 ? 6 : 0;
     return m;
 }
 namespace {
@@ -6673,6 +6682,50 @@ std::atomic<uint64_t> occ_log_lo{UINT64_MAX}, occ_log_hi{UINT64_MAX};   // (seri
 const char* occ_log_dir() {
     static const char* d = getenv("RX_VK_OCC_LOG");
     return d && *d ? d : nullptr;
+}
+// ---- (OCC1) RX_VK_OCC_GATE=1: the objects gated on the GPU by their proxy's own count ----
+// The predicate: one 32-bit word a slot of the query ring, 0 where the proxy's draw passed no sample, other where it did and
+// where the count is not there (the range is first filled with 1s, then the query results copied over it: the copy leaves
+// the words of queries that are not available alone). VK_EXT_conditional_rendering skips a gated draw whose word is 0.
+constexpr VkDeviceSize kOccGateBytes = (VkDeviceSize)kOccRing * 4;
+VkBuffer occ_gate_buf = VK_NULL_HANDLE, occ_gate_host = VK_NULL_HANDLE;   // (the host copy only for RX_VK_OCC_GATE_LOG)
+VmaAllocation occ_gate_mem = nullptr, occ_gate_host_mem = nullptr;
+const uint32_t* occ_gate_host_ptr = nullptr;
+bool occ_gate_ok = false;
+bool occ_gate_log_on() {
+    static const bool on = getenv("RX_VK_OCC_GATE_LOG") && atoi(getenv("RX_VK_OCC_GATE_LOG")) != 0;
+    return on;
+}
+struct OccGateAt { uint64_t lo; int64_t present; };
+std::unordered_map<uint64_t, OccGateAt> occ_gate_at;   // (report address -> its window's draw, when the window held exactly one; the replay thread's)
+struct OccGateRec { uint32_t slot; uint32_t indices; };
+std::mutex occ_gate_mu;
+std::vector<OccGateRec> occ_gate_now;                       // (this frame's gated draws, RX_VK_OCC_GATE_LOG)
+std::deque<std::vector<OccGateRec>> occ_gate_hist;          // (the frames before it, read once their GPU work is done)
+std::atomic<int64_t> st_gate_conds{0}, st_gate_gated_conds{0}, st_gate_draws{0}, st_gate_copies{0}, st_gate_copied{0};
+int64_t st_gate_skipped = 0, st_gate_skipped_idx = 0, st_gate_checked = 0, st_gate_checked_idx = 0;   // (the present's thread)
+void occ_gate_init() {
+    if (!dev.conditional_rendering || !vkx::vkCmdBeginConditionalRenderingEXT) {
+        logf("vk: occlusion gate: no VK_EXT_conditional_rendering; every object is drawn");
+        return;
+    }
+    VmaAllocation a = nullptr;
+    if (!create_buffer(kOccGateBytes, VK_BUFFER_USAGE_CONDITIONAL_RENDERING_BIT_EXT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+                                          VK_BUFFER_USAGE_TRANSFER_SRC_BIT, false, occ_gate_buf, a, nullptr)) {
+        logf("vk: occlusion gate: no predicate buffer; every object is drawn");
+        return;
+    }
+    occ_gate_mem = a;
+    if (occ_gate_log_on()) {
+        void* mapped = nullptr;
+        if (create_buffer(kOccGateBytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT, true, occ_gate_host, occ_gate_host_mem, &mapped) && mapped) {
+            occ_gate_host_ptr = (const uint32_t*)mapped;
+            std::memset(mapped, 0xFF, kOccGateBytes);
+        }
+    }
+    occ_gate_ok = true;
+    logf("vk: occlusion gate: objects behind a one-draw proxy test skipped on the GPU (VK_EXT_conditional_rendering, %u-slot predicate)%s",
+         kOccRing, occ_gate_host_ptr ? ", counted (RX_VK_OCC_GATE_LOG)" : "");
 }
 void occ_init() {
     VkPhysicalDeviceFeatures2 f{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
@@ -6705,7 +6758,8 @@ void occ_init() {
         }
         if (occ_stats_pool) vkResetQueryPool(dev.device, occ_stats_pool, 0, kOccRing);
     }
-    logf("vk: occlusion: real counts, mode %d (1 log only, 2 zero-or-fixed, 3 counts), %u query ring%s%s", occ_mode(), kOccRing,
+    if (occ_mode() == 6) occ_gate_init();
+    logf("vk: occlusion: real counts, mode %d (1 log only, 2 zero-or-fixed, 3 counts, 6 gate), %u query ring%s%s", occ_mode(), kOccRing,
          occ_precise ? ", precise" : "", occ_stats_pool ? ", pipeline statistics in logged frames" : "");
 }
 }  // namespace
@@ -6715,7 +6769,7 @@ struct OccQuery {
     uint32_t slot = 0;
     bool stats = false;
     OccQuery(VkCommandBuffer c, uint64_t prog, const DrawArgs& d, bool stats_busy) {
-        if (occ_draw_slot < 0 || !occ_pool) return;
+        if (occ_draw_slot < 0 || !occ_pool || (occ_mode() == 6 && !occ_gate_ok)) return;
         const uint64_t serial = (uint64_t)occ_draw_slot;
         slot = (uint32_t)(serial % kOccRing);
         uint8_t fl = OCC_BEGUN | (d.mesh ? OCC_MESH : 0) | (d.indirect ? OCC_INDIRECT : 0) | (d.indexed ? OCC_INDEXED : 0);
@@ -6874,6 +6928,11 @@ uint64_t occ_report(uint64_t addr, uint64_t lo, uint64_t hi, uint64_t value, uin
         const uint32_t ord = occ_key_ord[pk]++;
         key = (pk ^ ((uint64_t)ord * 0x165667B19E3779F9ull)) | 1;
     }
+    if (mode == 6) {   // (the fixed value stays what the game reads; the window's single draw is what the GPU gates on)
+        if (occ_gate_ok && hi == lo + 1) occ_gate_at[addr] = {lo, occ_presents};
+        else occ_gate_at.erase(addr);
+        return fixed;
+    }
     occ_pending.push_back({addr, lo, hi, value, key, occ_presents, occ_seq, logged});
     occ_latest[addr] = occ_seq++;
     occ_pending_at[addr]++;
@@ -6911,6 +6970,67 @@ void occ_give_up() {
     if (told++ < 8) logf("vk: occlusion: a condition on a report not read yet could not wait for it (the fixed value read)");
     occ_pending_at.clear();
 }
+/// (the replay thread, mode 6, a render condition on a report) the proxy draw whose count decides it: its serial. False: the
+/// report is not one of this frame's with a single draw, or the GPU cannot gate
+bool occ_gate_find(uint64_t addr, uint64_t& slot) {
+    st_gate_conds.fetch_add(1, std::memory_order_relaxed);
+    if (!occ_gate_ok) return false;
+    const auto it = occ_gate_at.find(addr);
+    if (it == occ_gate_at.end() || it->second.present != occ_presents) return false;
+    slot = it->second.lo;
+    st_gate_gated_conds.fetch_add(1, std::memory_order_relaxed);
+    return true;
+}
+/// (a recording thread, at the start of a segment, outside any pass) the predicate words of the proxies [lo, hi) of the stream
+/// made current on the GPU: filled with 1s, the available counts copied over them. The draws it gates are those of the slots in it
+void occ_gate_segment(VkCommandBuffer cmd, uint64_t lo, uint64_t hi) {
+    occ_gate_cov_lo = occ_gate_cov_hi = 0;
+    if (!occ_gate_ok || hi <= lo || hi - lo > kOccRing / 4) return;
+    struct Piece { uint32_t first, count; } pc[2];
+    int n = 0;
+    for (uint64_t at = lo; at < hi; n++) {
+        const uint32_t first = (uint32_t)(at % kOccRing), cnt = (uint32_t)std::min<uint64_t>(hi - at, kOccRing - first);
+        pc[n] = {first, cnt};
+        at += cnt;
+    }
+    for (int i = 0; i < n; i++) vkCmdFillBuffer(cmd, occ_gate_buf, (VkDeviceSize)pc[i].first * 4, (VkDeviceSize)pc[i].count * 4, 1u);
+    full_barrier(cmd, "occ gate");
+    for (int i = 0; i < n; i++)
+        vkCmdCopyQueryPoolResults(cmd, occ_pool, pc[i].first, pc[i].count, occ_gate_buf, (VkDeviceSize)pc[i].first * 4, 4, 0);
+    ::mkwvk::note_xfer_work(cmd), ::mkwvk::note_other_work(cmd);   // (vk_work.h: a copy of query results is work the next barrier must not be dropped for)
+    full_barrier(cmd, "occ gate");
+    if (occ_gate_host)
+        for (int i = 0; i < n; i++) {
+            const VkBufferCopy c{(VkDeviceSize)pc[i].first * 4, (VkDeviceSize)pc[i].first * 4, (VkDeviceSize)pc[i].count * 4};
+            vkCmdCopyBuffer(cmd, occ_gate_buf, occ_gate_host, 1, &c);
+        }
+    st_gate_copies.fetch_add(1, std::memory_order_relaxed);
+    st_gate_copied.fetch_add((int64_t)(hi - lo), std::memory_order_relaxed);
+    occ_gate_cov_lo = lo, occ_gate_cov_hi = hi;
+}
+void occ_gate_segment_end() { occ_gate_cov_lo = occ_gate_cov_hi = 0; }
+namespace {
+/// One draw recorded inside the conditional block of its proxy's predicate word (a draw whose slot the segment's copy covers)
+struct OccGate {
+    VkCommandBuffer cmd = VK_NULL_HANDLE;
+    OccGate(VkCommandBuffer c, uint32_t indices) {
+        if (occ_gate_draw < 0 || !occ_gate_ok) return;
+        const uint64_t at = (uint64_t)occ_gate_draw;
+        if (at < occ_gate_cov_lo || at >= occ_gate_cov_hi) return;
+        VkConditionalRenderingBeginInfoEXT bi{VK_STRUCTURE_TYPE_CONDITIONAL_RENDERING_BEGIN_INFO_EXT};
+        bi.buffer = occ_gate_buf;
+        bi.offset = (VkDeviceSize)(at % kOccRing) * 4;
+        vkx::vkCmdBeginConditionalRenderingEXT(c, &bi);
+        cmd = c;
+        st_gate_draws.fetch_add(1, std::memory_order_relaxed);
+        if (occ_gate_host_ptr) {
+            std::lock_guard l(occ_gate_mu);
+            occ_gate_now.push_back({(uint32_t)(at % kOccRing), indices});
+        }
+    }
+    ~OccGate() { if (cmd) vkx::vkCmdEndConditionalRenderingEXT(cmd); }
+};
+}  // namespace
 /// (the replay thread, logged frames) a render condition as it was decided
 void occ_cond(uint64_t addr, int mode, uint64_t x, uint64_t y, bool on, uint64_t serial) {
     if (!occ_log || serial < occ_log_lo.load(std::memory_order_relaxed) || serial >= occ_log_hi.load(std::memory_order_relaxed)) return;
@@ -6936,6 +7056,35 @@ void occ_present(int64_t presents, uint64_t serial, uint64_t done) {
         } else if (presents % every == frames && occ_log) {
             occ_log_hi.store(serial);
         }
+    }
+    if (occ_gate_ok) {
+        if (occ_gate_host_ptr) {   // (the gated draws of the frames before: the GPU's done with them, the predicate read back)
+            std::vector<OccGateRec> now;
+            {
+                std::lock_guard l(occ_gate_mu);
+                now.swap(occ_gate_now);
+            }
+            occ_gate_hist.push_back(std::move(now));
+            while (occ_gate_hist.size() > 5) {
+                for (const OccGateRec& r : occ_gate_hist.front()) {
+                    st_gate_checked++, st_gate_checked_idx += r.indices;
+                    if (occ_gate_host_ptr[r.slot] == 0) st_gate_skipped++, st_gate_skipped_idx += r.indices;
+                }
+                occ_gate_hist.pop_front();
+            }
+        }
+        if (presents % 600 == 0) {
+            const double f = 600.0;
+            logf("vk: occlusion gate: a frame: %.0f render conditions on reports, %.0f on a one-draw proxy; %.0f draws gated, %.1f predicate "
+                 "copies (%.0f slots); read back: %.1f%% of the gated draws skipped by the GPU (%.1f%% of their indices; %lld draws, %lld skipped)",
+                 st_gate_conds.load() / f, st_gate_gated_conds.load() / f, st_gate_draws.load() / f, st_gate_copies.load() / f,
+                 st_gate_copied.load() / f, st_gate_checked ? 100.0 * st_gate_skipped / st_gate_checked : 0.0,
+                 st_gate_checked_idx ? 100.0 * st_gate_skipped_idx / st_gate_checked_idx : 0.0, (long long)st_gate_checked,
+                 (long long)st_gate_skipped);
+            st_gate_conds = st_gate_gated_conds = st_gate_draws = st_gate_copies = st_gate_copied = 0;
+            st_gate_skipped = st_gate_skipped_idx = st_gate_checked = st_gate_checked_idx = 0;
+        }
+        occ_gate_at.clear();
     }
     if (presents % 600 == 0 && occ_t.reports) {
         const double f = 600.0;
@@ -8607,6 +8756,7 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
                 const uint32_t conv_n = (uint32_t)std::clamp(d.max, 1, 4096);
                 if (mesh_dbg) mesh_count_note(p.key, mesh_conv_off);
                 checkpoint_work('N', conv_n);
+                OccGate og(cmd, 0);
                 if (checkpoints_on()) checkpoint_flags(mesh_has_task(p), cnt && vkCmdDrawMeshTasksIndirectCountEXT, true);
                 if (cnt && vkCmdDrawMeshTasksIndirectCountEXT)
                     vkCmdDrawMeshTasksIndirectCountEXT(cmd, mesh_conv_buf, mesh_conv_off, cnt.buffer, cnt.offset, conv_n, 12);
@@ -8628,6 +8778,7 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
                 vkCmdPushConstants(cmd, p.layout, p.push_stages, Shader::Backend::SPIRV::MESH_FIRST_PUSH_OFFSET, 8, &firsts);
             }
             checkpoint_work('N', (uint32_t)std::max(d.max, 1));
+            OccGate og(cmd, 0);
             if (checkpoints_on()) checkpoint_flags(mesh_has_task(p), cnt && vkCmdDrawMeshTasksIndirectCountEXT, false);
             if (cnt && vkCmdDrawMeshTasksIndirectCountEXT)
                 vkCmdDrawMeshTasksIndirectCountEXT(cmd, mesh_args.buffer, mesh_args.offset, cnt.buffer, cnt.offset, d.max, step);
@@ -8645,6 +8796,7 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
             }
             checkpoint_work('M', (uint32_t)std::max(d.groups[0], 0), (uint32_t)std::max(d.groups[1], 1), (uint32_t)std::max(d.groups[2], 1));
             if (checkpoints_on()) checkpoint_flags(mesh_has_task(p), false, false);
+            OccGate og(cmd, 0);
             vkCmdDrawMeshTasksEXT(cmd, (uint32_t)std::max(d.groups[0], 0), (uint32_t)std::max(d.groups[1], 1),
                                   (uint32_t)std::max(d.groups[2], 1));
         }
@@ -8767,9 +8919,11 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
             BufferRef ib = gpu_buffer_bind(d.ibuf, 4, false);
             if (!ib) SKIP_HERE();
             bind_index(cmd, ib.buffer, ib.offset, itype);
+            OccGate og(cmd, 0);   // (OCC1, RX_VK_OCC_GATE)
             if (cnt) vkCmdDrawIndexedIndirectCount(cmd, args.buffer, args.offset, cnt.buffer, cnt.offset, std::max(d.max, 1), ind_stride);
             else vkCmdDrawIndexedIndirect(cmd, args.buffer, args.offset, std::max(d.max, 1), ind_stride);
         } else {
+            OccGate og(cmd, 0);
             if (cnt) vkCmdDrawIndirectCount(cmd, args.buffer, args.offset, cnt.buffer, cnt.offset, std::max(d.max, 1), ind_stride);
             else vkCmdDrawIndirect(cmd, args.buffer, args.offset, std::max(d.max, 1), ind_stride);
         }
@@ -8786,10 +8940,12 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
         }
         FINE_SCOPE(FT_DRAWCALL);
         checkpoint_work('E', (uint32_t)d.count, (uint32_t)std::max(1, d.instances));
+        OccGate og(cmd, (uint32_t)d.count * (uint32_t)std::max(1, d.instances));
         vkCmdDrawIndexed(cmd, (uint32_t)d.count, (uint32_t)std::max(1, d.instances), 0, d.base_vertex, (uint32_t)d.base_instance);
     } else {
         FINE_SCOPE(FT_DRAWCALL);
         checkpoint_work('V', (uint32_t)d.count, (uint32_t)std::max(1, d.instances));
+        OccGate og(cmd, (uint32_t)d.count * (uint32_t)std::max(1, d.instances));
         vkCmdDraw(cmd, (uint32_t)d.count, (uint32_t)std::max(1, d.instances), (uint32_t)d.first, (uint32_t)d.base_instance);
     }
     st_draws++, ps.draws++;

@@ -216,6 +216,10 @@ void tl_at_present(int64_t presents) {
 // (TICK-033, vk_draw.cpp: real occlusion counts, RX_VK_OCC_REAL) each draw and dispatch of the stream numbered in stream order: on
 // the replay thread (serial and dry passes) and on a segment's thread from the dry pass's number at its start
 extern thread_local int64_t occ_draw_slot;
+extern thread_local int64_t occ_gate_draw;   // (OCC1, RX_VK_OCC_GATE: the proxy the draw in hand is gated on)
+bool occ_gate_find(uint64_t addr, uint64_t& slot);
+void occ_gate_segment(VkCommandBuffer cmd, uint64_t lo, uint64_t hi);
+void occ_gate_segment_end();
 int occ_mode();
 void occ_advance(uint64_t serial, uint64_t value);
 uint64_t occ_report(uint64_t addr, uint64_t lo, uint64_t hi, uint64_t value, uint64_t fixed, uint64_t prog);
@@ -228,9 +232,15 @@ const uint8_t* occ_stop_at = nullptr;   // (RX_VK_OCC_REAL=4: where a dry pass s
 uint64_t occ_serial = 0;              // (the replay thread's)
 thread_local uint64_t occ_wserial = 0;   // (a segment's thread)
 uint64_t occ_win_lo = 0;              // (the serial at the last samples-passed reset)
-struct OccSlot {   // (the draw's serial for draw()'s query)
-    explicit OccSlot(uint64_t serial) { if (occ_mode()) occ_draw_slot = (int64_t)serial; }
-    ~OccSlot() { occ_draw_slot = -1; }
+thread_local uint64_t gate_cur = 0;   // (OCC1: the render condition in force's proxy, its serial + 1; 0: none)
+struct OccSlot {   // (the draw's serial for draw()'s query; mode 6: a query only for the first draw after a reset, the gate of the condition in force)
+    OccSlot(uint64_t serial, bool first_since_reset) {
+        const int m = occ_mode();
+        if (!m) return;
+        if (m != 6 || first_since_reset) occ_draw_slot = (int64_t)serial;
+        if (m == 6 && gate_cur) occ_gate_draw = (int64_t)(gate_cur - 1);
+    }
+    ~OccSlot() { occ_draw_slot = -1, occ_gate_draw = -1; }
 };
 void hang_watch_start();   // (EvilOOT, vk_hangdump.cpp: RX_VK_HANG_DUMP)
 struct CondNote { int64_t present; uint64_t addr, x, y; int mode; bool on; };   // (the last render conditions, for a dark frame)
@@ -1589,7 +1599,13 @@ enum class Mode { Serial, Dry, Worker };
 thread_local Mode rmode = Mode::Serial;
 thread_local size_t ub_limit = SIZE_MAX;   // (a worker: the uniform updates before its place in the stream)
 thread_local size_t cond_at = 0;           // (a worker: the next render condition's result)
-std::vector<uint8_t> par_conds;            // (the render conditions' results, in stream order: the dry pass's)
+// (OCC1) a render condition's result: whether it holds, and with RX_VK_OCC_GATE the proxy draw whose count the GPU tests (its serial + 1)
+// for the draws it covers, with the stream's place it was made at. With the gate, a SetRenderEnable is an entry too (it ends the gate)
+struct CondRes {
+    uint64_t gate, at;
+    uint8_t on;
+};
+std::vector<CondRes> par_conds;            // (the render conditions' results, in stream order: the dry pass's)
 // (HeyListen) how many of par_conds are written, for the workers' reads: the dry pass appends while early segments read
 // (RX_VK_SEG_EARLY), and a worker reads this count, never the vector's own size, which an append changes as it reads
 std::atomic<size_t> par_conds_n{0};
@@ -1684,6 +1700,23 @@ struct UbGrowGuard {
         ub_grow_waiting.store(false, std::memory_order_release);
     }
 };
+/// (OCC1, RX_VK_OCC_GATE) a SetRenderEnable ends the gate of the condition before it: an entry of its own in par_conds, so the workers
+/// count the same entries as the dry pass and a segment starting after it finds no gate in force
+void cond_enable_gate_end(bool dry, bool worker, bool on) {
+    gate_cur = 0;
+    if (worker) {
+        cond_at++;
+    } else if (dry) {
+        const CondRes cr{0, occ_serial, (uint8_t)(on ? 1 : 0)};
+        if (grow_lock_plain() || par_conds.size() == par_conds.capacity()) {
+            UbGrowGuard ug;
+            par_conds.push_back(cr);
+        } else {
+            par_conds.push_back(cr);
+        }
+        par_conds_n.store(par_conds.size(), std::memory_order_release);
+    }
+}
 // (the dry pass calls on_point at each point it keeps while an early replay_handle runs; the replay thread's only)
 struct SegEarlyHook {
     std::function<void(const ParPoint&)> on_point;
@@ -2609,12 +2642,20 @@ void replay(VkCommandBuffer& cmd, NvnState& s, const uint8_t* p, const uint8_t* 
         case NOP_RASTER_DISCARD: s.raster_discard = payload<nvn_p_flag>(a, avail).value != 0; break;
         case NOP_RENDER_ENABLE:
             s.render_enabled = payload<nvn_p_flag>(a, avail).value != 0;
+            if (occ_mode() == 6) cond_enable_gate_end(dry, worker, s.render_enabled);
             if (dump_on()) logf("vk: dump-op %03d RENDER_ENABLE %d", dump_seq(), (int)s.render_enabled);
             break;
         case NOP_RENDER_COND: {   // (read on the CPU for now; VK_EXT_conditional_rendering later)
             if (worker) {   // (as the dry pass found it, with the reports before it written and none after)
                 UbReadGuard ug;   // (TICK-056: par_conds may grow meanwhile, RX_VK_SEG_EARLY)
-                s.render_enabled = cond_at < par_conds_n.load(std::memory_order_acquire) ? par_conds[cond_at] != 0 : true;
+                if (cond_at < par_conds_n.load(std::memory_order_acquire)) {
+                    const CondRes& c = par_conds[cond_at];
+                    s.render_enabled = c.on != 0;
+                    gate_cur = c.gate;
+                } else {
+                    s.render_enabled = true;
+                    gate_cur = 0;
+                }
                 cond_at++;
                 break;
             }
@@ -2634,6 +2675,13 @@ void replay(VkCommandBuffer& cmd, NvnState& s, const uint8_t* p, const uint8_t* 
                 host->gpu_read(r.addr + 16, &y, 8);
             }
             s.render_enabled = r.mode == 0 ? x == y : x != y;
+            // (OCC1, RX_VK_OCC_GATE) a condition "render if the proxy's count is not 0" on a report of one draw, whose count the game's
+            // CPU read as the fixed value: the objects it covers are drawn inside a GPU conditional block on that proxy's count
+            gate_cur = 0;
+            if (occ_mode() == 6 && s.render_enabled && r.mode == 1 && y == 0 && !r.snapped) {
+                uint64_t slot = 0;
+                if (occ_gate_find(r.addr, slot)) gate_cur = slot + 1;
+            }
             {   // (RX_VK_COND_ALWAYS=1 (test): every condition holds. The frame log's dark frames dump the last ones)
                 static const bool always = getenv("RX_VK_COND_ALWAYS") != nullptr;
                 const uint32_t at = cond_ring_at++ % (1 << 15);
@@ -2647,11 +2695,12 @@ void replay(VkCommandBuffer& cmd, NvnState& s, const uint8_t* p, const uint8_t* 
                 // ~210), 3.1 ms of the replay thread's ~11 ms a frame in Zora's Domain (~790 conditions a frame). Without a move a
                 // worker's read of an earlier entry is not disturbed by it, and the count it reads (par_conds_n) is published after
                 // the entry
+                const CondRes cr{gate_cur, occ_serial, (uint8_t)(s.render_enabled ? 1 : 0)};
                 if (grow_lock_plain() || par_conds.size() == par_conds.capacity()) {
                     UbGrowGuard ug;
-                    par_conds.push_back(s.render_enabled ? 1 : 0);
+                    par_conds.push_back(cr);
                 } else {
-                    par_conds.push_back(s.render_enabled ? 1 : 0);
+                    par_conds.push_back(cr);
                 }
                 par_conds_n.store(par_conds.size(), std::memory_order_release);
             }
@@ -2719,7 +2768,7 @@ void replay(VkCommandBuffer& cmd, NvnState& s, const uint8_t* p, const uint8_t* 
                 DrawArgs da;
                 da.prim = d.prim, da.first = d.first, da.count = d.count;
                 da.base_instance = d.base_instance, da.instances = d.instances;
-                OccSlot os(worker ? occ_wserial : occ_serial);
+                OccSlot os(worker ? occ_wserial : occ_serial, s.samples_passed == 0);
                 draw(cmd, s, da);
             }
             s.samples_passed += 16;
@@ -2732,7 +2781,7 @@ void replay(VkCommandBuffer& cmd, NvnState& s, const uint8_t* p, const uint8_t* 
                 da.prim = d.prim, da.indexed = true, da.itype = d.itype, da.count = d.count;
                 da.base_vertex = d.base_vertex, da.base_instance = d.base_instance, da.instances = d.instances;
                 da.ibuf = d.ibuf;
-                OccSlot os(worker ? occ_wserial : occ_serial);
+                OccSlot os(worker ? occ_wserial : occ_serial, s.samples_passed == 0);
                 draw(cmd, s, da);
             }
             s.samples_passed += 16;
@@ -2745,7 +2794,7 @@ void replay(VkCommandBuffer& cmd, NvnState& s, const uint8_t* p, const uint8_t* 
                 da.prim = d.prim, da.indexed = d.indexed != 0, da.itype = d.itype;
                 da.indirect = d.indirect, da.count_addr = d.count_addr, da.max = d.max, da.stride = d.stride;
                 da.ibuf = d.ibuf;
-                OccSlot os(worker ? occ_wserial : occ_serial);
+                OccSlot os(worker ? occ_wserial : occ_serial, s.samples_passed == 0);
                 draw(cmd, s, da);
             }
             s.samples_passed += 16;
@@ -2766,7 +2815,7 @@ void replay(VkCommandBuffer& cmd, NvnState& s, const uint8_t* p, const uint8_t* 
                 if (d.kind == 0) da.first_task = d.x;   // (hookshot: the task programs add it, vk_draw.cpp's mesh_args)
                 da.indirect = d.indirect, da.count_addr = d.count_addr, da.max = d.max, da.stride = d.stride;
                 da.op = p;   // (RX_VK_MESH_CONV=2: mesh_conv_at_barrier's scan named it by this)
-                OccSlot os(worker ? occ_wserial : occ_serial);
+                OccSlot os(worker ? occ_wserial : occ_serial, s.samples_passed == 0);
                 draw(cmd, s, da);
             }
             s.samples_passed += 16;
@@ -3155,9 +3204,28 @@ struct Segment {
     const NvnState* s;
     size_t ub, cond;
     uint64_t serial = 0;   // (TICK-033: the stream number of its first draw or dispatch)
+    uint64_t serial_end = UINT64_MAX;   // (OCC1: the stream number its next segment starts at; the end of the command buffer: none)
 };
 /// One segment recorded into cmd from the state at its start (any thread: the replay thread's own included)
 
+/// (OCC1, RX_VK_OCC_GATE; a segment's start, outside a pass) the gate in force where the segment starts, and the predicate words of
+/// the proxies the segment's conditions test, made current on the GPU
+void gate_segment_begin(VkCommandBuffer cmd, const Segment& g) {
+    gate_cur = 0;
+    uint64_t lo = UINT64_MAX, hi = 0;
+    {
+        UbReadGuard ug;
+        const size_t n = par_conds_n.load(std::memory_order_acquire);
+        const auto take = [&](uint64_t gate) {
+            if (!gate || gate - 1 >= g.serial) return;   // (a proxy of this segment: no copy before it can hold it; drawn)
+            lo = std::min(lo, gate - 1), hi = std::max(hi, gate);
+        };
+        if (g.cond > 0 && g.cond - 1 < n) gate_cur = par_conds[g.cond - 1].gate;
+        take(gate_cur);
+        for (size_t i = g.cond; i < n && par_conds[i].at < g.serial_end; i++) take(par_conds[i].gate);
+    }
+    if (hi > lo) occ_gate_segment(cmd, lo, hi);
+}
 void record_segment(VkCommandBuffer& cmd, const Segment& g) {
     rmode = Mode::Worker;
     par_stats_segment(true);
@@ -3166,7 +3234,9 @@ void record_segment(VkCommandBuffer& cmd, const Segment& g) {
     occ_wserial = g.serial;
     ub_gen++;
     full_barrier(cmd);   // (after what the command buffers before it did)
+    if (occ_mode() == 6) gate_segment_begin(cmd, g);
     replay(cmd, s, g.p, g.end);
+    if (occ_mode() == 6) occ_gate_segment_end(), gate_cur = 0;
     end_pass(cmd);
     full_barrier(cmd);
     par_stats_segment(false);
@@ -3698,6 +3768,7 @@ const uint8_t* replay_handle_early(VkCommandBuffer& cmd, const uint8_t* h, bool 
         if (!hook.wants(q.work, q.p)) return;
         EarlyJob* j = jobs[open].get();
         j->g.end = q.p;
+        j->g.serial_end = serial0 + (uint64_t)q.work;
         {
             std::lock_guard lk(par_pool.mu);
             par_pool.jobs.push_back([group, j] { early_record_job(*group, j); });
@@ -3750,6 +3821,7 @@ const uint8_t* replay_handle_early(VkCommandBuffer& cmd, const uint8_t* h, bool 
         es_whole_n++;
         Segment whole = jobs[0]->g;
         whole.end = stop;
+        whole.serial_end = UINT64_MAX;
         {
             WallAdd wall_whole(rwall.whole_ns);
             rwall.whole++;
@@ -4029,6 +4101,7 @@ const uint8_t* replay_handle(VkCommandBuffer& cmd, const uint8_t* h, bool may_st
             if (seen.insert(keys).second && seen.size() < 40) logf("vk: parallel boundary %d at work %lld of %lld: program%s", k, (long long)at->work, (long long)total, keys.c_str());
         }
         seg.back().end = at->p;
+        seg.back().serial_end = serial0 + (uint64_t)at->work;
         seg.push_back({at->p, nullptr, &at->s, at->ub, at->cond, serial0 + (uint64_t)at->work});
     }
     seg.back().end = stop;
@@ -4138,6 +4211,7 @@ const uint8_t* replay_handle(VkCommandBuffer& cmd, const uint8_t* h, bool may_st
         rec_parts++;
         Segment whole = seg[0];
         whole.end = stop;
+        whole.serial_end = UINT64_MAX;
         {
             WallAdd wall_whole(rwall.whole_ns);
             rwall.whole++;
