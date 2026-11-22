@@ -4096,6 +4096,18 @@ bool dry_lean_on() {
     }();
     return on;
 }
+/// (stream SMALL1) RX_VK_MID_SEG=<work> (default 0: off): a command buffer of at least that many draws and dispatches is cut into two segments
+/// even when it has under two segments' worth (256 with the fine segments: the market's 105 and the castle's 159 and 201 are recorded whole
+/// on the replay thread, 0.35 and 0.7 ms each on the RTX 5070), so that a second thread records half of it
+int64_t mid_seg_min() {
+    static const int64_t v = [] {
+        const char* e = getenv("RX_VK_MID_SEG");
+        const int64_t n = e ? std::max<int64_t>(0, atoll(e)) : 0;
+        if (n) logf("vk: command buffers of %lld draws and dispatches and more cut in two at least (RX_VK_MID_SEG)", (long long)n);
+        return n;
+    }();
+    return v;
+}
 /// The draws and dispatches one segment is cut at (replay_handle's `per`)
 int64_t par_seg_per() {
     static const int64_t v = getenv("RX_VK_PARALLEL_SEG") ? std::max(32, atoi(getenv("RX_VK_PARALLEL_SEG"))) : fine_segments() ? 128 : 160;
@@ -4198,7 +4210,8 @@ const uint8_t* replay_handle(VkCommandBuffer& cmd, const uint8_t* h, bool may_st
         // size, another draw count) moves the boundaries or leaves planned ones unreached (those slots unused, the last segment
         // the rest); none reached: the whole buffer recorded on this thread. Too small a last count: the old path)
         const int64_t last_total = pk_total[pk_this];
-        const int nplan = mkwvk::segment_plan::segment_count(last_total, per, recorders, seg_cap(), one_round);
+        int nplan = mkwvk::segment_plan::segment_count(last_total, per, recorders, seg_cap(), one_round);
+        nplan = mkwvk::segment_plan::with_mid(nplan, last_total, seg_cap(), mid_seg_min());   // (stream SMALL1)
         if (nplan >= 2) {
             int64_t plan[kMaxBatch] = {};
             mkwvk::segment_plan::balanced_targets(pk_profile[pk_this], nplan, last_total, plan, seg_tail());
@@ -4239,7 +4252,8 @@ const uint8_t* replay_handle(VkCommandBuffer& cmd, const uint8_t* h, bool may_st
     if (dry_lean_on() && !only_boundary) {
         const int64_t pe = par_point_every();
         const int64_t T = count_work(h);
-        const int nplan = mkwvk::segment_plan::segment_count(T, per, recorders, seg_cap(), one_round);
+        int nplan = mkwvk::segment_plan::segment_count(T, per, recorders, seg_cap(), one_round);
+        nplan = mkwvk::segment_plan::with_mid(nplan, T, seg_cap(), mid_seg_min());   // (stream SMALL1)
         // (RX_VK_DRY_LEAN=1: the one-segment case only, exact whatever the dry pass finds. =2: the planned boundaries too, which
         // is exact only when the dry pass reaches the counted end; measured (TICK-061 screen 2) the segments came out other than
         // with every point (the first ~280 draws against ~180), the replay thread's own segment +0.8 ms: so =2 is not for play)
@@ -4287,7 +4301,8 @@ const uint8_t* replay_handle(VkCommandBuffer& cmd, const uint8_t* h, bool may_st
     static int64_t timed;
     dry_ms += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_dry0).count();
     if (wall_fine_on()) rwall.dry_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - t_dry0).count();
-    const int nseg = mkwvk::segment_plan::segment_count(total, per, recorders, seg_cap(), one_round);
+    int nseg = mkwvk::segment_plan::segment_count(total, per, recorders, seg_cap(), one_round);
+    nseg = mkwvk::segment_plan::with_mid(nseg, total, seg_cap(), mid_seg_min());   // (stream SMALL1)
     int64_t wants[kMaxBatch] = {};
     if (balance) mkwvk::segment_plan::balanced_targets(profile, nseg, total, wants, seg_tail());
     std::vector<Segment> seg;

@@ -27,6 +27,13 @@ inline int segment_count(int64_t total, int64_t per, int recorders, int cap, boo
     return (int)std::clamp<int64_t>(total / per, 1, bound);
 }
 
+/// (stream SMALL1, RX_VK_MID_SEG=<work>, 0: off) A command buffer of at least `mid_min` draws and dispatches that the rule above leaves in one
+/// segment (it has under two segments' worth) is cut in two, when the cap allows two: its recording goes to two threads instead of the replay
+/// thread's alone. More than one segment already: as it was.
+inline int with_mid(int n, int64_t total, int cap, int64_t mid_min) {
+    return (n < 2 && mid_min > 0 && total >= mid_min && cap >= 2) ? 2 : n;
+}
+
 /// The rounds n segments take on r recorders (a diagnosis: more than one is a round where some recorders idle)
 inline int rounds(int n, int r) {
     if (n <= 0) return 0;

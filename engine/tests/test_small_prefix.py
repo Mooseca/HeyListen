@@ -127,6 +127,11 @@ def main():
     fin = function(src, "void finish_recording(uint64_t value) {")
     if fin.index("small_pend_flush();") > fin.index("Recording& r = *rec_cur;"):
         raise SystemExit("finish_recording must record what is pending before it takes the recording")
+    # RX_VK_MID_SEG: every place that counts a command buffer's segments widens a lone one by with_mid, from the same count
+    if src.count("mkwvk::segment_plan::with_mid(") != 3 or 'getenv("RX_VK_MID_SEG")' not in src:
+        raise SystemExit("RX_VK_MID_SEG must be applied at the early plan, the lean plan and the segment count")
+    need(handle, "replay_handle", ["nseg = mkwvk::segment_plan::with_mid(nseg, total, seg_cap(), mid_seg_min());",
+                                   "nplan = mkwvk::segment_plan::with_mid(nplan, last_total, seg_cap(), mid_seg_min());"])
     model()
     print("test_small_prefix: ok")
 
