@@ -438,6 +438,9 @@ static DWORD WINAPI account_main(void *arg) {
 }
 
 static int pressure_on = 1;
+static uint64_t lowmem_mb = 4096;   /* (HL_MEM_COLD_LOWMEM: free RAM under which nothing is taken out; 0: never held) */
+static int lowmem_held;
+static int64_t lowmem_since, lowmem_ns, lowmem_passes;
 static int64_t pressure_until;
 static DWORD WINAPI cold_main(void *unused) {
     {
@@ -445,6 +448,10 @@ static DWORD WINAPI cold_main(void *unused) {
         pressure_on = pe && pe[0] ? atoi(pe) != 0 : 1;
     }
     (void)unused;
+    {
+        const char *lm = getenv("HL_MEM_COLD_LOWMEM");
+        if (lm && lm[0]) lowmem_mb = (uint64_t)atoll(lm);
+    }
     double worst_ms[2] = {0, 0};
     int64_t next_report = hos_now_ns() + 10000000000LL;
     uint64_t back_before[2] = {0, 0};   /* (come-backs of every kind, one and two passes ago: the quiet rule) */
@@ -457,6 +464,28 @@ static DWORD WINAPI cold_main(void *unused) {
            pages out and 6.8 GB came back, 113,504 units, and one working-set query took 6.8 s with game threads 2-11 s without a
            core: the system was paging, and each page taken out was one more to read back */
         if (pressure_on && hos_now_ns() < pressure_until) continue;
+        /* (MEM1, HL_MEM_COLD_LOWMEM=<MB>) The system's free RAM is low: every page taken out now goes to the standby or the
+           modified list of a machine that is about to reuse them, the dirty ones are written to the page file first, and what
+           the game or the back end reads next comes back from the disk. Nothing is taken out until the free RAM is a quarter
+           above the line again. */
+        if (lowmem_mb) {
+            MEMORYSTATUSEX ms;
+            memset(&ms, 0, sizeof ms);
+            ms.dwLength = sizeof ms;
+            if (GlobalMemoryStatusEx(&ms)) {
+                const uint64_t avail_mb = ms.ullAvailPhys >> 20;
+                if (!lowmem_held && avail_mb < lowmem_mb) {
+                    lowmem_held = 1, lowmem_since = hos_now_ns();
+                    hos_log("hl mem: cold pages: held, %llu MB of RAM free (under %llu MB; HL_MEM_COLD_LOWMEM=0: not)", (unsigned long long)avail_mb, (unsigned long long)lowmem_mb);
+                }
+                else if (lowmem_held && avail_mb >= lowmem_mb + lowmem_mb / 4) {
+                    lowmem_held = 0;
+                    lowmem_ns += hos_now_ns() - lowmem_since;
+                    hos_log("hl mem: cold pages: going on, %llu MB of RAM free; held %.1f s in all", (unsigned long long)avail_mb, lowmem_ns / 1e9);
+                }
+                if (lowmem_held) { lowmem_passes++; continue; }
+            }
+        }
         const int64_t t0 = hos_now_ns();
         const int64_t unlocks0 = cold_unlocks, queries0 = cold_queries;
         cold_max_ws = cold_max_unlock = cold_max_query = 0;
@@ -500,6 +529,10 @@ static DWORD WINAPI cold_main(void *unused) {
                         "pass %.1f ms at most", line, quiet_passes * COLD_PASS_MS / 1000.0,
                         quiet_passes_all * COLD_PASS_MS / 1000.0, (long long)heap_sweeps, worst_ms[1]);
             }
+            if (lowmem_mb)
+                hos_log("hl mem: cold pages: free RAM line %llu MB (HL_MEM_COLD_LOWMEM): %s now, %lld passes left out in all, held %.1f s in all",
+                        (unsigned long long)lowmem_mb, lowmem_held ? "held" : "not held", (long long)lowmem_passes,
+                        (lowmem_ns + (lowmem_held ? hos_now_ns() - lowmem_since : 0)) / 1e9);
             quiet_passes = 0;
             worst_ms[0] = worst_ms[1] = 0;
             next_report = hos_now_ns() + 10000000000LL;
