@@ -2032,6 +2032,8 @@ bool wall_fine_on() {
     static const bool v = getenv("RX_VK_PROF_FINE") != nullptr;
     return v;
 }
+thread_local bool small_phase_on = false;   // (RX_VK_SMALL_LOG: set around a command buffer recorded whole, on the replay thread only)
+int64_t small_phase_ns[3];   // (replay thread, under replay_mu: setup + first barrier, the ops, end of pass + last barrier)
 inline int64_t wall_now() { return std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count(); }
 struct WallAdd {   // (adds its scope's wall time to a counter; nothing when the switch is off)
     int64_t& acc;
@@ -2150,6 +2152,91 @@ void op_cost_report(double frames) {
     }
     last = n;
     op_cost_report(frames);
+}
+
+// ---- (stream SMALL1, RX_VK_SMALL_LOG=1) the command buffers recorded whole on the replay thread: how big, what in them, what they cost ----
+// Logging only. Each command buffer that is one segment (under two segments' worth of draws and dispatches) is counted by its work
+// (draws + dispatches): 0, 1-2, 3-7, 8-31, 32-127, 128 and over; with its ops (the stream's headers), the time of its dry pass and of its
+// recording (wall), whether it ended at a wait; and the op kinds over all of them. Every 120 presents (replay_wall_report's turn).
+bool small_log_on() {
+    static const bool v = [] {
+        const char* e = getenv("RX_VK_SMALL_LOG");
+        return e && atoi(e) != 0;
+    }();
+    return v;
+}
+struct SmallBucket {
+    int64_t n = 0, work = 0, ops = 0, dry_ns = 0, rec_ns = 0, stops = 0;
+};
+SmallBucket small_b[6];
+int64_t small_kinds[kOpKinds];
+int64_t small_subs = 0, small_cbs_all = 0, small_cb_max = 0;
+void small_count(const uint8_t* p, const uint8_t* stop, int64_t work, int64_t dry_ns, int64_t rec_ns) {
+    const int b = work == 0 ? 0 : work <= 2 ? 1 : work <= 7 ? 2 : work <= 31 ? 3 : work <= 127 ? 4 : 5;
+    SmallBucket& s = small_b[b];
+    s.n++, s.work += work, s.dry_ns += dry_ns, s.rec_ns += rec_ns, s.stops += stop != nullptr;
+    for (;;) {
+        if (stop && p >= stop) break;
+        nvn_op_hdr h;
+        std::memcpy(&h, p, sizeof h);
+        if (h.op == NOP_END || h.size < sizeof h) break;
+        s.ops++;
+        if (h.op < kOpKinds) small_kinds[h.op]++;
+        p += h.size;
+    }
+}
+std::string small_seq;   // (the command buffers' work in order: "12" a command buffer, "w" stopped at a wait, "|" a submission's end, "#" a new frame)
+uint64_t small_seq_frame = ~0ull;
+void small_seq_note(int64_t work, bool stopped) {
+    if (texture_frame_no() != small_seq_frame) small_seq_frame = texture_frame_no(), small_seq += "# ";
+    if (work < 0) {
+        small_seq += "| ";
+    } else {
+        small_seq += std::to_string(work);
+        if (stopped) small_seq += "w";
+        small_seq += " ";
+    }
+    if (small_seq.size() > 4000) small_seq.erase(0, small_seq.size() - 2000);
+}
+void small_log_report(double frames) {
+    if (!small_log_on()) return;
+    static SmallBucket last[6];
+    static int64_t last_kinds[kOpKinds], l_subs, l_cbs;
+    static const char* const nm[6] = {"0", "1-2", "3-7", "8-31", "32-127", "128+"};
+    char line[700];
+    int k = snprintf(line, sizeof line, "vk: a frame (small cbs, recorded whole; work = draws + dispatches):");
+    double all_n = 0, all_ms = 0, all_dry = 0;
+    for (int i = 0; i < 6; i++) {
+        const SmallBucket d{small_b[i].n - last[i].n, small_b[i].work - last[i].work, small_b[i].ops - last[i].ops,
+                            small_b[i].dry_ns - last[i].dry_ns, small_b[i].rec_ns - last[i].rec_ns, small_b[i].stops - last[i].stops};
+        last[i] = small_b[i];
+        all_n += d.n / frames, all_ms += d.rec_ns / frames / 1e6, all_dry += d.dry_ns / frames / 1e6;
+        if (!d.n) continue;
+        k += snprintf(line + k, sizeof line - k, " [work %s: %.1f cbs, %.1f work each, %.1f ops each, dry %.1f us, record %.1f us each, %.0f%% stopped]",
+                      nm[i], d.n / frames, (double)d.work / d.n, (double)d.ops / d.n, d.dry_ns / 1e3 / d.n, d.rec_ns / 1e3 / d.n, 100.0 * d.stops / d.n);
+    }
+    logf("%s total %.1f cbs a frame, dry %.2f ms, record %.2f ms; submissions %.1f with %.1f command buffers each", line, all_n, all_dry,
+         all_ms, (small_subs - l_subs) / frames, (small_subs - l_subs) ? (double)(small_cbs_all - l_cbs) / (small_subs - l_subs) : 0.0);
+    l_subs = small_subs, l_cbs = small_cbs_all;
+    static int64_t l_ph[3];
+    logf("vk: a frame (small cbs recorded whole, phases): setup + barrier %.3f ms, ops %.3f ms, end of pass + barrier %.3f ms",
+         (small_phase_ns[0] - l_ph[0]) / frames / 1e6, (small_phase_ns[1] - l_ph[1]) / frames / 1e6, (small_phase_ns[2] - l_ph[2]) / frames / 1e6);
+    for (int i = 0; i < 3; i++) l_ph[i] = small_phase_ns[i];
+    struct Row { int op; int64_t n; };
+    std::vector<Row> rows;
+    for (int i = 0; i < kOpKinds; i++) {
+        const int64_t n = small_kinds[i] - last_kinds[i];
+        last_kinds[i] = small_kinds[i];
+        if (n > 0) rows.push_back({i, n});
+    }
+    std::sort(rows.begin(), rows.end(), [](const Row& a, const Row& b) { return a.n > b.n; });
+    char l2[700];
+    int j = snprintf(l2, sizeof l2, "vk: a frame (small cbs' ops by kind):");
+    for (size_t i = 0; i < rows.size() && i < 16 && j < (int)sizeof l2 - 60; i++)
+        j += snprintf(l2 + j, sizeof l2 - j, " %s %.1f", kOpNames[rows[i].op], rows[i].n / frames);
+    logf("%s", l2);
+    logf("vk: small cbs, the command buffers of the last frames in order (work each; w: stopped at a wait; |: a submission's end; #: a new frame): %s",
+         small_seq.size() > 900 ? small_seq.c_str() + (small_seq.size() - 900) : small_seq.c_str());
 }
 
 void ubo_check_refs(uint32_t op, const uint8_t* a, uint32_t avail);   // (HL_UBO_CHECK: below)
@@ -3227,6 +3314,8 @@ void gate_segment_begin(VkCommandBuffer cmd, const Segment& g) {
     if (hi > lo) occ_gate_segment(cmd, lo, hi);
 }
 void record_segment(VkCommandBuffer& cmd, const Segment& g) {
+    const bool sm = small_phase_on;
+    const int64_t sm0 = sm ? wall_now() : 0;
     rmode = Mode::Worker;
     par_stats_segment(true);
     NvnState s = *g.s;
@@ -3235,10 +3324,13 @@ void record_segment(VkCommandBuffer& cmd, const Segment& g) {
     ub_gen++;
     full_barrier(cmd);   // (after what the command buffers before it did)
     if (occ_mode() == 6) gate_segment_begin(cmd, g);
+    const int64_t sm1 = sm ? wall_now() : 0;
     replay(cmd, s, g.p, g.end);
+    const int64_t sm2 = sm ? wall_now() : 0;
     if (occ_mode() == 6) occ_gate_segment_end(), gate_cur = 0;
     end_pass(cmd);
     full_barrier(cmd);
+    if (sm) small_phase_ns[0] += sm1 - sm0, small_phase_ns[1] += sm2 - sm1, small_phase_ns[2] += wall_now() - sm2;
     par_stats_segment(false);
     rmode = Mode::Serial;
     ub_limit = SIZE_MAX;
@@ -4110,11 +4202,15 @@ const uint8_t* replay_handle(VkCommandBuffer& cmd, const uint8_t* h, bool may_st
     if (presync_early.r) presync_early_finish(seg.size() > 1);   // (TICK-056: its copies ahead of rec_cur, on every path below)
     if (seg.size() == 1) {   // (one segment: here, as the dry pass left the reports and conditions)
         defer_check_beside(kDeferSerialRecord);   // (stream JOIN1: pending only with RX_VK_DEFER_JOIN=2)
+        const int64_t sm_t0 = small_log_on() ? wall_now() : 0;
+        small_phase_on = sm_t0 != 0;
         {
             WallAdd wall_whole(rwall.whole_ns);
             rwall.whole++;
             record_segment(cmd, seg[0]);
         }
+        small_phase_on = false;
+        if (sm_t0) small_count(h, stop, total, (int64_t)(std::chrono::duration<double, std::nano>(std::chrono::steady_clock::now() - t_dry0).count()) - (wall_now() - sm_t0), wall_now() - sm_t0);
         return occ_stop ? occ_go_on(cmd, occ_stop, may_stop, nullptr) : stop;
     }
     defer_join_now();   // (stream JOIN1: its own segments' tables and slots)
@@ -4812,16 +4908,28 @@ bool run_submit(const uint64_t* handles, int n, uint64_t value, uint64_t queue, 
     }
     VkCommandBuffer cmd = rec_cur->cmd;
     const uint8_t* stop = nullptr;
+    if (small_log_on() && cb == 0) small_subs++, small_cbs_all += n;
     for (; cb < n; cb++, p = nullptr) {
         if (!handles[cb]) continue;
         feed_set(mkwvk::feed::kWhole);   // (stream REPLAY2)
+        int64_t sq_d0 = 0, sq_di0 = 0;
+        if (small_log_on()) {
+            int64_t sk, pl;
+            draw_stats(&sq_d0, &sk, &sq_di0, &pl);
+        }
         {
             WallAdd wall_handle(rwall.handle_ns);
             rwall.handles++;
             stop = replay_handle(cmd, p ? p : reinterpret_cast<const uint8_t*>(handles[cb]), may_stop);
         }
+        if (small_log_on()) {
+            int64_t d1, sk, di1, pl;
+            draw_stats(&d1, &sk, &di1, &pl);
+            small_seq_note(d1 - sq_d0 + di1 - sq_di0, stop != nullptr);
+        }
         if (stop) break;
     }
+    if (small_log_on()) small_seq_note(-1, false);   // (the submission's end)
     defer_join_now();   // (stream JOIN1: a join never outlives the command buffers' loop: the recording's end below needs every segment)
     if (stop) {
         tl_ev("stop", value, queue, wait_at(stop).gpu);
@@ -6291,6 +6399,7 @@ void log_frame_stats() {
              (long long)tr, (long long)fl, texture_count(), (unsigned long long)(texture_bytes() >> 20));
         draw_skip_report(120.0);
         replay_wall_report(120.0);
+        small_log_report(120.0);
         {   // (hookshot: the full barriers recorded and the ones left out as the second of two in a row, RX_VK_BARRIER_DEDUPE_OFF=1)
             static int64_t l_made, l_left;
             int64_t made = 0, left = 0;
