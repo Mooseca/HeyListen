@@ -62,6 +62,7 @@
 #include <windows.h>
 #include <psapi.h>
 #else
+#include <sys/resource.h>
 #include <time.h>
 #include <unistd.h>
 #endif
@@ -151,6 +152,82 @@ std::string address_now() {
                ? base
                : "";
 }
+
+// ---- (v0.4.4) the memory record and the process's page faults: sampled by frame, summarized by period ----
+
+/// HL_TEL_MEMORY=0 turns the memory record's new fields and the os_wait sub-causes' page faults off; HL_TEL_WAITS=0 the host's wait kinds;
+/// HL_TEL_STALLS=0 the stall count and the load window. All on by default: they only add fields
+bool tel_on(const char* name) {
+    const char* e = getenv(name);
+    return !(e && e[0] == '0' && !e[1]);
+}
+/// HL_HITCH_LOG=<ms> (diagnostic): every frame of that many ms or more is logged with the numbers its cause was made of
+int hitch_log_ms() {
+    static const int v = [] {
+        const char* e = getenv("HL_HITCH_LOG");
+        return e && *e ? std::max(0, atoi(e)) : 0;
+    }();
+    return v;
+}
+
+struct ProcCounters {
+    int64_t faults = 0;   // (the process's page faults so far, soft and hard)
+    double ws_mb = 0;     // (its working set now)
+    bool ok = false;
+};
+ProcCounters proc_counters() {
+    ProcCounters c;
+#ifdef _WIN32
+    PROCESS_MEMORY_COUNTERS pm{};
+    pm.cb = sizeof pm;
+    if (K32GetProcessMemoryInfo(GetCurrentProcess(), &pm, sizeof pm))
+        c.faults = (int64_t)pm.PageFaultCount, c.ws_mb = pm.WorkingSetSize / 1048576.0, c.ok = true;
+#else
+    rusage ru{};
+    if (!getrusage(RUSAGE_SELF, &ru)) c.faults = (int64_t)ru.ru_minflt + (int64_t)ru.ru_majflt, c.ok = true;
+#endif
+    return c;
+}
+
+/// The system's memory now: the free physical RAM (GB) and the commit charge in percent of its limit (< 0: not known)
+void system_memory(double* free_gb, double* commit_pct) {
+    *free_gb = *commit_pct = -1;
+#ifdef _WIN32
+    MEMORYSTATUSEX ms{};
+    ms.dwLength = sizeof ms;
+    if (GlobalMemoryStatusEx(&ms)) *free_gb = ms.ullAvailPhys / 1073741824.0;
+    PERFORMANCE_INFORMATION pi{};
+    pi.cb = sizeof pi;
+    if (K32GetPerformanceInfo(&pi, sizeof pi) && pi.CommitLimit) *commit_pct = 100.0 * (double)pi.CommitTotal / (double)pi.CommitLimit;
+#else
+    FILE* f = fopen("/proc/meminfo", "r");
+    if (!f) return;
+    char line[128];
+    double avail = -1, total = 0, committed = 0, limit = 0;
+    while (fgets(line, sizeof line, f)) {
+        double kb;
+        if (sscanf(line, "MemAvailable: %lf kB", &kb) == 1) avail = kb;
+        else if (sscanf(line, "Committed_AS: %lf kB", &kb) == 1) committed = kb;
+        else if (sscanf(line, "CommitLimit: %lf kB", &kb) == 1) limit = kb;
+        else if (sscanf(line, "MemTotal: %lf kB", &kb) == 1) total = kb;
+    }
+    fclose(f);
+    (void)total;
+    if (avail >= 0) *free_gb = avail / 1048576.0;
+    if (limit > 0) *commit_pct = 100.0 * committed / limit;
+#endif
+}
+
+// The period's record (mu held): reset at each summary
+struct MemPeriod {
+    double free_min_gb = -1, commit_max = -1;
+    int64_t ws_trims = 0, faults = 0;
+    int64_t last_faults = -1;
+    double last_ws_mb = 0;
+    int64_t next_sample_ns = 0;
+    bool seen = false;
+} mem_period;
+std::vector<pr::Recent> recent_hitches;   // (mu held: the hitches and stalls of the last seconds, pr::reclassify_as_load)
 
 double ram_used_gb() {
 #ifdef _WIN32
@@ -436,7 +513,10 @@ bool where_now() {
     if (name != zone_map) zone_enter(name);   // (the zone recorder's own map switch: not held back by the summary's map cap)
     const bool full = current && name != current_map && !maps.count(name) && maps.size() >= (size_t)pr::kMaxMaps;
     if (!full && (!current || name != current_map)) {
-        if (current) map_switched = true;   // (an area change: the frame that spans its load carries it, perf_frame_shown)
+        if (current) {
+            map_switched = true;   // (an area change: the frame that spans its load carries it, perf_frame_shown)
+            if (tel_on("HL_TEL_STALLS")) pr::reclassify_as_load(*current, recent_hitches, clock_ns() / 1000000);   // (v0.4.4: the load's frames just before)
+        }
         current_map = name;
         current = &maps[name];
         current->fresh = !seen_maps.count(name);
@@ -663,6 +743,17 @@ void summarize(bool now) {
     uint64_t used = 0, allowed = 0;
     if (vram_usage_now(&used, &allowed)) mem.vram_used_gb = used / 1073741824.0, mem.vram_allowed_gb = allowed / 1073741824.0;
     mem.ram_used_gb = ram_used_gb();
+    if (tel_on("HL_TEL_MEMORY") && mem_period.seen) {   // (v0.4.4: the memory record's new fields, the period's)
+        mem.extra = true;
+        mem.ram_class = pr::ram_class_of(machine.ram_gb);
+        mem.free_min_gb = mem_period.free_min_gb, mem.commit_pct_max = mem_period.commit_max;
+        mem.ws_trims = mem_period.ws_trims, mem.page_faults = mem_period.faults;
+        if (const char* lm = getenv("HL_MEM_COLD_LOWMEM"); lm && *lm && atoll(lm) > 0)
+            mem.cold_line = true, mem.cold_held_ds = perf_parts::cold_held_ds.load(std::memory_order_relaxed),
+            mem.cold_passes = perf_parts::cold_passes.load(std::memory_order_relaxed);
+    }
+    mem_period.free_min_gb = mem_period.commit_max = -1, mem_period.ws_trims = mem_period.faults = 0;
+    recent_hitches.clear();   // (counted into the summary being made: a map change seen next must not reach into the next one's totals)
     const double session_s = (clock_ns() - started_ns) / 1e9;
     std::string json = pr::summary_json(machine, first, session_s, current_map, &mem, maps);
     char name[48];
@@ -805,6 +896,7 @@ void perf_frame_shown() {
     double dd[PD_COUNT];
     for (int i = 0; i < PD_COUNT; i++) dd[i] = std::max(0.0, (prof_desc[i].get() - l_desc[i]) / 1e6), l_desc[i] = prof_desc[i].get();
     w.descriptors = dd[PD_SELF] + dd[PD_POOL];
+    w.desc_self = dd[PD_SELF], w.desc_tex = dd[PD_TEX], w.desc_pool = dd[PD_POOL];
     w.upload += dd[PD_TEX];
     w.descriptors_which = pr::descriptor_kind(dd[PD_SELF], dd[PD_POOL]);
     w.present = std::max(0.0, (present_in - l_present_ns) / 1e6);
@@ -818,6 +910,24 @@ void perf_frame_shown() {
     // sleep the host pushed at this present, the GPU waits inside the renderer's calls (the recording slot, the read-backs,
     // the swapchain), the renderer's own work beside them. f.ms is known only under the lock below, where they are cut to it)
     const double pace_ms = perf_parts::pace_us.exchange(0, std::memory_order_relaxed) / 1000.0;
+    {   // (v0.4.4: what the presenting thread blocked on since the frame before, by kind: the host's push at the present; the pacing
+        // sleep is in the sleeps and is taken out of them. And the process's page faults and working-set fall since the frame before)
+        static const bool waits_on = tel_on("HL_TEL_WAITS"), mem_on = tel_on("HL_TEL_MEMORY");
+        static int64_t l_faults = -1;
+        static double l_ws = 0;
+        w.ow_known = waits_on && perf_parts::waits_seen.load(std::memory_order_relaxed);
+        w.ow_lock = perf_parts::wait_us[0].exchange(0, std::memory_order_relaxed) / 1000.0;
+        w.ow_sleep = std::max(0.0, perf_parts::wait_us[1].exchange(0, std::memory_order_relaxed) / 1000.0 - pace_ms);
+        w.ow_vcore = perf_parts::wait_us[2].exchange(0, std::memory_order_relaxed) / 1000.0;
+        w.ow_file = perf_parts::wait_us[3].exchange(0, std::memory_order_relaxed) / 1000.0;
+        if (mem_on || waits_on) {
+            const ProcCounters pc = proc_counters();
+            if (pc.ok) {
+                if (l_faults >= 0) w.faults = std::max<int64_t>(0, pc.faults - l_faults), w.ws_drop_mb = std::max(0.0, l_ws - pc.ws_mb);
+                l_faults = pc.faults, l_ws = pc.ws_mb;
+            }
+        }
+    }
     const double rb_ms = w.readback, wait_ms = (wait_in - l_wait_ns) / 1e6, present_ms = w.present;
     const double render_ms = (render_ns - l_render) / 1e6, cpu_ms = (cpu - l_cpu) / 1e6;
     const int64_t left_out = (skips - l_skips) + (fresh_skips - l_fresh);
@@ -831,6 +941,10 @@ void perf_frame_shown() {
     // (the first frame only takes the counters: they hold everything since the game started; a gap over 2 s, a pause or a
     // stall of the window, is no frame)
     if (!primed || !before || now - before > 2000000000LL) {
+        // (v0.4.4: a gap of over 2 s is no frame, but it is counted apart: the freezes the frame buckets cannot hold, a load's among them)
+        if (primed && before && current && perf_measure.load(std::memory_order_relaxed) && tel_on("HL_TEL_STALLS"))
+            pr::add_stall(*current, (now - before) / 1e6, perf_parts::loading.load(std::memory_order_relaxed) != 0, &recent_hitches,
+                          now / 1000000);
         primed = true;
         return;
     }
@@ -841,6 +955,17 @@ void perf_frame_shown() {
         // (a 17th map in one period: that summary now, with the 16 it has, then the new map in the next)
         if (where_now()) summarize(false), since_summary = 0, where_now();
         since_map = 0;
+    }
+    {   // (v0.4.4: the memory record's period: the faults and trims of each frame, the system's free RAM and commit about once a second)
+        mem_period.faults += w.faults;
+        if (w.ws_drop_mb >= pr::kTrimMb) mem_period.ws_trims++;
+        if (now >= mem_period.next_sample_ns) {
+            double free_gb, commit;
+            system_memory(&free_gb, &commit);
+            if (free_gb >= 0) mem_period.free_min_gb = mem_period.free_min_gb < 0 ? free_gb : std::min(mem_period.free_min_gb, free_gb);
+            if (commit >= 0) mem_period.commit_max = std::max(mem_period.commit_max, commit);
+            mem_period.next_sample_ns = now + 1000000000LL, mem_period.seen = true;
+        }
     }
     {   // (the frame's parts, cut to its ms: game + render + gpu_wait + pace is the whole frame)
         f.part[fs::kPace] = (float)std::clamp(pace_ms, 0.0, (double)f.ms);
@@ -864,7 +989,16 @@ void perf_frame_shown() {
     const bool load_now = perf_parts::loading.load(std::memory_order_relaxed) != 0;
     const bool loading = load_now || load_last || map_switched;
     load_last = load_now, map_switched = false;
-    pr::add_frame(*current, f, w, target, last_ms, usual, loading);
+    pr::add_frame(*current, f, w, target, last_ms, usual, loading, &recent_hitches, now / 1000000);
+    if (const int hl = hitch_log_ms(); hl > 0 && f.ms >= (float)hl) {   // (HL_HITCH_LOG=<ms>: the numbers a slow frame's cause was made of)
+        logf("vk: hitch %.1f ms: %s%s | game %.1f render %.1f gpu_wait %.1f pace %.1f gpu %.1f | pipe %.1f xlate %.1f upload %.1f memsync %.1f "
+             "readback %.1f drvcomp %.1f present %.1f | desc %.1f (build %.1f pool %.1f, tex %.1f in upload) | os_wait %.1f: lock %.1f sleep %.1f "
+             "vcore %.1f file %.1f, faults %lld, ws -%.0f MB (%s)",
+             f.ms, pr::cause_name(pr::cause_of(f, w)), loading ? " (load)" : "", f.part[fs::kGame], f.part[fs::kRender], f.part[fs::kGpuWait],
+             f.part[fs::kPace], f.gpu_ms, w.pipeline, w.translate, w.upload, w.memsync, w.readback, w.driver_compile, w.present,
+             w.descriptors, w.desc_self, w.desc_pool, w.desc_tex, w.os_wait, w.ow_lock, w.ow_sleep, w.ow_vcore, w.ow_file, (long long)w.faults,
+             w.ws_drop_mb, pr::os_wait_kind(w).c_str());
+    }
     profile_feed(profile_host_map, f.ms, pr::is_hitch(f.ms, std::max(target, usual)));
     last_ms = f.ms;
     since_map += f.ms / 1000.0, since_summary += f.ms / 1000.0;

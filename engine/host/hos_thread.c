@@ -9,6 +9,7 @@
 #include "hos.h"
 #include "hos_crash_record.h"
 #include "hos_report_prefixes.h"
+#include "hos_waitnote.h"
 #include <stdio.h>
 #include <stdlib.h>
 #define WIN32_LEAN_AND_MEAN
@@ -33,6 +34,8 @@
 #include <stdatomic.h>
 #include <unistd.h>
 #endif
+
+_Thread_local int64_t hos_wn_ns[HOS_WN_KINDS];   /* (hos_waitnote.h) */
 
 struct HosThread {
     Ctx ctx;
@@ -503,7 +506,9 @@ HosThread *hos_thread_by_handle(uint32_t h) {
 void hos_thread_wait(HosThread *t, int64_t timeout_ns, int *timed_out) {
     DWORD ms = timeout_ns < 0 ? INFINITE : (DWORD)((timeout_ns + 999999) / 1000000);
     const int away = hos_vcore_away();
+    const int64_t w0 = hos_now_ns();
     *timed_out = WaitForSingleObject(t->wake, ms) == WAIT_TIMEOUT;
+    hos_wn_add(HOS_WN_LOCK, hos_now_ns() - w0);
     if (away) hos_vcore_back();
 }
 void hos_thread_wake(HosThread *t) {
@@ -862,7 +867,9 @@ static void sleep_away(int64_t ns, int guest) {
         return;
     }
     const int away = hos_vcore_away();
+    const int64_t w0 = hos_now_ns();
     sleep_ns(ns, guest);
+    hos_wn_add(HOS_WN_SLEEP, hos_now_ns() - w0);
     if (away) hos_vcore_back();
 }
 void hos_sleep_ns(int64_t ns) { sleep_away(ns, 0); }
@@ -1761,6 +1768,7 @@ static void vc_acquire(HosThread *t) {
     if (waited > vc_st.max_ns) vc_st.max_ns = waited;
     vc_thread_note(t, waited);
     t->cc_vcw++, t->cc_vcw_ns += waited;
+    hos_wn_add(HOS_WN_VCORE, waited);
     vc_stats_locked(hos_now_ns());
     ReleaseSRWLockExclusive(&vc_lock);
 #ifdef __linux__
@@ -1889,7 +1897,9 @@ void hos_vcore_yield(void) {
    so callers see a spurious wake-up and look at their condition again, as they do anyway */
 int hos_cv_sleep(void *cv, void *lk, unsigned ms) {
     const int away = hos_vcore_away();
+    const int64_t w0 = hos_now_ns();
     const BOOL r = SleepConditionVariableSRW((PCONDITION_VARIABLE)cv, (PSRWLOCK)lk, ms, 0);
+    hos_wn_add(HOS_WN_LOCK, hos_now_ns() - w0);
     if (away) {
         ReleaseSRWLockExclusive((PSRWLOCK)lk);
         hos_vcore_back();

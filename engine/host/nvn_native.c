@@ -21,6 +21,7 @@
    own procs (program builders, native images, sparse tile layouts, recording modes). The SDK's exports reach the
    same functions as the proc table (nvn2_dispatch, from gen/nvn2_exports.c). */
 #include "hos.h"
+#include "hos_waitnote.h"
 #include "shadow_slot.h"   /* (the storage a character's shadow map reserves) */
 #include "../gpu/render/rx_nvn.h"
 #include "hl/c/hl_gfx_rec.h"   /* (HeyListen: the records native producers write, checked against rx_nvn.h below) */
@@ -2990,6 +2991,20 @@ NV(nvnQueuePresentTexture) {
         void rx_option_set(int id, int value);
         extern int64_t hos_vi_pace_us(void);
         rx_option_set(90 /* HOS_OPT_PERF_PACE, gpu/vk/perf_parts.h */, (int)hos_vi_pace_us());
+        /* (what this thread waited on since its last present, by kind, us: the summary's os_wait hitches' sub-cause,
+           hos_waitnote.h; ids 94 to 97 are perf_parts.h's kOptWaitLock ... kOptWaitFile. HL_TEL_WAITS=0: not pushed) */
+        static int waits_on = -1;
+        static _Thread_local int64_t waits_last[HOS_WN_KINDS];
+        if (waits_on < 0) {
+            const char *e = getenv("HL_TEL_WAITS");
+            waits_on = !(e && e[0] == '0' && !e[1]);
+        }
+        if (waits_on)
+            for (int k = 0; k < HOS_WN_KINDS; k++) {
+                const int64_t now_ns = hos_wn_ns[k];
+                rx_option_set(94 + k, (int)((now_ns - waits_last[k]) / 1000));
+                waits_last[k] = now_ns;
+            }
     }
     {
         const int away = hos_vcore_away();

@@ -274,6 +274,106 @@ int main() {
         CHECK("other keeps counting", many.which.size() == 9 && many.which.at("other") == 2);
     }
 
+    // v0.4.4: the os_wait hitches say which wait they were (hitch_detail's "which" and "which_ms"), from the host's waits by kind
+    {
+        pr::Waits w;
+        w.os_wait = 100, w.ow_known = true;
+        CHECK("no waits pushed: no label", [&] { pr::Waits n; n.os_wait = 100; return pr::os_wait_kind(n).empty(); }());
+        w.ow_lock = 80, w.ow_sleep = 5;
+        CHECK("lock", pr::os_wait_kind(w) == "lock");
+        w.ow_lock = 10, w.ow_sleep = 70;
+        CHECK("sleep", pr::os_wait_kind(w) == "sleep");
+        w.ow_sleep = 0, w.ow_vcore = 55;
+        CHECK("vcore", pr::os_wait_kind(w) == "vcore");
+        w.ow_vcore = 0, w.ow_file = 60;
+        CHECK("file", pr::os_wait_kind(w) == "file");
+        w.ow_file = 20, w.ow_lock = 20;   // (none makes up half: the rest is the OS's)
+        CHECK("nothing says why: off the CPU", pr::os_wait_kind(w) == "off_cpu");
+        w.faults = pr::kFaultsMin;
+        CHECK("page faults", pr::os_wait_kind(w) == "page_fault");
+        w.ws_drop_mb = pr::kTrimMb;
+        CHECK("a working-set trim first", pr::os_wait_kind(w) == "ws_trim");
+        w.ow_file = 70;   // (a wait that explains it beats the faults)
+        CHECK("an explained wait first", pr::os_wait_kind(w) == "file");
+
+        pr::MapTotals m;
+        pr::Waits a;
+        a.os_wait = 90, a.ow_known = true, a.ow_lock = 80;
+        pr::add_frame(m, frame(100, 100, 0, 0, 0), a, 16.7, 16.6);
+        pr::add_frame(m, frame(120, 120, 0, 0, 0), a, 16.7, 16.6);
+        pr::Waits b;
+        b.os_wait = 90, b.ow_known = true;
+        pr::add_frame(m, frame(80, 80, 0, 0, 0), b, 16.7, 16.6);
+        const auto& d = m.hitch_detail[pr::kOsWait];
+        CHECK("os_wait hitches by wait", m.hitch[pr::kOsWait] == 3 && d.which.at("lock") == 2 && d.which.at("off_cpu") == 1);
+        CHECK("and their ms", d.which_ms.at("lock") == 220 && d.which_ms.at("off_cpu") == 80);
+        std::map<std::string, pr::MapTotals> maps;
+        maps["Market"] = m;
+        const std::string j = pr::summary_json(pr::Machine{}, false, 1, "Market", nullptr, maps);
+        CHECK("json", j.find("\"which\":{\"lock\":2,\"off_cpu\":1},\"which_ms\":{\"lock\":220,\"off_cpu\":80}}") != std::string::npos);
+        CHECK("closed", std::count(j.begin(), j.end(), '{') == std::count(j.begin(), j.end(), '}'));
+    }
+
+    // v0.4.4: the memory record's new fields, at the end of "memory"; the three before them as they were
+    {
+        pr::Memory mem;
+        mem.vram_used_gb = 5.25, mem.vram_allowed_gb = 15.5, mem.ram_used_gb = 7.75;
+        std::map<std::string, pr::MapTotals> none;
+        const std::string old = pr::summary_json(pr::Machine{}, false, 1, "Market", &mem, none);
+        CHECK("as before without extra", old.find("\"memory\":{\"vram_used_gb\":5.25,\"vram_allowed_gb\":15.5,\"ram_used_gb\":7.75},") != std::string::npos);
+        mem.extra = true, mem.ram_class = pr::ram_class_of(15.7), mem.free_min_gb = 1.25, mem.commit_pct_max = 83.5, mem.ws_trims = 2,
+        mem.page_faults = 123456;
+        std::string j = pr::summary_json(pr::Machine{}, false, 1, "Market", &mem, none);
+        CHECK("extra", j.find("\"ram_used_gb\":7.75,\"ram_class\":\"16\",\"ram_free_min_gb\":1.25,\"commit_pct_max\":83.5,"
+                              "\"ws_trims\":2,\"page_faults\":123456},\"maps\"") != std::string::npos);
+        mem.cold_line = true, mem.cold_held_ds = 125, mem.cold_passes = 40;
+        j = pr::summary_json(pr::Machine{}, false, 1, "Market", &mem, none);
+        CHECK("cold hold", j.find("\"page_faults\":123456,\"cold_held_s\":12.5,\"cold_passes\":40}") != std::string::npos);
+        mem.free_min_gb = -1, mem.commit_pct_max = -1;   // (not read: left out, not 0)
+        j = pr::summary_json(pr::Machine{}, false, 1, "Market", &mem, none);
+        CHECK("unread left out", j.find("ram_free_min_gb") == std::string::npos && j.find("commit_pct_max") == std::string::npos);
+        CHECK("classes", !std::strcmp(pr::ram_class_of(0), "unknown") && !std::strcmp(pr::ram_class_of(4), "<=4") &&
+                         !std::strcmp(pr::ram_class_of(7.8), "8") && !std::strcmp(pr::ram_class_of(15.4), "16") &&
+                         !std::strcmp(pr::ram_class_of(31.9), "32") && !std::strcmp(pr::ram_class_of(63.8), "64+"));
+        CHECK("closed", std::count(j.begin(), j.end(), '{') == std::count(j.begin(), j.end(), '}'));
+    }
+
+    // v0.4.4: the load hitches. The loading flag is rarely seen, so a map change seen later marks the hitches and stalls just before it
+    {
+        pr::MapTotals m;
+        std::vector<pr::Recent> recent;
+        pr::Waits w;
+        w.os_wait = 150;
+        pr::add_frame(m, frame(160, 160, 0, 0, 0), w, 16.7, 16.6, 0, false, &recent, 100000);
+        pr::add_frame(m, frame(90, 90, 0, 0, 0), w, 16.7, 16.6, 0, true, &recent, 101000);   // (the flag was seen on this one)
+        pr::add_stall(m, 3500, false, &recent, 102000);
+        pr::add_stall(m, 1500, false, &recent, 102100);   // (under 2 s: a frame's business, not a stall)
+        pr::add_stall(m, 90000, false, &recent, 102200);   // (over a minute: the window was away, not a stall)
+        CHECK("stall counted", m.stall_count == 1 && m.stall_ms_sum == 3500 && m.stall_ms_max == 3500 && m.stall_load_count == 0);
+        CHECK("flagged frame counted at once", m.hitch_detail[pr::kOsWait].load_count == 1 && m.hitch_detail[pr::kOsWait].load_ms_sum == 90);
+        const int n = pr::reclassify_as_load(m, recent, 103500);   // (the change seen 1.5 s after the stall)
+        CHECK("two marked", n == 2);
+        CHECK("the hitch's load columns", m.hitch_detail[pr::kOsWait].load_count == 2 && m.hitch_detail[pr::kOsWait].load_ms_sum == 250 &&
+                                          m.hitch_detail[pr::kOsWait].load_ms_max == 160);
+        CHECK("the stall's", m.stall_load_count == 1 && recent.empty());
+        CHECK("nothing twice", pr::reclassify_as_load(m, recent, 103600) == 0);
+        // a hitch from long before the change is not the load's
+        pr::add_frame(m, frame(100, 100, 0, 0, 0), w, 16.7, 16.6, 0, false, &recent, 200000);
+        CHECK("a window of five seconds", pr::reclassify_as_load(m, recent, 206000) == 0 && m.hitch_detail[pr::kOsWait].load_count == 2);
+        // the list is bounded
+        std::vector<pr::Recent> many;
+        for (int i = 0; i < 500; i++) pr::add_frame(m, frame(100, 100, 0, 0, 0), w, 16.7, 16.6, 0, false, &many, 300000 + i * 5);
+        CHECK("bounded", many.size() <= pr::kRecentMax);
+        std::map<std::string, pr::MapTotals> maps;
+        pr::MapTotals only;
+        pr::add_stall(only, 4200, true);
+        CHECK("a map with only a stall is sent", only.any());
+        maps["Kokiri Forest (child)"] = only;
+        const std::string j = pr::summary_json(pr::Machine{}, false, 1, "Kokiri Forest (child)", nullptr, maps);
+        CHECK("stalls in the json", j.find("\"movie\":{\"shown\":0,\"dropped\":0,\"late\":0,\"decode_ms\":0,\"fallbacks\":0},"
+                                          "\"stalls\":{\"count\":1,\"ms_sum\":4200,\"ms_max\":4200,\"load_count\":1}}}") != std::string::npos);
+    }
+
     // what a frame costs (a player's): well under a microsecond, against a 16.7 ms frame
     {
         pr::MapTotals m;

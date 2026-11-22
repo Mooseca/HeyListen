@@ -144,6 +144,8 @@ Per map (`MapSummary`):
 | `events` | object | `program_failed`, `device_lost`, `swapchain_recreated`, `movie_upscaler_dropped`, `dlss_recreated`, `vram_over_budget` |
 | `movie` | object | `shown` (pictures the game took), `dropped` (skipped to keep up with the sound), `late`, `decode_ms`, `fallbacks`: the last three are 0 in HeyListen |
 
+v0.4.4 adds, as new keys only: `which` and `which_ms` on the `os_wait` hitch rows (which wait: `lock`, `sleep`, `vcore`, `file`, `ws_trim`, `page_fault`, `off_cpu`), `stalls` per map (gaps of over 2 s between two frames), load rows that are filled when an area change is seen, and a memory record in `memory` (`ram_class`, `ram_free_min_gb`, `commit_pct_max`, `ws_trims`, `page_faults`, `cold_held_s`, `cold_passes`). Each field and what a server needs to read it is in [telemetry-fields.md](telemetry-fields.md).
+
 Example:
 
 ```json

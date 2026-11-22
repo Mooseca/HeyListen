@@ -79,6 +79,11 @@ typedef struct { void *p; } CONDITION_VARIABLE, *PCONDITION_VARIABLE;
 typedef struct { uint64_t x[32]; volatile int poll; } Ctx;
 static int64_t now_ns = 1000000000;
 static int64_t hos_now_ns(void) { return now_ns; }
+/* (hos_waitnote.h: the wait kinds the host times for the performance summary) */
+enum { HOS_WN_LOCK, HOS_WN_SLEEP, HOS_WN_VCORE, HOS_WN_FILE, HOS_WN_KINDS };
+static _Thread_local int64_t hos_wn_ns[HOS_WN_KINDS];
+static void hos_wn_add(int kind, int64_t ns) { if (ns > 0) hos_wn_ns[kind] += ns; }
+
 static int hos_jt_on;   /* (HOS_JOBTRACE off: host/hos.h's marks do nothing) */
 enum { JT_VC_WAIT_B = 13, JT_VC_WAIT_E };
 #define HOS_JT(t, a, b) ((void)(t), (void)(a), (void)(b))

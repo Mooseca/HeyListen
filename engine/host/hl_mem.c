@@ -487,7 +487,22 @@ static DWORD WINAPI cold_main(void *unused) {
                     lowmem_ns += hos_now_ns() - lowmem_since;
                     hos_log("hl mem: cold pages: going on, %llu MB of RAM free; held %.1f s in all", (unsigned long long)avail_mb, lowmem_ns / 1e9);
                 }
-                if (lowmem_held) { lowmem_passes++; continue; }
+                if (lowmem_held) lowmem_passes++;
+                {   /* (the performance summary's memory record, gpu/vk/perf_parts.h kOptColdHeld / kOptColdPasses: tenths of a second
+                       the pages were held in all, and the passes left out; HL_TEL_MEMORY=0: not pushed) */
+                    void rx_option_set(int id, int value);
+                    static int push_on = -1;
+                    if (push_on < 0) {
+                        const char *e = getenv("HL_TEL_MEMORY");
+                        push_on = !(e && e[0] == '0' && !e[1]);
+                    }
+                    if (push_on) {
+                        const int64_t held_ns = lowmem_ns + (lowmem_held ? hos_now_ns() - lowmem_since : 0);
+                        rx_option_set(98, (int)(held_ns / 100000000LL));
+                        rx_option_set(99, (int)lowmem_passes);
+                    }
+                }
+                if (lowmem_held) continue;
             }
         }
         const int64_t t0 = hos_now_ns();

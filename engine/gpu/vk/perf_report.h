@@ -16,6 +16,7 @@
 #include <cstdlib>
 #include <map>
 #include <string>
+#include <vector>
 
 #include "fps_stats.h"
 
@@ -113,7 +114,35 @@ struct Waits {
     // (v0.4.4: what the frame's longest wait of those two causes was on: readback_wait.h label of the read that waited most,
     // the descriptor work that built longest (draw or dispatch, pool or push); empty: not known. Put in the hitch's detail row)
     std::string readback_which, descriptors_which;
+    // (v0.4.4: what the presenting thread was blocked on this frame, ms, by kind (host/hos_waitnote.h; the pacing sleep taken out of
+    // the sleeps), the process's page faults and the working set's fall in MB since the frame before; ow_known: the host pushed the
+    // waits (not HL_TEL_WAITS=0). The os_wait hitches' sub-cause: os_wait_kind)
+    bool ow_known = false;
+    double ow_lock = 0, ow_sleep = 0, ow_vcore = 0, ow_file = 0;
+    int64_t faults = 0;
+    double ws_drop_mb = 0;
+    // (the descriptors' parts, ms, for HL_HITCH_LOG: the build, the texture work inside it, the pools)
+    double desc_self = 0, desc_tex = 0, desc_pool = 0;
 };
+
+/// A frame's page faults (soft and hard together: the process's counter) from which the os_wait hitch's rest is called a page fault, and
+/// the working set's fall (MB) from which it is called a trim
+constexpr int64_t kFaultsMin = 2000;
+constexpr double kTrimMb = 64;
+/// What an os_wait hitch waited on (v0.4.4): the longest of the lock/condition, sleep, virtual-core and file waits when they make up at
+/// least half of it, else "ws_trim" (the working set fell), "page_fault" (the process faulted a lot), else "off_cpu" (the thread was
+/// not running and none of the above says why: preempted, or a wait the host does not time). "" when the host sent no waits
+inline std::string os_wait_kind(const Waits& w) {
+    if (!w.ow_known) return "";
+    const struct { const char* name; double ms; } k[] = {{"lock", w.ow_lock}, {"sleep", w.ow_sleep}, {"vcore", w.ow_vcore}, {"file", w.ow_file}};
+    int best = 0;
+    for (int i = 1; i < 4; i++)
+        if (k[i].ms > k[best].ms) best = i;
+    if (k[best].ms > 0 && k[best].ms >= 0.5 * w.os_wait) return k[best].name;
+    if (w.ws_drop_mb >= kTrimMb) return "ws_trim";
+    if (w.faults >= kFaultsMin) return "page_fault";
+    return "off_cpu";
+}
 
 /// Seconds of play between summaries: RX_VK_PERF_INTERVAL's whole seconds, 60 to 840, else 300. A summary ends on the frame
 /// past it, and the relay takes a map's seconds up to 900: 840 leaves a minute for that frame
@@ -168,6 +197,8 @@ struct HitchDetail {
     /// (v0.4.4, readback and descriptors hitches) what the frame waited on, by label (readback_wait.h): the hitches of each, at
     /// most kWhichMax labels, the rest under "other"
     std::map<std::string, int64_t> which;
+    /// (v0.4.4, os_wait hitches) the same labels' frame times in ms: how long each wait kind held the hitches
+    std::map<std::string, double> which_ms;
 };
 constexpr size_t kWhichMax = 8;
 inline void note_which(HitchDetail& d, const std::string& label) {
@@ -177,6 +208,17 @@ inline void note_which(HitchDetail& d, const std::string& label) {
     else if (it == d.which.end()) it = d.which.try_emplace(label, 0).first;
     it->second++;
 }
+
+/// A hitch (or stall) just counted, kept a few seconds: the map change that comes after it is seen late (the game thread that names the
+/// map is the one the load blocks), so the load's own frames are marked as its hitches once the change is seen (reclassify_as_load)
+struct Recent {
+    int cause;        // (a Cause; -1: a stall)
+    double ms;
+    int64_t at_ms;    // (the frame's time on any steady clock)
+    bool loaded;      // (already counted in the load columns)
+};
+constexpr int64_t kLoadWindowMs = 5000;   // (how far back from the map change's sight a hitch is the load's)
+constexpr size_t kRecentMax = 64;
 
 /// The totals of one map since the summary before
 struct MapTotals {
@@ -190,11 +232,15 @@ struct MapTotals {
     int64_t hitch[kCauses] = {};
     HitchDetail hitch_detail[kCauses] = {};
     int64_t pacing_misses = 0, left_out = 0;
+    /// (v0.4.4) the gaps between two frames of over 2 s (up to a minute), which the frame counts leave out: the longest freezes, a load's
+    /// among them. stall_load: those within a map change's window
+    int64_t stall_count = 0, stall_load_count = 0;
+    double stall_ms_sum = 0, stall_ms_max = 0;
     int64_t event[kEvents] = {};
     int64_t movie_shown = 0, movie_dropped = 0, movie_late = 0, movie_fallbacks = 0;
     double movie_decode_ms = 0;
     bool any() const {
-        return seconds > 0 || movie_shown || movie_dropped || movie_late || movie_fallbacks || movie_decode_ms > 0 ||
+        return seconds > 0 || stall_count > 0 || movie_shown || movie_dropped || movie_late || movie_fallbacks || movie_decode_ms > 0 ||
                std::any_of(event, event + kEvents, [](int64_t v) { return v > 0; });
     }
 };
@@ -202,8 +248,46 @@ struct MapTotals {
 /// usual_ms: the recent average frame. A hitch is measured against the longer of it and the target: a game the GPU holds
 /// at 20 fps under a 60 cap has slow frames, not stutters (its fps says so), and each of its frames would be one otherwise.
 /// loading: the game is loading a map (host/hos_main.c's flag), the hitch rows' load side
+inline void note_which_ms(HitchDetail& d, const std::string& label, double ms) {
+    if (label.empty()) return;
+    auto it = d.which_ms.find(label);
+    if (it == d.which_ms.end() && d.which_ms.size() >= kWhichMax) it = d.which_ms.try_emplace("other", 0.0).first;
+    else if (it == d.which_ms.end()) it = d.which_ms.try_emplace(label, 0.0).first;
+    it->second += ms;
+}
+inline void remember(std::vector<Recent>* recent, const Recent& r) {
+    if (!recent) return;
+    while (!recent->empty() && (recent->size() >= kRecentMax || r.at_ms - recent->front().at_ms > kLoadWindowMs))
+        recent->erase(recent->begin());
+    recent->push_back(r);
+}
+/// The map change was just seen (m: the map it left): the hitches and stalls of the window before it that the loading flag did not mark
+/// are the load's. Returns how many were marked; the list is emptied (they are counted)
+inline int reclassify_as_load(MapTotals& m, std::vector<Recent>& recent, int64_t now_ms) {
+    int n = 0;
+    for (Recent& r : recent) {
+        if (r.loaded || now_ms - r.at_ms > kLoadWindowMs) continue;
+        if (r.cause < 0) m.stall_load_count++;
+        else {
+            HitchDetail& d = m.hitch_detail[r.cause];
+            d.load_count++, d.load_ms_sum += r.ms, d.load_ms_max = std::max<double>(d.load_ms_max, r.ms);
+        }
+        r.loaded = true, n++;
+    }
+    recent.clear();
+    return n;
+}
+/// A gap of over 2 s between two frames (up to kStallMaxMs): counted apart, as the frame buckets leave it out
+constexpr double kStallMinMs = 2000, kStallMaxMs = 60000;
+inline void add_stall(MapTotals& m, double ms, bool loading, std::vector<Recent>* recent = nullptr, int64_t now_ms = 0) {
+    if (ms <= kStallMinMs || ms > kStallMaxMs) return;
+    m.stall_count++, m.stall_ms_sum += ms, m.stall_ms_max = std::max(m.stall_ms_max, ms);
+    if (loading) m.stall_load_count++;
+    remember(recent, {-1, ms, now_ms, loading});
+}
+
 inline void add_frame(MapTotals& m, const fps_stats::Frame& f, const Waits& w, double target_ms, double last_ms,
-                      double usual_ms = 0, bool loading = false) {
+                      double usual_ms = 0, bool loading = false, std::vector<Recent>* recent = nullptr, int64_t now_ms = 0) {
     m.seconds += f.ms / 1000.0;
     m.frame[bucket_of(f.ms, kFrameBuckets)]++;
     m.frame_sum += f.ms;
@@ -216,7 +300,12 @@ inline void add_frame(MapTotals& m, const fps_stats::Frame& f, const Waits& w, d
         d.count++, d.ms_sum += f.ms, d.ms_max = std::max<double>(d.ms_max, f.ms);
         if (c == kReadback) note_which(d, w.readback_which);
         else if (c == kDescriptors) note_which(d, w.descriptors_which);
+        else if (c == kOsWait) {   // (v0.4.4: which wait: os_wait_kind, with the frame's ms under it)
+            const std::string kind = os_wait_kind(w);
+            note_which(d, kind), note_which_ms(d, kind, f.ms);
+        }
         if (loading) d.load_count++, d.load_ms_sum += f.ms, d.load_ms_max = std::max<double>(d.load_ms_max, f.ms);
+        remember(recent, {(int)c, f.ms, now_ms, loading});
     } else if (is_pacing_miss(f.ms, last_ms, target_ms)) m.pacing_misses++;
     m.left_out += f.left_out;
 }
@@ -235,7 +324,26 @@ struct Machine {
 
 struct Memory {
     double vram_used_gb = 0, vram_allowed_gb = 0, ram_used_gb = 0;
+    // (v0.4.4, extra: the memory record's new fields, on when perf_report.cpp could read the system's memory) the PC's RAM class, the
+    // least free RAM the summary's period saw (GB; < 0 not read), the highest commit charge in percent of the limit (< 0 not read),
+    // the working-set trims (a fall of kTrimMb or more between two frames) and the process's page faults in the period, the cold pages'
+    // hold (HL_MEM_COLD_LOWMEM set: cold_line; tenths of a second held in all, passes left out in all)
+    bool extra = false;
+    std::string ram_class;
+    double free_min_gb = -1, commit_pct_max = -1;
+    int64_t ws_trims = 0, page_faults = 0;
+    bool cold_line = false;
+    int64_t cold_held_ds = 0, cold_passes = 0;
 };
+/// The PC's RAM as a class, not the figure: "<=4", "8" (up to 8), "16", "32", "64+" by the RAM the OS reports (a 16 GB PC reports 15.x)
+inline const char* ram_class_of(double ram_gb) {
+    if (ram_gb <= 0) return "unknown";
+    if (ram_gb <= 4.5) return "<=4";
+    if (ram_gb <= 8.5) return "8";
+    if (ram_gb <= 16.5) return "16";
+    if (ram_gb <= 32.5) return "32";
+    return "64+";
+}
 
 /// A string as JSON: quotes, backslashes and control characters escaped, cut at `limit` bytes (the relay's limits), never
 /// inside a UTF-8 character (half of one would make the whole file unreadable)
@@ -284,7 +392,16 @@ inline std::string summary_json(const Machine& m, bool first, double session_s, 
                     ",\"map\":" + json_text(map);
     if (mem)
         o += ",\"memory\":{\"vram_used_gb\":" + json_num(mem->vram_used_gb) + ",\"vram_allowed_gb\":" +
-             json_num(mem->vram_allowed_gb) + ",\"ram_used_gb\":" + json_num(mem->ram_used_gb) + "}";
+             json_num(mem->vram_allowed_gb) + ",\"ram_used_gb\":" + json_num(mem->ram_used_gb);
+    if (mem && mem->extra) {   // (v0.4.4: new fields at the end of the object; the three before are as they were)
+        o += ",\"ram_class\":" + json_text(mem->ram_class, 12);
+        if (mem->free_min_gb >= 0) o += ",\"ram_free_min_gb\":" + json_num(mem->free_min_gb);
+        if (mem->commit_pct_max >= 0) o += ",\"commit_pct_max\":" + json_num(mem->commit_pct_max);
+        o += ",\"ws_trims\":" + std::to_string(mem->ws_trims) + ",\"page_faults\":" + std::to_string(mem->page_faults);
+        if (mem->cold_line)
+            o += ",\"cold_held_s\":" + json_num(mem->cold_held_ds / 10.0) + ",\"cold_passes\":" + std::to_string(mem->cold_passes);
+    }
+    if (mem) o += "}";
     o += ",\"maps\":{";
     bool comma = false;
     for (const auto& [name, t] : maps) {
@@ -317,6 +434,15 @@ inline std::string summary_json(const Machine& m, bool first, double session_s, 
                 }
                 o += "}";
             }
+            if (!d.which_ms.empty()) {   // (v0.4.4, os_wait: the same labels' hitch ms)
+                o += ",\"which_ms\":{";
+                bool comma3 = false;
+                for (const auto& [label, ms] : d.which_ms) {
+                    o += std::string(comma3 ? "," : "") + json_text(label, 60) + ":" + json_num(ms);
+                    comma3 = true;
+                }
+                o += "}";
+            }
             o += "}";
             comma2 = true;
         }
@@ -325,7 +451,11 @@ inline std::string summary_json(const Machine& m, bool first, double session_s, 
         for (int e = 0; e < kEvents; e++) o += std::string(e ? "," : "") + "\"" + event_name(e) + "\":" + std::to_string(t.event[e]);
         o += "},\"movie\":{\"shown\":" + std::to_string(t.movie_shown) + ",\"dropped\":" + std::to_string(t.movie_dropped) +
              ",\"late\":" + std::to_string(t.movie_late) + ",\"decode_ms\":" + json_num(t.movie_decode_ms) +
-             ",\"fallbacks\":" + std::to_string(t.movie_fallbacks) + "}}";
+             ",\"fallbacks\":" + std::to_string(t.movie_fallbacks) + "}";
+        if (t.stall_count)   // (v0.4.4: the gaps of over 2 s the frame buckets leave out)
+            o += ",\"stalls\":{\"count\":" + std::to_string(t.stall_count) + ",\"ms_sum\":" + json_num(t.stall_ms_sum) +
+                 ",\"ms_max\":" + json_num(t.stall_ms_max) + ",\"load_count\":" + std::to_string(t.stall_load_count) + "}";
+        o += "}";
         comma = true;
     }
     return o + "}}";
