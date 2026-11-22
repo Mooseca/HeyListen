@@ -4806,6 +4806,51 @@ bool wait_value_bounded(uint64_t v) {
 void invalidate(uint64_t gpu, uint64_t size) {
     static const bool rb_prof = getenv("RX_VK_RB_PROF") != nullptr || getenv("RX_VK_TL") != nullptr || getenv("RX_VK_TL_S") != nullptr;
     RbScope rbs(rb_prof, gpu, size);
+    struct RbWhoPost { uint64_t g, n; ~RbWhoPost() { if (n && rbwho_on()) rbwho_content(g, n); } } rbwho_post{gpu, size};
+    // (READB2, HL_RB_R2 / HL_RB_R3, readbacks-r2-r3.md) the class of this read, whether it is read late (no wait: what guest memory holds),
+    // and for the CHECK switch the value it holds at entry, compared with the value after the waits when the read is done
+    // (STEP1, HL_RB_LAG) the range is learned as one to stage; one already staged is answered by the ring below and waits for nothing
+    if (size) rbring_note_read(host->gpu_guest(gpu), size);
+    const bool ring_serve = size && rbring_serves(host->gpu_guest(gpu), size);
+    struct RbQuietPost {   // (HL_RB_LAG_CHECK=1: a range no program writes, read before and after the old path's waits)
+        uint64_t gpu = 0, size = 0;
+        std::vector<uint8_t> early;
+        RbQuietPost(uint64_t g, uint64_t n) {
+            if (n && rbring_check_on() && rbring_quiet(host->gpu_guest(g), n)) {
+                gpu = g, size = n;
+                early.resize((size_t)n);
+                host->gpu_read(g, early.data(), n);
+            }
+        }
+        ~RbQuietPost() {
+            if (early.empty()) return;
+            std::vector<uint8_t> late(early.size());
+            host->gpu_read(gpu, late.data(), late.size());
+            rbring_quiet_result(size, late != early);
+        }
+    } rb_quiet_post{gpu, size};
+    const int rb_cls = size ? rbclass_of(size) : 0;
+    const bool rb_late = rb_cls && !rbclass_check(rb_cls) && (rbclass_mode(rb_cls) & 2);
+    struct RbClassPost {
+        int cls;
+        uint64_t gpu, size;
+        std::vector<uint32_t> early;
+        RbClassPost(int c, uint64_t g, uint64_t n) : cls(c), gpu(g), size(n) {
+            if (cls && rbclass_check(cls)) {
+                early.resize((size_t)(size / 4));
+                host->gpu_read(gpu, early.data(), early.size() * 4);
+            }
+        }
+        ~RbClassPost() {
+            if (early.empty()) return;
+            std::vector<uint32_t> late(early.size());
+            host->gpu_read(gpu, late.data(), late.size() * 4);
+            uint64_t diff = 0, z2v = 0, v2z = 0;
+            for (size_t i = 0; i < late.size(); i++)
+                if (late[i] != early[i]) diff++, z2v += early[i] == 0, v2z += late[i] == 0;
+            rbclass_check_late(cls, late.size(), diff, z2v, v2z);
+        }
+    } rb_class_post{rb_cls, gpu, size};
     // (HeyListen, TICK-059) RX_VK_READBACK_TICKET=1: the fast fence poll (wait_inner) no longer waits for the sync_order_mu
     // section in progress (a submit_q / present replay); it notes that section's number t (order_ticket_take) and the CPU's
     // readback here waits until section t has left, before anything else it does. Why that is all the locked path gave it:
@@ -4829,8 +4874,9 @@ void invalidate(uint64_t gpu, uint64_t size) {
     // it, only for what is left of that one section by then, and later readbacks wait for nothing until the next poll's ticket
     // (TICK-058's v3 waited at every readback with write-backs for whichever replay was in progress then: castle-move -6 fps)
     const int ticket = readback_ticket();
-    if (size && ticket == 1) order_ticket_wait();
+    if (size && ticket == 1 && !rb_late && !ring_serve) order_ticket_wait();
     rbs.mark(0);
+    if (size && rbwho_on()) rbwho_read(host->gpu_guest(gpu), size);
     if (size) memory_cpu_reads(host->gpu_guest(gpu), size);   // (TICK-015: its pool's write-backs made from now on)
     rbs.skip();
     static const bool log_inv = getenv("RX_VK_LOG_INVALIDATE") != nullptr;
@@ -4863,7 +4909,9 @@ void invalidate(uint64_t gpu, uint64_t size) {
     // the CPU reads and sets to 0) this way: it read 0 one frame, then the old sum came back over the CPU's 0 and the next
     // frame added to it (2x): the exposure stepped 0.2 EV up and down several times a second (the white flashes).
     // RX_VK_NO_READBACK_WAIT=1: as before
-    if (size) {
+    // (EXPO1, HL_EXPO_GPU=1) a meter block the engine's ring is fed from: no wait for any write-back, the sums come from the ring below
+    const bool expo_skip = size == 0x1040 && expo_mode() == 1 && expo_serves(host->gpu_guest(gpu));
+    if (size && !expo_skip && !ring_serve) {
         static const bool off = getenv("RX_VK_NO_READBACK_WAIT") != nullptr;
         bool ever = false;
         if (!off && (memory_writeback_value(host->gpu_guest(gpu), size, &ever), ever)) {
@@ -4876,7 +4924,8 @@ void invalidate(uint64_t gpu, uint64_t size) {
             // (TICK-059) with RX_VK_READBACK_TICKET the ticket's wait above replaces this one (=2: here, a diagnostic)
             rbs.ever = true;
             rbs.skip();
-            if (ticket == 2) order_ticket_wait();
+            if (rb_late) {}   // (READB2: no wait for the replay in progress either)
+            else if (ticket == 2) order_ticket_wait();
             else if (!ticket && fence_poll_fast_on() && !async_on() && sync_waits_on() && !per_queue_fences_off()) {
                 jt_mark(36, 0);   // (36/37: the readback waiting for the replay in progress)
                 { std::lock_guard lk(sync_order_mu); }
@@ -4897,7 +4946,7 @@ void invalidate(uint64_t gpu, uint64_t size) {
             // does not hold back
             const bool unforced = !async_on() && sync_waits_on() && !per_queue_fences_off();
             rbs.skip();
-            if (behind0 && !no_catchup && !unforced) wait_queue_empty(), w = true;   // (work handed over may write it back too)
+            if (behind0 && !no_catchup && !unforced && !rb_late) wait_queue_empty(), w = true;   // (work handed over may write it back too)
             rbs.mark(1);
             const auto w1 = std::chrono::steady_clock::now();
             const uint64_t v = memory_writeback_value(host->gpu_guest(gpu), size, nullptr);
@@ -4905,7 +4954,7 @@ void invalidate(uint64_t gpu, uint64_t size) {
             rbs.skip();
             // (RX_VK_READBACK_LATE: a range a rule names is read as guest memory holds it, with no wait at all)
             const bool pend = v > completed();
-            const bool late = pend && readback_late_wanted(size, v >= f0);
+            const bool late = pend && (rb_late || readback_late_wanted(size, v >= f0));
             if (pend) rbs.pending = true, rbs.newest = v >= f0, rbs.late = late;
             rbs.skip();
             int64_t phase_ns[readback_wait::kPhases] = {};   // (v0.4.4: where this read waited, for the hitch rows' label)
@@ -4978,9 +5027,13 @@ void invalidate(uint64_t gpu, uint64_t size) {
             }
         }
     }
+    if (ring_serve) rbring_apply(gpu, size);   // (STEP1, HL_RB_LAG: after everything else the invalidate does, nothing lands over it)
+    else if (size) rbring_check(gpu, size);    // (HL_RB_LAG_CHECK=1: the ring's candidate against what the waits left)
     {   // (ported from hookshot 53eb0441, pixl27, RX_VK_METER_HOLD=0 turns it off) OoT's exposure sums read before a new result
         // has landed are the zeros the game wrote after its last read: it is given the last result again
-        if (meter_hold_on() && size == 0x1040 && memory_is_meter(host->gpu_guest(gpu))) {
+        if (expo_skip) {
+            expo_answer(gpu);
+        } else if (meter_hold_on() && size == 0x1040 && memory_is_meter(host->gpu_guest(gpu))) {
             static std::mutex mu;
             static std::unordered_map<uint64_t, std::array<uint32_t, 4>> last;
             static std::atomic<int64_t> st_reads{0}, st_given{0};
@@ -4997,19 +5050,23 @@ void invalidate(uint64_t gpu, uint64_t size) {
                 logf("vk: exposure sums: 2000 reads, %lld of them given the last result again (RX_VK_METER_HOLD)", (long long)st_given.exchange(0));
         }
     }
+    if (size == 0x1040 && expo_mode() == 2) expo_check(gpu);   // (EXPO1, HL_EXPO_GPU=2: what the old path read against the ring)
     {   // (sprint 5, RX_VK_LOG_READBACK2=<present>: what the CPU is about to read, after the waits: 400 ranges of 0x1000 bytes or more)
         static const int64_t from = getenv("RX_VK_LOG_READBACK2") ? atoll(getenv("RX_VK_LOG_READBACK2")) : -1;
         static std::atomic<int> n{0};
-        if (from >= 0 && presents_now >= from && size >= 0x20 && n++ < 400) {
+        // (EXPO1) RX_VK_LOG_READBACK2_SIZE=<hex>: only ranges of that size; RX_VK_LOG_READBACK2_ROWS=<n>: the cap (default 400)
+        static const uint64_t only = getenv("RX_VK_LOG_READBACK2_SIZE") ? strtoull(getenv("RX_VK_LOG_READBACK2_SIZE"), nullptr, 16) : 0;
+        static const int cap = getenv("RX_VK_LOG_READBACK2_ROWS") ? atoi(getenv("RX_VK_LOG_READBACK2_ROWS")) : 400;
+        if (from >= 0 && presents_now >= from && size >= 0x20 && (!only || size == only) && n++ < cap) {
             std::vector<uint32_t> w(size / 4);
             host->gpu_read(gpu, w.data(), w.size() * 4);
             size_t nz = 0, first = 0;
             uint64_t sum = 0;
             for (size_t i = 0; i < w.size(); i++)
                 if (w[i]) { if (!nz) first = i; nz++, sum += w[i]; }
-            logf("vk: readback2 %lld %#llx +%#llx: %zu non-zero words (first at %zu: %08x %08x %08x %08x), sum %llx; value %llu done %llu fence %llu",
+            logf("vk: readback2 %lld %#llx +%#llx: %zu non-zero words (first at %zu: %08x %08x %08x %08x), words 0-3 %08x %08x %08x %08x, sum %llx; value %llu done %llu fence %llu",
                  (long long)presents_now, (unsigned long long)gpu, (unsigned long long)size, nz, first, w[first], first + 1 < w.size() ? w[first + 1] : 0,
-                 first + 2 < w.size() ? w[first + 2] : 0, first + 3 < w.size() ? w[first + 3] : 0, (unsigned long long)sum,
+                 first + 2 < w.size() ? w[first + 2] : 0, first + 3 < w.size() ? w[first + 3] : 0, w[0], w[1], w[2], w[3], (unsigned long long)sum,
                  (unsigned long long)memory_writeback_value(host->gpu_guest(gpu), size, nullptr), (unsigned long long)completed(), (unsigned long long)fence());
         }
     }
@@ -5270,6 +5327,18 @@ uint32_t crc32(const uint8_t* p, size_t n, uint32_t c = 0xFFFFFFFFu) {
     return c;
 }
 } // namespace
+/// (STEP1, HL_RB_LAG) the timeline reaching v within ms, the held submits sent first
+bool rbring_wait_value(uint64_t v, double ms) {
+    queue_flush_for(FR_VALUE);
+    VkSemaphoreWaitInfo wi{VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO};
+    wi.semaphoreCount = 1;
+    wi.pSemaphores = &timeline;
+    wi.pValues = &v;
+    const VkResult r = vkWaitSemaphores(dev.device, &wi, (uint64_t)(ms * 1e6));
+    (void)completed();
+    return r == VK_SUCCESS;
+}
+
 
 // (vk_internal.h) Called while replaying, including workers joined before the next signal is issued. The current logical value may
 // already have completed before a stopped queue resumes. A new signal instead follows every recording using the resources being

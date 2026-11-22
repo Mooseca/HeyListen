@@ -408,6 +408,29 @@ void memory_note_readback(uint64_t guest, uint64_t size);   // (PR 430) a CPU re
 bool memory_rb_refresh(VkCommandBuffer up);
 void memory_rb_recording_begun();   // (hookshot) at a recording's start, on its thread: the submission it joins (memory_rb_refresh)
 void memory_rb_segments_begin(uint64_t base, uint64_t n);   // (and a parallel replay's segments: their order, base on)
+/// (READB2, RX_VK_RB_WHO=1, logging only) which program wrote the ranges the CPU reads back: the program being bound on this
+/// thread (0: none, a copy or a clear), the GPU-written bindings with it, and the CPU's reads (invalidate) matched against them
+extern thread_local uint64_t rbwho_prog;
+bool rbwho_on();
+void rbwho_write(uint64_t guest, uint64_t size);
+void rbwho_read(uint64_t guest, uint64_t size);
+void rbwho_content(uint64_t gpu, uint64_t size);   // (after the waits: what the CPU is about to see, sampled)
+struct RbWhoProg {
+    uint64_t was;
+    explicit RbWhoProg(uint64_t key) : was(rbwho_prog) { rbwho_prog = key; }
+    ~RbWhoProg() { rbwho_prog = was; }
+};
+/// (READB2, HL_RB_R2 / HL_RB_R3, docs/native-engine/readbacks-r2-r3.md) the two readback classes of the engine refactor's step 1:
+/// R2 the 0x40 ring (a per-object read-and-reset result word, 65 reads a frame), R3 the 0x2000 pair (per-object results, read
+/// next frame). rbclass_of gives the class of a read by its size (0: none); rbclass_mode its switch: bit 0 the class's pages
+/// leave the readback refresh (memory_rb_refresh), bit 1 its reads do not wait for the GPU (the value guest memory holds, one
+/// frame late). HL_RB_Rn_CHECK=1 changes nothing in what the game sees and counts what the two bits would have changed
+int rbclass_of(uint64_t size);
+int rbclass_mode(int cls);
+bool rbclass_check(int cls);
+/// (CHECK, late read) a read of class cls: words of it that differ between the value at its entry and the value after its waits
+void memory_rb_check_poll(uint64_t done);   // (CHECK, refresh: the comparisons of the submissions done)
+void rbclass_check_late(int cls, uint64_t words, uint64_t diff, uint64_t zero_to_value, uint64_t value_to_zero);
 /// (hookshot) a range a program may write in the mirror that is not bound as written (not copied back): memory_rb_refresh
 void memory_note_gpu_write(uint64_t gpu, uint64_t size);
 /// (ported from hookshot 53eb0441, pixl27: its RX_VK_METER_ZERO / RX_VK_METER_HOLD parts only) OoT's exposure meter: two compute
@@ -426,6 +449,28 @@ inline bool meter_hold_on() {
 /// the block's start, noted where the meter's programs bind it (vk_draw.cpp), and whether guest is one (vk_replay.cpp invalidate)
 void memory_meter_range(uint64_t guest, uint64_t size);
 bool memory_is_meter(uint64_t guest);
+/// (EXPO1, vk_expo.cpp, HL_EXPO_GPU) the exposure meter's sums from an engine-owned ring: the mode (0 off, 1 on, 2 check), the producer
+/// after a meter dispatch, and the consumer in invalidate()
+int expo_mode();
+void expo_record(VkCommandBuffer cmd, VkBuffer src, VkDeviceSize offset, uint64_t guest);
+bool expo_serves(uint64_t guest);
+void expo_answer(uint64_t gpu);
+void expo_check(uint64_t gpu);
+/// (STEP1, vk_rbring.cpp, HL_RB_LAG, docs/native-engine/readback-ring.md) one deterministic mechanism for the readback classes R1 (the meter),
+/// R2 (0x40) and R3 (0x2000): the ranges the CPU reads (note_read) are staged at the end of the submission that wrote them (stage_bind, flush)
+/// into an engine-owned ring, and a read is answered (apply) with the newest unapplied entry that is `lag` frames old, never waiting;
+/// HL_RB_LAG_CHECK=1 (check) compares it with what the old path read
+bool rbring_on();
+bool rbring_check_on();
+void rbring_note_read(uint64_t guest, uint64_t size);
+void rbring_note_written(uint64_t guest, uint64_t size);
+bool rbring_stage_bind(uint64_t guest, uint64_t size, VkBuffer buffer, VkDeviceSize offset);
+void rbring_flush(VkCommandBuffer cmd, uint64_t value);
+bool rbring_serves(uint64_t guest, uint64_t size);
+bool rbring_quiet(uint64_t guest, uint64_t size);
+void rbring_quiet_result(uint64_t size, bool changed);
+void rbring_apply(uint64_t gpu, uint64_t size);
+void rbring_check(uint64_t gpu, uint64_t size);
 /// (vk_replay.cpp) The GPU's progress on the recordings' timeline, and a wait for it to reach v
 uint64_t vk_timeline_completed();
 /// (longshot #442) The timeline's value without the write-backs it applies: a plain read, safe under the replay's lock

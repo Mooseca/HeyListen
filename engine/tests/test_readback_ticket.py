@@ -64,7 +64,7 @@ def main():
     need(fast < take < ans < locked, "the fast poll does not take its ticket before it answers")
 
     inv = function(rp, "void invalidate(uint64_t gpu, uint64_t size) {")
-    w = inv.index("if (size && ticket == 1) order_ticket_wait();")
+    w = inv.index("if (size && ticket == 1 && !rb_late && !ring_serve) order_ticket_wait();")
     need(w < inv.index("memory_cpu_reads(") and w < inv.index("memory_writeback_value("),
          "the readback's ticket wait is not before memory_cpu_reads and the write-back check")
     need("else if (!ticket && fence_poll_fast_on() && !async_on() && sync_waits_on() && !per_queue_fences_off()) {" in inv,

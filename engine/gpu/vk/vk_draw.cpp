@@ -3372,9 +3372,10 @@ void desc_counts_unpack(uint64_t packed, size_t* nbuf, size_t* nimg, size_t* nvi
 }
 
 // (ported from hookshot 53eb0441, pixl27, RX_VK_METER_ZERO) where an exposure program's sums were bound, for its dispatch's reset
-struct MeterOut { VkBuffer buffer = VK_NULL_HANDLE; VkDeviceSize offset = 0, size = 0; };
+struct MeterOut { VkBuffer buffer = VK_NULL_HANDLE; VkDeviceSize offset = 0, size = 0; uint64_t guest = 0; };
 thread_local MeterOut meter_out;
 void build_descriptors(const NvnState& s, const Program& p) {
+    const RbWhoProg rbwho_scope(p.key);   // (READB2, RX_VK_RB_WHO: the program whose bindings the writes below belong to)
     if (p.key == 0x435a0138b9013040ull || p.key == 0x592079442d7129daull) meter_out = {};
     // (hookshot) the thread's writer asked for once: each out is a call and a thread-local read (__tls_get_addr in the shared
     // library), and a build made dozens of them. The same object for the thread's life, reset in place here
@@ -3567,10 +3568,20 @@ void build_descriptors(const NvnState& s, const Program& p) {
                                  (unsigned long long)size, b ? "yes" : "NO");
                     }
                 }
+                {   // (EXPO1, RX_VK_LOG_METER=<rows>, default off) every storage descriptor of the two exposure programs: which program
+                    // binds which block, at what offset and size, written or read (the map in docs/native-engine/exposure.md)
+                    static const int cap = getenv("RX_VK_LOG_METER") ? atoi(getenv("RX_VK_LOG_METER")) : 0;
+                    static std::atomic<int> rows{0};
+                    if (cap > 0 && (p.key == 0x435a0138b9013040ull || p.key == 0x592079442d7129daull) && rows++ < cap)
+                        logf("vk: meter program %016llx stage %d desc #%zu count %u: guest %#llx +%#llx (range from %#llx, size %#llx) %s bound %d",
+                             (unsigned long long)p.key, ns, (size_t)(&d - info.storage_buffers_descriptors.data()), (unsigned)d.count,
+                             (unsigned long long)host->gpu_guest(base), (unsigned long long)(addr - base), (unsigned long long)base,
+                             (unsigned long long)n, d.is_written ? "written" : "read", b ? 1 : 0);
+                }
                 // (ported from hookshot 53eb0441, pixl27) OoT's exposure meter: where its two programs bind their block
                 if ((p.key == 0x435a0138b9013040ull || p.key == 0x592079442d7129daull) && d.is_written && b && n == 0x1040) {
                     memory_meter_range(host->gpu_guest(base), n);
-                    meter_out = {b.buffer, b.offset + (addr - base), n - (addr - base)};
+                    meter_out = {b.buffer, b.offset + (addr - base), n - (addr - base), host->gpu_guest(base) + (addr - base)};
                 }
                 // (census: every single descriptor, and table entries that hold something, with where they came from)
                 if (d.count == 1 || addr) {
@@ -11050,6 +11061,9 @@ void dispatch(VkCommandBuffer cmd, NvnState& s, uint32_t x, uint32_t y, uint32_t
             vkCmdDispatch(cmd, x, y, z);
         }
         last_dispatch_cmd = cmd, last_dispatch_epoch = work_epoch.load(std::memory_order_relaxed);
+        // (EXPO1, HL_EXPO_GPU) the meter's sums into the engine's ring, for the game's CPU (vk_expo.cpp)
+        if ((p.key == 0x435a0138b9013040ull || p.key == 0x592079442d7129daull) && meter_out.buffer && meter_out.size >= 16 && !(meter_out.offset & 3))
+            expo_record(cmd, meter_out.buffer, meter_out.offset, meter_out.guest);
     }
     if (dump_on() && dump_ssbo_wanted(p.key)) dump_ssbos(cmd, p, "after");
     if (gprof_on()) {

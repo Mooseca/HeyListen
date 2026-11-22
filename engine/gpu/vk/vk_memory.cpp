@@ -5661,6 +5661,11 @@ void memory_meter_range(uint64_t guest, uint64_t size) {
 // none. RX_VK_RB_REFRESH_EACH=1: in every recording, as before
 namespace {
 std::unordered_map<uint32_t, uint64_t> rb_pages;   // (guest page -> mirror_epoch it was last read at)
+// (READB2) the pages the classes R2 / R3 read (page -> epoch | class << 62), and their ranges (CHECK only): kept out of rb_pages when the
+// class's refresh part is on, in it as before otherwise
+std::unordered_map<uint32_t, uint64_t> rb_class_pages;
+std::map<uint64_t, std::pair<uint64_t, int>> rb_class_ranges;   // (guest -> size, class; the ranges read in the last 600 epochs)
+std::map<uint64_t, std::pair<uint64_t, uint64_t>> rb_exact;     // (READB2, class R2's refresh part: guest -> size, epoch it was last read at)
 std::atomic<int64_t> st_rb_refresh{0}, st_rb_held{0};
 // (TICK-048) RX_VK_RB_RANGES=1: a readback page's refresh copies only the bytes the CPU's invalidates of it covered (their union,
 // 16-byte aligned outwards), not the whole 4 KB page. The results are small (meters, counters: 0x4000 at most), and the refresh is
@@ -5694,8 +5699,23 @@ void memory_note_readback(uint64_t guest, uint64_t size) {
     static const bool off = getenv("RX_VK_NO_RB_REFRESH") != nullptr;
     if (off || !size || size > 0x4000) return;   // (small results only: meters and counters)
     trace_gpu(MKWVK_TRACE_READBACK, guest, size, 0, 0);
+    const int cls = rbclass_of(size);
+    const bool chk = cls && rbclass_check(cls);
+    const bool cut = cls && !chk && (rbclass_mode(cls) & 1);   // (READB2: the class's pages are not refreshed)
     std::lock_guard lk(pools_mu);
+    if (cut) {   // (READB2: R2 refreshes its own ranges and not their pages, R3 not at all: readbacks-r2-r3.md)
+        if (cls == 2) {
+            rb_exact[guest] = {size, mirror_epoch};
+            if (rb_exact.size() > 4096) rb_exact.clear();
+        }
+        return;
+    }
+    if (chk) {
+        rb_class_ranges[guest] = {size, cls};
+        if (rb_class_ranges.size() > 4096) rb_class_ranges.clear();
+    }
     for (uint64_t pg = guest >> kPageShift; pg <= (guest + size - 1) >> kPageShift; pg++) {
+        if (chk) rb_class_pages[(uint32_t)pg] = mirror_epoch | (uint64_t)cls << 62;
         rb_pages[(uint32_t)pg] = mirror_epoch;
         if (rb_ranges_on()) {   // (TICK-048: the bytes of it read)
             const uint64_t base = pg << kPageShift;
@@ -5703,6 +5723,169 @@ void memory_note_readback(uint64_t guest, uint64_t size) {
             const uint32_t b = (uint32_t)std::min<uint64_t>(4096, (std::min(guest + size, base + 4096) - base + 15) & ~15ull);
             auto [it, fresh] = rb_spans.try_emplace((uint32_t)pg, a | b << 16);
             if (!fresh) it->second = std::min(it->second & 0xffff, a) | std::max(it->second >> 16, b) << 16;
+        }
+    }
+}
+// ---- (READB2) the readback classes R2 (size 0x40) and R3 (size 0x2000): HL_RB_R2 / HL_RB_R3, HL_RB_R2_CHECK / HL_RB_R3_CHECK ----
+// HL_RB_Rn=1: both parts; =2: the refresh part only (the class's pages are not copied from guest memory into the mirror at each
+// submission); =3: the late part only (the class's reads do not wait for the GPU: they read what guest memory holds). The
+// CHECK switch leaves the game's behaviour as it is whatever HL_RB_Rn says and measures what the parts would change
+// (rbclass_check_late, rbck_record). docs/native-engine/readbacks-r2-r3.md
+int rbclass_of(uint64_t size) { return size == 0x40 ? 2 : size == 0x2000 ? 3 : 0; }
+int rbclass_mode(int cls) {
+    static const int mode[4] = {0, 0, [] {
+        const char* e = getenv("HL_RB_R2");
+        const int v = e ? atoi(e) : 0;
+        const int m = v == 1 ? 3 : v == 2 ? 1 : v == 3 ? 2 : 0;
+        if (m) logf("vk: readback class R2 (the 0x40 ring): %s%s (HL_RB_R2=%d)", m & 1 ? "pages out of the refresh " : "", m & 2 ? "reads do not wait" : "", v);
+        return m;
+    }(), [] {
+        const char* e = getenv("HL_RB_R3");
+        const int v = e ? atoi(e) : 0;
+        const int m = v == 1 ? 3 : v == 2 ? 1 : v == 3 ? 2 : 0;
+        if (m) logf("vk: readback class R3 (the 0x2000 pair): %s%s (HL_RB_R3=%d)", m & 1 ? "pages out of the refresh " : "", m & 2 ? "reads do not wait" : "", v);
+        return m;
+    }()};
+    return cls >= 2 && cls <= 3 ? mode[cls] : 0;
+}
+bool rbclass_check(int cls) {
+    static const bool on[4] = {false, false, getenv("HL_RB_R2_CHECK") && atoi(getenv("HL_RB_R2_CHECK")) != 0,
+                               getenv("HL_RB_R3_CHECK") && atoi(getenv("HL_RB_R3_CHECK")) != 0};
+    return cls >= 2 && cls <= 3 && on[cls];
+}
+namespace {
+struct RbClassLate {
+    std::atomic<int64_t> reads{0}, differ{0}, words{0}, diff_words{0}, zero_to_value{0}, value_to_zero{0}, report{0};
+} rbc_late[4];
+}
+void rbclass_check_late(int cls, uint64_t words, uint64_t diff, uint64_t z2v, uint64_t v2z) {
+    RbClassLate& c = rbc_late[cls];
+    c.reads++, c.differ += diff != 0, c.words += (int64_t)words, c.diff_words += (int64_t)diff, c.zero_to_value += (int64_t)z2v, c.value_to_zero += (int64_t)v2z;
+    if (++c.report % 3000 == 0)
+        logf("vk: readback class R%d late check: %lld reads, %lld differ from the value after the waits (%.2f%%), %lld of %lld words differ "
+             "(%lld zero then a value, %lld a value then zero)",
+             cls, (long long)c.reads.load(), (long long)c.differ.load(), 100.0 * (double)c.differ.load() / (double)std::max<int64_t>(1, c.reads.load()),
+             (long long)c.diff_words.load(), (long long)c.words.load(), (long long)c.zero_to_value.load(), (long long)c.value_to_zero.load());
+}
+
+// ---- (READB2, RX_VK_RB_WHO=1, logging only) who wrote what the CPU reads back ----
+// Every GPU-written binding (gpu_buffer_bind, written) is kept with the program being bound on its thread (build_descriptors; 0:
+// a copy or a clear); every CPU read of GPU results (invalidate) is matched against the writers of this window and the one before
+// it, and counted by read size, writer program and writer size. A line per read size every 300 frames: reads a frame, then each
+// writer with its overlaps a frame and its binding's size. "bare" writers (1 MB guesses) match more than they write: look at the
+// writer's size. A read with no writer is data the CPU or an earlier frame wrote
+thread_local uint64_t rbwho_prog = 0;
+namespace {
+struct RbWhoW {
+    uint64_t key, lo, hi;
+};
+struct RbWhoStat {
+    int64_t reads = 0, none = 0;
+    std::map<std::pair<uint64_t, uint64_t>, int64_t> by_writer;   // (program, writer's size) -> overlaps
+    std::map<uint64_t, int64_t> sample;                           // read addresses seen (first 6)
+    std::set<uint64_t> ranges, pages;                             // distinct read addresses and the pages they lie in
+};
+std::mutex rbwho_mu;
+std::vector<RbWhoW> rbwho_cur, rbwho_prev;
+std::map<uint64_t, RbWhoStat> rbwho_stats;   // by read size
+uint64_t rbwho_window = ~0ull, rbwho_frames0 = 0;
+void rbwho_roll_locked() {
+    const uint64_t w = texture_frame_no() / 300;
+    if (w == rbwho_window) return;
+    if (rbwho_window != ~0ull) {
+        const double frames = 300.0;
+        for (const auto& [size, st] : rbwho_stats) {
+            if (st.reads < 30) continue;
+            std::string line;
+            char b[160];
+            for (const auto& [pw, n] : st.by_writer) {
+                if (n < 30) continue;
+                snprintf(b, sizeof b, " [%016llx wsize %#llx %.2f/frame]", (unsigned long long)pw.first, (unsigned long long)pw.second, n / frames);
+                line += b;
+            }
+            std::string where;
+            int k = 0;
+            for (const auto& [a, n] : st.sample) {
+                if (k++ >= 4) break;
+                snprintf(b, sizeof b, " %#llx", (unsigned long long)a);
+                where += b;
+            }
+            logf("vk: rbwho: read size %#llx: %.2f a frame, %.2f with no writer, %zu distinct ranges in %zu pages;%s | at%s",
+                 (unsigned long long)size, st.reads / frames, st.none / frames, st.ranges.size(), st.pages.size(),
+                 line.empty() ? " no writer overlaps 30 times" : line.c_str(), where.c_str());
+        }
+        rbwho_stats.clear();
+    }
+    rbwho_window = w;
+    rbwho_prev.swap(rbwho_cur);
+    rbwho_cur.clear();
+}
+}
+bool rbwho_on() {
+    static const bool on = getenv("RX_VK_RB_WHO") != nullptr;
+    return on;
+}
+void rbwho_write(uint64_t guest, uint64_t size) {
+    if (!size) return;
+    std::lock_guard lk(rbwho_mu);
+    rbwho_roll_locked();
+    if (rbwho_cur.size() > 200000) return;
+    rbwho_cur.push_back({rbwho_prog, guest, guest + size});
+}
+void rbwho_read(uint64_t guest, uint64_t size) {
+    std::lock_guard lk(rbwho_mu);
+    rbwho_roll_locked();
+    RbWhoStat& st = rbwho_stats[size];
+    st.reads++;
+    if (st.sample.size() < 6) st.sample.emplace(guest, 0);
+    st.ranges.insert(guest);
+    for (uint64_t pg = guest >> kPageShift; pg <= (guest + size - 1) >> kPageShift; pg++) st.pages.insert(pg);
+    std::set<std::pair<uint64_t, uint64_t>> seen;   // (a writer counts once per read)
+    for (const auto* v : {&rbwho_cur, &rbwho_prev})
+        for (const RbWhoW& w : *v)
+            if (w.lo < guest + size && guest < w.hi) seen.emplace(w.key, w.hi - w.lo);
+    if (seen.empty()) st.none++;
+    for (const auto& k : seen) st.by_writer[k]++;
+}
+void rbwho_content(uint64_t gpu, uint64_t size) {
+    static std::mutex mu;
+    struct Cls {
+        int64_t reads = 0, nonzero = 0, told_zero = 0, told_nz = 0;
+        std::set<uint64_t> hashes;
+        std::map<uint64_t, std::pair<int64_t, int64_t>> by_addr;   // address -> (reads, non-zero reads)
+    };
+    static std::map<uint64_t, Cls> cls;
+    static int64_t last_sum = 0;
+    if (texture_frame_no() < 1500) return;
+    std::vector<uint32_t> w((size_t)std::min<uint64_t>(size, 0x4000) / 4);
+    if (w.empty()) return;
+    host->gpu_read(gpu, w.data(), w.size() * 4);
+    uint64_t h = 1469598103934665603ull;
+    size_t nz = 0;
+    for (uint32_t x : w) h = (h ^ x) * 1099511628211ull, nz += x != 0;
+    std::lock_guard lk(mu);
+    Cls& c = cls[size];
+    c.reads++, c.nonzero += nz != 0;
+    if (c.hashes.size() < 100000) c.hashes.insert(h);
+    auto& ba = c.by_addr[gpu];
+    ba.first++, ba.second += nz != 0;
+    int64_t& told = nz ? c.told_nz : c.told_zero;
+    if (told < (nz ? 24 : 4) && (c.reads % 11) == 0) {
+        told++;
+        char b[400];
+        int n = snprintf(b, sizeof b, "vk: rbwho: content size %#llx at %#llx frame %llu: %zu of %zu words not zero, hash %016llx:", (unsigned long long)size,
+                         (unsigned long long)gpu, (unsigned long long)texture_frame_no(), nz, w.size(), (unsigned long long)h);
+        for (size_t i = 0; i < w.size() && i < 16 && n < (int)sizeof b - 12; i++) n += snprintf(b + n, sizeof b - n, " %08x", w[i]);
+        logf("%s", b);
+    }
+    const int64_t total = [&] { int64_t t = 0; for (auto& [k, v] : cls) t += v.reads; return t; }();
+    if (total - last_sum >= 20000) {
+        last_sum = total;
+        for (auto& [k, v] : cls) {
+            int addrs_nz = 0;
+            for (auto& [a, r] : v.by_addr) addrs_nz += r.second != 0;
+            logf("vk: rbwho: totals size %#llx: %lld reads, %lld not all zero, %zu distinct contents, %zu addresses (%d ever not zero)",
+                 (unsigned long long)k, (long long)v.reads, (long long)v.nonzero, v.hashes.size(), v.by_addr.size(), addrs_nz);
         }
     }
 }
@@ -5729,6 +5912,115 @@ void memory_rb_segments_begin(uint64_t base, uint64_t n) {
     std::lock_guard lk(pools_mu);
     rb_segs = {mirror_epoch, base, n, 0};
 }
+// ---- (READB2, HL_RB_R2_CHECK / HL_RB_R3_CHECK) what the refresh of a class's pages changes ----
+// At each refresh that includes class pages, the same ranges are copied twice more into a host buffer, before the refresh copy: the
+// mirror as the GPU holds it then, and guest memory as the refresh is about to copy it. When the submission is done they are
+// compared word by word: a word that differs is one the refresh changes in the mirror. The ones inside the ranges the CPU read
+// (rb_class_ranges) are the class's own data; "guest 0 over a mirror value" is the CPU's reset (read, store 0) reaching the
+// mirror, "guest value over mirror 0" an older result put back over a newer one
+namespace {
+struct RbCheck {
+    uint64_t value = 0;
+    int cls = 0;
+    VkBuffer buffer = VK_NULL_HANDLE;
+    VmaAllocation alloc = nullptr;
+    void* map = nullptr;
+    uint64_t cap = 0, half = 0;
+    std::vector<std::array<uint64_t, 3>> runs;                // (guest address, offset in a half, size)
+    std::vector<std::pair<uint64_t, uint64_t>> ranges;        // (the class's ranges at the time, sorted: guest, end)
+};
+std::mutex rbck_mu;
+std::deque<RbCheck> rbck_pending;
+std::vector<RbCheck> rbck_free;
+std::atomic<uint64_t> rbck_min{~0ull};
+struct RbCheckStat {
+    int64_t refreshes = 0, words = 0, differ = 0, in_class = 0, zero_over_value = 0, value_over_zero = 0, other_over = 0;
+} rbck_stat[4];
+void rbck_record(VkCommandBuffer up, int cls, const std::map<Pool*, std::vector<VkBufferCopy>>& by_pool) {
+    uint64_t bytes = 0;
+    for (const auto& [pp, rs] : by_pool) {
+        if (!pp->mirror || !pp->buffer) continue;
+        for (const VkBufferCopy& r : rs) bytes += (r.size + 3) & ~3ull;
+    }
+    if (!bytes) return;
+    RbCheck c;
+    {
+        std::lock_guard lk(rbck_mu);
+        for (size_t k = 0; k < rbck_free.size(); k++)
+            if (rbck_free[k].cap >= 2 * bytes) {
+                c = std::move(rbck_free[k]);
+                rbck_free.erase(rbck_free.begin() + (std::ptrdiff_t)k);
+                break;
+            }
+    }
+    if (!c.buffer) {
+        c.cap = std::max<uint64_t>(2 * bytes, 1u << 20);
+        if (!create_buffer_cached(c.cap, VK_BUFFER_USAGE_TRANSFER_DST_BIT, c.buffer, c.alloc, &c.map)) return;
+    }
+    c.value = mem_rec_value, c.cls = cls, c.half = bytes, c.runs.clear(), c.ranges.clear();
+    uint64_t off = 0;
+    for (const auto& [pp, rs] : by_pool) {
+        if (!pp->mirror || !pp->buffer) continue;
+        std::vector<VkBufferCopy> m, g;
+        for (const VkBufferCopy& r : rs) {
+            const uint64_t n = (r.size + 3) & ~3ull;
+            m.push_back({r.srcOffset, off, n});
+            g.push_back({r.srcOffset, bytes + off, n});
+            c.runs.push_back({pp->lo + r.srcOffset, off, n});
+            off += n;
+        }
+        vkCmdCopyBuffer(up, pp->mirror, c.buffer, (uint32_t)m.size(), m.data());
+        vkCmdCopyBuffer(up, pp->buffer, c.buffer, (uint32_t)g.size(), g.data());
+    }
+    for (const auto& [a, v] : rb_class_ranges)
+        if (v.second == cls) c.ranges.push_back({a, a + v.first});
+    full_barrier(up, "barrier (readback refresh check)");
+    std::lock_guard lk(rbck_mu);
+    rbck_pending.push_back(std::move(c));
+    rbck_min.store(rbck_pending.front().value, std::memory_order_release);
+}
+void rbck_poll(uint64_t done) {
+    std::lock_guard lk(rbck_mu);
+    while (!rbck_pending.empty() && rbck_pending.front().value <= done) {
+        RbCheck& c = rbck_pending.front();
+        invalidate_mapped(c.alloc, c.half * 2);
+        RbCheckStat& st = rbck_stat[c.cls];
+        st.refreshes++;
+        for (const auto& [guest, off, size] : c.runs) {
+            const uint32_t* m = reinterpret_cast<const uint32_t*>(static_cast<const uint8_t*>(c.map) + off);
+            const uint32_t* g = reinterpret_cast<const uint32_t*>(static_cast<const uint8_t*>(c.map) + c.half + off);
+            for (uint64_t i = 0; i < size / 4; i++) {
+                st.words++;
+                if (m[i] == g[i]) continue;
+                st.differ++;
+                const uint64_t a = guest + i * 4;
+                auto it = std::upper_bound(c.ranges.begin(), c.ranges.end(), std::make_pair(a, ~0ull));
+                const bool inside = it != c.ranges.begin() && a < std::prev(it)->second;
+                if (!inside) continue;
+                st.in_class++;
+                if (g[i] == 0) st.zero_over_value++;
+                else if (m[i] == 0) st.value_over_zero++;
+                else st.other_over++;
+            }
+        }
+        if (st.refreshes % 600 == 1)
+            logf("vk: readback class R%d refresh check: %lld refreshes, %lld words compared, %lld differ, %lld of them inside the class's ranges "
+                 "(%lld guest 0 over a mirror value, %lld guest value over mirror 0, %lld other)",
+                 c.cls, (long long)st.refreshes, (long long)st.words, (long long)st.differ, (long long)st.in_class, (long long)st.zero_over_value,
+                 (long long)st.value_over_zero, (long long)st.other_over);
+        rbck_free.push_back(std::move(c));
+        rbck_pending.pop_front();
+        if (rbck_free.size() > 8) {
+            destroy_buffer(rbck_free.front().buffer, rbck_free.front().alloc);
+            rbck_free.erase(rbck_free.begin());
+        }
+    }
+    rbck_min.store(rbck_pending.empty() ? ~0ull : rbck_pending.front().value, std::memory_order_release);
+}
+}
+void memory_rb_check_poll(uint64_t done) {
+    if (rbck_min.load(std::memory_order_acquire) <= done) rbck_poll(done);
+}
 /// Records the refresh copies into the submission's upload command buffer; true when it recorded any
 bool memory_rb_refresh(VkCommandBuffer up) {
     std::lock_guard lk(pools_mu);
@@ -5743,7 +6035,7 @@ bool memory_rb_refresh(VkCommandBuffer up) {
         ahead_made = ahead_made && k < 64 && (rb_segs.made & below) == below;
         if (k < 64) rb_segs.made |= 1ull << k;
     }
-    if (rb_pages.empty() || !up) return false;
+    if ((rb_pages.empty() && rb_exact.empty()) || !up) return false;
     // (hookshot, TICK-006) once a submission part (mirror_epoch), in its first recording. A parallel replay records a part's
     // segments, and what follows them, into recordings of their own in the same epoch, with no write-back between them: each
     // one's refresh copied the CPU's 0 over the sum the segments before it had added on the GPU. The meter read only the last
@@ -5758,9 +6050,11 @@ bool memory_rb_refresh(VkCommandBuffer up) {
         return false;
     };
     std::map<Pool*, std::vector<VkBufferCopy>> by_pool;
+    std::map<Pool*, std::vector<VkBufferCopy>> ck_by_pool[4];   // (READB2 CHECK: by class)
     for (auto it = rb_pages.begin(); it != rb_pages.end();) {
         if (it->second + 600 < mirror_epoch) { rb_spans.erase(it->first); it = rb_pages.erase(it); continue; }   // (not read for a while)
         const uint64_t g = (uint64_t)it->first << kPageShift;
+        const uint32_t pgkey = it->first;
         uint32_t span_lo = 0, span_hi = 4096;   // (TICK-048, RX_VK_RB_RANGES: the bytes read of it)
         if (rb_ranges_on())
             if (const auto sp = rb_spans.find(it->first); sp != rb_spans.end()) span_lo = sp->second & 0xffff, span_hi = sp->second >> 16;
@@ -5778,6 +6072,29 @@ bool memory_rb_refresh(VkCommandBuffer up) {
             continue;
         }
         by_pool[&p].push_back({a, a, b - a});
+        if (!rb_class_ranges.empty())   // (READB2 CHECK: the class's pages among them)
+            if (const auto cp = rb_class_pages.find(pgkey); cp != rb_class_pages.end())
+                ck_by_pool[(int)(cp->second >> 62)][&p].push_back({a, a, b - a});
+    }
+    for (auto it = rb_class_pages.begin(); it != rb_class_pages.end();)   // (READB2 CHECK: the pages not read for a while)
+        it = (it->second & ((1ull << 62) - 1)) + 600 < mirror_epoch ? rb_class_pages.erase(it) : std::next(it);
+    for (auto it = rb_exact.begin(); it != rb_exact.end();) {   // (READB2, R2: the ranges themselves, as the page loop above does a page)
+        if (it->second.second + 600 < mirror_epoch) { it = rb_exact.erase(it); continue; }
+        const uint64_t g = it->first, n = it->second.first;
+        ++it;
+        auto pit = imported.upper_bound(g);
+        if (pit == imported.begin()) continue;
+        --pit;
+        Pool& p = pit->second;
+        if (g < p.lo || g >= p.hi || p.mstate != Pool::MIRROR_ON || !p.mirror) continue;
+        if (!p.memory && !p.never_imported && !import_again(p, kAgainRb)) continue;
+        const uint64_t a = g - p.lo, b = std::min(g + n, p.hi) - p.lo;
+        if (b <= a) continue;
+        if (joined && (!ahead_made || written_ahead(p.lo + a, p.lo + b))) {
+            st_rb_held++;
+            continue;
+        }
+        by_pool[&p].push_back({a, a, b - a});
     }
     if (by_pool.empty()) return false;
     for (auto& [pp, rs] : by_pool)   // (TICK-048: the mirror written there from guest memory)
@@ -5786,6 +6103,8 @@ bool memory_rb_refresh(VkCommandBuffer up) {
             late_shadow_void_range(pp->lo + r.dstOffset, pp->lo + r.dstOffset + r.size);   // (TICK-053: guest memory, not a capture)
         }
     full_barrier(up);   // (after the older submissions' write-backs into guest memory and this one's other uploads)
+    for (int cls = 2; cls <= 3; cls++)   // (READB2 CHECK: what this refresh is about to change in the class's pages)
+        if (!ck_by_pool[cls].empty()) rbck_record(up, cls, ck_by_pool[cls]);
     {   // (TICK-021: one dispatch rather than a copy region each; RX_VK_MSYNC_SCATTER=0: copies)
         GprofSpan gp(up, "rbrefresh copies (readback pages guest -> mirror)");
         gp.items = 0;
@@ -5795,7 +6114,8 @@ bool memory_rb_refresh(VkCommandBuffer up) {
             std::sort(rs.begin(), rs.end(), [](const VkBufferCopy& x, const VkBufferCopy& y) { return x.srcOffset < y.srcOffset; });
             size_t k = 0;
             for (size_t i = 1; i < rs.size(); i++)
-                if (rs[k].srcOffset + rs[k].size == rs[i].srcOffset) rs[k].size += rs[i].size;
+                if (rs[i].srcOffset <= rs[k].srcOffset + rs[k].size)   // (adjacent, or overlapping: a range inside a page that is copied too, READB2)
+                    rs[k].size = std::max(rs[k].srcOffset + rs[k].size, rs[i].srcOffset + rs[i].size) - rs[k].srcOffset;
                 else rs[++k] = rs[i];
             rs.resize(k + 1);
             if (!pp->memory && pp->never_imported) {   // (RX_VK_POOL_MIRROR: guest memory through staging, into this same command buffer)
@@ -6017,6 +6337,8 @@ thread_local BindMemo bind_memo[256];
 
 BufferRef gpu_buffer_bind(uint64_t gpu, uint64_t size, bool written) {
     if (written) texture_gpu_wrote(gpu, size);
+    if (written) rbring_note_written(gpu >= (1ull << 40) ? host->gpu_guest(gpu) : gpu, size);   // (STEP1, HL_RB_LAG)
+    if (written && rbwho_on()) rbwho_write(gpu >= (1ull << 40) ? host->gpu_guest(gpu) : gpu, size);
     if (cap_only_gpu()) cap_excl_note(gpu, size, written ? "a buffer binding (written)" : "a buffer binding", __builtin_return_address(0));
     // (below 1 TB a GPU address is the guest address itself, and a pool holds the whole range or nothing: the host's
     // two translations are for the virtual pools above)
@@ -6153,7 +6475,8 @@ BufferRef gpu_buffer_bind(uint64_t gpu, uint64_t size, bool written) {
             if (kb) logf("vk: write-backs only of written bindings up to %llu KB (RX_VK_WB_MAX_KB)", (unsigned long long)kb);
             return kb << 10;
         }();
-        if (!wb_max || size <= wb_max)
+        // (STEP1, HL_RB_LAG) a range the CPU reads back that the readback ring stages: no write-back, the submission's end copies it
+        if ((!wb_max || size <= wb_max) && !rbring_stage_bind(guest, size, p->mirror, off))
             writebacks.push_back({p, off, std::min(off + size, p->hi - p->lo)});
         diff_gpu_wrote(p->lo + off, std::min(off + size, p->hi - p->lo) - off);   // (TICK-048)
         rb_hazard_locked(p->lo + off, p->lo + std::min(off + size, p->hi - p->lo));   // (memory_rb_refresh)
@@ -7436,6 +7759,7 @@ std::atomic<uint64_t> staged_min{~0ull};
 int64_t st_sw_runs = 0, st_sw_bytes = 0, st_sw_pages_written = 0, st_sw_pages_cpu = 0, st_sw_pages_dead = 0, st_sw_pages_same = 0;
 }  // namespace mkwvk
 void mkwvk::memory_staged_apply(uint64_t done) {
+    memory_rb_check_poll(done);   // (READB2 CHECK: the refresh comparisons of the submissions done)
     if (staged_min.load(std::memory_order_acquire) > done) return;
     const WriteLive write_live = write_live_fn();
     static uint8_t* const base = host->guest_base ? host->guest_base() : nullptr;
@@ -7611,6 +7935,7 @@ void memory_end_submission(VkCommandBuffer cmd) {
             }
         }
     }
+    rbring_flush(cmd, mem_rec_value);   // (STEP1, HL_RB_LAG: the staged ranges into the readback ring)
     static const bool no_writeback = getenv("RX_VK_NO_WRITEBACK") != nullptr;   // (an experiment: none)
     if (no_writeback) writebacks.clear();
     if (!writebacks.empty()) {
