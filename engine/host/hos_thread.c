@@ -1433,9 +1433,10 @@ static int vc_bg_cap(void) {
     if (cap < 0) {
         const char *e = getenv("HOS_BG_CAP"), *w = getenv("HOS_BG_WAIT_US"), *r = getenv("HOS_BG_RUN_US");
         int n = 0;
-        if (!e) {
-            n = 0;   /* (off unless asked for) */
-        } else if (strcmp(e, "auto")) {
+        /* (auto by default since 2026-11-22: on the PC 3050's 6 cores, 8 runs a side in the Lost Woods, Kokiri and Kakariko, it
+           cut the steady frames over 25 ms by 8-30% with fps unchanged; a no-op on hosts with 8 cores or more) */
+        if (!e) e = "auto";
+        if (strcmp(e, "auto")) {
             n = atoi(e);
         } else {
             SYSTEM_LOGICAL_PROCESSOR_INFORMATION info[256];
@@ -1450,7 +1451,7 @@ static int vc_bg_cap(void) {
         if (cap)
             hos_log("vcores: a background thread (priority over 18) takes a core only while fewer than %d are held, waiting "
                     "%lld us at most (HOS_BG_CAP=0: no limit)", cap, (long long)(vc_bg_wait_ns / 1000));
-        else if (e)
+        else
             hos_log("vcores: HOS_BG_CAP=%s: no limit (%d physical cores for the game, %d virtual)", e, n, vc_cores());
     }
     return cap;
