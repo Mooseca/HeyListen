@@ -40,8 +40,8 @@ def hitch(ms, cause, game=1.0, gw=0.0, pipe=0.0, up=0.0, rb=0.0, ow=0.0, lock=0.
 
 
 def make_rows():
-    # (8 ms frames; a 12 ms frame (minor), a 20 ms (major), a 60 ms and a 120 ms (severe), a 9 ms: no stutter)
-    ivs = [8.0] * 40 + [12.0] + [8.0] * 35 + [20.0] + [8.0] * 35 + [60.0] + [8.0] * 35 + [120.0] + [8.0] * 10 + [9.0] + [8.0] * 5
+    # (8 ms frames; a 12 ms frame (minor), a 28 ms (major), a 60 ms and a 120 ms (severe), a 9 ms: no stutter)
+    ivs = [8.0] * 40 + [12.0] + [8.0] * 35 + [28.0] + [8.0] * 35 + [60.0] + [8.0] * 35 + [120.0] + [8.0] * 10 + [9.0] + [8.0] * 5
     t, rows = 1_000_000_000, []
     for i, ms in enumerate(ivs, 1):
         t += int(ms * 1e6)
@@ -60,7 +60,7 @@ def test_report():
     rows = make_rows()
     st = sr.find_stutters(rows, 50, 2, 1.25)
     got = [(round(s["ms"]), s["cls"]) for s in st]
-    want = [(12, "minor"), (20, "major"), (60, "severe"), (120, "severe")]
+    want = [(12, "minor"), (28, "major"), (60, "severe"), (120, "severe")]
     if got != want:
         fail(f"classes {got}, wanted {want}")
     with tempfile.TemporaryDirectory() as d:
@@ -68,14 +68,15 @@ def test_report():
         lines = ["[hos MainThread] boot", "[hos BaseProcExecutor0] map: Market_Child (child)",
                  hitch(12.0, "os_wait", game=11.0, ow=10.0, lock=9.0, faults=3),
                  "[hos BaseProcExecutor1] map: HyruleField_Child (child)",
-                 hitch(20.1, "texture_upload", up=15.0),
+                 hitch(28.1, "texture_upload", up=20.0),
                  "[hos host] stallwatch: gap 60.2 ms between presents: page faults +9000, working set +30 MB since the 40 ms mark; each thread's CPU since the mark and where it was then",
                  "[hos host] stallwatch:   ARes_Loading_0               12.5 Mcycles (cpu ticks user 0.0 kernel 15.6 ms); then at ntdll.dll+0x1659c4",
                  hitch(60.1, "os_wait", game=59.0, ow=58.0, lock=50.0, faults=9000, ws=3),
                  hitch(120.0, "readback", rb=100.0, gw=110.0)]
         Path(d, "game_log.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
         csv_path = os.path.join(d, "out.csv")
-        r = subprocess.run([sys.executable, "-I", str(ROOT / "scripts/stutter_report.py"), d, "--csv", csv_path], capture_output=True, text=True)
+        r = subprocess.run([sys.executable, "-I", str(ROOT / "scripts/stutter_report.py"), d, "--csv", csv_path, "--delta", "2", "--ratio", "1.25", "--floor", "0"],
+                           capture_output=True, text=True)
         if r.returncode:
             fail("the report failed: " + r.stderr[-800:])
         out = r.stdout
@@ -101,6 +102,37 @@ def test_report():
         r = subprocess.run([sys.executable, "-I", str(ROOT / "scripts/stutter_report.py"), d], capture_output=True, text=True)
         if r.returncode or "HL_HITCH_LOG=rel:2" not in r.stdout or not os.path.exists(os.path.join(d, "stutter_report.csv")):
             fail("a run without a log: " + r.stderr[-400:])
+
+
+def test_default_rule_and_align():
+    """STALL2: the default rule (8 ms, 2x, 16.7 ms) skips the 12 ms jitter and keeps the 28 ms frame; align() keeps the order across
+    the lines the game's rate cap dropped"""
+    rows = make_rows()
+    got = [round(s["ms"]) for s in sr.find_stutters(rows, 50, 8, 2, 16.7)]
+    if got != [28, 60, 120]:
+        fail(f"the default rule flagged {got}, wanted [28, 60, 120]")
+    # 300 stutters of 6 to 12 ms (ms = 6 + i % 7) with every third line dropped, and three long ones in between: all of them match
+    st, items = [], []
+    for i in range(300):
+        ms = 6.0 + i % 7 + (0.1 if i % 11 == 0 else 0.0)
+        st.append({"ms": ms})
+        if i % 3:
+            items.append({"ms": ms + 0.05})
+    for at, ms in ((40, 150.0), (150, 400.0), (260, 75.0)):
+        st.insert(at, {"ms": ms})
+        items.insert(at * 2 // 3, {"ms": ms})
+    by = sr.align(st, items, lambda x: x["ms"], 1.0, 0.03)
+    for k, s in enumerate(st):
+        if s["ms"] >= 50 and by.get(k, {}).get("ms") != s["ms"]:
+            fail(f"the long stutter {s['ms']} did not match its line: {by.get(k)}")
+    wrong = sum(1 for k, it in by.items() if abs(it["ms"] - st[k]["ms"]) > 1.0)
+    if wrong or len(by) < 190:
+        fail(f"align: {wrong} wrong pairs, {len(by)} matched of 203 expected")
+    pos = [k for k in sorted(by)]
+    where = {id(it): n for n, it in enumerate(items)}
+    idx = [where[id(by[k])] for k in pos]
+    if idx != sorted(idx):
+        fail("align broke the order")
 
 
 FIXTURE_MAIN = r'''
@@ -159,6 +191,7 @@ def main():
     ap.add_argument("--cxx", default="g++")
     a = ap.parse_args()
     test_report()
+    test_default_rule_and_align()
     test_game_side(a.cxx)
     print("PASS: the stutter report on made-up files, HL_HITCH_LOG=rel, HL_STALL_WATCH=rel, RX_VK_ACCUM_RETIRE on by default")
 

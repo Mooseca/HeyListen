@@ -1,21 +1,29 @@
 # Copyright (C) 2026 Sacrappy
 """The cause of every stutter of a run, from the files the game leaves (standard library only).
 
-    python -I engine/scripts/stutter_report.py <run dir> [--stalls <dir>] [--abs 50] [--delta 2] [--ratio 1.25] [--csv <file>]
+    python -I engine/scripts/stutter_report.py <run dir> [--stalls <dir>] [--abs 50] [--delta 8] [--ratio 2] [--floor 16.7] [--csv <file>]
 
 A run dir holds present_trace.csv (frame, return_ns, interval_ns) and game_log.txt. The game wants, in its log:
-    HL_HITCH_LOG=rel:2     a "vk: hitch" line (the cause split) for each frame 2 ms and 1.25x over the median of the 30 before it
-    HL_STALL_WATCH=rel:2   a "stallwatch: gap" block (per-thread CPU, page faults) and a stall_NN.jt dump for each such gap
-    (the plain numbers, HL_HITCH_LOG=50 and HL_STALL_WATCH=40, still work: the report then has causes for the long ones only)
+    HL_HITCH_LOG=rel:8     a "vk: hitch" line (the cause split) for each frame 8 ms and 1.25x over the median of the 30 before it
+    HL_STALL_WATCH=rel:8   a "stallwatch: gap" block (per-thread CPU, page faults) and a stall_NN.jt dump for each such gap
+    (the plain numbers, HL_HITCH_LOG=50 and HL_STALL_WATCH=40, still work: the report then has causes for the long ones only.
+    The game keeps at most 20 hitch lines and 20 gap blocks a second and 80 dumps in all, the dumps going to the first gaps over
+    HL_STALL_WATCH_AFTER seconds: a long run wants HL_STALL_WATCH_MAX raised.)
 
-Stutter rule: a frame is a stutter when its interval is over the median of the 30 frames before it by --delta ms and --ratio,
-or over --abs ms. Classes: minor (under 2x the median), major (2 to 5x), severe (over 5x, or over 100 ms).
+Stutter rule (STALL2, 22 Nov: at 2 ms and 1.25x the owner's 23 minutes gave 25,501 stutters, one frame in seven, mostly the normal
+jitter of a 130 fps game whose 90th percentile is 1.6x its median): a frame is a stutter when its interval is over the median of the
+30 frames before it by --delta ms (8) and by --ratio (2x) and over --floor ms (16.7, a missed 60 Hz refresh), or over --abs ms (50).
+On that run this keeps 1,724 (75 a minute) and 89 percent of the time they cost. Classes: minor (under 3x the median), major
+(3 to 6x), severe (over 6x, or over 100 ms).
 
 How the lines are matched. The game's log has no time stamps, but its lines come in the order of the frames and a hitch line
-carries the frame's length: each stutter takes, in order, the nearest hitch line of the same length (within 1 ms or 3 percent)
-among the next few lines. The stall dumps share the trace's clock (their window ends at the present that ended the gap), so a
-dump is matched by time; a gap block without a dump is matched like a hitch line, by order and length. The map at a stutter is the
-last "map:" line before its hitch line (or gap block) in the log; "~" marks a map taken from the stutter before it."""
+carries the frame's length. The game's 20 a second cap drops lines (a quarter of them at the old rule), so the lines are a
+sub-sequence of the stutters: the long stutters are matched first to the lines of the same length (within 1 ms or 3 percent) by a
+longest common subsequence, then shorter levels fill the gaps between the pairs found (align(); the greedy match this replaced lost
+the order after the first dropped line, and 99 of the 223 stutters of 50 ms or more went "unknown" with their line in the log). The
+stall dumps share the trace's clock (their window ends at the present that ended the gap), so a dump is matched by time; a gap block
+without a dump is matched like a hitch line, by order and length. The map at a stutter is the last "map:" line before its hitch line
+(or gap block) in the log; "~" marks a map taken from the stutter before it, "?" a stutter before the first zone (the start-up)."""
 import argparse
 import csv
 import os
@@ -43,7 +51,8 @@ BEGIN = {EV_B: (EV_E, "event", EV_S), CV_B: (CV_E, "cv", CV_S), MX_B: (MX_E, "mu
 END_TO_BEGIN = {v[0]: k for k, v in BEGIN.items()}
 
 CAUSES = ["first-touch page faults / Windows trim", "shader or pipeline build", "texture upload", "readback wait", "GPU bound",
-          "lock wait on the frame hand-off", "zone load", "unknown"]
+          "lock wait on the frame hand-off", "zone load", "guest sleep (the game's own SleepThread)", "other OS wait (kernel, queue)",
+          "render thread busy, not split", "unknown"]
 
 
 def median(v):
@@ -63,7 +72,7 @@ def read_trace(path):
     return rows
 
 
-def find_stutters(rows, abs_ms, delta, ratio):
+def find_stutters(rows, abs_ms, delta, ratio, floor=0.0):
     """[(frame, t_s since the first frame, ms, median ms, class)], by the rule above"""
     out, ring = [], []
     t0 = rows[0][1] if rows else 0
@@ -72,10 +81,10 @@ def find_stutters(rows, abs_ms, delta, ratio):
         if ms <= 0:
             continue
         med = median(ring) if len(ring) >= 5 else 0.0
-        hit = ms >= abs_ms or (med > 0 and ms >= med + delta and ms >= med * ratio)
+        hit = ms >= abs_ms or (med > 0 and ms >= med + delta and ms >= med * ratio and ms >= floor)
         if hit:
             x = ms / med if med else 0.0
-            cls = "severe" if (ms > 100 or (med and x > 5)) else "major" if (med and x >= 2) or (not med) else "minor"
+            cls = "severe" if (ms > 100 or (med and x > 6)) else "major" if (med and x >= 3) or (not med) else "minor"
             out.append({"frame": frame, "ret": ret, "t": (ret - t0) / 1e9, "ms": ms, "med": med, "x": x, "cls": cls})
         ring.append(ms)
         if len(ring) > 30:
@@ -119,7 +128,8 @@ def read_log(path):
 
 
 def match_by_order(stutters, items, key_ms, tol_abs, tol_rel, look=4):
-    """each stutter, in order, takes the nearest item (same length) among the next few; returns {stutter index: item}"""
+    """(the old greedy matching, kept for a segment too long for the alignment) each stutter, in order, takes the nearest item
+    (same length) among the next few; returns {stutter index: item}"""
     got, p = {}, 0
     for i, s in enumerate(stutters):
         best, bd = None, None
@@ -131,6 +141,67 @@ def match_by_order(stutters, items, key_ms, tol_abs, tol_rel, look=4):
             got[i] = items[best]
             p = best + 1
     return got
+
+
+ALIGN_LEVELS = (150.0, 60.0, 30.0, 16.0, 10.0, 6.0, 0.0)
+ALIGN_CELLS = 2_500_000
+
+
+def align(stutters, items, key_ms, tol_abs, tol_rel):
+    """Match the stutters to the log's items (hitch lines or gap blocks) by length, keeping the order: returns {stutter index: item}.
+
+    Both lists are in time order, but the game's rate cap drops lines, so the items are a sub-sequence of the stutters (plus a few
+    the trace's own rule does not flag). A greedy match drifts after the first dropped line (STALL2, 22 Nov: 99 of the 223 stutters
+    of 50 ms or more went "unknown" with the line in the log). So the long ones, rare and distinct, are matched first, by a longest
+    common subsequence on the lengths; then each level (150, 60, 30, 16, 10, 6, 0 ms) fills the gaps between the pairs found so far."""
+    sk = [s["ms"] for s in stutters]
+    ik = [key_ms(x) for x in items]
+    got = {}   # stutter index -> item index
+
+    def tol(v):
+        return max(tol_abs, tol_rel * v)
+
+    def lcs(S, I):
+        n, m = len(S), len(I)
+        if not n or not m:
+            return []
+        if n * m > ALIGN_CELLS:
+            sub = match_by_order([stutters[i] for i in S], [items[j] for j in I], key_ms, tol_abs, tol_rel)
+            by_id = {id(items[j]): j for j in I}
+            return [(S[k], by_id[id(it)]) for k, it in sub.items()]
+        dp = [[0.0] * (m + 1) for _ in range(n + 1)]
+        for a in range(n - 1, -1, -1):
+            row, nxt, va = dp[a], dp[a + 1], sk[S[a]]
+            for b in range(m - 1, -1, -1):
+                best = nxt[b] if nxt[b] > row[b + 1] else row[b + 1]
+                d = abs(ik[I[b]] - va)
+                t = tol(va)
+                if d <= t:
+                    w = nxt[b + 1] + 1.0 - 0.5 * d / t
+                    if w > best:
+                        best = w
+                row[b] = best
+        out, a, b = [], 0, 0
+        while a < n and b < m:
+            d = abs(ik[I[b]] - sk[S[a]])
+            if d <= tol(sk[S[a]]) and abs(dp[a][b] - (dp[a + 1][b + 1] + 1.0 - 0.5 * d / tol(sk[S[a]]))) < 1e-9:
+                out.append((S[a], I[b]))
+                a += 1
+                b += 1
+            elif dp[a + 1][b] >= dp[a][b + 1]:
+                a += 1
+            else:
+                b += 1
+        return out
+
+    for thr in ALIGN_LEVELS:
+        anchors = [(-1, -1)] + sorted(got.items()) + [(len(stutters), len(items))]
+        for (s0, i0), (s1, i1) in zip(anchors, anchors[1:]):
+            S = [i for i in range(s0 + 1, s1) if sk[i] >= thr]
+            I = [j for j in range(i0 + 1, i1) if ik[j] >= thr - tol(thr)]
+            for si, ii in lcs(S, I):
+                got[si] = ii
+    return {si: items[ii] for si, ii in got.items()}
 
 
 def read_jt(path):
@@ -209,6 +280,12 @@ def label(s, h, blk):
             return CAUSES[4], f"gpu_wait {h['gpu_wait']:.1f} gpu {h['gpu']:.1f} ms"
         if h["lock"] >= 0.5 * ms:
             return CAUSES[5], f"os_wait lock {h['lock']:.1f} of {ms:.1f} ms, {int(h['faults'])} faults"
+        if h["sleep"] >= 0.5 * ms:
+            return CAUSES[7], f"os_wait sleep {h['sleep']:.1f} of {ms:.1f} ms"
+        if h["os_wait"] >= 0.5 * ms:
+            return CAUSES[8], f"os_wait {h['os_wait']:.1f} of {ms:.1f} ms (lock {h['lock']:.1f} sleep {h['sleep']:.1f} vcore {h['vcore']:.1f} file {h['file']:.1f})"
+        if h["render"] >= 0.5 * ms:
+            return CAUSES[9], f"render {h['render']:.1f} of {ms:.1f} ms, none of it pipe/xlate/upload/memsync/readback/gpu_wait"
         ev.append(f"game {h['game']:.1f} render {h['render']:.1f} gpu_wait {h['gpu_wait']:.1f} os_wait {h['os_wait']:.1f} "
                   f"(lock {h['lock']:.1f} sleep {h['sleep']:.1f} vcore {h['vcore']:.1f} file {h['file']:.1f}) faults {int(h['faults'])}")
     if blk:
@@ -245,12 +322,12 @@ def hitch_text(h):
     return s + f" | faults {int(h['faults'])}, ws -{h['ws']:.0f} MB"
 
 
-def build(run, stalls, abs_ms, delta, ratio):
+def build(run, stalls, abs_ms, delta, ratio, floor=0.0):
     rows = read_trace(os.path.join(run, "present_trace.csv"))
-    st = find_stutters(rows, abs_ms, delta, ratio)
+    st = find_stutters(rows, abs_ms, delta, ratio, floor)
     log = os.path.join(run, "game_log.txt")
     hitches, blocks, maps = read_log(log) if os.path.exists(log) else ([], [], [])
-    by_h = match_by_order(st, hitches, lambda h: h["ms"], 1.0, 0.03)
+    by_h = align(st, hitches, lambda h: h["ms"], 1.0, 0.03)
     # (the dumps by time: a dump's window ends at the present that ended its gap)
     jts, by_b = {}, {}
     for b in blocks:
@@ -269,7 +346,7 @@ def build(run, stalls, abs_ms, delta, ratio):
             by_b[i] = min(near, key=lambda x: x[0])[1]
     rest = [b for b in blocks if id(b) not in jts]
     left = [i for i in range(len(st)) if i not in by_b]
-    for k, b in match_by_order([st[i] for i in left], rest, lambda b: b["ms"], 2.0, 0.05).items():
+    for k, b in align([st[i] for i in left], rest, lambda b: b["ms"], 5.0, 0.15).items():
         by_b[left[k]] = b
     out, last_map = [], "?"
     for i, s in enumerate(st):
@@ -296,11 +373,12 @@ def main(argv=None):
     ap.add_argument("run")
     ap.add_argument("--stalls", help="the folder of the stall_NN.jt dumps (HL_STALL_WATCH_DIR); default: where the log says")
     ap.add_argument("--abs", "--ms", dest="abs", type=float, default=50.0, help="a frame over this many ms is a stutter (default 50)")
-    ap.add_argument("--delta", type=float, default=2.0, help="ms over the median of the 30 frames before (default 2)")
-    ap.add_argument("--ratio", type=float, default=1.25, help="times the median (default 1.25)")
+    ap.add_argument("--delta", type=float, default=8.0, help="ms over the median of the 30 frames before (default 8)")
+    ap.add_argument("--ratio", type=float, default=2.0, help="times the median (default 2)")
+    ap.add_argument("--floor", type=float, default=16.7, help="no frame under this many ms is a stutter, 0: none (default 16.7)")
     ap.add_argument("--csv", help="the CSV file (default: <run dir>/stutter_report.csv)")
     a = ap.parse_args(argv)
-    rows, out = build(a.run, a.stalls, a.abs, a.delta, a.ratio)
+    rows, out = build(a.run, a.stalls, a.abs, a.delta, a.ratio, a.floor)
     if not rows:
         print("no frames in", os.path.join(a.run, "present_trace.csv"))
         return 1
@@ -315,7 +393,7 @@ def main(argv=None):
     span = (rows[-1][1] - rows[0][1]) / 1e9
     print(f"# Stutters of {a.run}\n")
     print(f"{len(rows)} frames over {mmss(span)}, median frame {median([r[2] / 1e6 for r in rows if r[2]]):.2f} ms; "
-          f"stutter = {a.delta:g} ms and {a.ratio:g}x over the median of the 30 before, or over {a.abs:g} ms; {len(out)} stutters.\n")
+          f"stutter = {a.delta:g} ms and {a.ratio:g}x over the median of the 30 before and over {a.floor:g} ms, or over {a.abs:g} ms; {len(out)} stutters.\n")
     print("| time | ms | x med | class | map | cause | evidence |\n|---|---|---|---|---|---|---|")
     for s in out:
         extra = " ".join(x for x in (s["hitch"], s["stall"]) if x)
