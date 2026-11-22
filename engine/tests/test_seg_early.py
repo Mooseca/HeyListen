@@ -63,7 +63,7 @@ def main():
 
     e = function(rp, "const uint8_t* replay_handle_early(")
     i_dry = e.index("jt_mark(13, 0);")
-    for before in ("memory_sync_mirrors_before_segments();", "texture_rb_refresh_now();", "texture_segments_begin(inits.data(), inits.size());",
+    for before in ("memory_sync_mirrors_before_segments();", "texture_rb_refresh_now();", "G.seg_table = texture_segments_begin(inits.data(), inits.size());",
                    "par_active = true;", "ub_growing.store(true", "seg_early_hook = &hook;", "memory_rb_segments_begin(base, (uint64_t)nplan);"):
         need(e.index(before) < i_dry, "not before the dry pass: " + before)
     after = e[e.index("jt_mark(14, 0);"):]
@@ -80,7 +80,7 @@ def main():
     need("vkQueueSubmit2(dev.queue, 1, &si, j->r->fence)" in sj, "a segment's submit is not submit_job's")
     tail = function(rp, "void early_join(EarlyGroup& G)")
     need("early_submit_job(G, j);" in tail and tail.index("early_submit_job(G, j);") < tail.index("par_pool.done.wait("), "the segments' submits are out of place")
-    need(tail.index("par_pool.done.wait(lk, [] { return par_pool.pending == 0; });") < tail.index("par_active = false;\n    texture_segments_begin(nullptr, 0);"),
+    need(tail.index("par_pool.done.wait(lk, [] { return par_pool.pending == 0; });") < tail.index("par_active = false;"),
          "par_active goes off before every segment is done")
     need("defer_join_now();" in e[:e.index("jt_mark(13, 0);")] and "early_join(G);" in e and "defer_group = group;" in e,
          "the join is not made at the start of the next big command buffer, or not by early_join")

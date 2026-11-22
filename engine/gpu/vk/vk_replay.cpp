@@ -3362,6 +3362,7 @@ struct EarlyGroup {
     size_t next_sub = 0;
     bool sub_after_rd = false;
     std::atomic<bool> dry_uploaded{false};
+    SegTableRef seg_table;   // (stream REC1: this group's init command buffers; the workers hold it while they record a segment)
     std::condition_variable seg_cv;
     std::mutex seg_mu;
     bool init_lost = false;
@@ -3421,7 +3422,7 @@ void early_record_job(EarlyGroup& G, EarlyJob* j) {
     tl_ev("seg+", (uint64_t)j->index);   // (stream ORDER3)
     work_seg_begin();   // (TICK-061, D6: par_active is on while these segments record)
     texture_set_segment(j->order);
-    texture_segment_worker(j->index);
+    texture_segment_worker(G.seg_table, j->index);
     texture_begin_recording(j->r->upload, j->r->value);
     draw_begin_recording(j->r->slot, j->r->cmd, j->r->value);
     VkCommandBuffer c = j->r->cmd;
@@ -3430,8 +3431,8 @@ void early_record_job(EarlyGroup& G, EarlyJob* j) {
     const int64_t tc = par_stats_on ? now_ns() : 0;
     if (defer_check_on()) j->recorded = (int64_t)(occ_wserial - j->g.serial);   // (this thread's count: record_segment's draws and dispatches)
     j->uploads = texture_uploads_recorded();
-    j->inits = texture_segment_end(j->index);
-    texture_segment_worker(-1);
+    j->inits = texture_segment_end(*G.seg_table, j->index);
+    texture_segment_worker(nullptr, -1);
     gpu_time_end(*j->r, j->uploads);   // (as replay_handle's)
     host_read_barrier(c);
     vkEndCommandBuffer(j->r->upload);
@@ -3500,7 +3501,6 @@ void early_join(EarlyGroup& G) {
                      "change, and the work after it may use them");
     tl_ev("early-", used);
     par_active = false;
-    texture_segments_begin(nullptr, 0);
     es_seg_ms += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - G.t_seg0).count();
     es_join_ms += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_join0).count();
     if (wall_fine_on()) rwall.seg_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - G.t_seg0).count(), rwall.big++;
@@ -3613,7 +3613,7 @@ const uint8_t* replay_handle_early(VkCommandBuffer& cmd, const uint8_t* h, bool 
                 break;
     }
     const bool early = inits.size() == jobs.size();   // (else: no segment, the dry pass then the whole here, below)
-    if (early) texture_segments_begin(inits.data(), inits.size());
+    if (early) G.seg_table = texture_segments_begin(inits.data(), inits.size());
     early_wall.mark(4);
     jt_mark(21, 0);
     // (stream C1, RX_VK_EARLY_GPU) rec_cur goes to the GPU now, with the pre-sync's copies: the dry pass records nothing into it
@@ -3688,12 +3688,11 @@ const uint8_t* replay_handle_early(VkCommandBuffer& cmd, const uint8_t* h, bool 
     if (wall_fine_on()) rwall.dry_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - t_dry0).count();
     const size_t used = open + 1;
     if (early)
-        for (size_t k = used; k < jobs.size(); k++) texture_segment_end((int)k);   // (never reached: their init command buffers ended)
+        for (size_t k = used; k < jobs.size(); k++) texture_segment_end(*G.seg_table, (int)k);   // (never reached: their init command buffers ended)
     if (used < 2 || !early) {   // (no boundary reached, or no init command buffer: the whole command buffer here, into rec_cur)
         if (early) {
-            texture_segment_end(0);
+            texture_segment_end(*G.seg_table, 0);
             par_active = false;
-            texture_segments_begin(nullptr, 0);
         }
         es_whole_n++;
         Segment whole = jobs[0]->g;
@@ -4093,7 +4092,7 @@ const uint8_t* replay_handle(VkCommandBuffer& cmd, const uint8_t* h, bool may_st
         }
         return occ_stop ? occ_go_on(cmd, occ_stop, may_stop, nullptr) : stop;
     }
-    texture_segments_begin(inits.data(), inits.size());
+    const SegTableRef seg_table = texture_segments_begin(inits.data(), inits.size());
     const auto t_seg0 = std::chrono::steady_clock::now();
     int64_t locks0, wait0;
     par_counts_sum(&locks0, &wait0);
@@ -4104,12 +4103,12 @@ const uint8_t* replay_handle(VkCommandBuffer& cmd, const uint8_t* h, bool may_st
     // (one segment recorded into its own recording, on any recording thread: a worker, or with RX_VK_PARALLEL_SELF the replay
     // thread for the first. The thread's per-recording state (draw_begin_recording, texture_begin_recording) is set for it here;
     // the replay thread's is set again by begin_recording for what follows the segments, below)
-    const auto record_job = [&seg_cv, &seg_mu, &now_ns, setup_here](Job* j) {
+    const auto record_job = [&seg_cv, &seg_mu, &now_ns, &seg_table, setup_here](Job* j) {
         j->t0 = now_ns();
         work_seg_begin();   // (TICK-061, D6: RX_VK_WORK_LOCAL, vk_work.h; par_active is on until every job is done)
         if (setup_here) segment_begin_here(*j->r);   // (TICK-061, D7)
         texture_set_segment(j->order);
-        texture_segment_worker(j->index);
+        texture_segment_worker(seg_table, j->index);
         texture_begin_recording(j->r->upload, j->r->value);
         draw_begin_recording(j->r->slot, j->r->cmd, j->r->value);
         VkCommandBuffer c = j->r->cmd;
@@ -4117,8 +4116,8 @@ const uint8_t* replay_handle(VkCommandBuffer& cmd, const uint8_t* h, bool may_st
         record_segment(c, j->g);
         const int64_t tc = par_stats_on ? now_ns() : 0;
         j->uploads = texture_uploads_recorded();
-        j->inits = texture_segment_end(j->index);   // (after its last new image)
-        texture_segment_worker(-1);
+        j->inits = texture_segment_end(*seg_table, j->index);   // (after its last new image)
+        texture_segment_worker(nullptr, -1);
         gpu_time_end(*j->r, j->uploads);   // (TICK-057)
         host_read_barrier(c);
         vkEndCommandBuffer(j->r->upload);
@@ -4234,7 +4233,6 @@ const uint8_t* replay_handle(VkCommandBuffer& cmd, const uint8_t* h, bool may_st
         replay_fatal("a parallel replay segment's init command buffer could not be ended: new images lost their first layout "
                      "change, and the work after it may use them");
     par_active = false;
-    texture_segments_begin(nullptr, 0);
     seg_ms += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_seg0).count();
     if (wall_fine_on()) rwall.seg_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - t_seg0).count(), rwall.big++;
     segs_n += (double)seg.size();
