@@ -241,6 +241,11 @@ bool probe_serial();
 void probe_dump_all(const char* why);
 void probe_log(uint64_t frame);
 void memory_end_submission(VkCommandBuffer cmd);
+/// (stream REC1) a segment's worker reads this recording's value and epoch, not the replay thread's current ones (vk_memory.cpp)
+uint64_t memory_epoch();
+void memory_recording_thread(uint64_t value, uint64_t epoch);
+void memory_recording_thread_end();
+void memory_recording_check(int64_t* reads, int64_t* value_diff, int64_t* epoch_diff);
 /// The game made a memory pool (gpu address, bytes): imported in the background, before it is used
 /// RX_VK_CHECKPOINTS: the draws the GPU reached, logged once the device is lost (vk_draw.cpp)
 void checkpoints_report();

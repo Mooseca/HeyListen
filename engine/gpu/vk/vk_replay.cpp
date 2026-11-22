@@ -3385,6 +3385,7 @@ struct EarlyGroup {
     bool sub_after_rd = false;
     std::atomic<bool> dry_uploaded{false};
     SegTableRef seg_table;   // (stream REC1: this group's init command buffers; the workers hold it while they record a segment)
+    uint64_t rec_epoch = 0;   // (stream REC1: memory_epoch() when the group began: what its workers read as the submission's epoch)
     std::condition_variable seg_cv;
     std::mutex seg_mu;
     bool init_lost = false;
@@ -3453,6 +3454,7 @@ void early_record_job(EarlyGroup& G, EarlyJob* j) {
     work_seg_begin();   // (TICK-061, D6: par_active is on while these segments record)
     texture_set_segment(j->order);
     texture_segment_worker(G.seg_table, j->index);
+    memory_recording_thread(j->r->value, G.rec_epoch);   // (stream REC1)
     texture_begin_recording(j->r->upload, j->r->value);
     draw_begin_recording(j->r->slot, j->r->cmd, j->r->value);
     VkCommandBuffer c = j->r->cmd;
@@ -3463,6 +3465,7 @@ void early_record_job(EarlyGroup& G, EarlyJob* j) {
     j->uploads = texture_uploads_recorded();
     j->inits = texture_segment_end(*G.seg_table, j->index);
     texture_segment_worker(nullptr, -1);
+    memory_recording_thread_end();
     gpu_time_end(*j->r, j->uploads);   // (as replay_handle's)
     host_read_barrier(c);
     vkEndCommandBuffer(j->r->upload);
@@ -3563,6 +3566,10 @@ void early_join(EarlyGroup& G) {
                  defer_stats.shared[kRsEndSubmission] / 600.0, kJoinWhyName[0], defer_stats.why[0] / 600.0, kJoinWhyName[1], defer_stats.why[1] / 600.0,
                  kJoinWhyName[2], defer_stats.why[2] / 600.0, kJoinWhyName[3], defer_stats.why[3] / 600.0, kJoinWhyName[4], defer_stats.why[4] / 600.0,
                  kJoinWhyName[5], defer_stats.why[5] / 600.0);
+            int64_t rd = 0, vd = 0, ed = 0;
+            memory_recording_check(&rd, &vd, &ed);
+            logf("vk: DEFER_JOIN_CHECK: reads of the submission's value and epoch by segment workers: %lld, where the worker's differed from the replay thread's: "
+                 "value %lld, epoch %lld", (long long)rd, (long long)vd, (long long)ed);
             std::fill(std::begin(defer_stats.shared), std::end(defer_stats.shared), 0);
             std::fill(std::begin(defer_stats.why), std::end(defer_stats.why), 0);
             std::fill(std::begin(defer_stats.beside), std::end(defer_stats.beside), 0);
@@ -3623,6 +3630,7 @@ const uint8_t* replay_handle_early(VkCommandBuffer& cmd, const uint8_t* h, bool 
     memory_rb_segments_begin(base, (uint64_t)nplan);
     const auto group = std::make_shared<EarlyGroup>();   // (heap: the join may come after this function has returned, RX_VK_DEFER_JOIN)
     EarlyGroup& G = *group;
+    G.rec_epoch = memory_epoch();
     std::vector<std::unique_ptr<EarlyJob>>& jobs = G.jobs;
     for (int k = 0; k < nplan; k++) {
         auto j = std::make_unique<EarlyJob>();
@@ -4132,6 +4140,7 @@ const uint8_t* replay_handle(VkCommandBuffer& cmd, const uint8_t* h, bool may_st
         return occ_stop ? occ_go_on(cmd, occ_stop, may_stop, nullptr) : stop;
     }
     const SegTableRef seg_table = texture_segments_begin(inits.data(), inits.size());
+    const uint64_t seg_epoch = memory_epoch();   // (stream REC1)
     const auto t_seg0 = std::chrono::steady_clock::now();
     int64_t locks0, wait0;
     par_counts_sum(&locks0, &wait0);
@@ -4142,12 +4151,13 @@ const uint8_t* replay_handle(VkCommandBuffer& cmd, const uint8_t* h, bool may_st
     // (one segment recorded into its own recording, on any recording thread: a worker, or with RX_VK_PARALLEL_SELF the replay
     // thread for the first. The thread's per-recording state (draw_begin_recording, texture_begin_recording) is set for it here;
     // the replay thread's is set again by begin_recording for what follows the segments, below)
-    const auto record_job = [&seg_cv, &seg_mu, &now_ns, &seg_table, setup_here](Job* j) {
+    const auto record_job = [&seg_cv, &seg_mu, &now_ns, &seg_table, seg_epoch, setup_here](Job* j) {
         j->t0 = now_ns();
         work_seg_begin();   // (TICK-061, D6: RX_VK_WORK_LOCAL, vk_work.h; par_active is on until every job is done)
         if (setup_here) segment_begin_here(*j->r);   // (TICK-061, D7)
         texture_set_segment(j->order);
         texture_segment_worker(seg_table, j->index);
+        memory_recording_thread(j->r->value, seg_epoch);   // (stream REC1)
         texture_begin_recording(j->r->upload, j->r->value);
         draw_begin_recording(j->r->slot, j->r->cmd, j->r->value);
         VkCommandBuffer c = j->r->cmd;
@@ -4157,6 +4167,7 @@ const uint8_t* replay_handle(VkCommandBuffer& cmd, const uint8_t* h, bool may_st
         j->uploads = texture_uploads_recorded();
         j->inits = texture_segment_end(*seg_table, j->index);   // (after its last new image)
         texture_segment_worker(nullptr, -1);
+        memory_recording_thread_end();
         gpu_time_end(*j->r, j->uploads);   // (TICK-057)
         host_read_barrier(c);
         vkEndCommandBuffer(j->r->upload);

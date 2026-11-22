@@ -5,6 +5,7 @@ docs/native-engine/recording-state.md has each piece's note. Here, the pieces al
   texture_uploads_recorded flushes only what its own recording changed, never the replay thread's next recording's;
 - the segments' init command buffers are an object of their group (SegTable), held by the group and by a worker while it records a
   segment of it: no global table (seg_init_mu, seg_inits), and nothing replaces it at a join;
+- a segment's worker reads its own recording's value and epoch (memory_recording_thread), not the replay thread's current ones;
 - the uniform updates' list positions are absolute (ub_base, ub_end, ub_at): a prune moves nothing a recording holds, and the deque is
   read through ub_at only.
 
@@ -43,6 +44,13 @@ def main():
     need("const UbUpdate& ub_at(size_t pos) { return ub_updates[pos - ub_base]; }" in rep, "ub_at does not subtract ub_base")
     need(rep.count("ub_updates.pop_front();\n        ub_base++;") == 1, "a pop does not move ub_base with it")
     need("if (ub_first_of_recording) ub_first_of_recording--;" not in rep, "a prune moves the recording's first position again")
+    # the submission's value and epoch: a segment's worker has its own, the reads go through two accessors
+    code = "\n".join(line.split("//")[0] for line in mem.splitlines())
+    need(len(re.findall(r"\bmem_rec_value\b", code)) == 4, "mem_rec_value is read other than through rec_value_of() (its declaration, write and accessor)")
+    need(len(re.findall(r"\bmirror_epoch\b", code)) == 5, "mirror_epoch is read other than through rec_epoch() (its declaration, bump, memory_epoch and accessor)")
+    need(rep.count("memory_recording_thread(j->r->value,") == 2 and rep.count("memory_recording_thread_end();") == 2,
+         "a segment's worker does not set and clear its recording's value and epoch (both record paths)")
+    need("G.rec_epoch = memory_epoch();" in rep, "a group does not take the epoch it begins in")
     print("PASS recording state: page table changes per thread, segment init table per group, uniform update positions absolute")
 
 

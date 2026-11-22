@@ -20,9 +20,9 @@ group's segments (`early_join`) and what follows from it; a *submission* is one 
 | `ub_prune` | pops the front | rule + counter (positions done above) |
 | `memory_end_submission` | needs every worker's write-backs | rule + counter |
 | `memory_begin_submission` | bumps `mirror_epoch`, clears `mirror_synced`, `writebacks` | rule + counter |
-| `mem_rec_value` | one global | not moved (design below) |
-| `mirror_epoch` | one global | not moved (design below) |
-| `synced_epoch`, `sync_seg` (a pool's) | one pair a pool | not moved (design below) |
+| `mem_rec_value` | one global | **moved for the segments' workers: their own value** (check) |
+| `mirror_epoch` | one global | **moved for the segments' workers: their own epoch** (check) |
+| `synced_epoch`, `sync_seg` (a pool's) | one pair a pool | epoch side follows the line above; the pool's pair not moved (design below) |
 
 Every piece was read from the code, not from the JOIN1 list; the first row corrects it.
 
@@ -67,16 +67,18 @@ Every piece was read from the code, not from the JOIN1 list; the first row corre
 - Bumps `mirror_epoch`, sets `mirror_upload`, clears `mirror_synced` and `writebacks`, reaps and makes mirrors. Called at a submission's start, at a recording split (`split_part`, `occ_sync`) and at the present.
 - Rule: not while a group of the recording before is pending (it clears the write-backs those workers add and changes `mirror_epoch`, below). Counter: `memory_begin_submission` beside pending segments.
 
-### 7. `mem_rec_value` (global; set by `memory_recording_value` in `begin_recording`)
-- Readers: every binding (`p->last_value`), the write-back notes, imports and mirror frees. A worker reads the replay thread's value, which `begin_recording` changes at the next submission.
-- Rule to build: a `thread_local` value set where a recording thread begins its recording (`begin_recording` on the replay thread, the job's start on a worker, from its `Recording::value`), read through one function. With every switch
-  off the thread's value and the global are equal at every read: that is the check to add (count the differences; must be 0).
+### 7. `mem_rec_value` (global; set by `memory_recording_value` in `begin_recording`) - moved for segment workers
+- Readers: every binding (`p->last_value`), the write-back notes, imports and mirror frees. A worker read the replay thread's value, which `begin_recording` changes at the next submission.
+- Now: every read in `vk_memory.cpp` goes through `rec_value_of()`: a thread that called `memory_recording_thread(value, epoch)` (a segment's worker, from the start of its job to its end, with the
+  `Recording::value` of its segment's recording and the epoch its group took when it began) reads those, every other thread (the replay thread, game threads, a worker outside a segment) reads the global,
+  as before. With no recording beside another the two are equal at every read; `RX_VK_REC_OVERLAP_CHECK=1` counts the reads where they are not (logged with the join check: "reads of the submission's value
+  and epoch by segment workers ... differed"), and it must be 0.
 
-### 8. `mirror_epoch` and `synced_epoch` / `sync_seg`
+### 8. `mirror_epoch` and `synced_epoch` / `sync_seg` - the epoch moved for segment workers, the pool's pair not
 - `mirror_epoch` is written only by `memory_begin_submission` (under `pools_mu`), read at ~70 sites, of which the worker's binding (`memory_bind`, the unlocked fast path against `p->synced_epoch`, and `mirror_sync`), the readback ring (`rb_*`),
   `mirror_make` and the idle give-back. A pool's `synced_epoch`/`sync_seg` say "this pool's mirror holds the CPU's pages as of this submission, copied by a recording before queue position `sync_seg`".
 - The pre-sync of the next big command buffer marks pools `synced_epoch = mirror_epoch, sync_seg = 0`; a pending segment of the same submission that binds such a pool later reads it as synced by a copy that sits *behind it* in the queue.
-- Rule to build: a segment's check is against its own recording's `(epoch, order)`: the thread-local value above carries the epoch, and the pre-sync stamps `sync_seg` with the order of the recording that holds its copy (`par_seq`), so a segment of
+- Epoch side: done as for `mem_rec_value` (`rec_epoch()`, the group's `memory_epoch()` taken at its begin; the same check). Pool side, to build: a segment's check is against its own recording's `(epoch, order)`: the thread-local epoch carries it, and the pre-sync stamps `sync_seg` with the order of the recording that holds its copy (`par_seq`), so a segment of
   an earlier order finds the pool not synced for it. The pool then needs a short list of (epoch, order) syncs, not one pair, because two recordings' copies are both live in the queue. This is the largest change in `vk_memory.cpp` and is
   not made.
 
