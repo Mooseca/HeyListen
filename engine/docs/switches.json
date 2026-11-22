@@ -2,7 +2,7 @@
  "schema": 1,
  "generated_by": "engine/scripts/list_switches.py",
  "scope": "C, C++ and headers under engine/ (engine/tests and vendored trees other than a64-kit excluded) and the Python the builder, the lifter and the scripts run: getenv, std::getenv, _wgetenv, the code's own env helpers and table-driven reads, and os.environ.",
- "count": 1403,
+ "count": 1404,
  "switches": [
   {
    "name": "A64_DEVIRT",
@@ -1211,13 +1211,13 @@
    "files": [
     {
      "path": "gpu/vk/perf_report.cpp",
-     "line": 167
+     "line": 175
     }
    ],
    "default": "unset",
    "values": "text",
-   "explanation": "HL_HITCH_LOG=<ms> (diagnostic): every frame of that many ms or more is logged with the numbers its cause was made of.",
-   "comment": "HL_HITCH_LOG=<ms> (diagnostic): every frame of that many ms or more is logged with the numbers its cause was made of.",
+   "explanation": "HL_HITCH_LOG=<ms> (diagnostic): every frame of that many ms or more is logged with the numbers its cause was made of. HL_HITCH_LOG=rel:<ms> (diagnostic): every frame that is at least <ms> (default 2) and 1.25x over the median of the 30 frames before it, the same line; at most 20 lines a second, the lines dropped over that are counted on the next line logged.",
+   "comment": "HL_HITCH_LOG=<ms> (diagnostic): every frame of that many ms or more is logged with the numbers its cause was made of. HL_HITCH_LOG=rel:<ms> (diagnostic): every frame that is at least <ms> (default 2) and 1.25x over the median of the 30 frames before it, the same line; at most 20 lines a second, the lines dropped over that are counted on the next line logged.",
    "documented_in": null,
    "source": "comment at gpu/vk/perf_report.cpp",
    "documented": true,
@@ -1614,7 +1614,7 @@
    "files": [
     {
      "path": "gpu/vk/perf_report.cpp",
-     "line": 751
+     "line": 793
     },
     {
      "path": "host/hl_mem.c",
@@ -1933,7 +1933,7 @@
    "files": [
     {
      "path": "gpu/vk/perf_report.cpp",
-     "line": 479
+     "line": 521
     }
    ],
    "default": "off (unset)",
@@ -1954,7 +1954,7 @@
    "files": [
     {
      "path": "gpu/vk/perf_report.cpp",
-     "line": 467
+     "line": 509
     }
    ],
    "default": "off (unset)",
@@ -1975,7 +1975,7 @@
    "files": [
     {
      "path": "gpu/vk/perf_report.cpp",
-     "line": 396
+     "line": 438
     }
    ],
    "default": "off (unset)",
@@ -2298,17 +2298,17 @@
    "files": [
     {
      "path": "host/hos_jobtrace.c",
-     "line": 172
+     "line": 186
     },
     {
      "path": "host/hos_jobtrace.c",
-     "line": 237
+     "line": 284
     }
    ],
    "default": "unset",
    "values": "text",
-   "explanation": "(HL_STALL_WATCH=<ms>: the ring and the watcher; see the top of the file).",
-   "comment": "(HL_STALL_WATCH=<ms>: the ring and the watcher; see the top of the file).",
+   "explanation": "HL_STALL_WATCH=<ms> (diagnostic): a gap of that many ms or more between presents is dumped (default 40); HL_STALL_WATCH=rel:<ms> (default 2): a gap that is <ms> and 1.25x over the median of the last 30 intervals (never under 4 ms), at most 20 gaps a second.",
+   "comment": "HL_STALL_WATCH=<ms> (diagnostic): a gap of that many ms or more between presents is dumped (default 40); HL_STALL_WATCH=rel:<ms> (default 2): a gap that is <ms> and 1.25x over the median of the last 30 intervals (never under 4 ms), at most 20 gaps a second.",
    "documented_in": null,
    "source": "comment at host/hos_jobtrace.c",
    "documented": true,
@@ -2323,7 +2323,7 @@
    "files": [
     {
      "path": "host/hos_jobtrace.c",
-     "line": 182
+     "line": 204
     }
    ],
    "default": "unset",
@@ -2344,7 +2344,7 @@
    "files": [
     {
      "path": "host/hos_jobtrace.c",
-     "line": 243
+     "line": 290
     }
    ],
    "default": "unset",
@@ -2355,6 +2355,27 @@
    "source": "comment at host/hos_jobtrace.c",
    "documented": true,
    "set_via": "In the process environment (or in a file named by `HOS_ENV_FILE`); `hookshot_env.txt` refuses this one.",
+   "use": null
+  },
+  {
+   "name": "HL_STALL_WATCH_MAX",
+   "area": "native",
+   "group": "Native engine diagnostics",
+   "audience": "diagnostic",
+   "files": [
+    {
+     "path": "host/hos_jobtrace.c",
+     "line": 193
+    }
+   ],
+   "default": "unset",
+   "values": "text",
+   "explanation": "HL_STALL_WATCH_MAX=<n> (diagnostic): the number of stall dumps written (default 80).",
+   "comment": "HL_STALL_WATCH_MAX=<n> (diagnostic): the number of stall dumps written (default 80).",
+   "documented_in": null,
+   "source": "comment at host/hos_jobtrace.c",
+   "documented": true,
+   "set_via": "In `hookshot_env.txt`, or in the environment.",
    "use": null
   },
   {
@@ -2512,7 +2533,7 @@
    "files": [
     {
      "path": "gpu/vk/perf_report.cpp",
-     "line": 588
+     "line": 630
     },
     {
      "path": "host/hos_crash_dialog.c",
@@ -2541,7 +2562,7 @@
    "files": [
     {
      "path": "gpu/vk/perf_report.cpp",
-     "line": 392
+     "line": 434
     },
     {
      "path": "host/hos_crash_dialog.c",
@@ -2628,11 +2649,11 @@
    "files": [
     {
      "path": "gpu/vk/perf_report.cpp",
-     "line": 642
+     "line": 684
     },
     {
      "path": "gpu/vk/perf_report.cpp",
-     "line": 813
+     "line": 855
     },
     {
      "path": "host/hos_crash_dialog.c",
@@ -2661,11 +2682,11 @@
    "files": [
     {
      "path": "gpu/vk/perf_report.cpp",
-     "line": 746
+     "line": 788
     },
     {
      "path": "gpu/vk/perf_report.cpp",
-     "line": 915
+     "line": 957
     },
     {
      "path": "host/hl_mem.c",
@@ -2690,11 +2711,11 @@
    "files": [
     {
      "path": "gpu/vk/perf_report.cpp",
-     "line": 518
+     "line": 560
     },
     {
      "path": "gpu/vk/perf_report.cpp",
-     "line": 945
+     "line": 987
     }
    ],
    "default": "unset",
@@ -2715,7 +2736,7 @@
    "files": [
     {
      "path": "gpu/vk/perf_report.cpp",
-     "line": 915
+     "line": 957
     },
     {
      "path": "host/nvn_native.c",
@@ -4791,7 +4812,7 @@
    "files": [
     {
      "path": "gpu/vk/perf_report.cpp",
-     "line": 270
+     "line": 312
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
@@ -5765,7 +5786,7 @@
    "files": [
     {
      "path": "host/hos_jobtrace.c",
-     "line": 253
+     "line": 301
     }
    ],
    "default": "unset",
@@ -5786,7 +5807,7 @@
    "files": [
     {
      "path": "host/hos_jobtrace.c",
-     "line": 89
+     "line": 96
     }
    ],
    "default": "unset",
@@ -5807,7 +5828,7 @@
    "files": [
     {
      "path": "host/hos_jobtrace.c",
-     "line": 89
+     "line": 96
     }
    ],
    "default": "unset",
@@ -7434,7 +7455,7 @@
    "files": [
     {
      "path": "gpu/vk/perf_report.cpp",
-     "line": 789
+     "line": 831
     }
    ],
    "default": "unset",
@@ -14922,9 +14943,9 @@
     }
    ],
    "default": "unset",
-   "values": "text (`1` named)",
-   "explanation": "(HeyListen, 2026-11-22, #121) pools of zones left behind: RX_VK_ACCUM_RETIRE (default 0; =1 on), RX_VK_ACCUM_DIAG=1 ---- Players' logs after an hour of play: the replay's and the GPU's time per frame grew with the session and a restart brought them back. What grows is the pool table: a chunk (an import of 16 MB around a binding, with its VRAM mirror) left it only when a larger import took it in, and the game's end of a pool (RX_VK_POOL_FINALIZE, off by default) was the only other way out.",
-   "comment": "(HeyListen, 2026-11-22, #121) pools of zones left behind: RX_VK_ACCUM_RETIRE (default 0; =1 on), RX_VK_ACCUM_DIAG=1 ---- Players' logs after an hour of play: the replay's and the GPU's time per frame grew with the session and a restart brought them back. What grows is the pool table: a chunk (an import of 16 MB around a binding, with its VRAM mirror) left it only when a larger import took it in, and the game's end of a pool (RX_VK_POOL_FINALIZE, off by default) was the only other way out.",
+   "values": "text (`0`, `1` named)",
+   "explanation": "(HeyListen, 2026-11-22, #121) pools of zones left behind: RX_VK_ACCUM_RETIRE (default 1; =0 off), RX_VK_ACCUM_DIAG=1 ---- Players' logs after an hour of play: the replay's and the GPU's time per frame grew with the session and a restart brought them back. What grows is the pool table: a chunk (an import of 16 MB around a binding, with its VRAM mirror) left it only when a larger import took it in, and the game's end of a pool (RX_VK_POOL_FINALIZE, off by default) was the only other way out.",
+   "comment": "(HeyListen, 2026-11-22, #121) pools of zones left behind: RX_VK_ACCUM_RETIRE (default 1; =0 off), RX_VK_ACCUM_DIAG=1 ---- Players' logs after an hour of play: the replay's and the GPU's time per frame grew with the session and a restart brought them back. What grows is the pool table: a chunk (an import of 16 MB around a binding, with its VRAM mirror) left it only when a larger import took it in, and the game's end of a pool (RX_VK_POOL_FINALIZE, off by default) was the only other way out.",
    "documented_in": null,
    "source": "comment at gpu/vk/vk_memory.cpp",
    "documented": true,
@@ -17664,7 +17685,7 @@
    "files": [
     {
      "path": "gpu/vk/perf_report.cpp",
-     "line": 309
+     "line": 351
     },
     {
      "path": "gpu/vk/vk_dlss.cpp",
@@ -25131,7 +25152,7 @@
    "files": [
     {
      "path": "gpu/vk/perf_report.cpp",
-     "line": 821
+     "line": 863
     }
    ],
    "default": "off (unset)",

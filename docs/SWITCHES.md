@@ -10,7 +10,7 @@ python -I engine/scripts/list_switches.py
 
 and commit both files. A test (`engine/tests/test_switches_documented.py`) fails when a switch read in the source is missing here or the data file is out of date.
 
-1403 switches: 56 players may be told to use, 374 diagnostic, 973 developer-only; 1199 have a real explanation and 204 are marked `undocumented`.
+1404 switches: 56 players may be told to use, 375 diagnostic, 973 developer-only; 1200 have a real explanation and 204 are marked `undocumented`.
 
 ## How to set a switch
 
@@ -69,7 +69,7 @@ The entries below say what each one does, its values and default, and when it is
 | [Memory and textures](#memory-and-textures) | 187 | 10 | 0 | 177 |
 | [Audio](#audio) | 14 | 5 | 9 | 0 |
 | [Input and controllers](#input-and-controllers) | 13 | 1 | 12 | 0 |
-| [Native engine (`HL_*`)](#native-engine-hl_) | 88 | 1 | 34 | 53 |
+| [Native engine (`HL_*`)](#native-engine-hl_) | 89 | 1 | 35 | 53 |
 | [Host and OS (`HOS_*` and the system's variables)](#host-and-os-hos_-and-the-systems-variables) | 133 | 10 | 0 | 123 |
 | [Telemetry and crash reports](#telemetry-and-crash-reports) | 12 | 0 | 12 | 0 |
 | [Diagnostics and logging](#diagnostics-and-logging) | 293 | 0 | 293 | 0 |
@@ -209,7 +209,7 @@ NVIDIA DLSS and Reflex for one run: the readme's NVIDIA DLSS section. `RX_VK_DLS
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/perf_report.cpp:309` and 2 more places.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/perf_report.cpp:351` and 2 more places.
 
 #### `RX_VK_DLSS_PREWARM` - developer
 
@@ -1829,9 +1829,9 @@ Every zone visited left its chunks for good: 59 imports (1.7 GB) after the first
 
 #### `RX_VK_ACCUM_RETIRE` - developer
 
-(HeyListen, 2026-11-22, #121) pools of zones left behind: RX_VK_ACCUM_RETIRE (default 0; =1 on), RX_VK_ACCUM_DIAG=1 ---- Players' logs after an hour of play: the replay's and the GPU's time per frame grew with the session and a restart brought them back. What grows is the pool table: a chunk (an import of 16 MB around a binding, with its VRAM mirror) left it only when a larger import took it in, and the game's end of a pool (RX_VK_POOL_FINALIZE, off by default) was the only other way out.
+(HeyListen, 2026-11-22, #121) pools of zones left behind: RX_VK_ACCUM_RETIRE (default 1; =0 off), RX_VK_ACCUM_DIAG=1 ---- Players' logs after an hour of play: the replay's and the GPU's time per frame grew with the session and a restart brought them back. What grows is the pool table: a chunk (an import of 16 MB around a binding, with its VRAM mirror) left it only when a larger import took it in, and the game's end of a pool (RX_VK_POOL_FINALIZE, off by default) was the only other way out.
 
-**Values:** text (`1` named). **Default:** unset.
+**Values:** text (`0`, `1` named). **Default:** unset.
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
@@ -7989,7 +7989,7 @@ As above; the last lets every device count while the window is behind another on
 
 ## Native engine (`HL_*`)
 
-88 switches of the native engine (`HL_*`).
+89 switches of the native engine (`HL_*`).
 
 ### Main loop
 
@@ -8211,13 +8211,13 @@ HL_EXPO_GPU=1: the exposure meter's sums come to the game's CPU from the engine'
 
 #### `HL_HITCH_LOG` - diagnostic
 
-HL_HITCH_LOG=<ms> (diagnostic): every frame of that many ms or more is logged with the numbers its cause was made of.
+HL_HITCH_LOG=<ms> (diagnostic): every frame of that many ms or more is logged with the numbers its cause was made of. HL_HITCH_LOG=rel:<ms> (diagnostic): every frame that is at least <ms> (default 2) and 1.25x over the median of the 30 frames before it, the same line; at most 20 lines a second, the lines dropped over that are counted on the next line logged.
 
 **Values:** text. **Default:** unset.
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/perf_report.cpp:167`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/perf_report.cpp:175`.
 
 #### `HL_JOBGROUP_CHECK` - diagnostic
 
@@ -8287,7 +8287,7 @@ Seconds of play between two detailed-profile batches, 10 to 3600 (300 by default
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/perf_report.cpp:479`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/perf_report.cpp:521`.
 
 #### `HL_PROFILE_HZ` - diagnostic
 
@@ -8297,7 +8297,7 @@ The detailed profile's CPU sampler rate, 50 to 1000 (250 by default).
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/perf_report.cpp:467`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/perf_report.cpp:509`.
 
 #### `HL_PROFILE_LOCAL` - diagnostic
 
@@ -8307,7 +8307,7 @@ Takes the detailed profile with no address and with the row off, and writes the 
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/perf_report.cpp:396`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/perf_report.cpp:438`.
 
 #### `HL_PROG_MEMO_CHECK` - diagnostic
 
@@ -8371,13 +8371,13 @@ HL_STAGES_CHECK=1: the protocol's invariants are counted, each registration is c
 
 #### `HL_STALL_WATCH` - diagnostic
 
-(HL_STALL_WATCH=<ms>: the ring and the watcher; see the top of the file).
+HL_STALL_WATCH=<ms> (diagnostic): a gap of that many ms or more between presents is dumped (default 40); HL_STALL_WATCH=rel:<ms> (default 2): a gap that is <ms> and 1.25x over the median of the last 30 intervals (never under 4 ms), at most 20 gaps a second.
 
 **Values:** text. **Default:** unset.
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_jobtrace.c:172` and 1 more place.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_jobtrace.c:186` and 1 more place.
 
 #### `HL_STALL_WATCH_AFTER` - diagnostic
 
@@ -8387,7 +8387,7 @@ HL_STALL_WATCH=<ms> (diagnostic, STALL1 22 Nov 2026): the same records kept all 
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_jobtrace.c:182`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_jobtrace.c:204`.
 
 #### `HL_STALL_WATCH_DIR` - diagnostic
 
@@ -8397,7 +8397,17 @@ HL_STALL_WATCH=<ms> (diagnostic, STALL1 22 Nov 2026): the same records kept all 
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In the process environment (or in a file named by `HOS_ENV_FILE`); `hookshot_env.txt` refuses this one. **Read at:** `host/hos_jobtrace.c:243`.
+**Set it:** In the process environment (or in a file named by `HOS_ENV_FILE`); `hookshot_env.txt` refuses this one. **Read at:** `host/hos_jobtrace.c:290`.
+
+#### `HL_STALL_WATCH_MAX` - diagnostic
+
+HL_STALL_WATCH_MAX=<n> (diagnostic): the number of stall dumps written (default 80).
+
+**Values:** text. **Default:** unset.
+
+**When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
+
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_jobtrace.c:193`.
 
 #### `HL_STREAM_CHECK` - diagnostic
 
@@ -8619,7 +8629,7 @@ HL_MEM_COLD=1 on (the default) HL_MEM_COLD=0 off: nothing here runs, as before H
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/perf_report.cpp:751` and 1 more place.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/perf_report.cpp:793` and 1 more place.
 
 #### `HL_MEM_COLD_PRESSURE` - developer
 
@@ -8829,7 +8839,7 @@ HL_STREAM_PAGES=1: which decoded pages still hold the decoder's bytes, and the r
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/perf_report.cpp:746` and 2 more places.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/perf_report.cpp:788` and 2 more places.
 
 #### `HL_TEL_STALLS` - developer
 
@@ -8839,7 +8849,7 @@ HL_TEL_MEMORY=0 turns the memory record's new fields and the os_wait sub-causes'
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/perf_report.cpp:518` and 1 more place.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/perf_report.cpp:560` and 1 more place.
 
 #### `HL_TEL_WAITS` - developer
 
@@ -8849,7 +8859,7 @@ HOS_OPT_PERF_PACE, gpu/vk/perf_parts.h (what this thread waited on since its las
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/perf_report.cpp:915` and 1 more place.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/perf_report.cpp:957` and 1 more place.
 
 #### `HL_UBO_INLINE` - developer
 
@@ -8925,7 +8935,7 @@ The Frame rate limit for the run, over the row and Unlimited: the rate presented
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/perf_report.cpp:270` and 2 more places.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/perf_report.cpp:312` and 2 more places.
 
 #### `HOS_FPS_MOVIE` - developer
 
@@ -9067,7 +9077,7 @@ TICK-062 B1, HOS_CV_SIGNAL_FAST=1: a signal with no waiter changes nothing a lat
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_jobtrace.c:253`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_jobtrace.c:301`.
 
 #### `HOS_JOBTRACE_AT` - developer
 
@@ -9077,7 +9087,7 @@ Everything between a thread's waits is work (guest code and the runtime under it
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_jobtrace.c:89`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_jobtrace.c:96`.
 
 #### `HOS_JOBTRACE_SECS` - developer
 
@@ -9087,7 +9097,7 @@ Everything between a thread's waits is work (guest code and the runtime under it
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_jobtrace.c:89`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_jobtrace.c:96`.
 
 #### `HOS_JOB_ORDER` - developer
 
@@ -10239,7 +10249,7 @@ Turns off, alone, the sending of the pipeline state records (`gpu/vk/state_repor
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/perf_report.cpp:588` and 2 more places.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/perf_report.cpp:630` and 2 more places.
 
 #### `HL_TELEMETRY_PROFILE` - diagnostic
 
@@ -10249,7 +10259,7 @@ Turns off, alone, the detailed performance profile (`gpu/vk/profile_report.h`, `
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/perf_report.cpp:392` and 2 more places.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/perf_report.cpp:434` and 2 more places.
 
 #### `HL_TELEMETRY_TEST_HTTP` - diagnostic
 
@@ -10279,7 +10289,7 @@ Turns off, alone, the per-zone shader and pipeline usage (`gpu/vk/zone_report.h`
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/perf_report.cpp:642` and 3 more places.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/perf_report.cpp:684` and 3 more places.
 
 ### Crash reports and crash window
 
@@ -12811,7 +12821,7 @@ With `send_performance_stats=1`, the performance summaries are measured and writ
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/perf_report.cpp:789`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/perf_report.cpp:831`.
 
 #### `HOS_PROFILE` - diagnostic
 
@@ -13061,7 +13071,7 @@ Seconds of play between two performance summaries (60 to 840, 300 by default).
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/perf_report.cpp:821`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/perf_report.cpp:863`.
 
 #### `RX_VK_PRESYNC_STATS` - diagnostic
 
