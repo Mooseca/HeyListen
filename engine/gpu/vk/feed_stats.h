@@ -23,7 +23,52 @@ namespace mkwvk::feed {
 struct Rec {
     double ready = 0, sent = 0, start = 0, end = 0;
     int kind = 0;
+    double handed = 0;   // (stream REPLAY2: when the game's submission reached the replay, run_submit's entry; 0: unknown)
 };
+
+/// (stream REPLAY2) what the replay thread was doing, in a run_submit pass: from `t` on, until the next mark
+enum Phase {
+    kOut = 0,      // not in a pass (the replay lock free, or taken by another thread)
+    kSetup,        // run_submit: the recording begun, the memory work of the submission
+    kWhole,        // a command buffer recorded on the replay thread as it comes (serial replay, or one segment)
+    kDry,          // a big command buffer's dry pass
+    kPresync,      // the mirrors' pre-sync and the readback refresh before a big command buffer's segments
+    kJobs,         // a big command buffer's segment recordings begun (their pools, init command buffers)
+    kOwn,          // the replay thread's own segment
+    kJoin,         // the replay thread waiting for the segments (in order, and their submits)
+    kAfter,        // after the segments: the next recording begun, the profile
+    kFinish,       // finish_recording: the recording's end
+    kSubmit,       // submit_recording (vkEndCommandBuffer, the queue lock, vkQueueSubmit2)
+    kCapture,      // submit_q: the submission's capture of the mirrored pages, taken under sync_order_mu, before run_submit
+    kQueue,        // submit_q: the queue's bookkeeping between the capture and run_submit
+    kPhases
+};
+inline const char* phase_name(int p) {
+    static const char* const n[kPhases] = {"not in a pass", "setup", "small cb recorded whole", "dry pass", "pre-sync", "segment setup", "own segment",
+                                           "wait for segments", "after segments", "finish", "submit", "capture", "queue"};
+    return p >= 0 && p < kPhases ? n[p] : "?";
+}
+struct Mark {
+    double t = 0;
+    int id = 0;
+};
+
+/// The phase marks' time in [lo, hi] by phase into out[kPhases] (marks sorted by t: a mark's phase lasts to the next one's)
+inline void phase_cover(const std::vector<Mark>& marks, double lo, double hi, double* out) {
+    if (hi <= lo || marks.empty()) return;
+    size_t a = 0, b = marks.size();
+    while (a < b) {   // (the first mark after lo)
+        const size_t m = (a + b) / 2;
+        if (marks[m].t <= lo) a = m + 1; else b = m;
+    }
+    int cur = a ? marks[a - 1].id : kOut;
+    double at = lo;
+    for (size_t i = a; i < marks.size() && marks[i].t < hi; i++) {
+        out[cur] += marks[i].t - at;
+        at = marks[i].t, cur = marks[i].id;
+    }
+    out[cur] += hi - at;
+}
 
 /// A pass of the replay (run_submit with the replay lock held), host ns
 struct Span {
@@ -49,6 +94,9 @@ struct Totals {
     double not_ready = 0, held = 0, after_send = 0, queued = 0;
     double not_ready_kind[3] = {0, 0, 0};
     double not_ready_busy = 0;  // (of not_ready: the replay was in a pass; the rest it was not)
+    double before_hand[3] = {0, 0, 0};          // (stream REPLAY2: of not_ready, by kind: before the game's submission reached the replay)
+    double phase[3][kPhases] = {};              // (and from the hand-over on: what the replay thread was doing, by recording kind)
+    int64_t kind_gaps[3] = {0, 0, 0};           // (gaps before a recording of that kind)
     int64_t gaps = 0, big_gaps = 0;   // (gaps of 0.5 ms and over)
     double big_idle = 0;              // (their time)
     double longest = 0;
@@ -57,7 +105,8 @@ struct Totals {
 };
 
 /// The recordings of a window, any order: sorted by start, each gap against the latest end so far
-inline Totals attribute(std::vector<Rec> v, const std::vector<Span>& spans = {}, double tolerance_ns = 50e3) {
+inline Totals attribute(std::vector<Rec> v, const std::vector<Span>& spans = {}, double tolerance_ns = 50e3,
+                        const std::vector<Mark>& marks = {}) {
     Totals t;
     std::sort(v.begin(), v.end(), [](const Rec& a, const Rec& b) { return a.start < b.start; });
     double end = 0, lo = 0;
@@ -80,6 +129,11 @@ inline Totals attribute(std::vector<Rec> v, const std::vector<Span>& spans = {},
                     const double sent = r.sent ? std::clamp(r.sent, ready, g) : ready;
                     t.not_ready += ready - e, t.not_ready_kind[r.kind < 0 || r.kind > 2 ? 0 : r.kind] += ready - e;
                     t.not_ready_busy += covered(spans, e, ready);
+                    const int k = r.kind < 0 || r.kind > 2 ? 0 : r.kind;
+                    t.kind_gaps[k]++;
+                    const double from = r.handed ? std::clamp(r.handed, e, ready) : e;   // (before it: the game had not handed it over)
+                    t.before_hand[k] += from - e;
+                    phase_cover(marks, from, ready, t.phase[k]);
                     t.held += sent - ready;
                     t.after_send += g - sent;
                 }
@@ -102,6 +156,10 @@ inline void accumulate(Totals& a, const Totals& b) {
     for (int k = 0; k < 3; k++) a.not_ready_kind[k] += b.not_ready_kind[k];
     a.gaps += b.gaps, a.big_gaps += b.big_gaps, a.big_idle += b.big_idle, a.window += b.window, a.recs += b.recs;
     a.longest = std::max(a.longest, b.longest), a.not_ready_busy += b.not_ready_busy;
+    for (int k = 0; k < 3; k++) {
+        a.before_hand[k] += b.before_hand[k], a.kind_gaps[k] += b.kind_gaps[k];
+        for (int p = 0; p < kPhases; p++) a.phase[k][p] += b.phase[k][p];
+    }
 }
 
 } // namespace mkwvk::feed

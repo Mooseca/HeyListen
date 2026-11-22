@@ -79,6 +79,26 @@ int main() {
         CHECK("covered by passes", near(t.not_ready_busy, 300e3 + 200e3));
         CHECK("covered edges", near(covered(spans, 0, 5000e3), 1000e3) && near(covered(spans, 1400e3, 1900e3), 200e3) && near(covered({}, 0, 1), 0));
     }
+    // (8) stream REPLAY2: the not-ready time before the hand-over, then by what the replay thread was doing
+    {
+        std::vector<Rec> v;
+        v.push_back({0, 0, 0, 1000e3, 0});
+        Rec r{3000e3, 3100e3, 3200e3, 4000e3, 0};
+        r.handed = 1500e3;   // idle 1.0..3.2: not ready 1.0..3.0, handed over at 1.5
+        v.push_back(r);
+        std::vector<Mark> marks = {{1500e3, kSetup}, {1600e3, kWhole}, {2000e3, kPresync}, {2600e3, kDry}, {2800e3, kOut}};
+        const Totals t = attribute(v, {}, 50e3, marks);
+        CHECK("before hand", near(t.before_hand[0], 500e3) && t.kind_gaps[0] == 1);
+        CHECK("setup", near(t.phase[0][kSetup], 100e3));
+        CHECK("whole", near(t.phase[0][kWhole], 400e3));
+        CHECK("presync", near(t.phase[0][kPresync], 600e3));
+        CHECK("dry", near(t.phase[0][kDry], 200e3));
+        CHECK("out", near(t.phase[0][kOut], 200e3));
+        double sum = 0;
+        for (int p = 0; p < kPhases; p++) sum += t.phase[0][p];
+        CHECK("the phases add up to the time since the hand-over", near(sum, 1500e3));
+        CHECK("none for others", near(t.phase[1][kSetup], 0));
+    }
     std::puts("feed_stats: ok");
     return 0;
 }

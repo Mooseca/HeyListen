@@ -845,7 +845,10 @@ void gpu_tail_compute(uint64_t v, double period) {   // (ts_mu held)
 }
 // ---- (stream ORDER3, RX_VK_FEED_LOG=1) why the GPU sat idle between recordings: the host's times for each recording (ready: recorded
 // and its place in the queue's order reached; sent: the vkQueueSubmit2 that carries it, a held recording's the flush's) against the GPU's
-// own timestamps, calibrated to the host clock; feed_stats.h splits each gap. Logged every 600 presents. Logging only ----
+// own timestamps, calibrated to the host clock; feed_stats.h splits each gap. Logged every 600 presents. (Stream REPLAY2: the time the replay
+// was not ready is split again by what the submitting thread was doing, from the game's call to submit_q on: the capture, the submission's
+// setup, a command buffer recorded whole, the dry pass, the pre-sync, the segments' setup, its own segment, its wait for the segments; the
+// time before that call is the game's.) Logging only ----
 bool feed_on() {
     static const bool v = getenv("RX_VK_FEED_LOG") && atoi(getenv("RX_VK_FEED_LOG")) != 0 && dev.calibrated_ts;
     return v;
@@ -856,15 +859,51 @@ int ts_kind[kRecordings];
 std::vector<mkwvk::feed::Rec> feed_recs;      // (ts_mu)
 std::mutex feed_pass_mu;
 std::vector<mkwvk::feed::Span> feed_spans;    // (feed_pass_mu: the replay's passes, run_submit with replay_mu held, in order)
-/// run_submit's pass with the replay lock held, for the split of "not ready" (the replay in a pass, or not)
+std::vector<mkwvk::feed::Mark> feed_marks;    // (feed_pass_mu: what the replay thread did inside the passes, stream REPLAY2)
+thread_local bool feed_in_pass = false;       // (this thread holds the replay lock in a run_submit pass)
+thread_local int feed_phase_now = 0;
+std::atomic<int64_t> feed_lockwait_ns{0}, feed_lockwait_n{0};   // (submit_q's wait for sync_order_mu)
+std::atomic<int64_t> feed_hand_ns{0};         // (the entry of the run_submit in progress: when the game's submission reached the replay)
+int64_t ts_hand_ns[kRecordings];
+/// The replay thread starts doing `id` (a mkwvk::feed::Phase), until its next mark. Logging only, in a pass only
+void feed_set(int id) {
+    if (!feed_in_pass) return;
+    feed_phase_now = id;
+    const int64_t t = tl_now();
+    std::lock_guard l(feed_pass_mu);
+    feed_marks.push_back({(double)t, id});
+}
+/// feed_set for a scope: the phase before it comes back at its end
+struct FeedPhase {
+    int prev = -1;
+    explicit FeedPhase(int id) {
+        if (!feed_in_pass) return;
+        prev = feed_phase_now;
+        feed_set(id);
+    }
+    ~FeedPhase() { if (prev >= 0) feed_set(prev); }
+    FeedPhase(const FeedPhase&) = delete;
+    FeedPhase& operator=(const FeedPhase&) = delete;
+};
+/// run_submit's pass with the replay lock held, for the split of "not ready" (the replay in a pass, or not); enter: its entry, before
+/// the lock (when the game handed the submission over)
 struct FeedPass {
     int64_t t0 = 0;
-    FeedPass() { if (feed_on()) t0 = tl_now(); }
+    explicit FeedPass(int64_t enter) {
+        if (!feed_on() || feed_in_pass) return;   // (a pass of submit_q has begun: run_submit is inside it)
+        t0 = tl_now();
+        feed_in_pass = true;
+        feed_hand_ns.store(enter, std::memory_order_relaxed);
+        feed_set(mkwvk::feed::kSetup);
+    }
     ~FeedPass() {
         if (!t0) return;
+        feed_set(mkwvk::feed::kOut);
+        feed_in_pass = false;
         std::lock_guard l(feed_pass_mu);
         feed_spans.push_back({(double)t0, (double)tl_now()});
         if (feed_spans.size() > 12000) feed_spans.erase(feed_spans.begin(), feed_spans.begin() + 4000);
+        if (feed_marks.size() > 60000) feed_marks.erase(feed_marks.begin(), feed_marks.begin() + 20000);
     }
 };
 mkwvk::feed::Totals feed_acc;
@@ -872,6 +911,7 @@ int64_t feed_acc_frames = 0;
 void feed_note_ready(int slot, int kind, int64_t t = 0) {
     if (!feed_on()) return;
     ts_ready_ns[slot] = t ? t : tl_now(), ts_sent_ns[slot] = 0, ts_batch_of[slot] = 0, ts_kind[slot] = kind;
+    ts_hand_ns[slot] = feed_hand_ns.load(std::memory_order_relaxed);   // (stream REPLAY2)
 }
 void feed_note_sent(int slot) {
     if (!feed_on()) return;
@@ -934,7 +974,7 @@ void gpu_time_collect(Recording& r) {
         mkwvk::feed::Rec f;
         f.ready = (double)ts_ready_ns[r.slot];
         f.sent = ts_batch_of[r.slot] ? (double)batch_sent_ns[ts_batch_of[r.slot] & 63].load(std::memory_order_relaxed) : (double)ts_sent_ns[r.slot];
-        f.start = feed_host_ns(start), f.end = feed_host_ns(end), f.kind = ts_kind[r.slot];
+        f.start = feed_host_ns(start), f.end = feed_host_ns(end), f.kind = ts_kind[r.slot], f.handed = (double)ts_hand_ns[r.slot];
         feed_recs.push_back(f);
         ts_ready_ns[r.slot] = 0;
         if (feed_recs.size() > 20000) feed_recs.erase(feed_recs.begin(), feed_recs.begin() + 10000);
@@ -1251,6 +1291,7 @@ void host_read_barrier(VkCommandBuffer cmd) {
 }
 void submit_recording(Recording& r, bool signal_value = true, uint64_t signal_at = 0) {
     DrvTime drv_time(drvwall.qs_ns, drvwall.qs_n);
+    FeedPhase feed_phase(mkwvk::feed::kSubmit);   // (stream REPLAY2)
     {
         const uint64_t v = signal_at ? signal_at : r.value;
         ts_sig[r.slot] = v;   // (TICK-057)
@@ -3284,6 +3325,7 @@ const uint8_t* replay_handle_early(VkCommandBuffer& cmd, const uint8_t* h, bool 
     par_points.clear(), par_conds_reset(), dry_work = 0;
     const uint64_t serial0 = occ_serial;
     Recording& r = *rec_cur;
+    feed_set(mkwvk::feed::kPresync);   // (stream REPLAY2)
     end_pass(r.cmd);
     full_barrier(r.cmd);
     memory_sync_mirrors_before_segments();   // (rec_cur's uploads, before the dry pass: ahead of every segment)
@@ -3292,6 +3334,7 @@ const uint8_t* replay_handle_early(VkCommandBuffer& cmd, const uint8_t* h, bool 
     early_wall.mark(2);
     jt_mark(19, 0);
     tl_ev("early+", (uint64_t)nplan, rec_cur_value);   // (stream ORDER3: the timeline's marks of a big command buffer's replay)
+    feed_set(mkwvk::feed::kJobs);   // (stream REPLAY2)
     const uint64_t base = ++par_seq;
     par_seq += (uint64_t)nplan;
     memory_rb_segments_begin(base, (uint64_t)nplan);
@@ -3461,7 +3504,9 @@ const uint8_t* replay_handle_early(VkCommandBuffer& cmd, const uint8_t* h, bool 
     suspend_ok = may_stop;
     jt_mark(13, 0);
     tl_ev("dry+", dry_work);
+    feed_set(mkwvk::feed::kDry);   // (stream REPLAY2)
     replay(none, state, h);
+    feed_set(mkwvk::feed::kJobs);
     tl_ev("dry-", (uint64_t)dry_work, open + 1);
     jt_mark(14, 0);
     if (egpu) texture_upload_watch(nullptr);
@@ -3516,7 +3561,9 @@ const uint8_t* replay_handle_early(VkCommandBuffer& cmd, const uint8_t* h, bool 
     const auto t_seg0 = std::chrono::steady_clock::now();
     jt_mark(17, used);
     tl_ev("own+", used - 1);
+    feed_set(mkwvk::feed::kOwn);   // (stream REPLAY2)
     record_job(last);   // (the replay thread's: the last one)
+    feed_set(mkwvk::feed::kJoin);
     tl_ev("own-", used - 1);
     jt_mark(18, 0);
     early_wall.mark(7);
@@ -3588,6 +3635,7 @@ const uint8_t* replay_handle_early(VkCommandBuffer& cmd, const uint8_t* h, bool 
         dry_ms = seg_ms = segs_n = slow_ms = wait_ms = self_ms = early_n = 0;
         par_stats_log();
     }
+    feed_set(mkwvk::feed::kAfter);   // (stream REPLAY2)
     texture_set_segment(++par_seq);
     Recording& nr = begin_recording(rec_cur_value);
     full_barrier(nr.cmd);
@@ -3747,7 +3795,9 @@ const uint8_t* replay_handle(VkCommandBuffer& cmd, const uint8_t* h, bool may_st
     VkCommandBuffer none = cmd;
     suspend_ok = may_stop;
     jt_mark(13, 0);
+    feed_set(mkwvk::feed::kDry);   // (stream REPLAY2)
     replay(none, state, h);
+    feed_set(mkwvk::feed::kWhole);
     jt_mark(14, 0);
     if (lean_points) {
         lean_points = nullptr;
@@ -3836,6 +3886,7 @@ const uint8_t* replay_handle(VkCommandBuffer& cmd, const uint8_t* h, bool may_st
     // what came before, to the GPU now (its uploads included); then each segment into a recording of its own (its
     // command buffer and uploads), recorded in order by the threads and submitted in order as they are done
     Recording& r = *rec_cur;
+    feed_set(mkwvk::feed::kPresync);   // (stream REPLAY2)
     end_pass(r.cmd);
     full_barrier(r.cmd);
     memory_sync_mirrors_before_segments();   // (in r's uploads, ahead of every segment)
@@ -3858,6 +3909,7 @@ const uint8_t* replay_handle(VkCommandBuffer& cmd, const uint8_t* h, bool may_st
     };
     std::vector<std::unique_ptr<Job>> jobs;
     const bool setup_here = seg_setup_par_on() && ts_pool;   // (TICK-061, D7: see begin_segment_slot)
+    feed_set(mkwvk::feed::kJobs);   // (stream REPLAY2)
     for (size_t k = 0; k < seg.size(); k++) {
         auto j = std::make_unique<Job>();
         if (setup_here) {
@@ -3967,7 +4019,9 @@ const uint8_t* replay_handle(VkCommandBuffer& cmd, const uint8_t* h, bool may_st
     par_pool.posted.fetch_add(1, std::memory_order_release);
     par_pool.cv.notify_all();
     jt_mark(17, jobs.size());   // (TICK-054: the segments handed out: the setup since the dry pass's end)
+    feed_set(mkwvk::feed::kOwn);   // (stream REPLAY2)
     if (self_rec) record_job(jobs[0].get());
+    feed_set(mkwvk::feed::kJoin);
     jt_mark(18, 0);
     bool init_lost = false;
     int64_t pt_wait_ns = 0;   // (TICK-050: the replay thread waiting for segments, in seg_cv)
@@ -4104,6 +4158,7 @@ const uint8_t* replay_handle(VkCommandBuffer& cmd, const uint8_t* h, bool may_st
         for (int k = 0; k < kMaxBatch; k++) place_ms[k] = place_work[k] = place_n[k] = 0;
     }
     // what follows, after them all (the uniform updates are written to guest memory at the submission's end)
+    feed_set(mkwvk::feed::kAfter);   // (stream REPLAY2)
     texture_set_segment(++seq);
     Recording& nr = begin_recording(rec_cur_value);
     full_barrier(nr.cmd);
@@ -4449,8 +4504,10 @@ struct ReplayPin {
 bool run_submit(const uint64_t* handles, int n, uint64_t value, uint64_t queue, bool memory_work, int cb = 0,
                 const uint8_t* p = nullptr, bool may_stop = false) {
     tl_ev("run+", value, queue, cb);
+    const int64_t feed_enter = feed_on() ? tl_now() : 0;   // (stream REPLAY2)
     std::lock_guard lk(replay_mu);
-    FeedPass feed_pass;   // (stream ORDER3)
+    FeedPass feed_pass(feed_enter);   // (stream ORDER3)
+    feed_set(mkwvk::feed::kSetup);    // (stream REPLAY2)
     tl_ev("run-locked", value);
     struct TlRun { uint64_t v; ~TlRun() { tl_ev("run-", v); } } tl_run{value};
     ReplayPin pin;
@@ -4498,6 +4555,7 @@ bool run_submit(const uint64_t* handles, int n, uint64_t value, uint64_t queue, 
     const uint8_t* stop = nullptr;
     for (; cb < n; cb++, p = nullptr) {
         if (!handles[cb]) continue;
+        feed_set(mkwvk::feed::kWhole);   // (stream REPLAY2)
         {
             WallAdd wall_handle(rwall.handle_ns);
             rwall.handles++;
@@ -4525,6 +4583,7 @@ bool run_submit(const uint64_t* handles, int n, uint64_t value, uint64_t queue, 
         if (queue && rec_timeline) rec_open_qvalues.push_back(value);   // (TICK-058: value_queue has it: submit_q)
     }
     if (!burst_open) {   // (a burst's: at its end)
+        feed_set(mkwvk::feed::kFinish);   // (stream REPLAY2)
         WallAdd wall_finish(rwall.finish_ns);
         finish_recording(value);
     }
@@ -6009,11 +6068,13 @@ void log_frame_stats() {
                 v.swap(feed_recs);
             }
             std::vector<mkwvk::feed::Span> spans;
+            std::vector<mkwvk::feed::Mark> marks;
             {
                 std::lock_guard l(feed_pass_mu);
                 spans = feed_spans;
+                marks = feed_marks;
             }
-            mkwvk::feed::accumulate(feed_acc, mkwvk::feed::attribute(std::move(v), spans));
+            mkwvk::feed::accumulate(feed_acc, mkwvk::feed::attribute(std::move(v), spans, 50e3, marks));
             feed_acc_frames += 120;
             if (feed_acc_frames >= 600) {
                 const mkwvk::feed::Totals& t = feed_acc;
@@ -6026,6 +6087,19 @@ void log_frame_stats() {
                      t.not_ready_busy / f / ms, t.not_ready_kind[0] / f / ms, t.not_ready_kind[1] / f / ms, t.not_ready_kind[2] / f / ms, t.held / f / ms,
                      t.after_send / f / ms, t.queued / f / ms, t.recs / f, t.gaps / f, t.big_gaps / f, t.big_idle / f / ms,
                      t.longest / ms);
+                static const char* const kn[3] = {"whole recordings", "segments", "pre-sync's"};
+                for (int k = 0; k < 3; k++) {   // (stream REPLAY2: what the replay thread did while the GPU waited, by the recording it waited for)
+                    if (t.not_ready_kind[k] <= 0) continue;
+                    char b[600];
+                    int n = snprintf(b, sizeof b, "before the hand-over %.2f", t.before_hand[k] / f / ms);
+                    for (int p = 0; p < mkwvk::feed::kPhases; p++)
+                        if (t.phase[k][p] > 0 && n < (int)sizeof b - 60)
+                            n += snprintf(b + n, sizeof b - n, ", %s %.2f", mkwvk::feed::phase_name(p), t.phase[k][p] / f / ms);
+                    logf("vk: GPU feed, the replay not ready for %s (%.2f ms a frame, %.1f gaps a frame): %s", kn[k], t.not_ready_kind[k] / f / ms,
+                         t.kind_gaps[k] / f, b);
+                }
+                logf("vk: GPU feed, submit_q waited %.2f ms a frame for sync_order_mu (%.1f times a frame)",
+                     feed_lockwait_ns.exchange(0) / f / ms, feed_lockwait_n.exchange(0) / f);
                 feed_acc = {};
                 feed_acc_frames = 0;
             }
@@ -7514,9 +7588,13 @@ void submit_q(const uint64_t* handles, int n, uint64_t queue) {
     perf_parts::Scope perf_entry(perf_parts::t_render);   // (the renderer's entry on this thread: the summary's render part)
     tl_ev("submit+", queue, n);
     struct TlSub { ~TlSub() { tl_ev("submit-"); } } tl_sub;
+    const int64_t feed_enter = feed_on() ? tl_now() : 0;   // (stream REPLAY2: the game's call reaches the replay)
     if (!async_on()) {
         std::lock_guard order(sync_order_mu);
         tl_ev("submit-locked");
+        FeedPass feed_submit(feed_enter);   // (stream REPLAY2: the capture and the queue's bookkeeping are part of the pass, run_submit's inside it)
+        if (feed_enter) feed_lockwait_ns += tl_now() - feed_enter, feed_lockwait_n++;
+        feed_set(mkwvk::feed::kCapture);
         ReplayPin pin;   // (the capture and the replay on the replay's core)
         // (the replay here is on the submitting thread, but the game's other threads go on writing their next frames: a pool
         // synced from guest memory later in the frame read those. The capture is taken here too)
@@ -7530,6 +7608,7 @@ void submit_q(const uint64_t* handles, int n, uint64_t queue) {
         tl_ev("capture+");
         if (capture) memory_capture_submit();
         tl_ev("capture-");
+        feed_set(mkwvk::feed::kQueue);   // (stream REPLAY2)
         jt_mark(12, 0);
         // (RX_VK_SUBMIT_DELAY_US=<us> (a test): a console's GPU starts later than this replay does. Does what a submission reads
         // arrive just after it, from the game's other threads?)

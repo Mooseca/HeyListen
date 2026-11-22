@@ -219,3 +219,43 @@ A plain; B `RX_VK_SEG_TAIL=50`; C `RX_VK_SEG_TAIL=30`; D `RX_VK_POOL_SPIN=200`; 
 Read per run: fps and p50/p95; "GPU feed" lines (steady windows: GPU busy, idle, and the idle split into replay not ready (of it with the replay in a
 pass) / ready not sent / sent not started / queued), "GPU time ... gaps between recordings", "parallel replay, early segments ... a command buffer: dry pass
 ... the replay thread recorded x ms and waited y ms". With `RX_VK_PROF_FINE=1` in a separate untimed run: the order thread's wall by pass.
+
+
+# REPLAY2 (what the replay does while the GPU waits for the small recordings; 22 Nov 2026, branch refactor/replay2 from refactor/order3)
+
+All measures: `HL_RB_LAG=2 HL_GFX_VAR=1 RX_VK_FEED_LOG=1`, `market-spin` from `market-mid`, 100%, no upscaler, vsync 0, main PC (RTX 5070) under a speed lease.
+
+## The tool: `RX_VK_FEED_LOG` now splits "replay not ready" by what the submitting thread was doing
+`feed_stats.h` has `Phase` marks: the replay (it runs on the game's submitting thread, `submit_q` under `sync_order_mu`) pushes a mark each time it starts
+something else, inside a pass: `capture` (`memory_capture_submit`), `setup` (`run_submit` up to the first command buffer: memory work, `begin_recording`),
+`small cb recorded whole`, `dry pass`, `pre-sync`, `segment setup`, `own segment`, `wait for segments`, `after segments`, `finish`, `submit`. Each recording also keeps
+the time the game's call reached the replay (`submit_q`'s entry). The not-ready time of a gap is cut at that time: before it the game had not submitted;
+after it the phases are the replay thread's. Logged with the "GPU feed" line, per kind of recording ("GPU feed, the replay not ready for whole recordings
+/ segments ..."), and `submit_q waited ... for sync_order_mu` (always 0.00). Logging only; `tests/test_feed_stats.cpp` covers the phase split.
+
+## What it shows (5070, steady windows, ms a frame, frame ~10.5, GPU busy ~7.5, idle ~3.0, replay not ready ~2.5)
+Whole recordings (about 5.4 gaps a frame, 1.4-1.7 ms): the game's own time before its call 0.2-0.3, capture 0.13-0.15, setup 0.2-0.25, small command
+buffers recorded whole 0.4-0.45, the dry pass of the next big command buffer 0.26-0.3 (the empty `rd` recording that follows it is a whole recording too:
+what the GPU waits for is the first segment, which cannot go out before the dry pass has passed its first boundary), pre-sync 0.07, segment setup 0.06.
+Segments (2.5-2.8 gaps, 0.9-1.0): the replay thread's own segment 0.7-0.8 and its wait for the workers 0.24.
+So the "small recordings" wait is not one thing: about a fifth is the game, and the replay's share is spread over seven steps of 0.05-0.45 ms,
+none of them a wait on another thread (`submit_q` never waits for `sync_order_mu`) and none a lock: it is the serial path of the thread that submits.
+
+## Tried
+- `RX_VK_SMALL_DIRECT` (a command buffer of under 96 draws replayed once, in order, with no dry pass and no segment/barrier pair around it; 19 a frame,
+  3.4 draws each, 1/3 of them stopped at a wait): the header walk and the replay agreed (2 mismatches in 192,000), 'small cb recorded whole' 0.45 -> 0.48,
+  'dry pass' unchanged (the dry pass in the idle is the big buffers'), fps 92.8 -> 94.4 (one round). No gain: removed.
+- Existing switches seen through the new split (1 round, then 3 interleaved: see the hand-over below): `RX_VK_EARLY_GPU=0|1|2`, `RX_VK_PRESYNC_EARLY=1`.
+- `RX_VK_EARLY_GPU=1` (the default) against `=0`, 6 interleaved rounds (fps 83.2 / 90.0 / 94.3 / 94.6 / 78.2 / 90.2 against 93.1 / 90.2 / 92.9 / 91.8 / 92.1 / 90.6;
+  GPU idle 3.0-3.9 against 3.1-3.4 ms, replay not ready 2.6-3.5 against 2.4-2.6): no difference beyond the spread (the `=0` arm has no 1% hitch rounds, which the
+  default's two low rounds, 83.2 and 78.2, are not enough to call). `=2` (first segment short): 88.8 / 85.4 / 85.1, idle 3.7: not better. `RX_VK_PRESYNC_EARLY=1`, one round: no change.
+  The 5070 cannot judge these (its frame is the game's): the 3050 can, with the split.
+
+## Why no change was kept, and what is left
+- The replay is not a pool that something else fills: the "replay not ready" is the game's own submitting thread, one serial chain. Every step of it is
+  already short (0.05-0.45 ms a frame on the 5070), and each one was measured against a cheaper form (SMALL_DIRECT) or an existing switch without a gain.
+- The one lever that is large and not yet touched is the one ORDER2 analysed and left: the replay thread does not wait for the workers' segments before it returns
+  (own segment 0.7-0.8 + wait 0.24 a big command buffer, 2.5 a frame: ~2.4 ms of a 10.5 ms frame sits on the submitting thread and the workers are idle after it).
+  It needs the jobs on the heap, `par_active`, `par_seq`, `texture_segments_begin` and the in-order submits kept until a real join (the next `replay_mu` taker's first
+  act), and the Serial-mode replay of the next submission to be safe beside workers that are still recording (today only the dry pass runs beside them: `ub_growing`,
+  ParLock). That is a design for its own stream with a check mode comparing pictures, not a change to make in a measuring pass.
