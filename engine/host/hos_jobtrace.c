@@ -19,7 +19,14 @@
    running (the instruction pointer: module + offset), and when the present does come it writes the records of the gap (and 3 ms
    before it) to <HL_STALL_WATCH_DIR>/stall_<n>.jt in the HOS_JOBTRACE format and logs the gap's per-thread CPU time, page
    faults and working-set change: what every thread did while the presenting thread's wait lasted. 80 dumps at most, none before
-   HL_STALL_WATCH_AFTER seconds (the start-up's gaps). */
+   HL_STALL_WATCH_AFTER seconds (the start-up's gaps).
+
+   HL_STALL_WATCH=rel:<ms> (the relative form; default 2): the threshold follows the frames: a gap counts when it reaches the median of
+   the 30 intervals before it plus <ms> and 1.25x that median, never under 4 ms, so a stutter in a 120 fps zone is caught as well as a
+   long freeze. The watcher sleeps 1 ms at a time (the system timer's granularity, 1 to 15.6 ms, decides how early a mark is taken
+   for the short gaps; the log lines and the dump still carry the true gap). At most 20 gaps a second are looked at (the suspension of
+   every thread to read its instruction pointer is the cost, about a millisecond of the watcher's and the threads' time per gap), the
+   ones over are counted in the log; HL_STALL_WATCH_MAX (default 80) is the number of dumps. */
 #include "hos.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -124,8 +131,13 @@ static DWORD WINAPI jt_thread(void *p) {
 }
 
 /* (HL_STALL_WATCH) the presenting thread's present: the watcher's clock */
+static volatile int64_t sw_iv[30];   /* (the last 30 intervals between presents, written here so none is missed by the watcher's 1 ms polling) */
+static volatile LONG sw_iv_n;
 void hos_sw_present(void) {
-    if (sw_ring) sw_last_present = hos_now_ns();
+    if (!sw_ring) return;
+    const int64_t t = hos_now_ns(), prev = sw_last_present;
+    if (prev) { const LONG n = sw_iv_n; sw_iv[n % 30] = t - prev; sw_iv_n = n + 1; }
+    sw_last_present = t;
 }
 
 typedef struct { int64_t user, kern; uint64_t cyc; } SwCpu;   /* (GetThreadTimes ticks at 15.6 ms: the cycles are the exact figure) */
@@ -169,8 +181,17 @@ static void sw_dump(const char *dir, int n, int64_t from, int64_t to) {
 }
 static DWORD WINAPI sw_thread(void *p) {
     const char *dir = (const char *)p;
+    /* HL_STALL_WATCH=<ms> (diagnostic): a gap of that many ms or more between presents is dumped (default 40); HL_STALL_WATCH=rel:<ms> (default 2):
+       a gap that is <ms> and 1.25x over the median of the last 30 intervals (never under 4 ms), at most 20 gaps a second */
     const char *e = getenv("HL_STALL_WATCH");
-    const int thr_ms = e && atoi(e) > 1 ? atoi(e) : 40;
+    const int rel = e && !strncmp(e, "rel", 3);   /* (HL_STALL_WATCH=rel:<ms>: see the top of the file) */
+    const double rel_ms = rel && e[3] == ':' && atof(e + 4) > 0 ? atof(e + 4) : 2.0;
+    const int thr_ms = !rel && e && atoi(e) > 1 ? atoi(e) : 40;
+    int64_t ring[30] = {0}, prev_lp = 0, thr_ns = (int64_t)thr_ms * 1000000LL, win_s = -1, in_win = 0, dropped = 0;
+    int rn = 0;
+    /* HL_STALL_WATCH_MAX=<n> (diagnostic): the number of stall dumps written (default 80) */
+    const char *mx = getenv("HL_STALL_WATCH_MAX");
+    const int max_dumps = mx && atoi(mx) > 0 ? atoi(mx) : 80;
     static HANDLE hs[512];
     static SwCpu c0[512], c1[512];
     static CONTEXT ctx[512];
@@ -178,6 +199,7 @@ static DWORD WINAPI sw_thread(void *p) {
     PROCESS_MEMORY_COUNTERS pm0, pm1;
     memset(&pm0, 0, sizeof pm0);
     int64_t cur = 0;   /* (the present the running gap began at; 0: none) */
+    int64_t mark_ns = 0;   /* (the threshold the running gap's mark was taken at) */
     int dumped = 0;
     const char *af = getenv("HL_STALL_WATCH_AFTER");   /* (seconds since the first present before dumps are written: the start-up's gaps fill the quota) */
     const int after_s = af && *af ? atoi(af) : 0;
@@ -187,6 +209,21 @@ static DWORD WINAPI sw_thread(void *p) {
         const int64_t now = hos_now_ns(), lp = sw_last_present;
         if (!lp) continue;
         if (!first) first = lp;
+        if (rel && lp != prev_lp) {   /* (the interval just ended: the median of the last 30 sets the threshold of the next gap) */
+            prev_lp = lp;
+            rn = sw_iv_n < 30 ? (int)sw_iv_n : 30;
+            for (int i = 0; i < rn; i++) ring[i] = sw_iv[i];
+            if (rn >= 10) {
+                int64_t t[30];
+                for (int i = 0; i < rn; i++) t[i] = ring[i];
+                for (int i = 1; i < rn; i++) for (int j = i; j > 0 && t[j - 1] > t[j]; j--) { int64_t x = t[j]; t[j] = t[j - 1]; t[j - 1] = x; }
+                const int64_t med = (rn & 1) ? t[rn / 2] : (t[rn / 2 - 1] + t[rn / 2]) / 2;
+                int64_t th = med + (int64_t)(rel_ms * 1e6);
+                if (th < med * 5 / 4) th = med * 5 / 4;
+                if (th < 4000000LL) th = 4000000LL;
+                thr_ns = th;
+            } else thr_ns = 40000000LL;   /* (no median yet: the absolute default) */
+        }
         const int now_s = (int)((now - first) / 1000000000LL);
         const LONG m = nths < 512 ? nths : 512;
         for (LONG i = 0; i < m; i++)
@@ -198,7 +235,7 @@ static DWORD WINAPI sw_thread(void *p) {
             K32GetProcessMemoryInfo(GetCurrentProcess(), &pm1, sizeof pm1);
             hos_log("stallwatch: gap %.1f ms between presents: page faults +%lu, working set %+lld MB since the %d ms mark; each thread's CPU since the mark and where it was then",
                     ms, (unsigned long)(pm1.PageFaultCount - pm0.PageFaultCount),
-                    ((long long)pm1.WorkingSetSize - (long long)pm0.WorkingSetSize) / (1 << 20), thr_ms);
+                    ((long long)pm1.WorkingSetSize - (long long)pm0.WorkingSetSize) / (1 << 20), (int)(mark_ns / 1000000LL));
             for (LONG i = 0; i < m; i++) {
                 if (c0[i].user < 0 || c1[i].user < 0) continue;
                 const double u = (c1[i].user - c0[i].user) / 1e6, k = (c1[i].kern - c0[i].kern) / 1e6;
@@ -206,11 +243,21 @@ static DWORD WINAPI sw_thread(void *p) {
                 if (u + k >= 0.5 || mc >= 0.5) hos_log("stallwatch:   %-28s %.1f Mcycles (cpu ticks user %.1f kernel %.1f ms); then at %s", ths[i].name, mc, u, k,
                                                        have[i] ? where[i] : "-");
             }
-            if (dumped < 80 && now_s >= after_s) sw_dump(dir, dumped++, cur - 3000000LL, lp + 1000000LL);
+            if (dumped < max_dumps && now_s >= after_s) sw_dump(dir, dumped++, cur - 3000000LL, lp + 1000000LL);
             cur = 0;
         }
-        if (!cur && now - lp >= (int64_t)thr_ms * 1000000LL) {   /* a gap reached the threshold: where every thread is */
+        if (!cur && now - lp >= thr_ns) {   /* a gap reached the threshold: where every thread is */
+            if (rel) {   /* (the rate cap: 20 gaps a second are looked at) */
+                const int64_t sec = now / 1000000000LL;
+                if (sec != win_s) {
+                    if (dropped) hos_log("stallwatch: %lld gaps over the 20 a second cap were not looked at", (long long)dropped);
+                    win_s = sec, in_win = 0, dropped = 0;
+                }
+                if (in_win >= 20) { dropped++; Sleep(2); continue; }
+                in_win++;
+            }
             cur = lp;
+            mark_ns = thr_ns;
             sw_cpu_all(hs, c0, m);
             memset(&pm0, 0, sizeof pm0);
             K32GetProcessMemoryInfo(GetCurrentProcess(), &pm0, sizeof pm0);
@@ -233,9 +280,9 @@ static DWORD WINAPI sw_thread(void *p) {
 }
 
 void hos_jt_start(void) {
-    {   /* (HL_STALL_WATCH=<ms>: the ring and the watcher; see the top of the file) */
+    {   /* (HL_STALL_WATCH=<ms> or rel:<ms>: the ring and the watcher; see the top of the file) */
         const char *w = getenv("HL_STALL_WATCH");
-        if (w && *w && atoi(w) != 0) {
+        if (w && *w && (atoi(w) != 0 || !strncmp(w, "rel", 3))) {
             recs = (JtRec *)VirtualAlloc(NULL, (SIZE_T)JT_CAP * sizeof(JtRec), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
             if (!recs) return;
             hos_mem_tag(recs, (uint64_t)JT_CAP * sizeof(JtRec), "job trace ring (HL_STALL_WATCH)");
@@ -246,7 +293,8 @@ void hos_jt_start(void) {
             sw_ring = 1, hos_jt_on = 1;
             HANDLE h = CreateThread(NULL, 0, sw_thread, dir, 0, NULL);
             if (h) CloseHandle(h);
-            hos_log("stallwatch: on, a gap of %d ms or more between presents is dumped to %s (HL_STALL_WATCH)", atoi(w) > 1 ? atoi(w) : 40, dir);
+            if (!strncmp(w, "rel", 3)) hos_log("stallwatch: on, a gap over the median of the last 30 by %g ms and 1.25x is dumped to %s (HL_STALL_WATCH=rel)", w[3] == ':' && atof(w + 4) > 0 ? atof(w + 4) : 2.0, dir);
+            else hos_log("stallwatch: on, a gap of %d ms or more between presents is dumped to %s (HL_STALL_WATCH)", atoi(w) > 1 ? atoi(w) : 40, dir);
             return;
         }
     }

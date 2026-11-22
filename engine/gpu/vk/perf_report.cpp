@@ -161,14 +161,56 @@ bool tel_on(const char* name) {
     const char* e = getenv(name);
     return !(e && e[0] == '0' && !e[1]);
 }
-/// HL_HITCH_LOG=<ms> (diagnostic): every frame of that many ms or more is logged with the numbers its cause was made of
-int hitch_log_ms() {
-    static const int v = [] {
+/// HL_HITCH_LOG=<ms> (diagnostic): every frame of that many ms or more is logged with the numbers its cause was made of.
+/// HL_HITCH_LOG=rel:<ms> (diagnostic): every frame that is at least <ms> (default 2) and 1.25x over the median of the 30 frames before it,
+/// the same line; at most 20 lines a second, the lines dropped over that are counted on the next line logged.
+/// Copyright (C) 2026 Sacrappy (the relative form)
+struct HitchLog {
+    int abs_ms = 0;        // (the plain form: a frame of this many ms or more)
+    double rel_ms = -1;    // (the relative form: ms over the median; < 0: not asked for)
+};
+const HitchLog& hitch_log_cfg() {
+    static const HitchLog v = [] {
+        HitchLog h;
         const char* e = getenv("HL_HITCH_LOG");
-        return e && *e ? std::max(0, atoi(e)) : 0;
+        if (e && !strncmp(e, "rel:", 4)) h.rel_ms = std::max(0.0, atof(e + 4)), h.rel_ms = h.rel_ms > 0 ? h.rel_ms : 2.0;
+        else if (e && !strcmp(e, "rel")) h.rel_ms = 2.0;
+        else if (e && *e) h.abs_ms = std::max(0, atoi(e));
+        return h;
     }();
     return v;
 }
+int hitch_log_ms() { return hitch_log_cfg().abs_ms; }
+/// The relative form's test: the frame against the median of the 30 before it (the ring holds them; it is fed after the test)
+struct HitchRel {
+    float ring[30] = {};
+    int n = 0, at = 0;
+    int64_t window_s = -1, in_window = 0, dropped = 0;
+    double median() const {
+        float t[30];
+        const int m = std::min(n, 30);
+        for (int i = 0; i < m; i++) t[i] = ring[i];
+        std::sort(t, t + m);
+        return m ? (m & 1 ? t[m / 2] : 0.5 * (t[m / 2 - 1] + t[m / 2])) : 0.0;
+    }
+    /// whether to log this frame; the second is the lines dropped since the last one logged (to say so)
+    bool test(float ms, double delta, int64_t now_ns, int64_t* dropped_out) {
+        bool hit = false;
+        if (n >= 10) {   // (not before ten frames: a median of nothing)
+            const double med = median();
+            hit = ms >= med + delta && ms >= med * 1.25;
+        }
+        ring[at] = ms, at = (at + 1) % 30, n = std::min(n + 1, 30);
+        *dropped_out = 0;
+        if (!hit) return false;
+        const int64_t sec = now_ns / 1000000000LL;
+        if (sec != window_s) window_s = sec, in_window = 0;
+        if (in_window >= 20) return dropped++, false;   // (the rate cap)
+        in_window++;
+        *dropped_out = dropped, dropped = 0;
+        return true;
+    }
+};
 
 struct ProcCounters {
     int64_t faults = 0;   // (the process's page faults so far, soft and hard)
@@ -990,7 +1032,11 @@ void perf_frame_shown() {
     const bool loading = load_now || load_last || map_switched;
     load_last = load_now, map_switched = false;
     pr::add_frame(*current, f, w, target, last_ms, usual, loading, &recent_hitches, now / 1000000);
-    if (const int hl = hitch_log_ms(); hl > 0 && f.ms >= (float)hl) {   // (HL_HITCH_LOG=<ms>: the numbers a slow frame's cause was made of)
+    static HitchRel hitch_rel;
+    int64_t hitch_dropped = 0;
+    const bool hitch_by_rel = hitch_log_cfg().rel_ms > 0 && hitch_rel.test(f.ms, hitch_log_cfg().rel_ms, now, &hitch_dropped);
+    if (hitch_by_rel && hitch_dropped) logf("vk: hitch log: %lld lines dropped over the 20 a second cap (HL_HITCH_LOG=rel)", (long long)hitch_dropped);
+    if (const int hl = hitch_log_ms(); hitch_by_rel || (hl > 0 && f.ms >= (float)hl)) {   // (HL_HITCH_LOG=<ms> or rel:<ms>: the numbers a slow frame's cause was made of)
         logf("vk: hitch %.1f ms: %s%s | game %.1f render %.1f gpu_wait %.1f pace %.1f gpu %.1f | pipe %.1f xlate %.1f upload %.1f memsync %.1f "
              "readback %.1f drvcomp %.1f present %.1f | desc %.1f (build %.1f pool %.1f, tex %.1f in upload) | os_wait %.1f: lock %.1f sleep %.1f "
              "vcore %.1f file %.1f, faults %lld, ws -%.0f MB (%s)",

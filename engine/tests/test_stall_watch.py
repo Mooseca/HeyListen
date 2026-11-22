@@ -34,7 +34,7 @@ def main():
     sus = jt.index("SuspendThread(hs[i])")
     mid = jt[sus:jt.index("ResumeThread(hs[i])")]
     check("hos_log" not in mid and "fprintf" not in mid and "malloc" not in mid, "nothing is logged or allocated while a thread is suspended")
-    check("dumped < 80" in jt and "HL_STALL_WATCH_AFTER" in jt, "at most 80 dumps, none before the start-up's end")
+    check("dumped < max_dumps" in jt and "HL_STALL_WATCH_MAX" in jt and "HL_STALL_WATCH_AFTER" in jt, "at most 80 dumps (HL_STALL_WATCH_MAX), none before the start-up's end")
     # a dump reader: the format, one record
     sample = "# jobtrace window 100 900\nT 0 0000000000000001 Presentation_Thread\n150 15 0 1234 83abcd00\n"
     rec = [l.split() for l in sample.splitlines() if l[0] not in "#T"]
