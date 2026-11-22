@@ -52,3 +52,18 @@ The owner's order (22 Nov, evening): keep going until fps rises by **30% or more
 3. **ASTC → BC7 disk cache** at install, against texture pop-in and upload stutters at zone entry. Our encoder is already better than Rekarina's BC3.
 4. **Arrival hold** (Rekarina) together with work done during the hold.
 5. **A multi-threaded replay rework**, if bindless is not enough. This is the 5070's ceiling.
+
+## Night of 22 Nov: results so far (21:55)
+
+| Lever | Result | Decision |
+|---|---|---|
+| SHD1 shader optimisation (spirv-opt, sign, contract) | 3050: 0 fps; 701ae221 -0.2 ms in Hyrule only | closed: the driver already does it |
+| LIFT1 pieces 1-4 | 5070 castle-move 122.4 vs 122.2 | no gain: game code is not the critical path |
+| BIND1 replay breakdown | replay 7.7 ms (dry pass 2.35, own segment 2.89, small cbs 0.94); bindless would save 0.15-0.3 ms | bindless dropped |
+| SUBQ1 3050 GPU idle | unprofiled: Market idle 5.4 ms, 4.2 of it 'replay not ready', driven by 'small cb recorded whole' 1.9 ms; Kokiri/Hyrule GPU-bound; 50% render scale +17-40% | SMALL1 launched |
+| QUICK1 (Rekarina ideas) | compute-only images within noise; NVIDIA cache dir: start-up 2.1 -> 36.5 s, not reused | all off; NV cache reverted |
+| PORT2 (ReLink/Longshot) | zero upload: Market entry -34 ms; reaper/cap: noise; BG_CAP: confirming on the 3050; 3050 PCIe 6.5 GB/s | zero upload on, rest off; WBL1 launched |
+| STALL2 owner-session analysis | memory pressure (1-2.4 GB available); freed zone regions discarded then 42% faulted back | HL_REGION_KEEP built; warp-tour A/B running |
+| MEMO1 cross-frame repetition | running | – |
+| SMALL1 small command buffers | A/B running | – |
+| WBL1 lazy write-back for slow PCIe | build queued | – |
