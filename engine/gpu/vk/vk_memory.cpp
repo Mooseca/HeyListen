@@ -68,6 +68,8 @@ namespace { struct Pool; struct WriteBack { Pool* pool; uint64_t lo, hi; /* offs
 struct MemSub {
     std::vector<Pool*> synced;
     std::vector<WriteBack> writebacks;
+    RbPending rb;          // (the readback ring's staged ranges)
+    uint32_t gen_end = 0;  // (RX_VK_SUB_OVERLAP: the generation its pools are current as of, taken at its handoff; 0: gen_now at its end, as before)
 };
 namespace {
 
@@ -1944,6 +1946,7 @@ bool memory_read_as_submitted(uint64_t gpu, void* dst, uint64_t n) {
     const uint64_t page0 = guest >> kPageShift, page1 = (guest + n - 1) >> kPageShift;
     const uint64_t view = cap_view_gen.load(std::memory_order_acquire);
     if (page0 == page1 && submitted_known(page0, page_gen(page0), view)) return true;
+    if (memory_late_fix_pending()) replay_sub_complete_if_pending();   // (stream SUB1: a late slot's wait below may be for a submission whose end is not sent yet: sent first, outside pools_mu)
     static std::atomic<int64_t> reads{0}, pages_from{0};
     int64_t from = 0;
     {
@@ -6601,7 +6604,7 @@ BufferRef gpu_buffer_bind(uint64_t gpu, uint64_t size, bool written) {
             return kb << 10;
         }();
         // (STEP1, HL_RB_LAG) a range the CPU reads back that the readback ring stages: no write-back, the submission's end copies it
-        if ((!wb_max || size <= wb_max) && !rbring_stage_bind(guest, size, p->mirror, off))
+        if ((!wb_max || size <= wb_max) && !rbring_stage_bind(guest, size, p->mirror, off, lists().rb))
             lists().writebacks.push_back({p, off, std::min(off + size, p->hi - p->lo)});
         diff_gpu_wrote(p->lo + off, std::min(off + size, p->hi - p->lo) - off);   // (TICK-048)
         rb_hazard_locked(p->lo + off, p->lo + std::min(off + size, p->hi - p->lo));   // (memory_rb_refresh)
@@ -7921,7 +7924,26 @@ void mkwvk::memory_staged_apply(uint64_t done) {
 }
 namespace mkwvk {
 
+namespace { void end_submission_impl(VkCommandBuffer cmd, MemSub& sub); }
 void memory_end_submission(VkCommandBuffer cmd) {
+    end_submission_impl(cmd, *sub_cur);
+}
+/// (stream SUB1, RX_VK_SUB_OVERLAP) the generation a submission's pools are current as of, and its synced pools marked so at once: the next submission's
+/// syncs (before this one ends) take the pages written since
+void memory_submission_handoff(const MemView& view) {
+    std::lock_guard lk(pools_mu);
+    MemSub& sub = *view.sub;
+    sub.gen_end = gen_now;
+    for (Pool* p : sub.synced) p->synced_gen = sub.gen_end;
+}
+/// A submission's end after the next one began: its value, epoch, lists and capture view are the thread's own for the time (as a segment's worker's)
+void memory_end_submission_of(VkCommandBuffer cmd, uint64_t value, const MemView& view) {
+    memory_recording_thread(value, view);
+    end_submission_impl(cmd, *view.sub);
+    memory_recording_thread_end();
+}
+namespace {
+void end_submission_impl(VkCommandBuffer cmd, MemSub& sub) {
     std::lock_guard lk(pools_mu);
     lazy_apply();
     {   // (RX_VK_POOL_MIRROR: beyond 16 spare staging buffers or 256 MB of them, the oldest given back)
@@ -8066,10 +8088,9 @@ void memory_end_submission(VkCommandBuffer cmd) {
             }
         }
     }
-    rbring_flush(cmd, rec_value_of());   // (STEP1, HL_RB_LAG: the staged ranges into the readback ring)
+    rbring_flush(cmd, rec_value_of(), sub.rb);   // (STEP1, HL_RB_LAG: the staged ranges into the readback ring)
     static const bool no_writeback = getenv("RX_VK_NO_WRITEBACK") != nullptr;   // (an experiment: none)
-    MemSub& sub = *sub_cur;   // (stream SUB1: this submission's lists)
-    std::vector<WriteBack>& writebacks = sub.writebacks;
+    std::vector<WriteBack>& writebacks = sub.writebacks;   // (stream SUB1: this submission's lists)
     if (no_writeback) writebacks.clear();
     if (!writebacks.empty()) {
         // per pool, the ranges merged, one copy each (mirror -> the guest's pool)
@@ -8356,10 +8377,11 @@ void memory_end_submission(VkCommandBuffer cmd) {
     }
     // (what this submission synced is current as of now: the GPU's own writes, stamped while it was recorded, are
     // in the mirror and written back; CPU writes collected at the next submission get a newer generation)
-    for (Pool* p : sub.synced) p->synced_gen = gen_now;
+    for (Pool* p : sub.synced) p->synced_gen = sub.gen_end ? sub.gen_end : gen_now;
     sub.synced.clear();
-    mirror_upload = false;
+    if (&sub == sub_cur.get()) mirror_upload = false;   // (a submission that ends after the next began leaves its recording state)
 }
+} // namespace
 
 /// (TICK-038, RX_VK_RES_LOG=1) one line of the process's memory: commit, working set, the C heaps, and what this file keeps in
 /// system memory (the captures' buffers, the texture-storage shadow, the capture table)

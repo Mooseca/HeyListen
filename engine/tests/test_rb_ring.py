@@ -79,9 +79,8 @@ def main():
     assert inv.index("if (ring_serve) rbring_apply(gpu, size);") > inv.index("if (size && !expo_skip && !ring_serve) {"), "the answer comes before the wait's place"
     assert "rbring_check(gpu, size)" in inv, "the check is not called"
     mem = (ROOT / "gpu/vk/vk_memory.cpp").read_text(encoding="utf-8")
-    assert "!rbring_stage_bind(guest, size, p->mirror, off))\n            writebacks.push_back" in mem, "a staged binding still queues its write-back"
-    assert "rbring_flush(cmd, mem_rec_value);" in mem and mem.index("rbring_flush(cmd, mem_rec_value);") < mem.index("if (no_writeback) writebacks.clear();"), \
-        "the staged ranges are not copied before the write-backs"
+    assert "!rbring_stage_bind(guest, size, p->mirror, off, lists().rb))\n            lists().writebacks.push_back" in mem, "a staged binding still queues its write-back"
+    assert "rbring_flush(cmd, rec_value_of(), sub.rb);" in mem and mem.index("rbring_flush(cmd, rec_value_of(), sub.rb);") < mem.index("if (no_writeback) writebacks.clear();"),         "the staged ranges are not copied before the write-backs"
     print("PASS the wiring")
 
 

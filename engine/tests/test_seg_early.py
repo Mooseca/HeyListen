@@ -42,7 +42,7 @@ def main():
     need('getenv("RX_VK_SEG_EARLY") && atoi(getenv("RX_VK_SEG_EARLY")) != 0' in on, "RX_VK_SEG_EARLY is not off by default")
 
     rg = function(rp, "struct UbReadGuard")
-    need("rmode == Mode::Worker && ub_growing.load(std::memory_order_acquire)" in rg, "a read guard locks outside a worker or growth")
+    need("rmode == Mode::Worker &&" in rg and "ub_growing.load(std::memory_order_acquire) || ub_group_pending.load(std::memory_order_acquire)" in rg, "a read guard locks outside a worker or growth")
     need("ub_read_depth++ == 0" in rg, "a nested read takes the shared lock again")
     need("std::unique_lock<std::shared_mutex>(ub_grow_mu)" in function(rp, "struct UbGrowGuard"), "the growth guard is not exclusive")
     need("UbReadGuard ug;" in function(rp, "uint64_t ub_overlay("), "ub_overlay reads the list unguarded")

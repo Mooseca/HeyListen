@@ -252,6 +252,25 @@ std::map<uint64_t, uint64_t> value_queue;   // a submission's value -> its queue
 std::atomic<uint64_t> pushed{0};
 std::atomic<uint64_t> q_values{0};   // the fence values handed out (a submit or a present takes one each)
 std::mutex replay_mu;   // one replay at a time (the game submits from several threads)
+// (stream SUB1, RX_VK_SUB_OVERLAP) a submission whose end waits for its group's last segment returns from run_submit with its group pending
+// (defer_group, sub_pend); whoever takes replay_mu for anything that submits or waits completes it first (ReplayLock), and the replay thread's own
+// first submit after it does (submit_recording). tl_replay_depth: this thread holds replay_mu (the hooks complete the pending one directly)
+thread_local int tl_replay_depth = 0;
+std::atomic<bool> sub_pend_flag{false};
+bool sub_pend = false;           // (replay_mu: a submission's end is pending: defer_group is its group)
+uint64_t sub_pend_value = 0;     // (its value: `pushed` moves to it when its end is in the queue)
+int64_t sub_pend_t0 = 0;         // (when it was handed off, steady clock ns)
+void sub_complete_now();   // (replay_mu held: the pending submission's group joined, its end sent)
+struct ReplayLock {
+    std::unique_lock<std::mutex> lk;
+    explicit ReplayLock(bool complete = true) : lk(replay_mu) {
+        tl_replay_depth++;
+        if (complete && sub_pend_flag.load(std::memory_order_relaxed)) sub_complete_now();
+    }
+    ~ReplayLock() { tl_replay_depth--; }
+    ReplayLock(const ReplayLock&) = delete;
+    ReplayLock& operator=(const ReplayLock&) = delete;
+};
 // (RX_VK_BATCH: see queue_flush_locked)
 VkSemaphore batch_tl = VK_NULL_HANDLE;
 uint64_t batch_next = 0, batch_flushed = 0;
@@ -269,6 +288,7 @@ struct Recording {
     VkCommandPool upload_pool = VK_NULL_HANDLE;   // (its own: a parallel replay's threads record uploads into it while the
                                                   // replay thread records cmd, and a pool is one thread's at a time)
     VkCommandBuffer cmd = VK_NULL_HANDLE, upload = VK_NULL_HANDLE;
+    VkCommandBuffer tail = VK_NULL_HANDLE;   // (stream SUB1, RX_VK_SUB_OVERLAP: the write-backs of a submission that ends after the next began, recorded by the thread that sends it, from upload_pool)
     // (a parallel replay's segment: new images' first layout changes, submitted before its uploads. Its own pool: any
     // segment's worker records into the earliest open segment's, while that segment's worker records cmd and upload)
     VkCommandPool init_pool = VK_NULL_HANDLE;
@@ -1289,7 +1309,23 @@ void host_read_barrier(VkCommandBuffer cmd) {
     d.memoryBarrierCount = 1, d.pMemoryBarriers = &b;
     vkCmdPipelineBarrier2(cmd, &d);
 }
-void submit_recording(Recording& r, bool signal_value = true, uint64_t signal_at = 0) {
+/// (stream SUB1) a recording's submit made ready: what vkQueueSubmit2 takes (submit_send). RX_VK_SUB_OVERLAP makes it at a submission's end, on the replay
+/// thread, and sends it when the group's last segment is in the queue
+struct SubmitPrep {
+    VkCommandBufferSubmitInfo cb[3]{{VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO}, {VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO},
+                                    {VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO}};
+    uint32_t n = 0;
+    VkSemaphoreSubmitInfo signal{VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO};
+    VkSemaphoreSubmitInfo signals[2]{{VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO}, {VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO}};
+    uint32_t nsig = 0;
+    uint64_t seq = 0;
+    bool signal_value = true;
+    Recording* r = nullptr;
+};
+void submit_send(SubmitPrep& P);
+void sub_complete_before_submit();   // (below: a pending submission's end goes to the queue before this recording)
+void submit_recording(Recording& r, bool signal_value = true, uint64_t signal_at = 0, SubmitPrep* defer = nullptr) {
+    if (!defer) sub_complete_before_submit();
     DrvTime drv_time(drvwall.qs_ns, drvwall.qs_n);
     FeedPhase feed_phase(mkwvk::feed::kSubmit);   // (stream REPLAY2)
     {
@@ -1313,16 +1349,16 @@ void submit_recording(Recording& r, bool signal_value = true, uint64_t signal_at
     signal.semaphore = timeline;
     signal.value = signal_at ? signal_at : r.value;
     signal.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
-    VkCommandBufferSubmitInfo cb[2]{{VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO}, {VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO}};
-    uint32_t n = 0;
+    SubmitPrep P;
+    VkCommandBufferSubmitInfo* const cb = P.cb;
+    uint32_t& n = P.n;
     if (uploads) cb[n++].commandBuffer = r.upload;
     cb[n++].commandBuffer = r.cmd;
-    VkSubmitInfo2 si{VK_STRUCTURE_TYPE_SUBMIT_INFO_2};
-    si.commandBufferInfoCount = n;
-    si.pCommandBufferInfos = cb;
-    VkSemaphoreSubmitInfo signals[2] = {signal, {VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO}};
-    uint32_t nsig = signal_value ? 1 : 0;
-    uint64_t seq = 0;
+    VkSemaphoreSubmitInfo* const signals = P.signals;
+    signals[0] = signal;
+    uint32_t& nsig = P.nsig;
+    nsig = signal_value ? 1 : 0;
+    uint64_t& seq = P.seq;
     if (rec_timeline) {   // (and its number on the recordings' timeline; every caller holds replay_mu: in order)
         seq = ++rec_seq;
         ts_recseq[r.slot] = seq;   // (RX_VK_TL's GPU side)
@@ -1343,6 +1379,25 @@ void submit_recording(Recording& r, bool signal_value = true, uint64_t signal_at
         for (uint64_t v : rec_open_qvalues) whole_val[v & (kWholeSlots - 1)].store(v, std::memory_order_release);
         rec_open_qvalues.clear();
     }
+    P.signal = signal, P.signal_value = signal_value, P.r = &r;
+    if (defer) {   // (stream SUB1: sent later, with the write-backs behind it)
+        *defer = P;
+        return;
+    }
+    submit_send(P);
+}
+void submit_send(SubmitPrep& P) {
+    Recording& r = *P.r;
+    VkCommandBufferSubmitInfo* const cb = P.cb;
+    const uint32_t n = P.n;
+    VkSemaphoreSubmitInfo* const signals = P.signals;
+    const uint32_t nsig = P.nsig;
+    const VkSemaphoreSubmitInfo signal = P.signal;
+    const uint64_t seq = P.seq;
+    const bool signal_value = P.signal_value;
+    VkSubmitInfo2 si{VK_STRUCTURE_TYPE_SUBMIT_INFO_2};
+    si.commandBufferInfoCount = n;
+    si.pCommandBufferInfos = cb;
     si.signalSemaphoreInfoCount = nsig;
     si.pSignalSemaphoreInfos = nsig ? signals : nullptr;
     if (batch_tl == VK_NULL_HANDLE) late_fix_wait_unlocked();   // (TICK-060: nothing can be held without the batch semaphore)
@@ -1633,7 +1688,7 @@ struct UbReadGuard {
 struct UbGrowGuard {
     std::unique_lock<std::shared_mutex> lk;
     UbGrowGuard() {
-        if (!ub_growing.load(std::memory_order_relaxed)) return;
+        if (!ub_growing.load(std::memory_order_relaxed) && !ub_group_pending.load(std::memory_order_relaxed)) return;   // (stream SUB1: appends beside a pending group's workers hold it too)
         if (grow_lock_plain()) {
             lk = std::unique_lock<std::shared_mutex>(ub_grow_mu);
             return;
@@ -3355,10 +3410,19 @@ void seg_early_count(int kind) {
 // memory_rb_recording_begun, texture_begin_recording) and, with 2, replays the next small command buffers serially: both beside
 // workers that are recording. That is state shared with them that has no protection yet (docs/native-engine/replay-cost.md, JOIN1);
 // RX_VK_DEFER_JOIN_CHECK=1 counts the steps that ran beside them and compares each segment's recorded work with the dry pass's plan.
+bool sub_overlap_on() {   // (stream SUB1) RX_VK_SUB_OVERLAP=1: a submission whose last command buffer has segments pending returns without joining them
+    static const bool v = [] {
+        const char* e = getenv("RX_VK_SUB_OVERLAP");
+        const bool on = e && atoi(e) != 0;
+        if (on) logf("vk: a submission's end waits for its last segments' workers, the next one begins meanwhile (RX_VK_SUB_OVERLAP)");
+        return on;
+    }();
+    return v;
+}
 int defer_join_mode() {
     static const int v = [] {
         const char* e = getenv("RX_VK_DEFER_JOIN");
-        const int m = e ? std::clamp(atoi(e), 0, 2) : 0;
+        const int m = e ? std::clamp(atoi(e), 0, 2) : (sub_overlap_on() ? 2 : 0);
         if (m) logf("vk: the join of a big command buffer's segments deferred (RX_VK_DEFER_JOIN=%d): a diagnosis, not for play", m);
         return m;
     }();
@@ -3370,7 +3434,8 @@ bool defer_check_on() {
     static const bool v = [] {
         const char* e = getenv("RX_VK_DEFER_JOIN_CHECK");
         const char* e2 = getenv("RX_VK_REC_OVERLAP_CHECK");   // (stream REC1: the same check, named for the overlap)
-        const bool on = (e && atoi(e) != 0) || (e2 && atoi(e2) != 0);
+        const char* e3 = getenv("RX_VK_SUB_OVERLAP_CHECK");   // (stream SUB1: the same check, and the submission overlap's counters)
+        const bool on = (e && atoi(e) != 0) || (e2 && atoi(e2) != 0) || (e3 && atoi(e3) != 0);
         if (on) logf("vk: the recording-overlap check is on (RX_VK_DEFER_JOIN_CHECK / RX_VK_REC_OVERLAP_CHECK)");
         return on;
     }();
@@ -3408,13 +3473,20 @@ struct EarlyGroup {
     int64_t total = 0;
     mkwvk::segment_plan::Profile* profile = nullptr;
     std::chrono::steady_clock::time_point t_seg0;
+    // (stream SUB1, RX_VK_SUB_OVERLAP) the end of the submission this group is the last of: its last recording made ready by the replay thread at the
+    // submission's end (tail_prep), and sent by whichever thread puts the group's last segment in the queue, after the write-backs are recorded
+    SubmitPrep tail_prep;
+    MemView tail_view;
+    uint64_t tail_value = 0;
+    std::atomic<bool> tail_set{false};
+    bool tail_sent = false;   // (sub_mu)
 };
 std::shared_ptr<EarlyGroup> defer_group;   // (replay_mu: the group whose join is pending; null: none)
 enum DeferWhat { kDeferBegin, kDeferSerialRecord, kDeferDry, kDeferFinish, kDeferOther, kDeferWhats };
 // (stream REC1) what made the pending join be made: the places defer_join_now is called from
-enum DeferJoinWhy { kJoinEarlyStart, kJoinSerialPath, kJoinPresyncKick, kJoinMultiSeg, kJoinOcc, kJoinLoopEnd, kJoinWhys };
+enum DeferJoinWhy { kJoinEarlyStart, kJoinSerialPath, kJoinPresyncKick, kJoinMultiSeg, kJoinOcc, kJoinLoopEnd, kJoinSubPend, kJoinWhys };
 const char* const kJoinWhyName[kJoinWhys] = {"next big command buffer", "serial replay", "early pre-sync", "multi-segment path", "occlusion stop",
-                                             "end of the command buffers' loop"};
+                                             "end of the command buffers' loop", "pending submission's completion"};
 struct DeferStats {   // (RX_VK_DEFER_JOIN_CHECK, replay_mu)
     int64_t joins = 0, mismatches = 0, beside[kDeferWhats] = {}, shared[kRsCount] = {}, why[kJoinWhys] = {};
 } defer_stats;
@@ -3452,11 +3524,42 @@ void early_submit_job(EarlyGroup& G, EarlyJob* j) {   // (a segment, in the queu
 }
 /// (RX_VK_EARLY_GPU) the segments that are done go out in order, by whichever thread finishes one; held while the dry pass runs
 /// once it has recorded an upload (rd must go first), until the replay thread submits rd at the dry pass's end (sub_after_rd). sub_mu held
+void group_tail_send(EarlyGroup& G);
 void early_submit_ready(EarlyGroup& G) {
     while (G.next_sub < G.jobs.size() && G.jobs[G.next_sub]->done.load()) {
         if (!G.sub_after_rd && G.dry_uploaded.load(std::memory_order_acquire)) return;
         early_submit_job(G, G.jobs[G.next_sub++].get());
     }
+    group_tail_send(G);   // (stream SUB1: the submission's end goes right behind the group's last segment, from the thread that sent it)
+}
+/// (stream SUB1, RX_VK_SUB_OVERLAP; G.sub_mu held) The end of the submission this group is the last of, once every segment is in the queue: its write-backs
+/// recorded into a command buffer of its own (memory_end_submission_of, as the submission's own: its value, epoch, lists), then its last recording
+/// and that one sent in one vkQueueSubmit2 with the timeline signals made ready at its end
+struct SubStats {
+    std::atomic<int64_t> handoffs{0}, by_worker{0}, by_replay{0}, window_ns{0}, joined[kJoinWhys + 1] = {};
+} sub_stats;
+void group_tail_send(EarlyGroup& G) {
+    if (!G.tail_set.load(std::memory_order_acquire) || G.tail_sent || G.next_sub < G.used) return;
+    G.tail_sent = true;
+    Recording& r = *G.tail_prep.r;
+    VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+    bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    vkBeginCommandBuffer(r.tail, &bi);
+    memory_end_submission_of(r.tail, G.tail_value, G.tail_view);
+    {   // (what full_barrier("barrier (recording end)") records, with none of its bookkeeping: the replay thread's)
+        VkMemoryBarrier2 b{VK_STRUCTURE_TYPE_MEMORY_BARRIER_2};
+        b.srcStageMask = b.dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+        b.srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT;
+        b.dstAccessMask = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT;
+        VkDependencyInfo d{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
+        d.memoryBarrierCount = 1, d.pMemoryBarriers = &b;
+        vkCmdPipelineBarrier2(r.tail, &d);
+    }
+    host_read_barrier(r.tail);
+    vkEndCommandBuffer(r.tail);
+    G.tail_prep.cb[G.tail_prep.n++].commandBuffer = r.tail;
+    submit_send(G.tail_prep);
+    (tl_replay_depth ? sub_stats.by_replay : sub_stats.by_worker).fetch_add(1, std::memory_order_relaxed);
 }
 /// One segment recorded (a pool worker's, or the replay thread's own last one), as replay_handle's
 void early_record_job(EarlyGroup& G, EarlyJob* j) {
@@ -3541,6 +3644,10 @@ void early_join(EarlyGroup& G) {
         std::unique_lock lk(par_pool.mu);
         par_pool.done.wait(lk, [] { return par_pool.pending == 0; });
     }
+    if (G.egpu) {   // (stream SUB1: nothing is left to wait for: the submission's end, if no worker has sent it)
+        std::lock_guard sl(G.sub_mu);
+        early_submit_ready(G);
+    }
     if (G.init_lost)
         replay_fatal("a parallel replay segment's init command buffer could not be ended: new images lost their first layout "
                      "change, and the work after it may use them");
@@ -3587,6 +3694,16 @@ void early_join(EarlyGroup& G) {
                  "pool sync checks %lld, of them a pool synced by a later submission %lld; list additions %lld, to a list that is not the current one %lld",
                  (long long)sc.cap_reads, (long long)sc.cap_newer, (long long)sc.pool_checks, (long long)sc.pool_newer, (long long)sc.list_adds,
                  (long long)sc.list_other);
+            if (sub_overlap_on()) {
+                const int64_t h = sub_stats.handoffs.load();
+                logf("vk: SUB_OVERLAP_CHECK: %lld submissions handed off with their last segments pending; their ends sent by a worker %lld, by the replay thread %lld; "
+                     "the pending submission was completed by: %s %lld, %s %lld, %s %lld, %s %lld, %s %lld, %s %lld, %s %lld; mean window %.3f ms",
+                     (long long)h, (long long)sub_stats.by_worker.load(), (long long)sub_stats.by_replay.load(), kJoinWhyName[0],
+                     (long long)sub_stats.joined[0].load(), kJoinWhyName[1], (long long)sub_stats.joined[1].load(), kJoinWhyName[2],
+                     (long long)sub_stats.joined[2].load(), kJoinWhyName[3], (long long)sub_stats.joined[3].load(), kJoinWhyName[4],
+                     (long long)sub_stats.joined[4].load(), kJoinWhyName[5], (long long)sub_stats.joined[5].load(), kJoinWhyName[6],
+                     (long long)sub_stats.joined[6].load(), h ? sub_stats.window_ns.load() / 1e6 / (double)h : 0.0);
+            }
             std::fill(std::begin(defer_stats.shared), std::end(defer_stats.shared), 0);
             std::fill(std::begin(defer_stats.why), std::end(defer_stats.why), 0);
             std::fill(std::begin(defer_stats.beside), std::end(defer_stats.beside), 0);
@@ -3620,6 +3737,24 @@ void defer_join_now(DeferJoinWhy why) {
     feed_set(mkwvk::feed::kJoin);
     early_join(*g);
     ub_group_pending.store(false, std::memory_order_release);   // (stream SUB1: the workers are done)
+    if (sub_pend) {   // (the group was the last of a submission that returned without it: its end is in the queue now)
+        sub_pend = false;
+        sub_pend_flag.store(false, std::memory_order_release);
+        if (pushed.load() < sub_pend_value) pushed = sub_pend_value;
+        sub_stats.joined[why].fetch_add(1, std::memory_order_relaxed);
+        sub_stats.window_ns.fetch_add(std::chrono::steady_clock::now().time_since_epoch().count() - sub_pend_t0, std::memory_order_relaxed);
+    }
+}
+void sub_complete_now() {
+    if (sub_pend) defer_join_now(kJoinSubPend);
+    else sub_pend_flag.store(false, std::memory_order_release);
+}
+void sub_complete_before_submit() {   // (stream SUB1: before a recording of the next submission goes to the queue: the order)
+    if (sub_pend) defer_join_now(kJoinSubPend);
+}
+/// (stream SUB1) the memory code on the replay thread, about to wait for a late fix's value that a pending submission may hold: the end goes first
+void sub_complete_if_pending_impl() {
+    if (sub_pend_flag.load(std::memory_order_acquire) && tl_replay_depth > 0 && rmode != Mode::Worker) sub_complete_now();
 }
 const uint8_t* replay_handle_early(VkCommandBuffer& cmd, const uint8_t* h, bool may_stop, int nplan, const int64_t* plan,
                                    bool self_help, mkwvk::segment_plan::Profile& profile, int64_t* total_out, bool* cut) {
@@ -4494,6 +4629,7 @@ void submit_memory_work(uint64_t value) {
     jt_mark(15, value);
     struct JtEnd { ~JtEnd() { jt_mark(16, 0); } } jt_end;
     const auto m0 = std::chrono::steady_clock::now();
+    sub_complete_before_submit();   // (stream SUB1: the capture waits for write-backs of the submission before, whose end is sent first)
     memory_sync();
     // (the capture takes only the mirrored pools' pages, the collection the rest: skipping it whenever a capture was
     // taken, which with the replay thread is at every submit, left every other CPU write uncollected. Textures never
@@ -4635,10 +4771,36 @@ void burst_begin(uint64_t value) {
     }
 }
 void finish_recording(uint64_t value);
+/// (stream SUB1, RX_VK_SUB_OVERLAP) finish_recording for a submission whose last command buffer's group still has segments recording (defer_group): everything
+/// on this thread that finish_recording does before the queue (the recording ended, its uploads and timeline numbers made ready, the memory end's
+/// generation fixed), and the rest, the write-backs and the send, left to the thread that puts the group's last segment in the queue
+void finish_recording_deferred(uint64_t value) {
+    Recording& r = *rec_cur;
+    rec_cur = nullptr;
+    end_pass(r.cmd);
+    flush_ub_updates(r.cmd);
+    rec_shared_note(kRsEndSubmission);
+    const MemView view = memory_view();
+    memory_submission_handoff(view);
+    const uint64_t oldest = oldest_unfinished();
+    const uint64_t at = oldest == UINT64_MAX ? done_max : std::min(done_max, oldest - 1);
+    const bool signal = at > signaled;
+    if (signal) signaled = at;
+    EarlyGroup& G = *defer_group;
+    SubmitPrep P;
+    submit_recording(r, signal, at, &P);
+    sub_pend = true, sub_pend_value = value, sub_pend_flag.store(true, std::memory_order_release);
+    sub_pend_t0 = std::chrono::steady_clock::now().time_since_epoch().count();
+    sub_stats.handoffs.fetch_add(1, std::memory_order_relaxed);
+    std::lock_guard sl(G.sub_mu);
+    G.tail_prep = P, G.tail_view = view, G.tail_value = r.value;
+    G.tail_set.store(true, std::memory_order_release);
+    group_tail_send(G);   // (every segment is in the queue already: sent here)
+}
 void burst_end() {
     if (!burst_open) return;
     burst_open = false;
-    std::lock_guard lk(replay_mu);
+    ReplayLock lk;
     if (rec_cur) finish_recording(burst_value);
 }
 
@@ -4709,7 +4871,7 @@ bool run_submit(const uint64_t* handles, int n, uint64_t value, uint64_t queue, 
                 const uint8_t* p = nullptr, bool may_stop = false) {
     tl_ev("run+", value, queue, cb);
     const int64_t feed_enter = feed_on() ? tl_now() : 0;   // (stream REPLAY2)
-    std::lock_guard lk(replay_mu);
+    ReplayLock lk(false);   // (stream SUB1: a pending submission is completed where this one first submits or waits)
     FeedPass feed_pass(feed_enter);   // (stream ORDER3)
     feed_set(mkwvk::feed::kSetup);    // (stream REPLAY2)
     tl_ev("run-locked", value);
@@ -4768,7 +4930,11 @@ bool run_submit(const uint64_t* handles, int n, uint64_t value, uint64_t queue, 
         }
         if (stop) break;
     }
-    defer_join_now(kJoinLoopEnd);   // (stream JOIN1: a join never outlives the command buffers' loop: the recording's end below needs every segment)
+    // (stream SUB1, RX_VK_SUB_OVERLAP) the join that ends the loop is left to the next submission's first need of the queue (or any thread's wait) when the
+    // submission's last group is deferred and nothing here needs it done: no stop, no burst, no dump, no held batch
+    const bool overlap = sub_overlap_on() && !stop && !burst_open && defer_group && defer_group->deferred && defer_group->egpu && rec_cur &&
+                         !dump_pending() && !batch_on();
+    if (!overlap) defer_join_now(kJoinLoopEnd);   // (stream JOIN1: a join never outlives the command buffers' loop: the recording's end below needs every segment)
     if (stop) {
         tl_ev("stop", value, queue, wait_at(stop).gpu);
         QueueRun& q = qruns[queue];
@@ -4791,9 +4957,15 @@ bool run_submit(const uint64_t* handles, int n, uint64_t value, uint64_t queue, 
     if (!burst_open) {   // (a burst's: at its end)
         feed_set(mkwvk::feed::kFinish);   // (stream REPLAY2)
         WallAdd wall_finish(rwall.finish_ns);
-        finish_recording(value);
+        if (overlap) finish_recording_deferred(value);
+        else finish_recording(value);
     }
     if (stop) return false;
+    if (overlap) {   // (its end goes to the queue behind its last segment, by the thread that sends it: a wait on its value waits for that)
+        if (pushed.load() < value) pushed = value;
+        st_submits++;
+        return true;
+    }
     if (pushed.load() < value) pushed = value;
     st_submits++;
     if (!burst_open && dump_pending()) wait_value(value), dump_write();
@@ -4820,7 +4992,7 @@ void resume_queue(uint64_t queue, bool forced) {
                 cpu_event = cpu_events.count(wait_at(q.p).gpu) != 0;
             }
             if (cpu_event) {
-                std::lock_guard lk(replay_mu);
+                ReplayLock lk;
                 if (rec_cur) finish_recording(burst_open ? burst_value : q.value);   // (its mirrors synced again after)
                 memory_capture_now(q.value, completed());
                 st_resume_captures++;
@@ -5001,7 +5173,7 @@ void submit_job(std::vector<uint64_t>& handles, uint64_t value, uint64_t queue) 
     if (!may_stop) drain(2);
     auto it = qruns.find(queue);
     if (it != qruns.end() && it->second.blocked()) {   // (its memory work now, in the order of the submits)
-        std::lock_guard lk(replay_mu);
+        ReplayLock lk;
         if (frame_submits.empty()) frame_first_value = value;
         frame_submits.emplace_back(handles);
         submit_memory_work(value);
@@ -5502,7 +5674,7 @@ void invalidate(uint64_t gpu, uint64_t size) {
     if (log_inv && logged++ < 400) {
         std::string hits;
         {
-            std::lock_guard lk(replay_mu);
+            ReplayLock lk;
             texture_describe_written(gpu, size, hits);
         }
         logf("vk: invalidate %#llx +%#llx:%s", (unsigned long long)gpu, (unsigned long long)size,
@@ -5724,11 +5896,11 @@ void invalidate(uint64_t gpu, uint64_t size) {
             logf("vk: invalidate %#llx +%#llx: textures there; the catch-ups waited %.2f ms each (300 calls)",
                  (unsigned long long)gpu, (unsigned long long)size, ns.exchange(0) / 300.0 / 1e6);
     }
-    std::lock_guard lk(replay_mu);
+    ReplayLock lk;
     texture_flush_to_guest(gpu, size);
 }
 void do_texture_released(const nvn_tex* t) {
-    std::lock_guard lk(replay_mu);
+    ReplayLock lk;
     if (t) {
         mkwvk::texture_released(t->serial);   // (vk_bank.cpp: the registrations of it)
         mkwvk::texture_released(t);           // (vk_texture.cpp: its image may take CPU writes again)
@@ -5945,6 +6117,7 @@ uint32_t crc32(const uint8_t* p, size_t n, uint32_t c = 0xFFFFFFFFu) {
     return c;
 }
 } // namespace
+void replay_sub_complete_if_pending() { sub_complete_if_pending_impl(); }   // (stream SUB1: vk_memory.cpp's)
 /// (STEP1, HL_RB_LAG) the timeline reaching v within ms, the held submits sent first
 bool rbring_wait_value(uint64_t v, double ms) {
     queue_flush_for(FR_VALUE);
@@ -6509,7 +6682,7 @@ void do_present(const nvn_tex* t, const int crop[4]) {
     bool shot = false, interpolated = false;
     VkImage made_src = VK_NULL_HANDLE;
     {
-        std::lock_guard lk(replay_mu);
+        ReplayLock lk;
         bench_frame(presents);
         SlowWatch slow("present");
         frame_submits.clear();
@@ -7525,7 +7698,7 @@ void set_texture_pool_size(int) {}
 void read_texels(const nvn_tex* t, unsigned level, unsigned layer0, const NVNcopyRegion* r, uint8_t* dst, uint64_t row,
                  uint64_t img) {
     finish();   // (what the submits before it wrote)
-    std::lock_guard lk(replay_mu);
+    ReplayLock lk;
     {   // (RX_VK_LOG_READ_TEXELS=1: the CPU reading textures back, 200 lines: are they ones the GPU wrote?)
         static const bool log_reads = getenv("RX_VK_LOG_READ_TEXELS") != nullptr;
         static int logged;
@@ -7564,14 +7737,14 @@ void vmap_changing(uint64_t gpu, uint64_t size) {
              (unsigned long long)(gpu + size), (int)listed, (int)behind, (int)listed_after);
     if (!listed_after) return;
     wait_queue_empty();   // (the work the game recorded before: submitted)
-    std::lock_guard lk(replay_mu);
+    ReplayLock lk;
     const int n = texture_flush_to_guest(gpu, size);
     if (log_calls && logged < 300) logf("vk: vmap changing %#llx: %d written back", (unsigned long long)gpu, n);
 }
 void write_texels(const nvn_tex* t, unsigned level, unsigned layer0, const NVNcopyRegion* r, const uint8_t* src,
                   uint64_t row, uint64_t img) {
     finish();   // (after the submits before it read the texture)
-    std::lock_guard lk(replay_mu);
+    ReplayLock lk;
     texture_read_texels(t, level, layer0, r, const_cast<uint8_t*>(src), row, img, true);
 }
 void stats(int64_t* draws, int64_t* skipped, int64_t* pipelines) {
@@ -7583,7 +7756,7 @@ void stats(int64_t* draws, int64_t* skipped, int64_t* pipelines) {
 }
 void register_texture_locked(int id, const nvn_tex* t, const nvn_view* v) { register_texture(id, t, v); }
 void do_program_released(const nvn_prog* p) {
-    std::lock_guard lk(replay_mu);   // (the replay may be translating it)
+    ReplayLock lk;   // (the replay may be translating it)
     program_released(p);
 }
 
@@ -8112,6 +8285,7 @@ bool replay_start() {
         vkAllocateCommandBuffers(dev.device, &ai, &r.cmd);
         ai.commandPool = r.upload_pool;
         vkAllocateCommandBuffers(dev.device, &ai, &r.upload);
+        vkAllocateCommandBuffers(dev.device, &ai, &r.tail);
     }
     ai.commandBufferCount = 1;
     for (Frame& f : frames) {

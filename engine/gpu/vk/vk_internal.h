@@ -251,6 +251,11 @@ struct MemView {
     std::shared_ptr<MemSub> sub;
 };
 MemView memory_view();   // the replay thread's, now: a group takes it when it begins
+/// (stream SUB1, RX_VK_SUB_OVERLAP) a submission that ends after the next one began: its handoff (the replay thread, once its recordings are made: the
+/// generation its synced pools are current as of) and its end (any thread, in the queue's order, into a command buffer of its own: the write-backs)
+void memory_submission_handoff(const MemView& view);
+void replay_sub_complete_if_pending();   // (vk_replay.cpp: the pending submission's end sent, on the replay thread; a no-op elsewhere)
+void memory_end_submission_of(VkCommandBuffer cmd, uint64_t value, const MemView& view);
 void memory_recording_thread(uint64_t value, const MemView& view);
 void memory_recording_thread_end();
 void memory_recording_check(int64_t* reads, int64_t* value_diff, int64_t* epoch_diff);
@@ -482,8 +487,18 @@ bool rbring_on();
 bool rbring_check_on();
 void rbring_note_read(uint64_t guest, uint64_t size);
 void rbring_note_written(uint64_t guest, uint64_t size);
-bool rbring_stage_bind(uint64_t guest, uint64_t size, VkBuffer buffer, VkDeviceSize offset);
-void rbring_flush(VkCommandBuffer cmd, uint64_t value);
+/// (stream SUB1) the readback ring's staged ranges of one submission: its own list, so a submission that ends after the next began flushes its own
+struct RbPending {
+    struct Req {
+        uint64_t guest, size;
+        VkBuffer buffer;
+        VkDeviceSize offset;
+    };
+    std::vector<Req> reqs;
+    uint64_t bytes = 0;
+};
+bool rbring_stage_bind(uint64_t guest, uint64_t size, VkBuffer buffer, VkDeviceSize offset, RbPending& pending);
+void rbring_flush(VkCommandBuffer cmd, uint64_t value, RbPending& pending);
 bool rbring_serves(uint64_t guest, uint64_t size);
 bool rbring_quiet(uint64_t guest, uint64_t size);
 void rbring_quiet_result(uint64_t size, bool changed);
