@@ -2,7 +2,7 @@
  "schema": 1,
  "generated_by": "engine/scripts/list_switches.py",
  "scope": "C, C++ and headers under engine/ (engine/tests and vendored trees other than a64-kit excluded) and the Python the builder, the lifter and the scripts run: getenv, std::getenv, _wgetenv, the code's own env helpers and table-driven reads, and os.environ.",
- "count": 1366,
+ "count": 1368,
  "switches": [
   {
    "name": "A64_DEVIRT",
@@ -1456,6 +1456,27 @@
    "use": null
   },
   {
+   "name": "HL_MEM_ACCOUNT",
+   "area": "native",
+   "group": "Native engine",
+   "audience": "developer",
+   "files": [
+    {
+     "path": "host/hl_mem.c",
+     "line": 548
+    }
+   ],
+   "default": "unset",
+   "values": "text",
+   "explanation": "HL_MEM_ACCOUNT=<seconds> (off by default): where the process's private commit and its working set are, a line \"hl mem: account:\" every <seconds> (MEM1, 22 Nov 2026: the owner's 15 minutes grew from 7.5 to 29.2 GB of private commit and frames of 0.4-1.2 s came with an OS trim). A sweep of the address space with VirtualQuery (the address space lock is held for each call, so a pass is for diagnosis only) sums the committed bytes of the guest space by part (the heap, the address regions, the part below the heap) and of the rest of the process by kind (private, mapped, image) and by the size of the allocation they are in; QueryWorkingSet says how many resident pages are the guest's (in a GPU pool, outside) and how many the host's.",
+   "comment": "HL_MEM_ACCOUNT=<seconds> (off by default): where the process's private commit and its working set are, a line \"hl mem: account:\" every <seconds> (MEM1, 22 Nov 2026: the owner's 15 minutes grew from 7.5 to 29.2 GB of private commit and frames of 0.4-1.2 s came with an OS trim). A sweep of the address space with VirtualQuery (the address space lock is held for each call, so a pass is for diagnosis only) sums the committed bytes of the guest space by part (the heap, the address regions, the part below the heap) and of the rest of the process by kind (private, mapped, image) and by the size of the allocation they are in; QueryWorkingSet says how many resident pages are the guest's (in a GPU pool, outside) and how many the host's.",
+   "documented_in": null,
+   "source": "comment at host/hl_mem.c",
+   "documented": true,
+   "set_via": "In `hookshot_env.txt`, or in the environment.",
+   "use": null
+  },
+  {
    "name": "HL_MEM_COLD",
    "area": "native",
    "group": "Native engine",
@@ -1467,7 +1488,7 @@
     },
     {
      "path": "host/hl_mem.c",
-     "line": 376
+     "line": 551
     }
    ],
    "default": "unset",
@@ -1488,7 +1509,7 @@
    "files": [
     {
      "path": "host/hl_mem.c",
-     "line": 389
+     "line": 564
     }
    ],
    "default": "unset",
@@ -1509,13 +1530,13 @@
    "files": [
     {
      "path": "host/hl_mem.c",
-     "line": 389
+     "line": 564
     }
    ],
    "default": "unset",
-   "values": "text (`1`, `0` named)",
-   "explanation": "HL_MEM_COLD=1 on (the default) HL_MEM_COLD=0 off: nothing here runs, as before HL_MEM_COLD_HEAPS=1 the heaps too (the default) HL_MEM_COLD_HEAPS=0 the pools only HL_MEM_COLD_PRESSURE=0 without the back-off: a pass of 500 ms or more stops all trimming for 60 s, and the pools wait out the quiet rule too (the default: the system is paging then, and what comes back is read from the page file) HL_MEM_COLD_FLAGS=<hex,...> the pool flags (default 24,64) HL_MEM_COLD_AGE=<seconds> the pools' age (default 10) Every 10 s two lines \"hl mem: cold pages (pools): ...\" and \"(heaps): ...\" give the counters (MB out now, taken out, came back and how often, the most that came back in 10 s).",
-   "comment": "HL_MEM_COLD=1 on (the default) HL_MEM_COLD=0 off: nothing here runs, as before HL_MEM_COLD_HEAPS=1 the heaps too (the default) HL_MEM_COLD_HEAPS=0 the pools only HL_MEM_COLD_PRESSURE=0 without the back-off: a pass of 500 ms or more stops all trimming for 60 s, and the pools wait out the quiet rule too (the default: the system is paging then, and what comes back is read from the page file) HL_MEM_COLD_FLAGS=<hex,...> the pool flags (default 24,64) HL_MEM_COLD_AGE=<seconds> the pools' age (default 10) Every 10 s two lines \"hl mem: cold pages (pools): ...\" and \"(heaps): ...\" give the counters (MB out now, taken out, came back and how often, the most that came back in 10 s).",
+   "values": "text",
+   "explanation": "HL_MEM_ACCOUNT=<seconds> the \"hl mem: account:\" lines (private commit and working set by owner) HL_MEM_COLD_FLAGS=<hex,...> the pool flags (default 24,64) HL_MEM_COLD_AGE=<seconds> the pools' age (default 10) Every 10 s two lines \"hl mem: cold pages (pools): ...\" and \"(heaps): ...\" give the counters (MB out now, taken out, came back and how often, the most that came back in 10 s).",
+   "comment": "HL_MEM_ACCOUNT=<seconds> the \"hl mem: account:\" lines (private commit and working set by owner) HL_MEM_COLD_FLAGS=<hex,...> the pool flags (default 24,64) HL_MEM_COLD_AGE=<seconds> the pools' age (default 10) Every 10 s two lines \"hl mem: cold pages (pools): ...\" and \"(heaps): ...\" give the counters (MB out now, taken out, came back and how often, the most that came back in 10 s).",
    "documented_in": null,
    "source": "comment at host/hl_mem.c",
    "documented": true,
@@ -1530,13 +1551,13 @@
    "files": [
     {
      "path": "host/hl_mem.c",
-     "line": 406
+     "line": 581
     }
    ],
    "default": "unset",
    "values": "text (`1`, `0` named)",
-   "explanation": "HL_MEM_COLD=1 on (the default) HL_MEM_COLD=0 off: nothing here runs, as before HL_MEM_COLD_HEAPS=1 the heaps too (the default) HL_MEM_COLD_HEAPS=0 the pools only HL_MEM_COLD_PRESSURE=0 without the back-off: a pass of 500 ms or more stops all trimming for 60 s, and the pools wait out the quiet rule too (the default: the system is paging then, and what comes back is read from the page file) HL_MEM_COLD_FLAGS=<hex,...> the pool flags (default 24,64) HL_MEM_COLD_AGE=<seconds> the pools' age (default 10) Every 10 s two lines \"hl mem: cold pages (pools): ...\" and \"(heaps): ...\" give the counters (MB out now, taken out, came back and how often, the most that came back in 10 s).",
-   "comment": "HL_MEM_COLD=1 on (the default) HL_MEM_COLD=0 off: nothing here runs, as before HL_MEM_COLD_HEAPS=1 the heaps too (the default) HL_MEM_COLD_HEAPS=0 the pools only HL_MEM_COLD_PRESSURE=0 without the back-off: a pass of 500 ms or more stops all trimming for 60 s, and the pools wait out the quiet rule too (the default: the system is paging then, and what comes back is read from the page file) HL_MEM_COLD_FLAGS=<hex,...> the pool flags (default 24,64) HL_MEM_COLD_AGE=<seconds> the pools' age (default 10) Every 10 s two lines \"hl mem: cold pages (pools): ...\" and \"(heaps): ...\" give the counters (MB out now, taken out, came back and how often, the most that came back in 10 s).",
+   "explanation": "HL_MEM_COLD=1 on (the default) HL_MEM_COLD=0 off: nothing here runs, as before HL_MEM_COLD_HEAPS=1 the heaps too (the default) HL_MEM_COLD_HEAPS=0 the pools only HL_MEM_COLD_PRESSURE=0 without the back-off: a pass of 500 ms or more stops all trimming for 60 s, and the pools wait out the quiet rule too (the default: the system is paging then, and what comes back is read from the page file) HL_MEM_COLD_LOWMEM=<MB> no trimming while the system's available RAM is under that (a quarter more to start again; default 0: never held, 3072 proposed). HL_MEM_ACCOUNT=<seconds> the \"hl mem: account:\" lines (private commit and working set by owner) HL_MEM_COLD_FLAGS=<hex,...> the pool flags (default 24,64) HL_MEM_COLD_AGE=<seconds> the pools' age (default 10) Every 10 s two lines \"hl mem: cold pages (pools): ...\" and \"(heaps): ...\" give the counters (MB out now, taken out, came back and how often, the ...",
+   "comment": "HL_MEM_COLD=1 on (the default) HL_MEM_COLD=0 off: nothing here runs, as before HL_MEM_COLD_HEAPS=1 the heaps too (the default) HL_MEM_COLD_HEAPS=0 the pools only HL_MEM_COLD_PRESSURE=0 without the back-off: a pass of 500 ms or more stops all trimming for 60 s, and the pools wait out the quiet rule too (the default: the system is paging then, and what comes back is read from the page file) HL_MEM_COLD_LOWMEM=<MB> no trimming while the system's available RAM is under that (a quarter more to start again; default 0: never held, 3072 proposed). HL_MEM_ACCOUNT=<seconds> the \"hl mem: account:\" lines (private commit and working set by owner) HL_MEM_COLD_FLAGS=<hex,...> the pool flags (default 24,64) HL_MEM_COLD_AGE=<seconds> the pools' age (default 10) Every 10 s two lines \"hl mem: cold pages (pools): ...\" and \"(heaps): ...\" give the counters (MB out now, taken out, came back and how often, the ...",
    "documented_in": null,
    "source": "comment at host/hl_mem.c",
    "documented": true,
@@ -1551,13 +1572,34 @@
    "files": [
     {
      "path": "host/hl_mem.c",
-     "line": 411
+     "line": 586
     }
    ],
    "default": "unset",
    "values": "text (`1` named)",
    "explanation": "(HL_MEM_COLD_LISTED=1, the default) The heaps' ranges from the OS layer's own books: the heap, then the address regions above it, ascending, adjacent ones merged; their pages are looked at with QueryWorkingSetEx alone, a page not committed reads as not resident. The walk before it found the committed pages with VirtualQuery, and one VirtualQuery over a large lazily committed range walks its page tables to find where the range ends, with the process's address space lock held: on the main PC, passes of 300-430 ms with ~205 queries, and in each of them a game thread committing memory (NtAllocateVirtualMemory: AllocateMemoryPages, a first touch) sat that long with its virtual core, and every thread waiting for that core ran without one after 250 ms: the 165-317 ms frames of steady play (temple of time, 3 runs of 3).",
    "comment": "(HL_MEM_COLD_LISTED=1, the default) The heaps' ranges from the OS layer's own books: the heap, then the address regions above it, ascending, adjacent ones merged; their pages are looked at with QueryWorkingSetEx alone, a page not committed reads as not resident. The walk before it found the committed pages with VirtualQuery, and one VirtualQuery over a large lazily committed range walks its page tables to find where the range ends, with the process's address space lock held: on the main PC, passes of 300-430 ms with ~205 queries, and in each of them a game thread committing memory (NtAllocateVirtualMemory: AllocateMemoryPages, a first touch) sat that long with its virtual core, and every thread waiting for that core ran without one after 250 ms: the 165-317 ms frames of steady play (temple of time, 3 runs of 3).",
+   "documented_in": null,
+   "source": "comment at host/hl_mem.c",
+   "documented": true,
+   "set_via": "In `hookshot_env.txt`, or in the environment.",
+   "use": null
+  },
+  {
+   "name": "HL_MEM_COLD_LOWMEM",
+   "area": "native",
+   "group": "Native engine",
+   "audience": "developer",
+   "files": [
+    {
+     "path": "host/hl_mem.c",
+     "line": 454
+    }
+   ],
+   "default": "unset",
+   "values": "text",
+   "explanation": "(HL_MEM_COLD_LOWMEM=<MB>: available RAM under which nothing is taken out; 0, the default: never held. 3072 is the proposal).",
+   "comment": "(HL_MEM_COLD_LOWMEM=<MB>: available RAM under which nothing is taken out; 0, the default: never held. 3072 is the proposal).",
    "documented_in": null,
    "source": "comment at host/hl_mem.c",
    "documented": true,
@@ -1572,7 +1614,7 @@
    "files": [
     {
      "path": "host/hl_mem.c",
-     "line": 308
+     "line": 449
     }
    ],
    "default": "unset",
@@ -5209,7 +5251,7 @@
    "files": [
     {
      "path": "host/hl_mem.c",
-     "line": 406
+     "line": 581
     },
     {
      "path": "host/hos_heapsplit.c",
@@ -5234,7 +5276,7 @@
    "files": [
     {
      "path": "host/hl_mem.c",
-     "line": 406
+     "line": 581
     },
     {
      "path": "host/hos_heapsplit.c",

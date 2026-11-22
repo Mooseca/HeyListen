@@ -37,6 +37,8 @@
      HL_MEM_COLD_HEAPS=1  the heaps too (the default)    HL_MEM_COLD_HEAPS=0  the pools only
      HL_MEM_COLD_PRESSURE=0  without the back-off: a pass of 500 ms or more stops all trimming for 60 s, and the pools wait out
        the quiet rule too (the default: the system is paging then, and what comes back is read from the page file)
+     HL_MEM_COLD_LOWMEM=<MB>  no trimming while the system's available RAM is under that (a quarter more to start again; default 0:
+       never held, 3072 proposed). HL_MEM_ACCOUNT=<seconds>  the "hl mem: account:" lines (private commit and working set by owner)
      HL_MEM_COLD_FLAGS=<hex,...>  the pool flags (default 24,64)    HL_MEM_COLD_AGE=<seconds>  the pools' age (default 10)
    Every 10 s two lines "hl mem: cold pages (pools): ..." and "(heaps): ..." give the counters (MB out now, taken out, came
    back and how often, the most that came back in 10 s). */
@@ -438,7 +440,7 @@ static DWORD WINAPI account_main(void *arg) {
 }
 
 static int pressure_on = 1;
-static uint64_t lowmem_mb = 4096;   /* (HL_MEM_COLD_LOWMEM: free RAM under which nothing is taken out; 0: never held) */
+static uint64_t lowmem_mb = 0;   /* (HL_MEM_COLD_LOWMEM=<MB>: available RAM under which nothing is taken out; 0, the default: never held. 3072 is the proposal) */
 static int lowmem_held;
 static int64_t lowmem_since, lowmem_ns, lowmem_passes;
 static int64_t pressure_until;
