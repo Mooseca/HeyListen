@@ -48,7 +48,7 @@ def main():
     text = (ROOT / "tools" / "release" / "make_release.py").read_text(encoding="utf-8")
 
     # 1. the release packages the Python part with the pins, and checks the result
-    m = re.search(r'run\(py \+ \[parts_py, "package".*?\], env=env\)\n(\s*check_prompt_packages\(package\))?', text, re.S)
+    m = re.search(r'run\(py \+ \[parts_py, "package".*?\], env=env\)\n(\s*check_prompt_packages\(package(, previous)?\))?', text, re.S)
     check(m is not None, "make_release.py has no 'release_parts.py package' call")
     check('"--python-packages"' in m.group(0) and "prompt_requirements.txt" in m.group(0),
           "make_release.py's package call has no --python-packages nx2/prompt_requirements.txt")
@@ -74,6 +74,21 @@ def main():
         wrong = site(Path(t) / "wrong", ["%s-0.0.1.dist-info" % n.replace("-", "_") for n, _ in pins])
         check(len(mr.missing_prompt_packages(str(wrong))) == len(pins), "pins of another version do not count")
         check(len(mr.missing_prompt_packages(str(Path(t) / "no-python"))) == len(pins), "no Python at all misses every pin")
+        # (the Python part shipped whole: no tools/python in the package, the cached part's dist-infos are read)
+        import zipfile
+        part_dir = Path(mr.ROOT) / "build" / "release" / "cache" / "release-parts"
+        part_dir.mkdir(parents=True, exist_ok=True)
+        part = part_dir / "HeyListenBuilder-python-testonly0000.zip"
+        try:
+            with zipfile.ZipFile(part, "w") as z:
+                for n, v in pins:
+                    z.writestr("HookshotBuilder/tools/python/Lib/site-packages/%s-%s.dist-info/METADATA" % (n.replace("-", "_"), v), "")
+            lst = Path(t) / "list.txt"
+            lst.write_text("part 00 1 . - - https://example.invalid/HeyListenBuilder-python-testonly0000.zip\n", encoding="utf-8")
+            check(mr.missing_prompt_packages(str(Path(t) / "no-python"), str(lst)) == [],
+                  "a package with no tools/python but a Python part carrying every pin is complete")
+        finally:
+            part.unlink()
 
     # 3. the lookup: what host/prompts.c opens is what the build writes
     src = (ENGINE / "host" / "prompts.c").read_text(encoding="utf-8")

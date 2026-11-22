@@ -76,17 +76,35 @@ def prompt_pins():
     return [tuple(l.split("==")) for l in lines if l]
 
 
-def missing_prompt_packages(package):
-    """The pins of nx2/prompt_requirements.txt that the package folder's Python (tools/python) does not have installed"""
+def python_part_dist_infos(list_path):
+    """The dist-info folder names inside the parts list's Python part, read from the parts cache (release_parts.py downloads it
+    there). Empty when the list names no Python part or the file is not cached."""
+    import zipfile
+    if not list_path or not os.path.isfile(list_path):
+        return set()
+    with open(list_path, encoding="utf-8") as f:
+        urls = [l.split()[-1] for l in f.read().splitlines() if l.startswith("part ") and "-python-" in l]
+    for url in urls:
+        cached = os.path.join(ROOT, "build", "release", "cache", "release-parts", url.rsplit("/", 1)[-1])
+        if os.path.isfile(cached):
+            with zipfile.ZipFile(cached) as z:
+                return {m.split("/")[-2].lower() for m in z.namelist() if m.count("/") >= 1 and m.split("/")[-2].endswith(".dist-info")}
+    return set()
+
+
+def missing_prompt_packages(package, list_path=None):
+    """The pins of nx2/prompt_requirements.txt that the package folder's Python (tools/python) does not have installed. When the
+    package has no tools/python, release_parts.py found the list's Python part already carrying every pin and ships that part as
+    it is: the part's own dist-infos are checked instead."""
     site = os.path.join(package, "tools", "python", "Lib", "site-packages")
-    have = {n.lower() for n in os.listdir(site)} if os.path.isdir(site) else set()
+    have = {n.lower() for n in os.listdir(site)} if os.path.isdir(site) else python_part_dist_infos(list_path)
     return ["%s==%s" % p for p in prompt_pins() if "%s-%s.dist-info" % (p[0].lower().replace("-", "_"), p[1]) not in have]
 
 
-def check_prompt_packages(package):
+def check_prompt_packages(package, list_path=None):
     """Stops a release whose builder could not draw the button prompts: nx2/make_game.py skips them without fontTools (and the
     game then shows the Switch's icons whatever the Button prompts row says: issue #69)"""
-    missing = missing_prompt_packages(package)
+    missing = missing_prompt_packages(package, list_path)
     if missing:
         sys.exit("the package's Python lacks %s: the game would keep the Switch's button icons (nx2/prompt_requirements.txt)"
                  % ", ".join(missing))
@@ -205,7 +223,7 @@ def main():
     run(py + [parts_py, "package", package, "--publish", publish, "--setup", setup, "--list", previous,
               "--profile", os.path.join(ROOT, "profile"),
               "--python-packages", os.path.join(ENGINE, "nx2", "prompt_requirements.txt")], env=env)
-    check_prompt_packages(package)
+    check_prompt_packages(package, previous)
     for f in ("THIRD_PARTY_NOTICES.md",):
         shutil.copyfile(os.path.join(ROOT, f), os.path.join(package, f))
 
