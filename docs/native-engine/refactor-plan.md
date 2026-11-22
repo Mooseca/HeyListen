@@ -64,3 +64,22 @@ Target: no blocking readback. A case tied to gameplay logic is decided individua
 
 - At most 2-3 module owners at a time; no other performance stream runs alongside.
 - Paused until the refactor ends (2026-11-21): VRAM4 (4 GB cards, branch `perf/vram4`) and the order-thread work (ORDER2, `perf/order2`, design note in `replay-cost.md`).
+
+## Results so far (night of 2026-11-21 to 22)
+
+Market, `market-spin`, uniform options; RTX 5070 and PC 3050 (1440p unless said).
+
+| Stream | Branch | What it found | Gain | State |
+|---|---|---|---|---|
+| Step 1: readback ring | `refactor/step1` | R1-R3 served from a lag-2 staged ring, no wait; ranges nobody writes answered at once | 5070 +10%, 3050 +5% (1440p) / +8% (1080p) | **On by default in `refactor/integ1`** (`HL_RB_LAG=0` turns it off) |
+| Native key-0xa0 draw loop | `refactor/writer1` | `HL_GFX_VAR=1`: same pictures, same speed, less translated work | 0 | **On by default in `refactor/integ1`** |
+| Step 2, per pass | `refactor/step2p` | heavy passes are 54-63 draws; 95% of their uniform blocks are written after recording | ceiling ~5% CPU | dropped |
+| Step 2, uniform writer | `refactor/writer1` | the writer is the batch job 0x8009bb80 (skin palettes, vector copies, instanced loop) | ~3% of CPU, off the critical path | not built |
+| Translated shader quality | `refactor/shaderq` | translation ~1:1 with the guest; `RX_VK_POLISH` rewrites | 0 on both GPUs (3050 GPU 17.35 vs 17.3 ms) | off |
+| Replay feed | `refactor/order3`, `refactor/replay2` | `RX_VK_FEED_LOG`: GPU idle is 78-88% "replay not ready", one serial chain, no lock; `RX_VK_PASS_TIMING` forces the serial replay (its gaps are not the shipped ones) | knobs 0 | off; diagnostics kept |
+| Deferred join | `refactor/join1` | the next recording's begin touches globals the workers use, so every join is forced at once | 0 | off |
+
+What this says:
+- On the 3050 at 1440p the GPU is busy 83% of the frame with the game's own work (16.2 ms); its lever is a lower render resolution with upscaling. The replay's own speed is at most ~+14% there, ~+28% on the 5070.
+- The next replay step needs the recording state made per-recording (`table_defer`/`table_pending`, `synced_epoch`, the segment texture table, `mirror_epoch`, `ub_prune`), so a recording can begin while workers finish the last one.
+- Long sessions (#121): readback waits and mirror syncs grow with play time; step 1 removes the waits. To check with a 1 h+ run.
