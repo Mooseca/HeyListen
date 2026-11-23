@@ -1373,11 +1373,19 @@ NV(nvnEventGetValue) {
            while this one is replayed, as far as the window's textures and the replay's queue let it */
         static int nowait = -1;
         if (nowait < 0) nowait = getenv("HOS_PRESENT_NOWAIT") ? atoi(getenv("HOS_PRESENT_NOWAIT")) != 0
-                                 : getenv("RX_VK_FRAMES_IN_FLIGHT") && atoi(getenv("RX_VK_FRAMES_IN_FLIGHT")) > 1;   /* (stream R3: the renderer hands the present over) */
+                                 : (getenv("RX_VK_FRAMES_IN_FLIGHT") && atoi(getenv("RX_VK_FRAMES_IN_FLIGHT")) > 1) ||
+                                   (getenv("RX_VK_ORDER_THREAD") && atoi(getenv("RX_VK_ORDER_THREAD")) != 0);   /* (stream R3, PIPE2: the renderer hands the present over) */
         if (nowait && (c->x[30] == 0x805904a0 || c->x[30] == 0x80590530)) { RET(1); return; }
     }
     LAG_COUNT(LC_EVENT);
     if (hold_on == 2 && nheld && !hold_lingering()) held_flush_why(HF_EVENT);   /* (TICK-054: a held submit may be what signals it) */
+    {   /* (PIPE2, RX_VK_ORDER_THREAD) an event the GPU signals: the submissions handed over before this poll (the held ones just flushed too) replayed first, as the
+           submitting thread's replay had them (rx_backend.c rx_order_join: nothing when none waits). HOS_ORDER_EVENT_JOIN=0: not */
+        static int join = -1;
+        if (join < 0) join = getenv("RX_VK_ORDER_THREAD") && atoi(getenv("RX_VK_ORDER_THREAD")) != 0 &&
+                             !(getenv("HOS_ORDER_EVENT_JOIN") && atoi(getenv("HOS_ORDER_EVENT_JOIN")) == 0);
+        if (join) { void rx_order_join(void); rx_order_join(); }
+    }
     uint32_t v = 0; nvn_gpu_read(((const nvn_event *)P(0))->gpu, &v, 4); RET(v);
     if (sync_log()) hos_log("nvn: EventGetValue %p = %u (lr %#llx)", P(0), v, (unsigned long long)c->x[30]);
 }
