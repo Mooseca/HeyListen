@@ -4,16 +4,38 @@
 Branch `perf/pipe2` from origin/main 4b599eb04 (PIPE1 merged, `RX_VK_TOUCH_FAST` on). Worktree `E:\OOT\HeyListen-wt\pipe2`. Design:
 `pipe1-frame-overlap.md` section 3 (stages 0-3 with their gates). Main PC (RTX 5070); PC 3050 runs are routed by the coordinator.
 
-## State
+## State (stopped 23 Nov ~18:40: the Claude weekly limit; handed over)
 
-- Commits on perf/pipe2: 1da506c92 (stage 0), 9581e0cae (stage 1), 59e05cc3e (tests, switch docs), the readback join narrowed
-  (own thread's jobs, then its submissions only), `RX_VK_ORDER_PIN` (1758bb3b0).
-- Builds in `build/s5/bin`: pipe2a, pipe2b, pipe2c (submissions-only readback join), pipe2d (+ life-long pin) building.
-- Now: pipe2c's order thread is the bound (idle 0.1 ms a frame; its work 8.1-8.4 ms a frame against the PT's inline chain of 7.3-8.3):
-  profile runs (`RX_VK_PROF_FINE`) of pipe2d, off / on / on with `RX_VK_ORDER_PIN=0`, to find where the replay got slower.
-- Then: the A/B (castle, Kokiri, Market, `ab_env.sh`, speed leases at priority 2; slot leases at priority 1), the 4-zone tour
-  (`build/s5/pipe2/tour.sh`), and if it passes the 3050 list (`build/s5/pipe2/`).
-- Scripts: `build/s5/pipe2/build.sh` (build lease + tests + mkg), `func.sh` (slot runs), `tour.sh` (flash / meter tour).
+Done:
+- Stage 0 (`HL_SLACK`, on) and stage 1 (`RX_VK_ORDER_THREAD`, off) on perf/pipe2, tip 1758bb3b0 + this doc; tests: only the known
+  environmental failures (test_nup_paths, test_nup_read_name, test_renderer_new_handler). Builds `build/s5/bin/pipe2a..pipe2d`
+  (pipe2d = the tip's code).
+- Stage 0 slack, main PC, slot runs (machine shared): castle off: main's present wait 1.31-1.60 ms a frame (85-98% of frames over
+  0.5 ms), PT's hand-over wait 0.22-0.65: replay-bound. Kokiri off: present wait 1.62-1.66 ms (96-98%), PT 0.23-0.25: replay-bound.
+  Market: not run yet.
+- Stage 1 works (no crash, 0 flashes in function runs without shots, the meter not frozen) and the overlap happens (the PT waits for
+  the main thread, the main thread never for the present). pipe2c / pipe2d: the order thread is now the bound (idle ~0.1 ms a
+  frame), its replay slower than the PT's inline chain (8.1-8.5 ms a frame); the meter hold gives 15-25% of reads the last result
+  (0% off). No clean fps yet: slot runs only (castle on 126.5 / off 119.9; Kokiri on 115.3 / off 118.0, shared machine).
+
+Next (exact): the speed series that was stopped before its lease was granted (castle + Kokiri, 3 interleaved rounds, then a
+`RX_VK_PROF_FINE` pair), then `python -I build/s5/pipe2/fps.py <tags>`:
+
+    cd /e/OOT/HeyListen && A=(); A+=("p2s1-warm-c|castle-move|hyrule-castle|-"); for i in 1 2 3; do A+=("p2s1-c-off-$i|castle-move|hyrule-castle|-" "p2s1-c-on-$i|castle-move|hyrule-castle|RX_VK_ORDER_THREAD=1"); done; A+=("p2s1-warm-k|kokiri-idle|kokiri-forest|-"); for i in 1 2 3; do A+=("p2s1-k-off-$i|kokiri-idle|kokiri-forest|-" "p2s1-k-on-$i|kokiri-idle|kokiri-forest|RX_VK_ORDER_THREAD=1"); done; A+=("p2s1-pc-off|castle-move|hyrule-castle|RX_VK_PROF_FINE=1" "p2s1-pc-on|castle-move|hyrule-castle|RX_VK_ORDER_THREAD=1 RX_VK_PROF_FINE=1"); bash build/s5/pipe2/speed.sh s1 pipe2d "${A[@]}"
+
+Then the Market (same form, save market-mid, scene market-spin), the tour (`bash build/s5/pipe2/tour.sh pipe2d "p2t-off|-"
+"p2t-on|RX_VK_ORDER_THREAD=1"`: flashes, meter, maps), and if the gate passes (castle and Kokiri +8%, Market within the spread, 0
+flashes, meter not frozen, pictures right) the PC 3050 list in `build/s5/pipe2/`. Slot leases at priority 1, speed at 2 (coordinator).
+
+Open risks / leads:
+- Why the replay is slower on the order thread: one slot profile (shared GPU, not trusted) showed vkQueueSubmit at 10 ms a frame
+  against 2.5 off and the parallel segments 4x slower: check under a speed lease (the PROF_FINE pair above); suspects the GPU queue
+  running ahead (no present pacing on the CPU side), contention with the PT's captures, the 64-72 jobs queued (registrations).
+- The meter's held reads (15-25%): the ring at lag 3 or the readback join's narrowing; watch the picture's exposure in the tour.
+- Reads outside the capture view (stage 2) not covered: texture uploads and collected writes read guest memory at replay time.
+- `RX_VK_ORDER_RB_JOIN=1` (a readback waits for its own thread's submissions only) follows the inline replay's semantics; =2 is the
+  conservative arm if pictures go wrong.
+- Scripts: `build/s5/pipe2/build.sh <name> [tests]`, `func.sh`, `tour.sh`, `speed.sh`, `fps.py`.
 
 ## Stage 0: the stages' slack (`HL_SLACK`, on; =0 off)
 
