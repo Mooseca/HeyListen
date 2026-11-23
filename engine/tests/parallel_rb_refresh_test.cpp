@@ -108,6 +108,10 @@ int rbclass_mode(int) { return 0; }
 bool rbclass_check(int) { return false; }
 // (STEP1, HL_RB_LAG: the readback ring stages no range in the model, so every written binding queues its write-back)
 bool rbring_stage_bind(uint64_t, uint64_t, VkBuffer, uint64_t) { return false; }
+// (EXPO1's test switch HL_RB_TEST_DIRECT: unset in the model, so no binding goes to guest memory on purpose)
+bool rbring_test_direct(uint64_t, uint64_t) { return false; }
+uint64_t mem_rec_value = 0;
+void wb_pages_note(uint64_t, uint64_t, uint64_t) {}   // (WBL1's put-off pages: never reached in the model)
 void rbck_record(VkCommandBuffer, int, const std::map<Pool*, std::vector<VkBufferCopy>>&) {}   // (READB2 CHECK: off)
 #include "rb_refresh.inc"
 
