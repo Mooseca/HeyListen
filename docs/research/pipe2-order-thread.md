@@ -6,9 +6,14 @@ Branch `perf/pipe2` from origin/main 4b599eb04 (PIPE1 merged, `RX_VK_TOUCH_FAST`
 
 ## State
 
-- Commits: 1da506c92 (stage 0), 9581e0cae (stage 1), 59e05cc3e (tests, switch docs), then the readback join narrowed (pipe2b).
-- Build `pipe2a` (9581e0cae + test fixes): runs, function runs below. Build `pipe2b` (own-thread readback join) building.
-- Next: function run of pipe2b, then the A/B (castle, Kokiri, Market) and the 4-zone tour.
+- Commits on perf/pipe2: 1da506c92 (stage 0), 9581e0cae (stage 1), 59e05cc3e (tests, switch docs), the readback join narrowed
+  (own thread's jobs, then its submissions only), `RX_VK_ORDER_PIN` (1758bb3b0).
+- Builds in `build/s5/bin`: pipe2a, pipe2b, pipe2c (submissions-only readback join), pipe2d (+ life-long pin) building.
+- Now: pipe2c's order thread is the bound (idle 0.1 ms a frame; its work 8.1-8.4 ms a frame against the PT's inline chain of 7.3-8.3):
+  profile runs (`RX_VK_PROF_FINE`) of pipe2d, off / on / on with `RX_VK_ORDER_PIN=0`, to find where the replay got slower.
+- Then: the A/B (castle, Kokiri, Market, `ab_env.sh`, speed leases at priority 2; slot leases at priority 1), the 4-zone tour
+  (`build/s5/pipe2/tour.sh`), and if it passes the 3050 list (`build/s5/pipe2/`).
+- Scripts: `build/s5/pipe2/build.sh` (build lease + tests + mkg), `func.sh` (slot runs), `tour.sh` (flash / meter tour).
 
 ## Stage 0: the stages' slack (`HL_SLACK`, on; =0 off)
 
@@ -62,6 +67,21 @@ the main thread, the main thread never for the present; fence waits, polls, catc
 thread) but one CPU readback a frame not served by the ring joined *every* job handed over, so the main thread waited for the replay
 of the frame before again (Kokiri fell to 73 fps). Inline, a reader only had its own thread's submits replayed; the other threads'
 (the PT's) were being replayed beside it. Fixed in pipe2b: `RX_VK_ORDER_RB_JOIN=1` (default) waits for the reading thread's own jobs.
+
+### 2. pipe2b and pipe2c, function runs (slot a)
+
+pipe2b (own thread's jobs): the main thread's one readback a frame (0x115bcf9580 +0x1b580, `RX_VK_ORDER_LOG`) still waited 2 ms a frame
+(once 56 ms): its last job was a texture registration, queued behind the PT's frame. Inline, registrations never waited for the replay.
+Kokiri on 117.6 against off 118.0 fps. pipe2c counts only the thread's submissions: readbacks 0 waits; now the order thread is the bound:
+
+| run | fps | order thread | joins |
+|---|---:|---|---|
+| Kokiri on | 115.3 | idle 0.11 ms a frame, 64 jobs queued on average (138 at most) | fence waits 495 / 600 frames, 0.79 ms a frame |
+| castle on | 126.5 | idle 0.07 ms a frame, 72 jobs queued (154 at most) | fence waits 511, 0.67 ms a frame |
+
+The meter: 308-496 of 2000 reads given the last result again (0 in the runs before; not frozen: frozen is >= 1990). The order thread's
+work, 8.1-8.5 ms a frame, is more than the PT's inline chain (submits + present, 6.7-7.4 ms in PIPE1's traces): the replay got slower
+on its own thread.
 
 ## Dead ends
 
