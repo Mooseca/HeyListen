@@ -5783,6 +5783,7 @@ bool wait_value_bounded(uint64_t v) {
     return r == VK_SUCCESS;
 }
 void ot_join_all(int site);   // (PIPE2)
+void ot_join_readback(uint64_t gpu, uint64_t size);
 void invalidate(uint64_t gpu, uint64_t size) {
     static const bool rb_prof = getenv("RX_VK_RB_PROF") != nullptr || getenv("RX_VK_TL") != nullptr || getenv("RX_VK_TL_S") != nullptr;
     RbScope rbs(rb_prof, gpu, size);
@@ -5811,10 +5812,10 @@ void invalidate(uint64_t gpu, uint64_t size) {
     } rb_quiet_post{gpu, size};
     const int rb_cls = size ? rbclass_of(size) : 0;
     const bool rb_late = rb_cls && !rbclass_check(rb_cls) && (rbclass_mode(rb_cls) & 2);
-    // (PIPE2, RX_VK_ORDER_THREAD) a read the ring does not answer reads what the submissions handed over before it write back: they
-    // are replayed first, as the submitting thread's replay had them by now (the write-back registrations are made as they replay)
+    // (PIPE2, RX_VK_ORDER_THREAD) a read the ring does not answer: the submissions this thread handed over before it replayed first,
+    // as the submitting thread's own replay had them by now (their write-back registrations are made as they replay): ot_join_readback
     if (size && !ring_serve && !rb_late && order_thread_on() && !(size == 0x1040 && expo_mode() == 1 && expo_serves(host->gpu_guest(gpu))))
-        ot_join_all(3);
+        ot_join_readback(gpu, size);
     struct RbClassPost {
         int cls;
         uint64_t gpu, size;
@@ -8262,6 +8263,7 @@ int ot_ahead() {
     return n;
 }
 thread_local bool ot_self = false;
+thread_local uint64_t ot_my_seq = 0;   // (the last job this thread handed over)
 std::mutex ot_mu;
 std::condition_variable ot_cv, ot_done_cv;
 std::deque<Job> ot_jobs;               // (ot_mu)
@@ -8387,6 +8389,7 @@ void ot_push(Job&& j) {
     {
         std::lock_guard lk(ot_mu);
         j.seq = ++ot_seq_pushed;
+        ot_my_seq = j.seq;
         if (j.kind == JOB_PRESENT) ot_presents++;
         ot_jobs.push_back(std::move(j));
     }
@@ -8422,7 +8425,31 @@ void ot_join_all(int site) {
     if (ot_seq_done.load(std::memory_order_acquire) >= want) return ot_note(site, 0, false);
     const int64_t t0 = ot_now();
     ot_wait_until([want] { return ot_seq_done.load(std::memory_order_acquire) >= want; }, UINT64_MAX);
-    ot_note(site, ot_now() - t0, true);
+    const int64_t d = ot_now() - t0;
+    ot_note(site, d, true);
+    static const bool log_each = getenv("RX_VK_ORDER_LOG") && atoi(getenv("RX_VK_ORDER_LOG")) != 0;
+    static std::atomic<int> logged{0};
+    if (log_each && logged++ < 60) logf("vk: order thread: %s waited %.2f ms for every job handed over", kOtSite[site], d / 1e6);
+}
+/// (PIPE2) a CPU readback the ring does not serve. In the replay inline, the reading thread's own submits had been replayed by now
+/// (on it), while the other threads' were being replayed beside it (OoT's main thread reads while the PT replays the frame before):
+/// so it waits for the jobs this thread handed over (RX_VK_ORDER_RB_JOIN=1, the default); =2: every job handed over (all threads'),
+/// =0: none. RX_VK_ORDER_LOG=1: the first 60 reads that waited, by range
+void ot_join_readback(uint64_t gpu, uint64_t size) {
+    // (PIPE2) RX_VK_ORDER_RB_JOIN=<0|1|2> (1): what a CPU readback waits for with the order thread: nothing, this thread's jobs, all jobs
+    static const int mode = getenv("RX_VK_ORDER_RB_JOIN") ? atoi(getenv("RX_VK_ORDER_RB_JOIN")) : 1;
+    // (PIPE2) RX_VK_ORDER_LOG=1: the order thread's joins one by one (the first 60 readbacks that waited)
+    static const bool log_each = getenv("RX_VK_ORDER_LOG") && atoi(getenv("RX_VK_ORDER_LOG")) != 0;
+    if (ot_self || !mode) return;
+    if (mode == 2) return ot_join_all(OT_READBACK);
+    const uint64_t want = ot_my_seq;
+    if (ot_seq_done.load(std::memory_order_acquire) >= want) return ot_note(OT_READBACK, 0, false);
+    const int64_t t0 = ot_now();
+    ot_wait_until([want] { return ot_seq_done.load(std::memory_order_acquire) >= want; }, UINT64_MAX);
+    const int64_t d = ot_now() - t0;
+    ot_note(OT_READBACK, d, true);
+    static std::atomic<int> logged{0};
+    if (log_each && logged++ < 60) logf("vk: order thread: readback %#llx +%#llx waited %.2f ms for this thread's jobs", (unsigned long long)gpu, (unsigned long long)size, d / 1e6);
 }
 /// a fence wait (nvnSyncWait, nvnQueueFinish's) for value f: false when the game is to be told "not yet" (a poll, or the timeout
 /// ran out while its submission waited for the order thread); *timeout_ns is what is left of the wait
