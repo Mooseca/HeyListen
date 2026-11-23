@@ -34,6 +34,7 @@ import fastvec   # (longshot #1576, Veix) TBL / EXT, vector loads and DUP as sin
 import vecfp   # (longshot #1782, snaildev99) SSE fast paths for lane-by-lane float forms (A64_VECFP)
 import fpxkeep   # (longshot #1905, snaildev99) NaN, infinite operands and exact-zero multiply-adds kept off the software bodies (A64_FPXKEEP)
 import cmpflags   # (longshot #1871, dyst) a subtraction's V as N xor (a < b): A64_SUB_V
+import nativefp   # (ProjectReLink, pixl27) native floating point in the hot functions, FPX_EASY, vector registers as locals
 import lift_fixes
 import chunks
 import standalone
@@ -50,10 +51,12 @@ insn.install()
 vecfp.install()   # (around insn's translate: the forms the kit's passes and the FP blocks leave, behind SSE fast paths)
 cmpflags.install()   # (around that translate: text only, after the forms are chosen)
 fpxkeep.install()   # (the kit's lane routes and wrappers, in a64_fpx.h's text)
+nativefp.install_regs()   # (ProjectReLink, pixl27) A64_LOCAL_VREGS: the kit's localize_regs as guest_locals wraps it
 local_regs.install()   # (the defaults; around the kit's localize_regs, op_text and Lifter.emit_function: the context kept where text edits read it)
 dead_flags.install()
 fastvec.install()   # (around the kit's hot_text, fpx_header and Lifter.emit_function: after the FP blocks)
 lift_fixes.install()
+nativefp.install()   # (ProjectReLink, pixl27) A64_NATIVE_FP, A64_FPX_EASY: around fpx_header, hot_text and emit_function, last
 
 
 def module_of(img, pc):
@@ -180,7 +183,7 @@ def main():
         import oot_view   # (fork: the gameplay view's hook, which oot_patches.py's patch_view no longer finds; host/hos_main.c)
         oot_view.install(L, img)
     L.discover(max_insns=a.max_func)
-    if a64_lift.local_regs() or a64_lift.local_flags():   # (nx2/guest_locals.py: which functions keep the context)
+    if local_regs.text_passes():   # (nx2/guest_locals.py: which functions keep the context, and keep main's text)
         print("locals: %d functions with spliced code kept in the context" % local_regs.keep_spliced(L))
         print("locals: %d functions entered above their first block kept in the context" % local_regs.keep_entered_below(L))
         print("locals: %d functions that hold an address the text edits name kept in the context" % (
@@ -220,6 +223,8 @@ def main():
             standalone.write_nvn_exports(gen, nvn)
             print("standalone: nvn2_exports.c (%d sdk NVN functions routed to host/nvn2.c)" % len(nvn))
         L.report()
+        if nativefp.report():
+            print(nativefp.report())
         print("interrupt polls: %d loop headers in %d functions" % (poll.stats["polls"], poll.stats["functions"]))
         print("wrote %d code files to %s (%.0fs)" % (len(files), gen, time.time() - t0))
     print("done (%.0fs)" % (time.time() - t0))
