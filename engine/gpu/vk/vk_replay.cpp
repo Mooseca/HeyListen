@@ -8352,6 +8352,14 @@ void ot_main() {
     static const int prio = getenv("RX_VK_ORDER_PRIO") ? atoi(getenv("RX_VK_ORDER_PRIO")) : 1;
     SetThreadPriority(GetCurrentThread(), prio >= 2 ? THREAD_PRIORITY_HIGHEST : prio == 1 ? THREAD_PRIORITY_ABOVE_NORMAL : THREAD_PRIORITY_NORMAL);
     ot_self = true;
+    // (PIPE2) RX_VK_ORDER_PIN=1 (default; 0: each replay pins and unpins itself, ReplayPin): the order thread kept on the core the host
+    // keeps for the replay (hos_reserved_cpus) for its whole life, as the old replay thread was: no affinity change at every job
+    static const bool pin_life = !getenv("RX_VK_ORDER_PIN") || atoi(getenv("RX_VK_ORDER_PIN")) != 0;
+    if (pin_life)
+        if (const uint64_t m = replay_pin_mask()) {
+            SetThreadAffinityMask(GetCurrentThread(), (DWORD_PTR)m);
+            replay_pin_depth = 1;   // (the ReplayPins inside its jobs then change nothing)
+        }
     for (;;) {
         Job j;
         {

@@ -2,7 +2,7 @@
  "schema": 1,
  "generated_by": "engine/scripts/list_switches.py",
  "scope": "C, C++ and headers under engine/ (engine/tests and vendored trees other than a64-kit excluded) and the Python the builder, the lifter and the scripts run: getenv, std::getenv, _wgetenv, the code's own env helpers and table-driven reads, and os.environ.",
- "count": 1450,
+ "count": 1451,
  "switches": [
   {
    "name": "A64_",
@@ -25244,17 +25244,38 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 8430
+     "line": 8438
     },
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 8442
+     "line": 8450
     }
    ],
    "default": "off (unset)",
    "values": "on or off (0, false, off, no and empty are off); the description names `0`, `1`",
    "explanation": "(PIPE2) RX_VK_ORDER_LOG=1: the order thread's joins one by one (the first 60 readbacks that waited).",
    "comment": "(PIPE2) RX_VK_ORDER_LOG=1: the order thread's joins one by one (the first 60 readbacks that waited).",
+   "documented_in": null,
+   "source": "comment at gpu/vk/vk_replay.cpp",
+   "documented": true,
+   "set_via": "In `hookshot_env.txt`, or in the environment.",
+   "use": null
+  },
+  {
+   "name": "RX_VK_ORDER_PIN",
+   "area": "renderer",
+   "group": "Rendering and GPU",
+   "audience": "developer",
+   "files": [
+    {
+     "path": "gpu/vk/vk_replay.cpp",
+     "line": 8357
+    }
+   ],
+   "default": "on (unless set to 0, false, off or no)",
+   "values": "on or off (0, false, off, no and empty are off); the description names `0`, `1`",
+   "explanation": "(PIPE2) RX_VK_ORDER_PIN=1 (default; 0: each replay pins and unpins itself, ReplayPin): the order thread kept on the core the host keeps for the replay (hos_reserved_cpus) for its whole life, as the old replay thread was: no affinity change at every job.",
+   "comment": "(PIPE2) RX_VK_ORDER_PIN=1 (default; 0: each replay pins and unpins itself, ReplayPin): the order thread kept on the core the host keeps for the replay (hos_reserved_cpus) for its whole life, as the old replay thread was: no affinity change at every job.",
    "documented_in": null,
    "source": "comment at gpu/vk/vk_replay.cpp",
    "documented": true,
@@ -25269,7 +25290,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 8459
+     "line": 8467
     }
    ],
    "default": "off (unset)",
@@ -25311,7 +25332,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 8440
+     "line": 8448
     }
    ],
    "default": "1",
@@ -25658,7 +25679,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 9132
+     "line": 9140
     }
    ],
    "default": "0 (unset)",
@@ -27511,7 +27532,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 8789
+     "line": 8797
     },
     {
      "path": "gpu/vk/vk_shader.cpp",
@@ -27603,7 +27624,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 9046
+     "line": 9054
     }
    ],
    "default": "on (unless set to 0, false, off or no)",
@@ -29339,7 +29360,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 8569
+     "line": 8577
     }
    ],
    "default": "0",
@@ -29360,11 +29381,11 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 8476
+     "line": 8484
     },
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 8550
+     "line": 8558
     }
    ],
    "default": "on (unless set to 0, false, off or no)",
