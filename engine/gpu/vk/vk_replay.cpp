@@ -5608,7 +5608,12 @@ bool tex_pages_any(uint64_t gpu, uint64_t size) {
     }
     return false;
 }
-void texture_created_of(const nvn_tex* t) { tex_pages_add(t, +1); }
+void texture_created_of(const nvn_tex* t) {
+    tex_pages_add(t, +1);
+    // (WBL1, RX_VK_WB_LAZY) the texture's texels are read from guest memory when it is first used: pages of its storage that a GPU
+    // write put off are written back now, ahead of that read, and not put off again (the guard found the texture upload reading them)
+    if (t && t->gpu && t->gpu < (1ull << 39) && t->L.size) memory_wb_texture(t->gpu, t->L.size);
+}
 uint64_t fence();
 // ---- (stream R2) RX_VK_RB_PROF=1: every CPU read of GPU results (invalidate) timed by phase, and what it waited for, by the
 // thread that read and by range; a line every 300 presents. Phases: 0 the ticket's wait for the replay section in progress
@@ -7022,11 +7027,24 @@ void do_present(const nvn_tex* t, const int crop[4]) {
                 vkCmdCopyImageToBuffer(r.cmd, shot_image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, shot_bufs[presents & 1], 1, &c);
             }
         }
+        // (WBL1, RX_VK_WB_LAZY; ProjectReLink, pixl27) this frame's share of the write-backs that were put off: with this recording's
+        // own (a thirtieth of the pages), or RX_VK_WB_LAZY_OWN=1: in a recording of its own after it, below
+        const bool wb_flush = memory_wb_pending();
+        if (wb_flush && !memory_wb_flush_own()) memory_wb_flush_queue();
         memory_end_submission(r.cmd);
         full_barrier(r.cmd);
         submit_recording(r);   // (nothing is stopped at a present: drain)
         if (pushed.load() < value) pushed = value;
         done_max = std::max(done_max, value), signaled = std::max(signaled, value);
+        if (wb_flush && memory_wb_flush_own()) {
+            // (after the recording that signals the present's value, as the frame interpolation's below: the game waits for that value)
+            Recording& w = begin_recording(value + 1);
+            memory_begin_submission();
+            memory_wb_flush_queue();
+            memory_end_submission(w.cmd);
+            full_barrier(w.cmd);
+            submit_recording(w, false);
+        }
         if (fg_after) {
             // (its slot is free again once the next submit's value is reached: that one comes after it)
             Recording& g = begin_recording(value + 1);

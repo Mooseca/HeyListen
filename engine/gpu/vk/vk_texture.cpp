@@ -1207,6 +1207,8 @@ const uint8_t* guest_bytes(uint64_t gpu, uint64_t n, std::vector<uint8_t>& scrat
     const uint8_t* p = host->gpu_ptr(gpu, &avail);
     // (TICK-060m, RX_VK_LATE_DEFER) a late page here whose fix is pending: guest memory has the write-back only once its value is done
     if (gpu < (1ull << 40)) memory_late_fix_wait_range(gpu, n);
+    // (WBL1, RX_VK_WB_LAZY) pages of this range whose write-back was put off: copied from their mirrors into guest memory now
+    if (gpu < (1ull << 40)) memory_wbl_settle(gpu, n);
     // (below 1 TB the GPU address is the guest's: the storage as it was at the submit being replayed, where the game has
     // rewritten it since (vk_memory.cpp, "texture storage in the capture"))
     if (p && avail >= n) return gpu < (1ull << 40) ? memory_as_submitted(gpu, p, n, scratch, tl_first_upload, tl_reupload) : p;
