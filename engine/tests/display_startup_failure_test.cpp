@@ -121,6 +121,8 @@ static void load_hookshot_env() { ++env_loads; }
 static int setenv(const char* name, const char* value, int) { return _putenv_s(name, value); }
 #endif
 
+static void nv_cache_env(void) {}   // (QUICK1: the NVIDIA driver cache environment, set before Vulkan loads; nothing to do here)
+
 #include "display_startup_actual.inc"
 
 static void headless_setting(const char* value) {

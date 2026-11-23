@@ -53,7 +53,7 @@ class TargetImagePoolTests(unittest.TestCase):
         self.assertIn("uint64_t pool_key = 0;", self.hdr)
 
     def test_a_texture_made_for_a_target_is_one_and_its_image_comes_from_the_targets_blocks(self):
-        get = block(self.tex, "Texture* texture_get(const nvn_tex* t, bool for_sampling)")
+        get = block(self.tex, "Texture* texture_get(const nvn_tex* t, bool for_sampling, bool need_attach)")
         self.assertIn("create(k, t, fi.format, fi.astc, bw, bh, bpb, !for_sampling)", get)
         make = block(self.tex, "Texture* create(const Key& key")
         self.assertIn("create_image(ci, x.image, x.allocation, big, as_target && !is_bc(x.format) && !is_astc(x.format))", make)
