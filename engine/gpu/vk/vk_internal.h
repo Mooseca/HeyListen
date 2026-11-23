@@ -3,9 +3,11 @@
 // The Vulkan back end's shared state (gpu/vk).
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdlib>
 #include <array>
+#include <functional>
 #include <atomic>
 #include <mutex>
 #include <string>
@@ -557,6 +559,13 @@ void res_pipeline_counts(size_t* graphics, size_t* used, int64_t* modules_droppe
 bool vma_init(PFN_vkGetInstanceProcAddr gipa);
 bool create_image(const VkImageCreateInfo& ci, VkImage& image, VmaAllocation& allocation, bool dedicated = false, bool target = false);
 void destroy_image(VkImage image, VmaAllocation allocation);
+/// (RX_VK_REAP, vk_vma.cpp) fn on the reaper's thread, in the order given, or here with RX_VK_REAP=0: a texture's views, a buffer, memory
+/// of its own that the GPU is done with. destroy_image and destroy_buffer go there themselves
+void reap(std::function<void()> fn);
+/// Waits (5 s at most) for what the reaper holds; true when something was queued: a creation the driver refused tries again after it
+bool reap_drain();
+int64_t reap_queued();
+void reap_report(char* out, size_t n);
 /// What an allocation really takes (VkMemoryRequirements.size: padding, alignment, the driver's metadata), 0 for none
 uint64_t allocation_size(VmaAllocation allocation);
 /// (TICK-023/030) the size from which an image gets memory of its own (RX_VK_BIG_IMAGE_MB, 16 MB; 0: none)
@@ -696,6 +705,15 @@ inline int prof_pick(ProfThread& t) {   // (the weight: 8 one time in eight, els
     t.rng ^= t.rng << 13, t.rng ^= t.rng >> 17, t.rng ^= t.rng << 5;
     return t.rng >> 29 ? 0 : 8;   // (the top bits: xorshift's low ones are its weakest)
 }
+/// (HeyListen, v0.4.4) A sampled scope that took over this long (ns) is counted once as it was, not eight times: a draw's descriptors
+/// take microseconds, so a millisecond in one is the thread being switched out or the driver stalling, and eight times it made a frame's
+/// "descriptors" cause out of one such interruption (v0.4.3 telemetry: 3,628 descriptors hitches of 216 ms on average, a frame
+/// 8x its own stall). RX_VK_PROF_CAP=<us> sets it (default 1000), 0: no cap, as before. The sampled phases' totals in the logs are
+/// the same but for those scopes
+inline const int64_t prof_cap_ns = [] {
+    const char* e = getenv("RX_VK_PROF_CAP");
+    return e && *e ? (int64_t)std::max(0, atoi(e)) * 1000 : (int64_t)1000000;
+}();
 struct ProfScopeHot {
     int phase, k;
     int64_t t0, x0, a0;
@@ -707,7 +725,8 @@ struct ProfScopeHot {
     ~ProfScopeHot() {
         ProfThread& t = prof_t;
         const int64_t x = t.exact - x0;   // (timed exactly inside: once, as it is)
-        const int64_t own = k ? (prof_now() - t0 - x) * k : 0;
+        const int64_t raw = k ? prof_now() - t0 - x : 0;
+        const int64_t own = k > 1 && prof_cap_ns > 0 && raw > prof_cap_ns ? raw : raw * k;
         if (k) prof_ns[phase] += own + x;
         else if (x) prof_ns[phase] += x;
         if (phase == PROF_DESC) {   // (v0.4.4: the build's own time and the texture work inside it, apart: DescPart)

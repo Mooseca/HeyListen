@@ -69,6 +69,15 @@ __declspec(dllexport) void hos_mem_untag(const void *ptr) {
     ReleaseSRWLockExclusive(&tags_lock);
 }
 
+int hos_mem_tag_name(uint64_t addr, char *out, int n) {
+    int found = 0;
+    AcquireSRWLockExclusive(&tags_lock);
+    for (int i = 0; i < ntags; i++)
+        if (addr >= tags[i].lo && addr - tags[i].lo < tags[i].size) { snprintf(out, (size_t)n, "%s", tags[i].name); found = 1; break; }
+    ReleaseSRWLockExclusive(&tags_lock);
+    return found;
+}
+
 typedef struct { void *va; ULONG_PTR attr; } WsInfo;
 typedef BOOL(WINAPI *QueryWsFn)(HANDLE, PVOID, DWORD);
 typedef struct { DWORD cb, PageFaultCount; SIZE_T PeakWorkingSetSize, WorkingSetSize, QuotaPeakPagedPoolUsage, QuotaPagedPoolUsage,

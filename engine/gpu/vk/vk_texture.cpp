@@ -23,6 +23,7 @@
 #endif
 #include <atomic>
 #include <chrono>
+#include <climits>
 #include <cmath>
 #include <cstring>
 #include <exception>
@@ -322,8 +323,8 @@ bool pool_take(uint64_t key, VkImage& image, VmaAllocation& allocation, std::uno
     return true;
 }
 void pool_destroy(Pooled& p) {
-    for (auto& kv : p.views)
-        if (kv.second) vkDestroyImageView(dev.device, kv.second, nullptr);
+    if (!p.views.empty())   // (RX_VK_REAP: before the image on the reaper's thread, as here)
+        reap([views = std::move(p.views)] { for (auto& kv : views) if (kv.second) vkDestroyImageView(dev.device, kv.second, nullptr); });
     destroy_image(p.image, p.allocation);
     st_pool_destroyed++;
 }
@@ -2160,6 +2161,77 @@ void upload_frame_report() {
     for (UpStat& u : up_frame) u = {};
     up_slowest.clear();
 }
+/// A big texture whose whole storage is zero: the image cleared to zero on the GPU, not unswizzled on the CPU. All-zero bits are
+/// 0 in every format this path takes (not ASTC or BC, not one widened on the way), so the clear is what the unswizzle would have
+/// made. The game's shadow map (12288 x 12288 D16, 288 MB, its storage fresh and zero) took 73 ms of the replay thread at a
+/// scene change (the GPU unswizzle takes colour images only); the check reads the storage once, on several threads, and stops at
+/// the first word that is not 0. Ported by hand from Longshot (NotRexed, #2175) and ProjectReLink (pixl27, RX_VK_ZERO_UPLOAD).
+/// RX_VK_ZERO_UPLOAD=0: off, the storage is unswizzled as before
+bool upload_all_zero(Texture& tex, uint64_t total, const Ranges* dirty, bool widened_format) {
+    static const bool off = getenv("RX_VK_ZERO_UPLOAD") && atoi(getenv("RX_VK_ZERO_UPLOAD")) == 0;
+    if (off || total < (32ull << 20) || tex.astc || tex.bc || tex.sparse || widened_format || !tex.image ||
+        tex.type == VK_IMAGE_TYPE_3D || is_bc(tex.format) || is_astc(tex.format))
+        return false;
+    if (dirty) {   // (only an upload of the whole storage: a part of it says nothing of the rest)
+        uint64_t covered = 0;
+        for (const auto& r : *dirty) covered += std::min(r.second, total) - std::min(r.first, total);
+        if (covered < total) return false;
+    }
+    // (live memory, as the GPU unswizzle reads it: not a storage the capture kept as it was at its submit, which the CPU path reads)
+    if (tex.gpu >= (1ull << 40) || memory_has_shadow(tex.gpu, total)) return false;
+    uint64_t avail = 0;
+    const uint8_t* p = host->gpu_ptr(tex.gpu, &avail);
+    if (!p || avail < total) return false;
+    const auto t0 = std::chrono::steady_clock::now();
+    std::atomic<bool> found{false};
+    const uint32_t nthreads = std::clamp(std::thread::hardware_concurrency() / 2, 1u, 8u);
+    const uint64_t per = ((total / nthreads) + 4095) & ~4095ull;
+    auto part = [&](uint32_t t) {
+        const uint64_t a = std::min<uint64_t>(total, (uint64_t)t * per), b = std::min<uint64_t>(total, a + per);
+        for (uint64_t at = a; at < b && !found.load(std::memory_order_relaxed); at += 65536) {
+            const uint64_t end = std::min<uint64_t>(b, at + 65536);
+            uint64_t acc = 0;
+            uint64_t k = at;
+            for (; k + 8 <= end; k += 8) {
+                uint64_t w;
+                std::memcpy(&w, p + k, 8);
+                acc |= w;
+            }
+            for (; k < end; k++) acc |= p[k];
+            if (acc) found.store(true, std::memory_order_relaxed);
+        }
+    };
+    if (nthreads > 1) {
+        std::vector<std::thread> th;
+        for (uint32_t t = 1; t < nthreads; t++) th.emplace_back(part, t);
+        part(0);
+        for (auto& x : th) x.join();
+    } else {
+        part(0);
+    }
+    const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+    static std::atomic<int> told{0};
+    if (found.load()) {
+        if (told.fetch_add(1) < 4)
+            logf("vk: upload: %ux%u NVN %#x (%llu MB) is not all zero (checked in %.1f ms): unswizzled as before", tex.width,
+                 tex.height, tex.nvn_format, (unsigned long long)(total >> 20), ms);
+        return false;
+    }
+    texture_resident_flush(&tex);
+    checkpoint_mark(upload_cmd(), tex.gpu, 'u');
+    const VkImageSubresourceRange range{tex.aspect, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS};
+    if (tex.aspect & (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT)) {
+        const VkClearDepthStencilValue z{0.0f, 0};
+        vkCmdClearDepthStencilImage(upload_cmd(), tex.image, VK_IMAGE_LAYOUT_GENERAL, &z, 1, &range);
+    } else {
+        const VkClearColorValue z{};
+        vkCmdClearColorImage(upload_cmd(), tex.image, VK_IMAGE_LAYOUT_GENERAL, &z, 1, &range);
+    }
+    if (told.fetch_add(1) < 4)
+        logf("vk: upload: %ux%u NVN %#x (%llu MB) is all zero: cleared on the GPU (checked in %.1f ms)", tex.width, tex.height,
+             tex.nvn_format, (unsigned long long)(total >> 20), ms);
+    return true;
+}
 bool upload_inner(Texture& tex, const Ranges* dirty);
 bool upload(Texture& tex, const Ranges* dirty) {
     const auto t0 = std::chrono::steady_clock::now();
@@ -2224,6 +2296,7 @@ bool upload_inner(Texture& tex, const Ranges* dirty) {
     int widen_from = 0;
     const VkFormat src_vf = tex.d.format ? vk_format(tex.nvn_format).format : tex.format;
     widened(src_vf, &widen_from);
+    if (upload_all_zero(tex, total, dirty, widen_from != 0)) return true;
     const int src_bpb = tex.bpb;
     const int out_bpb = tex.astc ? 4 : widen_from ? (widen_from == 3 ? 4 : widen_from == 6 ? 8 : 16) : src_bpb;
     const uint32_t copy_layers = tex.type == VK_IMAGE_TYPE_3D ? 1 : tex.layers;
@@ -2566,6 +2639,27 @@ void forget_gpu(Texture* tex) {
         }
 }
 
+/// (QUICK1, RX_VK_COMPUTE_ONLY_IMAGES=1, off until measured; idea: Rekarina's notes, 2026-11, SIM_NO_ATTACH) A colour image the game
+/// made with the shader-image flag and looked up first for sampling or storage is made without COLOR_ATTACHMENT usage: the driver
+/// then keeps it in the layout compute likes best (a fluid pass of Rekarina's went from 9 ms to 0.2 ms, in 2 of 5 runs). The
+/// game gives no "this is a render target" flag, so the first time one is bound as a target anyway (texture_get's need_attach), its
+/// image is made again with the usage, its key is remembered (attach_seen: the next one of that shape is made with it from the start),
+/// and its content up to then is lost: a rare, one-time event per shape, not a per-frame one.
+bool compute_only_on() {
+    static const bool on = getenv("RX_VK_COMPUTE_ONLY_IMAGES") && atoi(getenv("RX_VK_COMPUTE_ONLY_IMAGES")) != 0;
+    return on;
+}
+std::mutex attach_mu;
+std::unordered_set<uint64_t> attach_seen;
+uint64_t attach_key(const nvn_tex* t) {
+    return mix(mix(mix(t->gpu, t->d.width | (uint64_t)t->d.height << 32), (uint64_t)t->d.format), (uint64_t)t->d.target << 8 | std::max(1, t->d.samples));
+}
+bool attach_known(const nvn_tex* t) {
+    std::lock_guard lk(attach_mu);
+    return attach_seen.count(attach_key(t)) != 0;
+}
+std::atomic<int> st_no_attach_made{0}, st_no_attach_upgraded{0};
+
 /// (as_target: texture_get's for a render target or a copy's destination, not for sampling: its image goes to the render targets'
 /// blocks, and to the target pool when its texture goes)
 Texture* create(const Key& key, const nvn_tex* t, VkFormat vf, bool astc, int bw, int bh, int bpb, bool as_target) {
@@ -2748,7 +2842,14 @@ Texture* create(const Key& key, const nvn_tex* t, VkFormat vf, bool astc, int bw
     } else if (!is_bc(x.format) && !is_astc(x.format)) {
         // (any format of the class may be a view: attachments and storage where one of them can)
         flags |= VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT | VK_IMAGE_CREATE_EXTENDED_USAGE_BIT;
-        x.usage |= VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+        x.usage |= VK_IMAGE_USAGE_SAMPLED_BIT;
+        if (compute_only_on() && !as_target && !x.sparse && x.samples == VK_SAMPLE_COUNT_1_BIT && (d.flags & NVN_TEXTURE_FLAGS_IMAGE) &&
+            !attach_known(t)) {
+            x.no_attach = true;
+            st_no_attach_made++;
+        } else {
+            x.usage |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+        }
         if (x.samples == VK_SAMPLE_COUNT_1_BIT) x.usage |= VK_IMAGE_USAGE_STORAGE_BIT;
     } else {
         // Raw storage views address one compressed block per texel (8 or 16 bytes).
@@ -3339,7 +3440,7 @@ unsigned view_layer(const nvn_view* v) {
     return v && v->set_layers ? v->min_layer : 0;
 }
 
-Texture* texture_get(const nvn_tex* t, bool for_sampling) {
+Texture* texture_get(const nvn_tex* t, bool for_sampling, bool need_attach) {
     PROF_HOT(PROF_TEXGET);
     if (!t || !t->gpu || t->d.target == NVN_TEXTURE_TARGET_BUFFER) return nullptr;
     const VkFormatInfo fi = vk_format(t->d.format);
@@ -3369,6 +3470,23 @@ Texture* texture_get(const nvn_tex* t, bool for_sampling) {
     k.cls = format_class(fi.format, t->d.format, bpb, fi.astc);
     Texture* tex;
     auto it = textures.find(k);
+    if (it != textures.end() && need_attach && it->second->no_attach) {
+        // (QUICK1: a compute-only image bound as a target after all: made again with the usage, and its shape remembered)
+        Texture* old = it->second.get();
+        {
+            std::lock_guard lk(attach_mu);
+            attach_seen.insert(attach_key(t));
+        }
+        st_no_attach_upgraded++;
+        static int told;
+        if (told++ < 20)
+            logf("vk: compute-only image #%u %#llx %ux%u NVN %#x bound as a target: made again with the attachment usage",
+                 old->id, (unsigned long long)old->gpu, old->width, old->height, old->nvn_format);
+        destroy_later(*old);
+        forget_gpu(old);
+        textures.erase(it);
+        it = textures.end();
+    }
     if (it == textures.end()) {
         tex = create(k, t, fi.format, fi.astc, bw, bh, bpb, !for_sampling);
         if (!tex) return nullptr;
@@ -5248,7 +5366,20 @@ void texture_frame(uint64_t completed) {
             it = textures.erase(it);
         }
     }
-    for (auto it = dead.begin(); it != dead.end();) {
+    // (relink, pixl27; RX_VK_DESTROY_PER_FRAME=<n>, default 24, 0: no cap) At most that many dead textures a frame go to the
+    // reaper, the rest at the next frames: the sweep every 600 frames retired ~300 at once outdoors, and their destruction (kernel
+    // calls each) was a 15-30 ms hitch every 10 s. A render target's image going to the pool, and a spare kept, do not count. A
+    // backlog of over eight frames' worth is worked off in about half a second (dead / 30 a frame), and with VRAM within 5% of what
+    // the driver allows (or past it) the cap is lifted: the dead textures' memory is what the next ones need
+    static const int per_frame_cfg = getenv("RX_VK_DESTROY_PER_FRAME") ? std::max(0, atoi(getenv("RX_VK_DESTROY_PER_FRAME"))) : 0;   // (off by default since 2026-11-22: 24 was ReLink's; the 5070 A/B was noise; the 3050 decides)
+    int per_frame = per_frame_cfg ? per_frame_cfg : INT_MAX;
+    if (per_frame_cfg && dead.size() > (size_t)per_frame * 8) {
+        uint64_t vu = 0, va = 0;
+        if (vram_usage(&vu, &va, nullptr) && va && vu > va / 100 * 95) per_frame = INT_MAX;
+        else per_frame = std::max(per_frame, (int)(dead.size() / 30));
+    }
+    int destroyed = 0;
+    for (auto it = dead.begin(); it != dead.end() && destroyed < per_frame;) {
         if (it->value > completed) {
             ++it;
             continue;
@@ -5258,7 +5389,8 @@ void texture_frame(uint64_t completed) {
             it = dead.erase(it);
             continue;
         }
-        for (VkImageView v : it->views) vkDestroyImageView(dev.device, v, nullptr);
+        if (!it->views.empty())   // (on the reaper, before the image's own end: vk_vma.cpp)
+            reap([views = std::move(it->views)] { for (VkImageView v : views) vkDestroyImageView(dev.device, v, nullptr); });
         static const uint64_t spare_max = (uint64_t)(getenv("RX_VK_SPARE_MB") ? atoi(getenv("RX_VK_SPARE_MB")) : 256) << 20;
         const uint64_t sz = it->ci_key && it->allocation ? allocation_size(it->allocation) : 0;
         if (sz && spare_frames() && it->memory.empty() && !it->buffer && spare_bytes + sz <= spare_max) {
@@ -5267,9 +5399,10 @@ void texture_frame(uint64_t completed) {
             spare_st.kept++;
         } else {
             destroy_image(it->image, it->allocation);
+            destroyed++;
         }
         if (it->buffer) destroy_buffer(it->buffer, it->buffer_alloc);
-        for (VkDeviceMemory m : it->memory) vkFreeMemory(dev.device, m, nullptr);
+        if (!it->memory.empty()) reap([m = std::move(it->memory)] { for (VkDeviceMemory x : m) vkFreeMemory(dev.device, x, nullptr); });
         it = dead.erase(it);
     }
     pool_trim();
@@ -5468,6 +5601,7 @@ void texture_frame(uint64_t completed) {
     }
     if (frame_no % 600 == 0) {
         vma_log_heaps();
+        { char r[200]; reap_report(r, sizeof r); logf("vk: %s (RX_VK_REAP)", r); }
         vma_log_image_blocks();
         {
             std::lock_guard lk(pool_mu);
@@ -5476,6 +5610,9 @@ void texture_frame(uint64_t completed) {
                  (unsigned long long)st_pool_destroyed, (unsigned long long)pool_n, (unsigned long long)(pool_bytes >> 20),
                  pool_cap() ? (pool_pressure >= 2 ? ", VRAM critical: given back" : pool_pressure == 1 ? ", VRAM short: halved" : "") : " (RX_VK_TARGET_POOL_MB=0)");
         }
+        if (compute_only_on())
+            logf("vk: compute-only images (RX_VK_COMPUTE_ONLY_IMAGES): %d made without the attachment usage, %d made again with it",
+                 st_no_attach_made.load(), st_no_attach_upgraded.load());
         uint32_t samplers_made = 0, samplers_waiting = 0, samplers_limit = 0;   // (longshot #442: a count that grows without end shows)
         uint64_t samplers_retired = 0, samplers_destroyed = 0;
         sampler_counts(&samplers_made, &samplers_waiting, &samplers_retired, &samplers_destroyed, &samplers_limit);

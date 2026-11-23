@@ -119,6 +119,10 @@ def main():
             if "void queue_flush_locked() {" in before:
                 need("late_fix_flush_locked();" in before, f"{name}: the batched flush applies the fixes")
                 continue
+            if "void link_probe() {" in before:   # (PORT2: the PCIe link timed once in memory_init, before any recording: no fix exists)
+                need(name == "vk_memory.cpp" and "vkWaitForFences(dev.device, 1, &fence" in src[m.start():m.start() + 400],
+                     f"{name}: the link probe waits for its own copies at once")
+                continue
             line = src.count("\n", 0, m.start()) + 1
             need("queue_flush_locked();" in before, f"{name}:{line}: a queue submit without a flush before it")
             need("late_fix_wait_unlocked();" in before, f"{name}:{line}: a queue submit without the fix waited for outside the lock")

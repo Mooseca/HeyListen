@@ -42,6 +42,7 @@
      HL_MEM_COLD_LOWMEM=<MB>  no trimming while the system's available RAM is under that (a quarter more to start again; default 0:
        never held, 3072 proposed). HL_MEM_ACCOUNT=<seconds>  the "hl mem: account:" lines (private commit and working set by owner)
      HL_MEM_COLD_FLAGS=<hex,...>  the pool flags (default 24,64)    HL_MEM_COLD_AGE=<seconds>  the pools' age (default 10)
+   HL_FAULT_WATCH=<ms>: who takes the page faults, and on what memory (its comment, above hl_mem_init).
    Every 10 s two lines "hl mem: cold pages (pools): ..." and "(heaps): ..." give the counters (MB out now, taken out, came
    back and how often, the most that came back in 10 s). */
 #include "hos.h"
@@ -434,6 +435,36 @@ static DWORD WINAPI account_main(void *arg) {
                 (unsigned long long)ms.ullAvailPhys / MB, (unsigned long long)ms.ullTotalPhys / MB,
                 (unsigned long long)(ms.ullTotalPageFile - ms.ullAvailPageFile) / MB, (unsigned long long)ms.ullTotalPageFile / MB,
                 d_reads, d_faults, (hos_now_ns() - t0) / 1e6);
+        {   /* (STALL2: who holds the rest of the PC's RAM: the five largest working sets of the other processes) */
+            DWORD pids[2048], got_b = 0;
+            if (K32EnumProcesses(pids, sizeof pids, &got_b)) {
+                struct { uint64_t ws; char name[40]; } top[5];
+                memset(top, 0, sizeof top);
+                uint64_t others = 0;
+                for (DWORD i = 0; i < got_b / sizeof(DWORD); i++) {
+                    if (pids[i] == GetCurrentProcessId()) continue;
+                    HANDLE ph = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pids[i]);
+                    if (!ph) continue;
+                    PROCESS_MEMORY_COUNTERS opm;
+                    char nm[MAX_PATH] = "?";
+                    DWORD nl = sizeof nm;
+                    if (K32GetProcessMemoryInfo(ph, &opm, sizeof opm)) {
+                        QueryFullProcessImageNameA(ph, 0, nm, &nl);
+                        const char *b = strrchr(nm, 0x5c);
+                        others += opm.WorkingSetSize;
+                        int at = -1;
+                        for (int k = 0; k < 5; k++)
+                            if (opm.WorkingSetSize > top[k].ws && (at < 0 || top[k].ws < top[at].ws)) at = k;
+                        if (at >= 0) top[at].ws = opm.WorkingSetSize, snprintf(top[at].name, sizeof top[at].name, "%s", b ? b + 1 : nm);
+                    }
+                    CloseHandle(ph);
+                }
+                hos_log("hl mem: account: other processes' working sets %llu MB in all (those this process may query); the largest: %s %llu, %s %llu, "
+                        "%s %llu, %s %llu, %s %llu MB", (unsigned long long)(others / MB), top[0].name, (unsigned long long)(top[0].ws / MB), top[1].name,
+                        (unsigned long long)(top[1].ws / MB), top[2].name, (unsigned long long)(top[2].ws / MB), top[3].name, (unsigned long long)(top[3].ws / MB),
+                        top[4].name, (unsigned long long)(top[4].ws / MB));
+            }
+        }
         for (int k = 0; k < 6 && k < nalloc; k++)
             hos_log("hl mem: account:   host allocation %#llx: %llu MB reserved, %llu MB committed", (unsigned long long)allocs[k].base,
                     (unsigned long long)allocs[k].reserved / MB, (unsigned long long)allocs[k].committed / MB);
@@ -442,7 +473,7 @@ static DWORD WINAPI account_main(void *arg) {
 }
 
 static int pressure_on = 1;
-static uint64_t lowmem_mb = 0;   /* (HL_MEM_COLD_LOWMEM=<MB>: available RAM under which nothing is taken out; 0, the default: never held. 3072 is the proposal) */
+static uint64_t lowmem_mb = 3072;   /* (HL_MEM_COLD_LOWMEM=<MB>: available RAM under which nothing is taken out; 0: never held. Default 3072 since STALL1, 22 Nov: the PC 3050's hog run with it had 56 frames over 50 ms against 77 with the pages taken out as before) */
 static int lowmem_held;
 static int64_t lowmem_since, lowmem_ns, lowmem_passes;
 static int64_t pressure_until;
@@ -487,7 +518,22 @@ static DWORD WINAPI cold_main(void *unused) {
                     lowmem_ns += hos_now_ns() - lowmem_since;
                     hos_log("hl mem: cold pages: going on, %llu MB of RAM free; held %.1f s in all", (unsigned long long)avail_mb, lowmem_ns / 1e9);
                 }
-                if (lowmem_held) { lowmem_passes++; continue; }
+                if (lowmem_held) lowmem_passes++;
+                {   /* (the performance summary's memory record, gpu/vk/perf_parts.h kOptColdHeld / kOptColdPasses: tenths of a second
+                       the pages were held in all, and the passes left out; HL_TEL_MEMORY=0: not pushed) */
+                    void rx_option_set(int id, int value);
+                    static int push_on = -1;
+                    if (push_on < 0) {
+                        const char *e = getenv("HL_TEL_MEMORY");
+                        push_on = !(e && e[0] == '0' && !e[1]);
+                    }
+                    if (push_on) {
+                        const int64_t held_ns = lowmem_ns + (lowmem_held ? hos_now_ns() - lowmem_since : 0);
+                        rx_option_set(98, (int)(held_ns / 100000000LL));
+                        rx_option_set(99, (int)lowmem_passes);
+                    }
+                }
+                if (lowmem_held) continue;
             }
         }
         const int64_t t0 = hos_now_ns();
@@ -545,10 +591,222 @@ static DWORD WINAPI cold_main(void *unused) {
     return 0;
 }
 
+/* ---- HL_FAULT_WATCH=<poll ms> (diagnostic, off by default; STALL2, 22 Nov 2026): who takes the page faults, and on what memory.
+   The owner's 23 minutes had 31 million faults (123 GB of 4 KB pages for a working set of 8 GB) and 132 stutters of 50 ms or more
+   that were page faults at 9 to 12 us each; nothing said which thread faulted or which memory (the stall watch has each thread's CPU,
+   not its faults). InitializeProcessForWsWatch + GetWsChangesEx hand back, for every page that was added to the working set, the
+   faulting instruction, the address and the thread. Each second with at least 2000 such pages, one line: the pages (and MB), by
+   thread (the job trace's names: run with HL_STALL_WATCH), by memory (guest heap, address regions, below the heap, GPU pools; outside
+   the guest window: the tagged ranges of HOS_HOST_SPLIT / RX_VK_LEDGER by name, private with no owner, mapped, images) and by the
+   module of the faulting instruction, with the discards of freed guest pages of that second (hos_mem.c discard_pages: count, MB, ms).
+   Every 30 s the cells (thread x memory) with the most pages. "ns" is hos_now_ns, the clock of present_trace.csv. Pages that were
+   already in the working set (a touch of a resident page) are not faults and not listed. */
+typedef struct { void *pc, *va; ULONG_PTR tid, flags; } FwEntry;
+typedef BOOL(WINAPI *FwInitFn)(HANDLE);
+typedef BOOL(WINAPI *FwGetFn)(HANDLE, FwEntry *, DWORD *);
+enum { FW_MAX_THREADS = 256, FW_MAX_CLASSES = 40 };
+static volatile LONG64 fw_disc_bytes, fw_disc_ns, fw_disc_n;
+void hl_fw_note_discard(uint64_t bytes, int64_t ns) {
+    InterlockedAdd64(&fw_disc_bytes, (LONG64)bytes);
+    InterlockedAdd64(&fw_disc_ns, ns);
+    InterlockedIncrement64(&fw_disc_n);
+}
+static struct { DWORD tid; char name[40]; } fw_th[FW_MAX_THREADS];
+static int fw_nth;
+static char fw_cls[FW_MAX_CLASSES][48];
+static int fw_ncls;
+static int fw_class(const char *name) {
+    for (int i = 0; i < fw_ncls; i++)
+        if (!strcmp(fw_cls[i], name)) return i;
+    if (fw_ncls == FW_MAX_CLASSES) return 0;
+    snprintf(fw_cls[fw_ncls], sizeof fw_cls[0], "%s", name);
+    return fw_ncls++;
+}
+static int fw_thread(DWORD tid) {
+    for (int i = 0; i < fw_nth; i++)
+        if (fw_th[i].tid == tid) return i;
+    if (fw_nth == FW_MAX_THREADS) return 0;
+    fw_th[fw_nth].tid = tid;
+    if (!hos_jt_name_of_tid(tid, fw_th[fw_nth].name, sizeof fw_th[0].name)) {
+        HANDLE h = OpenThread(THREAD_QUERY_LIMITED_INFORMATION, FALSE, tid);
+        PWSTR d = NULL;
+        if (h && SUCCEEDED(GetThreadDescription(h, &d)) && d && d[0]) snprintf(fw_th[fw_nth].name, sizeof fw_th[0].name, "host:%ls", d);
+        else snprintf(fw_th[fw_nth].name, sizeof fw_th[0].name, "tid %lu", (unsigned long)tid);
+        if (d) LocalFree(d);
+        if (h) CloseHandle(h);
+    }
+    return fw_nth++;
+}
+static uint64_t fw_cell_win[FW_MAX_THREADS][FW_MAX_CLASSES], fw_cell_30[FW_MAX_THREADS][FW_MAX_CLASSES];
+static uint64_t fw_mod_win[FW_MAX_CLASSES];
+static char fw_mod[FW_MAX_CLASSES][40];
+static int fw_nmod;
+static int fw_module(void *pc) {
+    static uint64_t last_lo, last_hi;
+    static int last_id;
+    const uint64_t a = (uint64_t)(uintptr_t)pc;
+    if (a >= last_lo && a < last_hi) return last_id;
+    HMODULE m = NULL;
+    char path[260], *base = "?";
+    MEMORY_BASIC_INFORMATION mbi;
+    if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (LPCSTR)pc, &m) &&
+        GetModuleFileNameA(m, path, sizeof path)) {
+        base = strrchr(path, '\\');
+        base = base ? base + 1 : path;
+    } else if (a >= (uint64_t)(uintptr_t)GP(0) && a < (uint64_t)(uintptr_t)GP(0) + HOS_GUEST_SPACE) base = "guest window";
+    int id = -1;
+    for (int i = 0; i < fw_nmod; i++)
+        if (!strcmp(fw_mod[i], base)) id = i;
+    if (id < 0 && fw_nmod < FW_MAX_CLASSES) snprintf(fw_mod[id = fw_nmod++], sizeof fw_mod[0], "%s", base);
+    if (id < 0) id = 0;
+    if (m && VirtualQuery(pc, &mbi, sizeof mbi)) last_lo = (uint64_t)(uintptr_t)mbi.BaseAddress, last_hi = last_lo + mbi.RegionSize, last_id = id;
+    return id;
+}
+static int fw_cmp(const void *a, const void *b) {
+    const uint64_t x = *(const uint64_t *)a, y = *(const uint64_t *)b;
+    return x < y ? 1 : x > y ? -1 : 0;
+}
+/* the k largest of a counter list, as "name n, name n" */
+static void fw_top(char *out, size_t cap, const uint64_t *cnt, int n, const char *(*name)(int), int k) {
+    uint64_t pr[FW_MAX_THREADS + FW_MAX_CLASSES][2];
+    int m = 0;
+    for (int i = 0; i < n; i++)
+        if (cnt[i]) pr[m][0] = cnt[i], pr[m][1] = (uint64_t)i, m++;
+    qsort(pr, (size_t)m, sizeof pr[0], fw_cmp);
+    size_t len = 0;
+    out[0] = 0;
+    for (int i = 0; i < m && i < k && len + 90 < cap; i++)
+        len += (size_t)snprintf(out + len, cap - len, "%s%s %llu", i ? ", " : "", name((int)pr[i][1]), (unsigned long long)pr[i][0]);
+}
+static const char *fw_name_th(int i) { return fw_th[i].name; }
+static const char *fw_name_cls(int i) { return fw_cls[i]; }
+static const char *fw_name_mod(int i) { return fw_mod[i]; }
+static DWORD WINAPI fault_main(void *arg) {
+    const int poll_ms = (int)(intptr_t)arg;
+    HMODULE k32 = GetModuleHandleA("kernel32.dll");
+    FwInitFn init = (FwInitFn)(void *)GetProcAddress(k32, "K32InitializeProcessForWsWatch");
+    FwGetFn get = (FwGetFn)(void *)GetProcAddress(k32, "K32GetWsChangesEx");
+    if (!init || !get || !init(GetCurrentProcess())) {
+        hos_log("hl fault: HL_FAULT_WATCH: no working-set watch here (error %lu): off", GetLastError());
+        return 0;
+    }
+    hos_log("hl fault: on: every %d ms the pages added to the working set are read with the faulting thread and address; a line a second "
+            "with 2000 pages or more, the cells of the last 30 s every 30 s (HL_FAULT_WATCH=0: off)", poll_ms);
+    DWORD cap_entries = 1u << 18;
+    FwEntry *buf = (FwEntry *)malloc((size_t)cap_entries * sizeof *buf);
+    const uint64_t g0 = (uint64_t)(uintptr_t)GP(0), heap_lo = g0 + HOS_HEAP_BASE;
+    static uint64_t pools[COLD_MAX_EXCLUDED][2];
+    const int64_t t_start = hos_now_ns();
+    int64_t next_line = t_start + 1000000000LL, next_30 = t_start + 30000000000LL, pools_at = 0;
+    uint64_t total_win = 0, lost = 0, total_all = 0;
+    LONG64 d_bytes0 = 0, d_ns0 = 0, d_n0 = 0;
+    int npools = 0;
+    uint64_t memo_lo = 0, memo_hi = 0;
+    int memo_cls = -1;
+    for (;;) {
+        Sleep((DWORD)poll_ms);
+        DWORD cb = cap_entries * (DWORD)sizeof *buf;
+        memset(buf, 0, (size_t)cb);
+        if (get(GetCurrentProcess(), buf, &cb)) {
+            if (hos_now_ns() - pools_at > 2000000000LL) {   /* (the pools move rarely: looked at again every 2 s) */
+                npools = hos_pools_with_flags(NULL, 0, INT64_MAX, pools, COLD_MAX_EXCLUDED);
+                pools_at = hos_now_ns();
+            }
+            const uint64_t heap_hi = heap_lo + hos_heap_size;
+            for (DWORD i = 0; i < cap_entries && buf[i].pc; i++) {
+                const uint64_t va = (uint64_t)(uintptr_t)buf[i].va;
+                int cls;
+                if (memo_cls >= 0 && va >= memo_lo && va < memo_hi) cls = memo_cls;
+                else {
+                    char nm[48], t[48];
+                    memo_lo = va & ~0xFFFFULL, memo_hi = memo_lo + 0x10000;
+                    if (va >= g0 && va < g0 + HOS_GUEST_SPACE) {
+                        const uint64_t ga = va - g0;
+                        int pool = 0;
+                        for (int p = 0; p < npools; p++)
+                            if (pools[p][0] <= ga && ga < pools[p][1]) { pool = 1; break; }
+                        snprintf(nm, sizeof nm, "%s", pool ? "guest: GPU pool" : va >= heap_hi ? "guest: address regions" : va >= heap_lo ? "guest: heap" : "guest: below the heap");
+                    } else {
+                        MEMORY_BASIC_INFORMATION mbi;
+                        if (hos_mem_tag_name(va, t, sizeof t)) snprintf(nm, sizeof nm, "host tag: %s", t);
+                        else if (VirtualQuery((void *)(uintptr_t)va, &mbi, sizeof mbi))
+                            snprintf(nm, sizeof nm, "%s", mbi.Type == MEM_IMAGE ? "host: image" : mbi.Type == MEM_MAPPED ? "host: mapped" :
+                                     mbi.RegionSize >= (64u << 20) ? "host: private, 64 MB+" : "host: private, no owner");
+                        else snprintf(nm, sizeof nm, "host: unknown");
+                    }
+                    cls = fw_class(nm);
+                    memo_cls = cls;
+                }
+                const int th = fw_thread((DWORD)buf[i].tid);
+                fw_cell_win[th][cls]++;
+                fw_cell_30[th][cls]++;
+                fw_mod_win[fw_module(buf[i].pc)]++;
+                total_win++;
+                total_all++;
+            }
+        } else {
+            const DWORD err = GetLastError();
+            if (err == ERROR_INSUFFICIENT_BUFFER || err == ERROR_MORE_DATA) {   /* (the kernel keeps what did not fit: the next call is bigger) */
+                lost++;
+                if (cap_entries < (1u << 22)) {
+                    cap_entries *= 2;
+                    free(buf);
+                    buf = (FwEntry *)malloc((size_t)cap_entries * sizeof *buf);
+                }
+            }
+        }
+        if (hos_now_ns() >= next_line) {
+            next_line = hos_now_ns() + 1000000000LL;
+            if (total_win >= 2000) {
+                uint64_t by_th[FW_MAX_THREADS] = {0}, by_cls[FW_MAX_CLASSES] = {0};
+                for (int t = 0; t < fw_nth; t++)
+                    for (int c = 0; c < fw_ncls; c++) by_th[t] += fw_cell_win[t][c], by_cls[c] += fw_cell_win[t][c];
+                char a[420], b[420], m[240];
+                fw_top(a, sizeof a, by_th, fw_nth, fw_name_th, 6);
+                fw_top(b, sizeof b, by_cls, fw_ncls, fw_name_cls, 6);
+                fw_top(m, sizeof m, fw_mod_win, fw_nmod, fw_name_mod, 4);
+                const LONG64 db = fw_disc_bytes, dn = fw_disc_ns, dc = fw_disc_n;
+                hos_log("hl fault: t=%.0f s ns=%lld: %llu pages added to the working set (%llu MB); by thread: %s; by memory: %s; by code in: %s; "
+                        "discards of freed guest pages this second: %lld (%lld MB, %.1f ms)",
+                        (hos_now_ns() - t_start) / 1e9, (long long)hos_now_ns(), (unsigned long long)total_win, (unsigned long long)(total_win >> 8),
+                        a, b, m, (long long)(dc - d_n0), (long long)((db - d_bytes0) >> 20), (dn - d_ns0) / 1e6);
+            }
+            d_bytes0 = fw_disc_bytes, d_ns0 = fw_disc_ns, d_n0 = fw_disc_n;
+            memset(fw_cell_win, 0, sizeof fw_cell_win);
+            memset(fw_mod_win, 0, sizeof fw_mod_win);
+            total_win = 0;
+        }
+        if (hos_now_ns() >= next_30) {
+            next_30 = hos_now_ns() + 30000000000LL;
+            static uint64_t flat[FW_MAX_THREADS * FW_MAX_CLASSES][2];
+            int n = 0;
+            uint64_t sum = 0;
+            for (int t = 0; t < fw_nth; t++)
+                for (int c = 0; c < fw_ncls; c++)
+                    if (fw_cell_30[t][c]) flat[n][0] = fw_cell_30[t][c], flat[n][1] = (uint64_t)(t * FW_MAX_CLASSES + c), n++, sum += fw_cell_30[t][c];
+            qsort(flat, (size_t)n, sizeof flat[0], fw_cmp);
+            char line[900];
+            size_t len = 0;
+            line[0] = 0;
+            for (int i = 0; i < n && i < 10 && len + 130 < sizeof line; i++)
+                len += (size_t)snprintf(line + len, sizeof line - len, "%s%s on %s %llu", i ? "; " : "", fw_th[flat[i][1] / FW_MAX_CLASSES].name,
+                                        fw_cls[flat[i][1] % FW_MAX_CLASSES], (unsigned long long)flat[i][0]);
+            hos_log("hl fault: 30 s: %llu pages (%llu MB), %llu in all so far, %llu polls found the kernel's buffer too small; the most: %s",
+                    (unsigned long long)sum, (unsigned long long)(sum >> 8), (unsigned long long)total_all, (unsigned long long)lost, line);
+            memset(fw_cell_30, 0, sizeof fw_cell_30);
+        }
+    }
+    return 0;
+}
+
 void hl_mem_init(void) {
     {
         const char *ac = getenv("HL_MEM_ACCOUNT");
         if (ac && atoi(ac) > 0) CloseHandle(CreateThread(NULL, 0, account_main, (void *)(intptr_t)atoi(ac), 0, NULL));
+    }
+    {
+        const char *fw = getenv("HL_FAULT_WATCH");
+        if (fw && atoi(fw) > 0) CloseHandle(CreateThread(NULL, 0, fault_main, (void *)(intptr_t)atoi(fw), 0, NULL));
     }
     const char *e = getenv("HL_MEM_COLD");
     const int want = e && e[0] ? atoi(e) != 0 : HL_MEM_COLD_DEFAULT;
@@ -609,4 +867,5 @@ void hl_mem_pool_made(uint64_t addr, uint64_t size) { (void)addr; (void)size; }
 void hl_mem_imported(uint64_t lo, uint64_t hi) { (void)lo; (void)hi; }
 void hl_mem_unimported(uint64_t lo, uint64_t hi) { (void)lo; (void)hi; }
 void hl_mem_init(void) {}
+void hl_fw_note_discard(uint64_t bytes, int64_t ns) { (void)bytes; (void)ns; }
 #endif

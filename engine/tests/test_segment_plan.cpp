@@ -10,6 +10,7 @@ int main() {
     using mkwvk::segment_plan::recorders;
     using mkwvk::segment_plan::rounds;
     using mkwvk::segment_plan::segment_count;
+    using mkwvk::segment_plan::with_mid;
     const int kMaxBatch = 6;
 
     CHECK("4 workers are 4 recorders", recorders(4, false) == 4);
@@ -90,5 +91,12 @@ int main() {
         balanced_targets(p, 3, 800, out, 100.0);
         CHECK("a tail above 1 is 1", out[0] > 265 && out[0] < 270);
     }
+    // (stream SMALL1, RX_VK_MID_SEG: a command buffer under two segments' worth, from the given work on, is two segments)
+    CHECK("mid: off (0) leaves one segment", with_mid(segment_count(200, 128, 4, 10, false), 200, 10, 0) == 1);
+    CHECK("mid: 105 of a threshold of 100 is two", with_mid(segment_count(105, 128, 4, 10, false), 105, 10, 100) == 2);
+    CHECK("mid: 99 of a threshold of 100 stays one", with_mid(segment_count(99, 128, 4, 10, false), 99, 10, 100) == 1);
+    CHECK("mid: already more than one is unchanged", with_mid(segment_count(830, 128, 4, 10, false), 830, 10, 100) == segment_count(830, 128, 4, 10, false));
+    CHECK("mid: a cap of 1 keeps one", with_mid(1, 500, 1, 100) == 1);
+    CHECK("mid: never fewer than before", with_mid(3, 10, 6, 100) == 3);
     std::puts("segment plan: all checks passed");
 }

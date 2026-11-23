@@ -21,6 +21,7 @@
    own procs (program builders, native images, sparse tile layouts, recording modes). The SDK's exports reach the
    same functions as the proc table (nvn2_dispatch, from gen/nvn2_exports.c). */
 #include "hos.h"
+#include "hos_waitnote.h"
 #include "shadow_slot.h"   /* (the storage a character's shadow map reserves) */
 #include "../gpu/render/rx_nvn.h"
 #include "hl/c/hl_gfx_rec.h"   /* (HeyListen: the records native producers write, checked against rx_nvn.h below) */
@@ -669,8 +670,16 @@ static int shadow_slot_layout(const nvn_texdesc *d, nvn_texlayout *out) {
         step = e ? atoi(e) : HOS_SHADOW_SLOT_STEP;
         if (step < 0) step = 0;
     }
-    const uint32_t side = hos_shadow_slot_side(d->target == NVN_TEXTURE_TARGET_2D, d->format, d->levels, d->depth, d->width,
-                                               d->height, (uint32_t)step);
+    /* (QUICK1) HOS_SHADOW_LADDER=1: the rungs of shadow_slot.h's ladder, also under 384, instead of the step */
+    static int ladder = -1;
+    if (ladder < 0) {
+        const char *e = getenv("HOS_SHADOW_LADDER");
+        ladder = e && atoi(e) != 0;
+    }
+    const uint32_t side = ladder ? hos_shadow_slot_side_ladder(d->target == NVN_TEXTURE_TARGET_2D, d->format, d->levels, d->depth,
+                                                               d->width, d->height)
+                                 : hos_shadow_slot_side(d->target == NVN_TEXTURE_TARGET_2D, d->format, d->levels, d->depth, d->width,
+                                                        d->height, (uint32_t)step);
     if (!side || side == d->width) return 0;
     nvn_texdesc slot = *d;
     slot.width = slot.height = side;
@@ -2983,6 +2992,7 @@ NV(nvnQueuePresentTexture) {
     if (i < 0 || i >= o->ntex) die("present of window texture %d", i);
     held_init();
     present_thread = hos_self();   /* (TICK-054, HOS_NVN_HOLD=2: the presenting thread, whose submits are not held) */
+    hos_sw_present();   /* (HL_STALL_WATCH, hos_jobtrace.c: the gap between presents) */
     held_flush_why(HF_PRESENT);   /* (a present flushes the queue) */
     {   /* (heylisten) this frame's pacing sleep (nn_vi.c), for the performance summary's pace part: pushed before the present
            so the frame the renderer counts inside it carries it (gpu/vk/perf_parts.h's HOS_OPT_PERF_PACE, as the Cheats page's
@@ -2990,6 +3000,20 @@ NV(nvnQueuePresentTexture) {
         void rx_option_set(int id, int value);
         extern int64_t hos_vi_pace_us(void);
         rx_option_set(90 /* HOS_OPT_PERF_PACE, gpu/vk/perf_parts.h */, (int)hos_vi_pace_us());
+        /* (what this thread waited on since its last present, by kind, us: the summary's os_wait hitches' sub-cause,
+           hos_waitnote.h; ids 94 to 97 are perf_parts.h's kOptWaitLock ... kOptWaitFile. HL_TEL_WAITS=0: not pushed) */
+        static int waits_on = -1;
+        static _Thread_local int64_t waits_last[HOS_WN_KINDS];
+        if (waits_on < 0) {
+            const char *e = getenv("HL_TEL_WAITS");
+            waits_on = !(e && e[0] == '0' && !e[1]);
+        }
+        if (waits_on)
+            for (int k = 0; k < HOS_WN_KINDS; k++) {
+                const int64_t now_ns = hos_wn_ns[k];
+                rx_option_set(94 + k, (int)((now_ns - waits_last[k]) / 1000));
+                waits_last[k] = now_ns;
+            }
     }
     {
         const int away = hos_vcore_away();

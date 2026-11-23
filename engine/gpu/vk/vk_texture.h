@@ -47,6 +47,7 @@ struct Texture {
     bool cube = false;        // CUBE_COMPATIBLE
     bool astc = false;        // ASTC blocks decoded into RGBA8 (block_w x block_h)
     bool bc = false;          // (and kept as BC1 / BC7 (TICK-031), or BC3: re-encoded on the GPU after decoding; vk_texture.cpp)
+    bool no_attach = false;   // (QUICK1, RX_VK_COMPUTE_ONLY_IMAGES: made without COLOR_ATTACHMENT usage; texture_get's need_attach makes it again)
     bool remake = false;      // (TICK-031: kept as BC1, and an upload brought alpha: made again as BC7 by texture_frame)
     bool bc_resized = false;  // (hookshot-amd: its BC3 image is a resized copy, uneven block levels on AMD; vk_texture.cpp)
     int block_w = 1, block_h = 1, bpb = 0;   // the storage's blocks
@@ -162,7 +163,7 @@ uint32_t texture_epoch();
 uint64_t texture_destroy_generation();
 /// The texture an NVN texture's storage is (made and uploaded at first use, uploaded again when the CPU wrote its
 /// storage since). null for formats and targets that have no image (buffers, unknown formats).
-Texture* texture_get(const nvn_tex* t, bool for_sampling);
+Texture* texture_get(const nvn_tex* t, bool for_sampling, bool need_attach = false);
 /// A view of it: the view's levels and layers (all when v is null), as view_type, in the view's format
 /// (attachment: one level, one layer; storage: one level, every layer, in a storage-capable format)
 enum class ViewUse { Sample, Attachment, Storage };
