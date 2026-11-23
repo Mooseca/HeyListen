@@ -6,12 +6,13 @@ Branch `perf/pipe2` from origin/main 4b599eb04 (PIPE1 merged, `RX_VK_TOUCH_FAST`
 
 ## State (PIPE2 continues; last edit 23 Nov ~19:00)
 
-Where it stands: the gate series for `pipe2d` is **queued** (ticket `20261123-...-pipe2-s1-speed`, 22 runs to do: castle 6, Kokiri 7,
-Market 7, the PROF_FINE pair last; a speed lease at priority 2 behind foot2's and zone3's leases, which hold the machine to ~20:30).
-Runner `build/s5/pipe2/series.sh` (a tag with a valid result is skipped, so a cut series resumes by re-requesting); its list is
-`E:\OOT\scratch-pipe2\tmp\s1-series.sh`, log `build/s5/pipe2/series-s1.log`; launches go through
+Where it stands: the gate series for `pipe2e` is **queued** (ticket `20261123-202924-pipe2-s1-speed-d880`, 22 runs to do: castle 6, Kokiri 7,
+Market 7, the PROF_FINE pair last; a speed lease at priority 2, third in a queue of foot2-T7 and zone4's speed leases, so it has not
+started as of 20:55). Runner `build/s5/pipe2/series.sh` (a tag with a valid result is skipped, so a cut series resumes by re-requesting);
+its list is `E:\OOT\scratch-pipe2\tmp\s1-series.sh`, log `build/s5/pipe2/series-s1.log`; launches go through
 `E:\OOT\scratch-pipe2\tmp\launch.py` (a detached bash; the harness's shell alternates between Git bash and PowerShell, so a plain
-`nohup ... &` from a call is not dependable - a doubled launch cost one tour and one lease today).
+`nohup ... &` from a call is not dependable - a doubled launch cost one tour and one lease today). The gate table:
+`python -I E:/OOT/scratch-pipe2/tmp/gate.py "p2g-*"`.
 
 Clean baseline, castle off (the series' warm-up `p2s1-warm-c`, 127.2 fps from play + 10 s): frames 8.37-8.79 ms, the PT waited
 0.26 ms for the main thread's hand-over, the main thread 1.34-1.43 ms for the present (89-94% of frames over 0.5 ms): replay-bound, the
@@ -174,6 +175,26 @@ So PIPE1's upper bounds (+10-16%, +16-21%, section 3 there) were read off the tr
 the castle has ~0-3% of room and Kokiri ~10%**, not 10-21%. PIPE1's traced castle window ran at 7.59 ms a frame, which today's GPU work
 (7.6-8.0) would not allow: the scene moment (the camera turns move the GPU's work between 5.4 and 8.1 ms a frame within one run) or the
 builds differ; the series' own GPU lines say which.
+
+### 4. The first clean on/off pair (castle-move, pipe2e, 21:21-21:27: the lease was cut by another agent's game after three runs)
+
+| run | fps (play + 10 s) | frame p50 / mean (ms) | >50 ms | slack: PT waits for main / main for present | GPU time | order thread |
+|---|---:|---|---:|---|---:|---|
+| `p2g-c-off-1` | 137.8 | 6.68 / 7.26 | 18 | 0.21 / 1.10 | 5.0 | - |
+| `p2g-c-on-1` | 138.6 | 6.38 / 7.22 | 26 | 5.63 / 0.00 | 5.4 | idle 0.18, fence join 0.40 |
+| `p2g-c-off-2` | 126.6 | 7.83 / 7.90 | 6 | 0.32 / 1.43 | 7.5 | - |
+| `p2g-warm-c` (off) | 126.4 | 7.92 / 7.91 | 0 | 0.24 / 1.55 | 7.9 | - |
+
+Three things:
+- **The overlap works and its cost is small**: the on arm's frame median is 0.30 ms shorter than the off arm's (6.38 against 6.68) and
+  the CPU work above the GPU's own time is halved (frame - GPU: on 0.66 ms, off 1.39 ms). The PT waits 5.63 ms for the main thread and
+  the main thread never waits for the present; the order thread idles 0.18 ms; the fence join costs 0.40 ms.
+- **The fps of the two arms is the same within the noise (+0.6%)** because the GPU's own work differs between the runs: the walk's
+  camera turns move it from 5.0 to 7.9 ms a frame, and a run's window covers a different stretch of the walk (`c-off-1` and `c-on-1`
+  saw 5.0-5.4 ms of GPU, `c-off-2` and the warm-up 7.5-7.9). The interleaved rounds are the only way to compare: one round is not
+  enough, and the hitches (18-26 frames over 50 ms, max 300-450 ms: a load hitch inside the window) are in both arms.
+- **The meter's fix holds**: `p2g-c-on-1`'s log has `exposure sums: 2000 reads, 0 of them given the last result again` in every window
+  (the runs before the fix gave 308-496 of 2000 on the on arm, 0 off): `0bb228966` does what it says.
 
 ## Dead ends
 
