@@ -70,6 +70,7 @@ struct Device {
     uint32_t queue_family = 0;
     VkQueue queue = VK_NULL_HANDLE;
     // extensions in use
+    bool frag_shading_rate = false;   // (RX_VK_VRS: VK_KHR_fragment_shading_rate's pipeline rate, 2x2 usable; vk_vrs.h)
     bool mesh_shader = false, external_memory_host = false, external_memory_fd = false, dma_buf_import = false, pipeline_library = false,
          graphics_pipeline_library = false, custom_border_color = false, dynamic_state3 = false,
          depth_clip_control = false, null_descriptor = false, index_uint8 = false, push_descriptor = false,

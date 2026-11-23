@@ -2540,6 +2540,13 @@ bool upload_inner(Texture& tex, const Ranges* dirty) {
     // (depth-stencil: the depth aspect only; packed D24S8 storage is not copied into it as is: such targets are
     // rendered, not uploaded)
     if (tex.aspect == (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT)) return false;
+    if (tex.shrink && tex.image) {   // (RX_VK_SHADOW_SHIFT: its guest storage is another size's; the game clears the map before it draws it)
+        texture_resident_flush(&tex);
+        const VkImageSubresourceRange range{tex.aspect, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS};
+        const VkClearDepthStencilValue z{0.0f, 0};
+        vkCmdClearDepthStencilImage(upload_cmd(), tex.image, VK_IMAGE_LAYOUT_GENERAL, &z, 1, &range);
+        return true;
+    }
     st_uploads++;
     {   // RX_VK_LOG_UPLOADS=<present>: the uploads from that present on (200 of them; what churns)
         static const int64_t from = getenv("RX_VK_LOG_UPLOADS") ? atoll(getenv("RX_VK_LOG_UPLOADS")) : -1;
@@ -2954,6 +2961,18 @@ Texture* create(const Key& key, const nvn_tex* t, VkFormat vf, bool astc, int bw
     const nvn_texdesc& d = t->d;
     x.width = std::max(1u, d.width);
     x.height = std::max(1u, d.height);
+    {   // (RX_VK_SHADOW_SHIFT=<1..3>, a quality option, off by default: the game's sun shadow map, a square depth-only 2D image of 8192
+        // texels or more (12288 x 12288 D16, 288 MB), is made 2^n times smaller in each direction. The guest still addresses it
+        // at its own size: draw.cpp's viewport, scissor and clears shrink with it, and no upload goes into it)
+        static const uint32_t shift = getenv("RX_VK_SHADOW_SHIFT") ? (uint32_t)std::clamp(atoi(getenv("RX_VK_SHADOW_SHIFT")), 0, 3) : 0u;
+        if (shift && depth && x.aspect == VK_IMAGE_ASPECT_DEPTH_BIT && d.target == NVN_TEXTURE_TARGET_2D && d.width == d.height &&
+            d.width >= 8192 && d.samples <= 1 && d.depth <= 1) {
+            x.shrink = shift;
+            x.width = std::max(1u, x.width >> shift), x.height = std::max(1u, x.height >> shift);
+            static int told;
+            if (told++ < 4) logf("vk: shadow map %ux%u made %ux%u (RX_VK_SHADOW_SHIFT=%u)", d.width, d.height, x.width, x.height, shift);
+        }
+    }
     switch (d.target) {
     case NVN_TEXTURE_TARGET_1D: x.type = VK_IMAGE_TYPE_1D, x.height = 1; break;
     case NVN_TEXTURE_TARGET_1D_ARRAY: x.type = VK_IMAGE_TYPE_1D, x.layers = std::max(1u, d.height), x.height = 1; break;
