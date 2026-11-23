@@ -597,7 +597,9 @@ def run(args: argparse.Namespace) -> dict:
         if script is None:
             raise SystemExit(f"unknown scene {args.scene!r}; known: {sorted(scenes)} (or pass --input-script)")
         env.update({"HOS_PRESENT_TRACE": str(trace), "HOS_FPS_LIMIT": str(args.fps_limit),
-                    "HOS_AUDIO": "0", "HOS_WINDOW_NOACTIVATE": "1", "HOS_INPUT_SCRIPT": script})
+                    # (sound off for measured runs; BENCH_AUDIO=1 keeps it, for a window someone plays by hand)
+                    "HOS_AUDIO": "1" if os.environ.get("BENCH_AUDIO") == "1" else "0",
+                    "HOS_WINDOW_NOACTIVATE": "1", "HOS_INPUT_SCRIPT": script})
         if mode == "skip":
             env.update({"HL_SKIP_TITLE": "1", "HOS_INPUT_FROM_PLAY": "1"})
     else:
