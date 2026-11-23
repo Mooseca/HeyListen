@@ -153,6 +153,9 @@ const char* const kFineC[] = {"draws", "descriptor builds", "descriptors", "desc
                                       "program picks answered from the kept answers (DRAW1)"};
 static_assert(std::size(kFineT) == FT_COUNT && std::size(kFineC) == FC_COUNT, "every section and count is named");
 const bool g_fine = getenv("RX_VK_PROF_FINE") != nullptr;
+// (stream PIPE1) the dry pass's marks of a draw's or clear's targets (dry_mark_written, the replay thread only): how many, ns resolving the
+// targets, ns waiting for ParLock, ns marking, textures marked. Logged with "a frame (fine)"
+int64_t dry_mark_ns[5];
 // (stream DRAW1) The sums are each thread's own: the recording threads of the parallel replay add at once, and a shared array lost
 // updates, so its sums did not describe the shipped configuration. A thread's arrays are made at its first use and never freed (the
 // report reads every thread's without a lock: plain 64-bit reads of counters that only that thread writes).
@@ -279,6 +282,13 @@ void fine_report(double frames) {
     }
     logf("%s", line);
     for (int i = 0; i < FC_COUNT; i++) last_n[i] = sum_n[i];
+    {   // (stream PIPE1) the dry pass's target marks
+        static int64_t last_dm[5];
+        int64_t d[5];
+        for (int i = 0; i < 5; i++) d[i] = dry_mark_ns[i] - last_dm[i], last_dm[i] = dry_mark_ns[i];
+        logf("vk: a frame (fine, the dry pass's target marks): %.1f marks (%.1f textures), %.3f ms resolving the targets, %.3f ms waiting for "
+             "ParLock, %.3f ms marking", d[0] / frames, d[4] / frames, d[1] / frames / 1e6, d[2] / frames / 1e6, d[3] / frames / 1e6);
+    }
     {   // (DRAW1) the draws' time by size: draws a frame and ms a frame in each bucket
         static const char* const names[kDrawBuckets] = {"<1us", "1-2us", "2-3us", "3-5us", "5-10us", "10-30us", ">=30us"};
         k = snprintf(line, sizeof line, "vk: a frame (draw1): draws by time (a frame: draws / ms):");
@@ -2938,7 +2948,8 @@ VkImageView texture_view_of(uint32_t handle, VkImageViewType want, ViewUse use, 
                 : it->second.destroy_gen != dgen ? PW_VIEW_DGEN : PW_COUNT);
     if (it != handle_hits().end() && it->second.version == version && it->second.destroy_gen == dgen) {
         if (it->second.tex && it->second.tex_epoch != texture_epoch()) {   // (once a submission: its age and contents)
-            if (!texture_touch_quick(it->second.tex, it->second.sampling)) {
+            if (!texture_touch_quick(it->second.tex, it->second.sampling) &&
+                !texture_touch_unlocked(it->second.tex, it->second.sampling)) {   // (stream PIPE1, RX_VK_TOUCH_FAST)
                 if (par_stats_on) par_why(PW_TOUCH_VIEW);
                 ParLock lk;
                 texture_touch(it->second.tex, it->second.sampling);
@@ -3955,7 +3966,7 @@ void build_descriptors(const NvnState& s, const Program& p) {
                     view = sl->view, tex = sl->tex, sampler = sl->sampler;
                     FINE_N(FC_TEX_HIT, 1);
                     if (tex && sl->tex_epoch != texture_epoch()) {   // (as texture_view_of's hit: once a submission)
-                        if (!texture_touch_quick(tex, true)) {
+                        if (!texture_touch_quick(tex, true) && !texture_touch_unlocked(tex, true)) {   // (stream PIPE1, RX_VK_TOUCH_FAST)
                             if (par_stats_on) par_why(PW_TOUCH_SLOT);
                             ParLock lk;
                             texture_touch(tex, true);
@@ -11576,11 +11587,16 @@ void dry_mark_written(NvnState& s, bool compute, bool first) {
         static thread_local decltype(s.rt) last;
         if (!first && !std::memcmp(&last, &s.rt, sizeof last)) return;
         std::memcpy((void*)&last, (const void*)&s.rt, sizeof last);
+        const int64_t t0 = g_fine ? prof_now() : 0;   // (stream PIPE1: the mark's parts, RX_VK_PROF_FINE)
         const Targets at = targets(s);
+        const int64_t t1 = g_fine ? prof_now() : 0;
         ParLock lk;   // (TICK-056, RX_VK_SEG_EARLY: segments recorded meanwhile read these marks; nothing when none is)
+        const int64_t t2 = g_fine ? prof_now() : 0;
         for (int i = 0; i < at.n; i++)
             if (at.color[i]) texture_written(at.color[i], "the dry pass (a draw's target)");
         if (at.depth) texture_written(at.depth, "the dry pass (a draw's depth)");
+        if (g_fine) dry_mark_ns[0]++, dry_mark_ns[1] += t1 - t0, dry_mark_ns[2] += t2 - t1, dry_mark_ns[3] += prof_now() - t2,
+                    dry_mark_ns[4] += at.n + (at.depth != nullptr);
         return;
     }
     const uint8_t types[8]{};
