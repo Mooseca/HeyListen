@@ -13645,11 +13645,11 @@ undocumented: third_party/a64-kit/lift/a64_block.py:56 reads it as a number: `re
 
 (ProjectReLink, pixl27; nx2/nativefp.py) A64_FPX_EASY: what the fast paths give up on, done with the host's own arithmetic where Arm's result is known without the software body (recomp_fpe_*): a NaN or an infinite operand, an invalid operation, an overflow, a subnormal operand, a tiny result. Called inside the RECOMP_FPX_OPEN gate only (round to nearest, no trap enabled, no default NaN, IXC raised already), after the fast tests and the rescues have refused the operation. 1: *v is Arm's result and FPSR has what Arm's operation raises (never 0 for these two: kept as a way out). tests/test_native_fp.py (easy): against the bodies, result and FPSR. ----.
 
-**Values:** text (`1` named). **Default:** unset.
+**Values:** text (`0` named). **Default:** unset.
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/nativefp.py:71`.
+**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/nativefp.py:78`.
 
 #### `A64_GRAN` - developer
 
@@ -13723,13 +13723,13 @@ undocumented: nx2/guest_locals.py:49 reads it as a text value: `v = os.environ.g
 
 #### `A64_LOCAL_VREGS` - developer
 
-undocumented: nx2/nativefp.py:77 reads it as a text value: `return on(os.environ.get("A64_LOCAL_VREGS"))`. No comment in the source says what it changes.
+undocumented: nx2/nativefp.py:84 reads it as a text value: `return on_by_default(os.environ.get("A64_LOCAL_VREGS"))`. No comment in the source says what it changes.
 
-**Values:** text (`1` named). **Default:** unset.
+**Values:** text (`0` named). **Default:** unset.
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/nativefp.py:77`.
+**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/nativefp.py:84`.
 
 #### `A64_MARK_EACH` - developer
 
@@ -13765,11 +13765,11 @@ undocumented: third_party/a64-kit/lift/a64_lift.py:238 reads it as an on/off swi
 
 (ProjectReLink, pixl27; nx2/nativefp.py) A64_NATIVE_FP: the hot functions' floating point on the host's instructions. See nx2/nativefp.py for what it keeps and what it does not ----.
 
-**Values:** text (`1` named). **Default:** unset.
+**Values:** text (`0` named). **Default:** unset.
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/nativefp.py:65`.
+**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/nativefp.py:72`.
 
 #### `A64_NO_SFCMP` - developer
 

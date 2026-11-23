@@ -163,11 +163,11 @@
    "files": [
     {
      "path": "nx2/nativefp.py",
-     "line": 71
+     "line": 78
     }
    ],
    "default": "unset",
-   "values": "text (`1` named)",
+   "values": "text (`0` named)",
    "explanation": "(ProjectReLink, pixl27; nx2/nativefp.py) A64_FPX_EASY: what the fast paths give up on, done with the host's own arithmetic where Arm's result is known without the software body (recomp_fpe_*): a NaN or an infinite operand, an invalid operation, an overflow, a subnormal operand, a tiny result. Called inside the RECOMP_FPX_OPEN gate only (round to nearest, no trap enabled, no default NaN, IXC raised already), after the fast tests and the rescues have refused the operation. 1: *v is Arm's result and FPSR has what Arm's operation raises (never 0 for these two: kept as a way out). tests/test_native_fp.py (easy): against the bodies, result and FPSR. ----.",
    "comment": "(ProjectReLink, pixl27; nx2/nativefp.py) A64_FPX_EASY: what the fast paths give up on, done with the host's own arithmetic where Arm's result is known without the software body (recomp_fpe_*): a NaN or an infinite operand, an invalid operation, an overflow, a subnormal operand, a tiny result. Called inside the RECOMP_FPX_OPEN gate only (round to nearest, no trap enabled, no default NaN, IXC raised already), after the fast tests and the rescues have refused the operation. 1: *v is Arm's result and FPSR has what Arm's operation raises (never 0 for these two: kept as a way out). tests/test_native_fp.py (easy): against the bodies, result and FPSR. ----.",
    "documented_in": null,
@@ -343,12 +343,12 @@
    "files": [
     {
      "path": "nx2/nativefp.py",
-     "line": 77
+     "line": 84
     }
    ],
    "default": "unset",
-   "values": "text (`1` named)",
-   "explanation": "undocumented: nx2/nativefp.py:77 reads it as a text value: `return on(os.environ.get(\"A64_LOCAL_VREGS\"))`. No comment in the source says what it changes.",
+   "values": "text (`0` named)",
+   "explanation": "undocumented: nx2/nativefp.py:84 reads it as a text value: `return on_by_default(os.environ.get(\"A64_LOCAL_VREGS\"))`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -431,11 +431,11 @@
    "files": [
     {
      "path": "nx2/nativefp.py",
-     "line": 65
+     "line": 72
     }
    ],
    "default": "unset",
-   "values": "text (`1` named)",
+   "values": "text (`0` named)",
    "explanation": "(ProjectReLink, pixl27; nx2/nativefp.py) A64_NATIVE_FP: the hot functions' floating point on the host's instructions. See nx2/nativefp.py for what it keeps and what it does not ----.",
    "comment": "(ProjectReLink, pixl27; nx2/nativefp.py) A64_NATIVE_FP: the hot functions' floating point on the host's instructions. See nx2/nativefp.py for what it keeps and what it does not ----.",
    "documented_in": null,

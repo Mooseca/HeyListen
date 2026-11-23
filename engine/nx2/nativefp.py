@@ -59,22 +59,29 @@ def on(value):
     return (value or "0").strip().lower() in ("1", "on", "true", "yes")
 
 
+def on_by_default(value):
+    """a switch that is on unless set to 0 (off, false, no)"""
+    return value is None or value.strip() == "" or on(value)
+
+
+# (on by default since 2026-11-23, the owner's choice: RTX 5070 Market +10-12% (integ4b 84.9 -> 95.4 fps median), the game's own
+# loop being the Market's limit; a 41-minute hand session with no physics or timing fault seen. =0 gives the exact path back)
 def native_fp():
-    # A64_NATIVE_FP=1 (lift time, off by default): the hot functions' floating point on the host's own instructions, FPSR's
+    # A64_NATIVE_FP (lift time, on unless =0): the hot functions' floating point on the host's own instructions, FPSR's
     # flags not kept there (ProjectReLink's, ported: nx2/nativefp.py)
-    return on(os.environ.get("A64_NATIVE_FP"))
+    return on_by_default(os.environ.get("A64_NATIVE_FP"))
 
 
 def fpx_easy():
-    # A64_FPX_EASY=1 (lift time, off by default): FADD / FSUB / FMUL S past the fast path done without the software body,
+    # A64_FPX_EASY (lift time, on unless =0): FADD / FSUB / FMUL S past the fast path done without the software body,
     # result and flags exact (ProjectReLink's, ported: nx2/nativefp.py)
-    return on(os.environ.get("A64_FPX_EASY"))
+    return on_by_default(os.environ.get("A64_FPX_EASY"))
 
 
 def local_vregs():
-    # A64_LOCAL_VREGS=1 (lift time, off by default; with A64_LOCAL_REGS): the vector registers a function names as C locals
+    # A64_LOCAL_VREGS (lift time, on unless =0; with A64_LOCAL_REGS): the vector registers a function names as C locals
     # (ProjectReLink's, ported: nx2/nativefp.py)
-    return on(os.environ.get("A64_LOCAL_VREGS"))
+    return on_by_default(os.environ.get("A64_LOCAL_VREGS"))
 
 
 # ---- A64_NATIVE_FP --------------------------------------------------------------------------------------------------------

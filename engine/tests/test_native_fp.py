@@ -69,8 +69,14 @@ def generate(cxx, tmp, flags):
     base_hot = a64_lift.hot_text
     saved = {k: os.environ.get(k) for k in ("A64_NATIVE_FP", "A64_FPX_EASY", "A64_LOCAL_VREGS")}
     try:
+        for k in saved:   # (on by default since 2026-11-23: unset is on, =0 off)
+            os.environ.pop(k, None)
+        if not (nativefp.native_fp() and nativefp.fpx_easy() and nativefp.local_vregs()):
+            raise SystemExit("nativefp: A64_NATIVE_FP / A64_FPX_EASY / A64_LOCAL_VREGS are not on by default")
         for k in saved:
             os.environ[k] = "0"
+        if nativefp.native_fp() or nativefp.fpx_easy() or nativefp.local_vregs():
+            raise SystemExit("nativefp: =0 does not turn an option off")
         nativefp.install()
         if a64_lift.fpx_header(SHAPES) != base or a64_lift.hot_text is not base_hot:
             raise SystemExit("nativefp: the options off changed a64_fpx.h or the hot text")
