@@ -190,6 +190,11 @@ def check_patched(gen):
         heads = list(HEAD.finditer(s))
         for k, m in enumerate(heads):
             fn = s[m.start():heads[k + 1].start() if k + 1 < len(heads) else len(s)]
+            # (LIFT2) up to its closing brace: what stands between it and the next head belongs to the next function (hl_gates
+            # puts a gate's constructor line right above the gated function's head, which counted for the one before it)
+            end = fn.rfind("\n}\n")
+            if end >= 0:
+                fn = fn[:end + 3]
             if any(mk in fn for mk in PATCH_MARKS):
                 seen += 1
                 if LOCAL_DECL.search(fn):

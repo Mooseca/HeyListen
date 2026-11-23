@@ -149,6 +149,15 @@ def check_patched():
                 fail("check_patched stops without naming the function: %s" % e)
         else:
             fail("check_patched let a marked function with locals through")
+        # (LIFT2) a gate's constructor line above the gated function's head belongs to it, not to the function before
+        gate = ("__attribute__((constructor)) static void hl_gate_in_80000100(void) { hl_gate_present(0x80000100ULL); }   "
+                "/* hl gate 80000100 */\n")
+        gated = ("void f_80000100(Ctx *__restrict A64_NOESC c) {\n    { if (hl_gate_80000100(c)) return; }   /* hl gate 80000100 */\n"
+                 "#if A64_BK\n}\n#endif\n}\n")
+        with open(os.path.join(tmp, "code_000.c"), "w", newline="\n") as f:
+            f.write('#include "a64.h"\n' + other + gate + gated)
+        if gl.check_patched(tmp) != 1:
+            fail("check_patched counted a gate's constructor line for the function above it")
 
 
 def check_text_passes():
