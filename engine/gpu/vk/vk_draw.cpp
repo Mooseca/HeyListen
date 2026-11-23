@@ -4770,6 +4770,11 @@ struct Pass {
     std::vector<const Texture*> sampled;   // (rendered textures its draws sampled: a target among them is a hazard)
     uint16_t sampled_targets = 0;          // (colour i bit i, depth bit 8: targets earlier draws sampled)
     uint16_t written = 0;                  // (its targets written so far: colour i bit i, depth bit 8)
+    // (RX_VK_PASS_TIMING: what the pass map (docs/research/pass1-pass-map.md) lists per pass: its draws that write depth, that run
+    // with rasterizer discard, with alpha to coverage, whose fragment program writes depth or kills (early Z is lost), that blend;
+    // and the attachments its load operation clears: colour i bit i, depth bit 8)
+    uint32_t dw_draws = 0, disc_draws = 0, a2c_draws = 0, latez_draws = 0, blend_draws = 0;
+    uint16_t load_cleared = 0;
 };
 TLS_OBJECT(pass, Pass)
 thread_local bool work_since_barrier = false;   // (GPU work recorded since the last full barrier: a dispatch orders after it)
@@ -4964,6 +4969,7 @@ void begin_pass(VkCommandBuffer cmd, const Targets& at) {
             ca[i].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
             std::memcpy(&ca[i].clearValue.color, load_clear.rgba[i], 16);
             load_clear.taken_color[i] = true;
+            ps.load_cleared |= (uint16_t)(1u << i);
         }
         ps.color[i] = at.color_view[i];
         ps.tex[i] = at.color[i], ps.level[i] = at.color_level[i], ps.layer[i] = at.color_layer[i];
@@ -4981,6 +4987,7 @@ void begin_pass(VkCommandBuffer cmd, const Targets& at) {
             da.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
             da.clearValue.depthStencil = load_clear.ds;
             load_clear.taken_depth = true;
+            ps.load_cleared |= 1u << 8;
         }
         texture_written(at.depth, "a pass's depth target");
         texture_rendered(at.depth);
@@ -4999,6 +5006,7 @@ void begin_pass(VkCommandBuffer cmd, const Targets& at) {
     ps.draws = 0, ps.format0 = at.n ? at.color_format[0] : at.depth_format;
     ps.wm_or = 0, ps.wm_n = 0;
     ps.clears = 0, ps.first_prog = 0;
+    ps.dw_draws = ps.disc_draws = ps.a2c_draws = ps.latez_draws = ps.blend_draws = 0, ps.load_cleared = 0;
     ps.sampled.clear(), ps.sampled_targets = 0, ps.written = 0;
     vkCmdBeginRendering(cmd, &ri);
     ps.open = true;
@@ -5090,6 +5098,17 @@ void dynamic_state(VkCommandBuffer cmd, const NvnState& s, const Targets& at, Vk
     float df[kDynF];
     uint32_t du[kDynU];
     uint8_t db[160];
+    if (gprof_on()) {   // (RX_VK_PASS_TIMING: the pass map's per-pass counts)
+        ps.dw_draws += at.depth && s.ds.dw && s.ds.dt;
+        ps.disc_draws += s.raster_discard != 0, ps.a2c_draws += s.ms.a2c != 0;
+        ps.blend_draws += (s.color.blend_en & ((1u << at.n) - 1)) != 0;
+        if (cur_program)
+            for (const Stage& st : cur_program->stages)
+                if (st.nvn_stage == 1 && (st.info.stores_frag_depth || st.info.uses_demote_to_helper_invocation)) {
+                    ps.latez_draws++;
+                    break;
+                }
+    }
     if (dev.frag_shading_rate) {   // (RX_VK_VRS: the rate of this draw's program; the dynamic state's fast path below does not see programs)
         static const vrs::Rule rule = vrs::parse(getenv("RX_VK_VRS"), getenv("RX_VK_VRS_MIN_W") ? (uint32_t)atoi(getenv("RX_VK_VRS_MIN_W")) : 64u);
         const bool dwrite = at.depth && depth_aspect(at.depth_format) && s.ds.dw;
@@ -6033,10 +6052,13 @@ void end_pass(VkCommandBuffer cmd) {
                    (unsigned long long)ps.first_prog, (unsigned long long)ps.prog, sampled);
     }
     if (gprof_on()) {
-        char label[160];
-        snprintf(label, sizeof label, "pass %ux%u f%d %dc%s, %s draws, %zu sampled, first prog %016llx, last prog %016llx", ps.width, ps.height,
-                 (int)ps.format0, ps.n, ps.depth ? "+d" : "", ps.draws > 256 ? ">256" : ps.draws > 32 ? "33-256" : ps.draws > 4 ? "5-32" : "0-4",
-                 ps.sampled.size(), (unsigned long long)ps.first_prog, (unsigned long long)ps.prog);
+        char label[288];
+        snprintf(label, sizeof label, "pass %ux%u f%d %dc%s, %s draws, %zu sampled, first prog %016llx, last prog %016llx, dw%s disc%s a2c%s latez%s blend%s cl%x vrs%d",
+                 ps.width, ps.height, (int)ps.format0, ps.n, ps.depth ? "+d" : "", ps.draws > 256 ? ">256" : ps.draws > 32 ? "33-256" : ps.draws > 4 ? "5-32" : "0-4",
+                 ps.sampled.size(), (unsigned long long)ps.first_prog, (unsigned long long)ps.prog,
+                 ps.dw_draws ? (ps.dw_draws >= (uint32_t)ps.draws ? "all" : "some") : "0", ps.disc_draws ? "Y" : "0", ps.a2c_draws ? "Y" : "0",
+                 ps.latez_draws ? (ps.latez_draws >= (uint32_t)ps.draws ? "all" : "some") : "0",
+                 ps.blend_draws ? (ps.blend_draws >= (uint32_t)ps.draws ? "all" : "some") : "0", (unsigned)ps.load_cleared, dev.frag_shading_rate ? 1 : 0);
         gprof_end(cmd, label, ps.draws);
     } else if (tprof_on()) {   // (the performance profile: the pass's kind and key; a dynamic resolution's small steps are one pass)
         const profile_report::PassKind kind = profile_report::pass_kind(ps.n, ps.depth != VK_NULL_HANDLE, ps.width, ps.height, ps.draws, tprof_output_pixels());
