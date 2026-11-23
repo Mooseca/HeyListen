@@ -4691,7 +4691,7 @@ bool texture_touch_quick(Texture* tex, bool for_sampling) {
 // value the locked path would store; a concurrent locked look stores the same). Anything else: false, and the caller takes the lock.
 // RX_VK_TOUCH_FAST_CHECK=1 (implies it): each look the unlocked path answered is asked again under ParLock the locked way (the memory,
 // the GPU writes, the segment order); a disagreement is counted, logged and handed to texture_touch, so the check changes nothing seen.
-// Logged every 3600 presents: looks answered without the lock, sent to it (and why), the check's comparisons and disagreements.
+// Logged every 1200 presents: looks answered without the lock, sent to it (and why), the check's comparisons and disagreements.
 namespace {
 int touch_fast_mode() {   // (0 off, 1 on, 2 on with the check)
     static const int v = [] {
@@ -4743,11 +4743,16 @@ touch_fast::Verdict touch_fast_decide(Texture* tex, bool for_sampling, uint32_t&
         });
 }
 void touch_fast_log() {
+    // (every 1200 presents counted from the first look: a run of 110 s at 50 fps has ~5,500 presents, and the first 3600-present version
+    // logged its first line only after twice that, never in such a run: the PC 3050's check run, 23 Nov)
     const uint64_t f = frame_no;
     uint64_t at = st_tf_logged_at.load(std::memory_order_relaxed);
-    if (f < at + 3600 || !st_tf_logged_at.compare_exchange_strong(at, f)) return;
-    if (!at) return;   // (the first call only sets the clock)
-    logf("vk: a texture's first look of a submission (RX_VK_TOUCH_FAST, 3600 presents): %lld without ParLock, %lld under it (%lld written since, "
+    if (!at) {   // (the first call starts the clock; f + 1 is never 0)
+        st_tf_logged_at.compare_exchange_strong(at, f + 1);
+        return;
+    }
+    if (f + 1 < at + 1200 || !st_tf_logged_at.compare_exchange_strong(at, f + 1)) return;
+    logf("vk: a texture's first look of a submission (RX_VK_TOUCH_FAST, 1200 presents): %lld without ParLock, %lld under it (%lld written since, "
          "%lld uploaded by a later segment, %lld other cases); check: %lld asked again under the lock, %lld disagreed",
          (long long)st_tf_skip.exchange(0), (long long)(st_tf_dirty.load() + st_tf_later.load() + st_tf_locked.load()),
          (long long)st_tf_dirty.exchange(0), (long long)st_tf_later.exchange(0), (long long)st_tf_locked.exchange(0),

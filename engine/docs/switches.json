@@ -16135,7 +16135,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_texture.cpp",
-     "line": 5569
+     "line": 5574
     }
    ],
    "default": "off (unset)",
@@ -16156,7 +16156,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_texture.cpp",
-     "line": 5692
+     "line": 5697
     }
    ],
    "default": "off (unset)",
@@ -17313,7 +17313,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_texture.cpp",
-     "line": 5288
+     "line": 5293
     }
    ],
    "default": "1",
@@ -17334,7 +17334,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_texture.cpp",
-     "line": 5292
+     "line": 5297
     }
    ],
    "default": "1",
@@ -17355,7 +17355,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_texture.cpp",
-     "line": 5284
+     "line": 5289
     }
    ],
    "default": "on (unless set to 0, false, off or no)",
@@ -17586,7 +17586,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_texture.cpp",
-     "line": 5489
+     "line": 5494
     }
    ],
    "default": "0",
@@ -19040,7 +19040,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_texture.cpp",
-     "line": 5933
+     "line": 5938
     }
    ],
    "default": "60",
@@ -19061,7 +19061,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_texture.cpp",
-     "line": 6171
+     "line": 6176
     }
    ],
    "default": "off (unset)",
@@ -19082,7 +19082,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_texture.cpp",
-     "line": 5902
+     "line": 5907
     }
    ],
    "default": "unset",
@@ -19103,7 +19103,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_texture.cpp",
-     "line": 6117
+     "line": 6122
     }
    ],
    "default": "off (unset)",
@@ -19124,7 +19124,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_texture.cpp",
-     "line": 6145
+     "line": 6150
     }
    ],
    "default": "off (unset)",
@@ -19969,7 +19969,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_texture.cpp",
-     "line": 6085
+     "line": 6090
     }
    ],
    "default": "unset",
@@ -21163,7 +21163,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_texture.cpp",
-     "line": 5976
+     "line": 5981
     }
    ],
    "default": "512",
@@ -21205,7 +21205,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_texture.cpp",
-     "line": 6125
+     "line": 6130
     }
    ],
    "default": "off (unset)",
@@ -21607,7 +21607,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_texture.cpp",
-     "line": 5834
+     "line": 5839
     }
    ],
    "default": "off (unset)",
@@ -22530,7 +22530,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_texture.cpp",
-     "line": 5435
+     "line": 5440
     }
    ],
    "default": "192",
@@ -23909,11 +23909,11 @@
    "files": [
     {
      "path": "gpu/vk/vk_texture.cpp",
-     "line": 5531
+     "line": 5536
     },
     {
      "path": "gpu/vk/vk_texture.cpp",
-     "line": 5884
+     "line": 5889
     }
    ],
    "default": "off (unset)",
@@ -28174,7 +28174,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_texture.cpp",
-     "line": 5509
+     "line": 5514
     }
    ],
    "default": "256",
@@ -28216,7 +28216,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_texture.cpp",
-     "line": 4980
+     "line": 4985
     }
    ],
    "default": "unset",
@@ -28363,7 +28363,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_texture.cpp",
-     "line": 5406
+     "line": 5411
     }
    ],
    "default": "2",
@@ -28384,7 +28384,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_texture.cpp",
-     "line": 5398
+     "line": 5403
     }
    ],
    "default": "30",
@@ -28405,7 +28405,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_texture.cpp",
-     "line": 5389
+     "line": 5394
     }
    ],
    "default": "0 (unset)",
@@ -29672,8 +29672,8 @@
    ],
    "default": "off (unset)",
    "values": "on or off (0, false, off, no and empty are off); the description names `1`",
-   "explanation": "Anything else: false, and the caller takes the lock. RX_VK_TOUCH_FAST_CHECK=1 (implies it): each look the unlocked path answered is asked again under ParLock the locked way (the memory, the GPU writes, the segment order); a disagreement is counted, logged and handed to texture_touch, so the check changes nothing seen. Logged every 3600 presents: looks answered without the lock, sent to it (and why), the check's comparisons and disagreements.",
-   "comment": "Anything else: false, and the caller takes the lock. RX_VK_TOUCH_FAST_CHECK=1 (implies it): each look the unlocked path answered is asked again under ParLock the locked way (the memory, the GPU writes, the segment order); a disagreement is counted, logged and handed to texture_touch, so the check changes nothing seen. Logged every 3600 presents: looks answered without the lock, sent to it (and why), the check's comparisons and disagreements.",
+   "explanation": "Anything else: false, and the caller takes the lock. RX_VK_TOUCH_FAST_CHECK=1 (implies it): each look the unlocked path answered is asked again under ParLock the locked way (the memory, the GPU writes, the segment order); a disagreement is counted, logged and handed to texture_touch, so the check changes nothing seen. Logged every 1200 presents: looks answered without the lock, sent to it (and why), the check's comparisons and disagreements.",
+   "comment": "Anything else: false, and the caller takes the lock. RX_VK_TOUCH_FAST_CHECK=1 (implies it): each look the unlocked path answered is asked again under ParLock the locked way (the memory, the GPU writes, the segment order); a disagreement is counted, logged and handed to texture_touch, so the check changes nothing seen. Logged every 1200 presents: looks answered without the lock, sent to it (and why), the check's comparisons and disagreements.",
    "documented_in": null,
    "source": "comment at gpu/vk/vk_texture.cpp",
    "documented": true,
@@ -30124,15 +30124,15 @@
    "files": [
     {
      "path": "gpu/vk/vk_texture.cpp",
-     "line": 5539
+     "line": 5544
     },
     {
      "path": "gpu/vk/vk_texture.cpp",
-     "line": 5551
+     "line": 5556
     },
     {
      "path": "gpu/vk/vk_texture.cpp",
-     "line": 5686
+     "line": 5691
     }
    ],
    "default": "70",
@@ -30153,7 +30153,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_texture.cpp",
-     "line": 5685
+     "line": 5690
     }
    ],
    "default": "80",
@@ -30425,7 +30425,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_texture.cpp",
-     "line": 4799
+     "line": 4804
     }
    ],
    "default": "unset",
@@ -30504,7 +30504,7 @@
     },
     {
      "path": "gpu/vk/vk_texture.cpp",
-     "line": 6347
+     "line": 6352
     },
     {
      "path": "gpu/vk/vk_xfer.cpp",
