@@ -22,6 +22,7 @@
    same functions as the proc table (nvn2_dispatch, from gen/nvn2_exports.c). */
 #include "hos.h"
 #include "hos_waitnote.h"
+#include "hos_slack.h"
 #include "shadow_slot.h"   /* (the storage a character's shadow map reserves) */
 #include "../gpu/render/rx_nvn.h"
 #include "hl/c/hl_gfx_rec.h"   /* (HeyListen: the records native producers write, checked against rx_nvn.h below) */
@@ -2992,6 +2993,7 @@ NV(nvnQueuePresentTexture) {
     if (i < 0 || i >= o->ntex) die("present of window texture %d", i);
     held_init();
     present_thread = hos_self();   /* (TICK-054, HOS_NVN_HOLD=2: the presenting thread, whose submits are not held) */
+    hos_slack_present(present_thread);   /* (PIPE2 stage 0: the two stages' slack, hos_slack.c) */
     hos_sw_present();   /* (HL_STALL_WATCH, hos_jobtrace.c: the gap between presents) */
     held_flush_why(HF_PRESENT);   /* (a present flushes the queue) */
     {   /* (heylisten) this frame's pacing sleep (nn_vi.c), for the performance summary's pace part: pushed before the present
