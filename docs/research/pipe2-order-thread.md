@@ -15,14 +15,22 @@ Runner `build/s5/pipe2/series.sh` (a tag with a valid result is skipped, so a cu
 
 Clean baseline, castle off (the series' warm-up `p2s1-warm-c`, 127.2 fps from play + 10 s): frames 8.37-8.79 ms, the PT waited
 0.26 ms for the main thread's hand-over, the main thread 1.34-1.43 ms for the present (89-94% of frames over 0.5 ms): replay-bound, the
-PT's chain 8.1-8.5 ms. **GPU time 1.7 ms a frame** (not 5.5: that was a run with another agent's build in it), so the GPU has ~6 ms of
-slack and a win is a CPU question. The main thread's held submits are replayed on the `HOS_NVN_HOLD=2` flush thread (0.73-0.90 ms a
-flush), not on the PT: stage 3's "held flush" is already off the PT in this build.
+PT's chain 8.1-8.5 ms. **GPU time 7.6-7.7 ms a frame** in the played windows (1.7 at the title screen; not 5.5, that was a run with
+another agent's build in it): the GPU is 89-91% busy, so the stage 1 gate's +8% (7.9 ms frames) is at or beyond the GPU's own work in
+this scene - see section 3. The main thread's held submits are replayed on the `HOS_NVN_HOLD=2` flush thread (0.73-0.90 ms a flush),
+not on the PT: stage 3's "held flush" is already off the PT in this build.
 
 Losses today: the first series start (18:36-18:40) ran the warm-up and castle off-1 (the run came out at 66.9 fps, 36 frames over 50 ms:
 another agent's build began during it, deleted) and then died on runguard exit 11; a second start got the lease at 18:51 and died on
 exit 11 again (my own two tour games left running by a doubled launch: killed, both slot leases released, the slots' own exes restored
-from `build/s5/pipe2/bak-{a,b}`); the tour was killed before its first run, so the flashes and the pictures are still unmeasured.
+from `build/s5/pipe2/bak-{a,b}`); a first tour attempt (slot b, 19:31) never started: runguard exit 12, 1065 MB of RAM free with
+zone3's game in slot a (a second game does not fit: the tour waits until the machine is free).
+
+Built `build/s5/bin/pipe2e` (19:28, 571 s, tests 503 passed / the 3 known failures) from `0bb228966`: the tip plus the readback
+ring's meter re-apply (`vk_rbring.cpp`: with the order thread the game reads and zeroes the meter's block, so a frame's second read
+finds its own zero and no new entry; the ring now hands the last applied entry back - the same value the meter hold gave - for the
+meter's block only). Committed as `0bb228966`, `fix(vk): the readback ring hands the meter's block its last result back when no entry
+is new (order thread, lag 3)`. The gate series now runs on pipe2e (tags `p2g-*`).
 
 Done before this session: stage 0 (`HL_SLACK`, on) and stage 1 (`RX_VK_ORDER_THREAD`, off) on perf/pipe2, tip 1758bb3b0 + the doc; tests
 only the known environmental failures. Builds `build/s5/bin/pipe2a..pipe2d` (pipe2d = the tip's code). Function runs (slot, shared
@@ -135,6 +143,37 @@ Kokiri on 117.6 against off 118.0 fps. pipe2c counts only the thread's submissio
 The meter: 308-496 of 2000 reads given the last result again (0 in the runs before; not frozen: frozen is >= 1990). The order thread's
 work, 8.1-8.5 ms a frame, is more than the PT's inline chain (submits + present, 6.7-7.4 ms in PIPE1's traces): the replay got slower
 on its own thread.
+
+### 3. The GPU's own work per frame: what the gate's +8% meets (clean runs, 23 Nov 19:20-20:15)
+
+The engine logs the GPU's busy time a frame (`vk: GPU time X ms a frame`, the sum of the recordings' timestamp spans, every 120
+presents; the gaps between recordings and the uploads are separate). In the two scenes the gate uses, on this PC, a frame of the played
+scene is 88-95% GPU-busy:
+
+| run (one run each) | fps | frame, the played windows (ms) | GPU busy a frame (ms) | GPU of the frame |
+|---|---:|---|---:|---:|
+| castle off, `p2s1-warm-c` (pipe2d) | 127.2 | 8.37 / 8.56 / 8.55 / 8.79 / 8.49 | 7.68 / 7.62 / 7.88 / 7.82 / 7.64 | 89-92% |
+| castle off, `p2g-warm-c` (pipe2e) | 126.4 | 7.84 / 8.12 / 8.56 / 8.73 / 8.76 | 6.44 / 7.78 / 7.86 / 7.90 / 7.92 | 82-96% |
+| Kokiri off, `p2b-f-off-kok` (pipe2b, shared machine) | 118.0 | 8.29 / 8.36 / 8.16 / 8.29 / 8.63 | 7.30 / 7.28 / 7.20 / 7.36 / 7.34 | 85-89% |
+| Kokiri on, `p2c-f-on-kok` (pipe2c, shared machine) | 115.3 | 8.68 / 8.03 / 7.99 / 8.07 / 8.14 | 7.24 / 7.28 / 7.26 / 7.24 / 7.24 | 83-91% |
+
+(each line: the last five 600-present windows of the run, and the GPU line's five 120-present windows that fall in each.)
+
+(Title screen, for scale: GPU 1.7 ms of 2.8 ms frames.) The GPU's work a frame is the same in both arms (it does not depend on where
+the replay runs), and it varies with what the camera sees: in the castle's fast windows 5.4-6.7 ms of GPU work against 7.2-7.5 ms
+frames, in its slow ones 7.6-8.1 against 8.4-8.8.
+
+What it means for the gate: **the frame cannot be shorter than the GPU's work plus the present's ~0.2 ms.**
+
+- **castle**: the ceiling is 7.8-8.1 ms a frame (123-128 fps), and the two off runs are at 126.4-127.2 fps: **the scene is at the GPU's
+  ceiling today**; the gate's +8% (7.9 ms frames from a 8.5 ms median, ~137 fps) would need the GPU's own work to drop by half a
+  millisecond, which no CPU-side change can do. Some windows are already there (7.84 ms of frame against 6.44 of GPU in `p2g-warm-c`).
+- **Kokiri**: the ceiling is 7.4-7.6 ms (132-135 fps) against 8.2-8.6: +8% (128 fps, 7.8 ms) is inside it, by ~0.3 ms.
+
+So PIPE1's upper bounds (+10-16%, +16-21%, section 3 there) were read off the traces and did not include the GPU's share: **on this PC
+the castle has ~0-3% of room and Kokiri ~10%**, not 10-21%. PIPE1's traced castle window ran at 7.59 ms a frame, which today's GPU work
+(7.6-8.0) would not allow: the scene moment (the camera turns move the GPU's work between 5.4 and 8.1 ms a frame within one run) or the
+builds differ; the series' own GPU lines say which.
 
 ## Dead ends
 
