@@ -1,6 +1,22 @@
 <!-- Copyright (C) 2026 Sacrappy -->
 # PIPE2: the stages' slack and the replay on an order thread (23 Nov 2026 -)
 
+## Summary (this session, in progress at 21:45)
+
+1. **Stage 1 works and the overlap is real, but the wall is the GPU.** One clean interleaved round on `pipe2e` (castle-move): on 138.6
+   against off 137.8 fps (+0.6%), the frame's median 6.38 against 6.68 ms, and **the CPU work above the GPU's own time halved** (frame -
+   GPU: 0.66 ms on, 1.39 off). The PT waits 5.6 ms for the main thread, the main thread never for the present, the order thread idles
+   0.18 ms, the fence join costs 0.40 ms (section 4).
+2. **The gate's +8% is measured against the GPU's 5-8 ms a frame**, which PIPE1's upper bounds did not include: in the played windows the
+   engine's GPU time is 5.0-7.9 ms a frame in the castle (89-92% of the frame in the slow windows) and 7.2-7.4 in Kokiri (85-91%). The
+   castle's ceiling at the walk's slow part is ~123-128 fps and the off arm is already there; Kokiri has ~10% (section 3).
+3. **The meter's held reads are fixed** (`0bb228966`): the on arm's log now reads "2000 reads, 0 of them given the last result again"
+   (308-496 of 2000 before the fix, 0 off) (section 4).
+4. **Not measured yet**: the rest of the gate series (Kokiri, the Market, more castle rounds) - queued under a speed lease that the
+   machine's other streams keep taking; the flash/picture tour (the first attempt was killed by a launch mistake, the second refused by
+   runguard's RAM guard with another game in a slot); the PROF_FINE pair.
+
+
 Branch `perf/pipe2` from origin/main 4b599eb04 (PIPE1 merged, `RX_VK_TOUCH_FAST` on). Worktree `E:\OOT\HeyListen-wt\pipe2`. Design:
 `pipe1-frame-overlap.md` section 3 (stages 0-3 with their gates). Main PC (RTX 5070); PC 3050 runs are routed by the coordinator.
 
