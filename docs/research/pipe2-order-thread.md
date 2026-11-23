@@ -284,6 +284,12 @@ The overlap's own evidence in these runs: the PT waits 5.6-10.3 ms for the main 
 was the bound) and 1.9-2.9 ms in the game-bound Market; the fence join (the game's own `nvnSyncWait` on the PT's fence, answered when
 the order thread reaches it) costs 0.40-0.86 ms a frame on the main thread's side.
 
+The Market needs its caveat: the on arm has more frames over 25 ms in every round (13 / 156 / 81 against the off arm's 8 / 126 / 35)
+and its round 3 is 11.7% below the off arm's (87.5 against 99.1). Its frame p50 is equal in all six runs (9.28-9.57 on, 9.39-9.47 off),
+so the difference is in the tail: **the order thread adds stutters in the game-bound scene**. The candidates are the ring at lag 3 and
+the fence join (0.15 ms a frame there); not diagnosed. "Not below the spread" is true of the p50 and of the clean round, not of the
+tails.
+
 ### 6. The tour: flashes, the meter across zone changes, the pictures (pipe2e, slot a, 23:22-23:29, `tour.sh` with `RX_VK_FLASH=1 RX_VK_SHOT_EVERY=1`)
 
 The warp tour (`E:/OOT/scratch-foot1/tour_live.sh`: Market save, `kokiri-idle` inputs, `!cheat 1001` HyruleField, `1002` Kakariko,
