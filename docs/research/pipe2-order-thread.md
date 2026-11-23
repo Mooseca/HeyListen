@@ -4,7 +4,38 @@
 Branch `perf/pipe2` from origin/main 4b599eb04 (PIPE1 merged, `RX_VK_TOUCH_FAST` on). Worktree `E:\OOT\HeyListen-wt\pipe2`. Design:
 `pipe1-frame-overlap.md` section 3 (stages 0-3 with their gates). Main PC (RTX 5070); PC 3050 runs are routed by the coordinator.
 
-## State (stopped 23 Nov ~18:40: the Claude weekly limit; handed over)
+## State (PIPE2 continues; last edit 23 Nov ~19:00)
+
+Where it stands: the gate series for `pipe2d` is **queued** (ticket `20261123-...-pipe2-s1-speed`, 22 runs to do: castle 6, Kokiri 7,
+Market 7, the PROF_FINE pair last; a speed lease at priority 2 behind foot2's and zone3's leases, which hold the machine to ~20:30).
+Runner `build/s5/pipe2/series.sh` (a tag with a valid result is skipped, so a cut series resumes by re-requesting); its list is
+`E:\OOT\scratch-pipe2\tmp\s1-series.sh`, log `build/s5/pipe2/series-s1.log`; launches go through
+`E:\OOT\scratch-pipe2\tmp\launch.py` (a detached bash; the harness's shell alternates between Git bash and PowerShell, so a plain
+`nohup ... &` from a call is not dependable - a doubled launch cost one tour and one lease today).
+
+Clean baseline, castle off (the series' warm-up `p2s1-warm-c`, 127.2 fps from play + 10 s): frames 8.37-8.79 ms, the PT waited
+0.26 ms for the main thread's hand-over, the main thread 1.34-1.43 ms for the present (89-94% of frames over 0.5 ms): replay-bound, the
+PT's chain 8.1-8.5 ms. **GPU time 1.7 ms a frame** (not 5.5: that was a run with another agent's build in it), so the GPU has ~6 ms of
+slack and a win is a CPU question. The main thread's held submits are replayed on the `HOS_NVN_HOLD=2` flush thread (0.73-0.90 ms a
+flush), not on the PT: stage 3's "held flush" is already off the PT in this build.
+
+Losses today: the first series start (18:36-18:40) ran the warm-up and castle off-1 (the run came out at 66.9 fps, 36 frames over 50 ms:
+another agent's build began during it, deleted) and then died on runguard exit 11; a second start got the lease at 18:51 and died on
+exit 11 again (my own two tour games left running by a doubled launch: killed, both slot leases released, the slots' own exes restored
+from `build/s5/pipe2/bak-{a,b}`); the tour was killed before its first run, so the flashes and the pictures are still unmeasured.
+
+Done before this session: stage 0 (`HL_SLACK`, on) and stage 1 (`RX_VK_ORDER_THREAD`, off) on perf/pipe2, tip 1758bb3b0 + the doc; tests
+only the known environmental failures. Builds `build/s5/bin/pipe2a..pipe2d` (pipe2d = the tip's code). Function runs (slot, shared
+machine, so not comparable): castle on 126.5 / off 119.9; Kokiri on 115.3 / off 118.0; order thread the bound, its replay 8.1-8.5 ms a
+frame against the PT's inline chain 7.3; meter 308-496 of 2000 reads given the last result again (0 off).
+
+Open this session:
+- Uncommitted, untested: `vk_rbring.cpp`, `rbring_apply` hands the meter's block the last applied entry back when no entry is new
+  (class R1, `size == 0x1040`, `memory_is_meter`): the game reads and zeroes the block, so at lag 3 a read with no new entry sees its
+  own zero and the meter hold counts it. New stat `again` in the rbring log line. To build and test (unit tests unaffected).
+- The castle's GPU time is 5.5 ms a frame (`p2s1-c-off-1/game_log.txt`) against 8.3 ms frames, so the GPU has ~2.8 ms of slack: a
+  win is possible; the question is the CPU contention between the replay's recorders and the game's job threads (13 threads on 8 cores).
+
 
 Done:
 - Stage 0 (`HL_SLACK`, on) and stage 1 (`RX_VK_ORDER_THREAD`, off) on perf/pipe2, tip 1758bb3b0 + this doc; tests: only the known
