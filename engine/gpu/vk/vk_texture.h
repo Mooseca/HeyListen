@@ -138,7 +138,7 @@ Texture* texture_touch(Texture* tex, bool for_sampling);
 bool texture_touch_quick(Texture* tex, bool for_sampling);
 /// (stream PIPE1, RX_VK_TOUCH_FAST) after texture_touch_quick said no, outside ParLock: true when the locked texture_touch would only
 /// note this submission's first look (uploaded, not GPU-written, nothing written into its storage since, not uploaded by a later
-/// segment); the look is then noted here. False: take ParLock and call texture_touch. Always false with the switch off
+/// segment); the look is then noted here. False: take ParLock and call texture_touch. Always false with RX_VK_TOUCH_FAST=0
 bool texture_touch_unlocked(Texture* tex, bool for_sampling);
 /// Whether texture_written and texture_rendered would change nothing this frame (a parallel replay: no lock then)
 bool texture_marked(const Texture* tex);

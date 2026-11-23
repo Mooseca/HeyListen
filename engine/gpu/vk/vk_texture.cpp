@@ -4680,7 +4680,7 @@ bool texture_touch_quick(Texture* tex, bool for_sampling) {
     return tex->uploaded && tex->checked_epoch == epoch;
 }
 
-// ---- (stream PIPE1) RX_VK_TOUCH_FAST=1: the first look of a submission at an unchanged texture without ParLock ----
+// ---- (stream PIPE1) RX_VK_TOUCH_FAST (on by default, =0 off): the first look of a submission at an unchanged texture without ParLock ----
 // texture_touch_quick answers a texture already looked at in this submission (checked_epoch). Its first look in a submission (380 a
 // big command buffer in the Market, BIND1/TEXRES1) took ParLock for texture_touch, whose work for a texture uploaded from memory and not
 // written since is only to note the look: 1.1 ms a frame of the recording threads' wait for the lock (vk_draw.cpp:2943 and :3960).
@@ -4692,12 +4692,15 @@ bool texture_touch_quick(Texture* tex, bool for_sampling) {
 // RX_VK_TOUCH_FAST_CHECK=1 (implies it): each look the unlocked path answered is asked again under ParLock the locked way (the memory,
 // the GPU writes, the segment order); a disagreement is counted, logged and handed to texture_touch, so the check changes nothing seen.
 // Logged every 1200 presents: looks answered without the lock, sent to it (and why), the check's comparisons and disagreements.
+// On by default since PIPE1's A/B (5070, 3 rounds each: Market +0.2%, castle +0.8%, Kokiri +0.5%, all inside the spread; PC 3050 equal) and
+// its checks (6.5 M unlocked looks asked again under the lock in the Market, the castle and Kokiri: 0 disagreed): leaner (ParLock's takes
+// 610 -> 280 a big command buffer in the Market), the same answers. RX_VK_TOUCH_FAST=0: the locked look, as before
 namespace {
 int touch_fast_mode() {   // (0 off, 1 on, 2 on with the check)
     static const int v = [] {
         const bool check = env_on("RX_VK_TOUCH_FAST_CHECK");
         const char* e = getenv("RX_VK_TOUCH_FAST");
-        const int m = check ? 2 : e && atoi(e) != 0 ? 1 : 0;
+        const int m = check ? 2 : e && atoi(e) == 0 ? 0 : 1;
         logf("vk: a texture's first look of a submission: %s (RX_VK_TOUCH_FAST)",
              m == 2 ? "without ParLock when unchanged, checked under it (RX_VK_TOUCH_FAST_CHECK)" : m ? "without ParLock when unchanged" : "under ParLock, as before");
         return m;

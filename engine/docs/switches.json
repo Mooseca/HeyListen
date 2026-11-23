@@ -16135,7 +16135,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_texture.cpp",
-     "line": 5574
+     "line": 5577
     }
    ],
    "default": "off (unset)",
@@ -16156,7 +16156,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_texture.cpp",
-     "line": 5697
+     "line": 5700
     }
    ],
    "default": "off (unset)",
@@ -17313,7 +17313,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_texture.cpp",
-     "line": 5293
+     "line": 5296
     }
    ],
    "default": "1",
@@ -17334,7 +17334,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_texture.cpp",
-     "line": 5297
+     "line": 5300
     }
    ],
    "default": "1",
@@ -17355,7 +17355,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_texture.cpp",
-     "line": 5289
+     "line": 5292
     }
    ],
    "default": "on (unless set to 0, false, off or no)",
@@ -17586,7 +17586,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_texture.cpp",
-     "line": 5494
+     "line": 5497
     }
    ],
    "default": "0",
@@ -19040,7 +19040,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_texture.cpp",
-     "line": 5938
+     "line": 5941
     }
    ],
    "default": "60",
@@ -19061,7 +19061,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_texture.cpp",
-     "line": 6176
+     "line": 6179
     }
    ],
    "default": "off (unset)",
@@ -19082,7 +19082,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_texture.cpp",
-     "line": 5907
+     "line": 5910
     }
    ],
    "default": "unset",
@@ -19103,7 +19103,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_texture.cpp",
-     "line": 6122
+     "line": 6125
     }
    ],
    "default": "off (unset)",
@@ -19124,7 +19124,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_texture.cpp",
-     "line": 6150
+     "line": 6153
     }
    ],
    "default": "off (unset)",
@@ -19969,7 +19969,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_texture.cpp",
-     "line": 6090
+     "line": 6093
     }
    ],
    "default": "unset",
@@ -21163,7 +21163,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_texture.cpp",
-     "line": 5981
+     "line": 5984
     }
    ],
    "default": "512",
@@ -21205,7 +21205,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_texture.cpp",
-     "line": 6130
+     "line": 6133
     }
    ],
    "default": "off (unset)",
@@ -21607,7 +21607,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_texture.cpp",
-     "line": 5839
+     "line": 5842
     }
    ],
    "default": "off (unset)",
@@ -22530,7 +22530,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_texture.cpp",
-     "line": 5440
+     "line": 5443
     }
    ],
    "default": "192",
@@ -23909,11 +23909,11 @@
    "files": [
     {
      "path": "gpu/vk/vk_texture.cpp",
-     "line": 5536
+     "line": 5539
     },
     {
      "path": "gpu/vk/vk_texture.cpp",
-     "line": 5889
+     "line": 5892
     }
    ],
    "default": "off (unset)",
@@ -27290,7 +27290,7 @@
     },
     {
      "path": "gpu/vk/vk_texture.cpp",
-     "line": 4722
+     "line": 4725
     }
    ],
    "default": "unset",
@@ -28174,7 +28174,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_texture.cpp",
-     "line": 5514
+     "line": 5517
     }
    ],
    "default": "256",
@@ -28216,7 +28216,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_texture.cpp",
-     "line": 4985
+     "line": 4988
     }
    ],
    "default": "unset",
@@ -28363,7 +28363,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_texture.cpp",
-     "line": 5411
+     "line": 5414
     }
    ],
    "default": "2",
@@ -28384,7 +28384,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_texture.cpp",
-     "line": 5403
+     "line": 5406
     }
    ],
    "default": "30",
@@ -28405,7 +28405,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_texture.cpp",
-     "line": 5394
+     "line": 5397
     }
    ],
    "default": "0 (unset)",
@@ -29646,13 +29646,13 @@
    "files": [
     {
      "path": "gpu/vk/vk_texture.cpp",
-     "line": 4699
+     "line": 4702
     }
    ],
    "default": "unset",
-   "values": "text (`1` named)",
-   "explanation": "(Stream PIPE1) RX_VK_TOUCH_FAST=1: the first look of a submission at an unchanged texture without ParLock ---- texture_touch_quick answers a texture already looked at in this submission (checked_epoch). Its first look in a submission (380 a big command buffer in the Market, BIND1/TEXRES1) took ParLock for texture_touch, whose work for a texture uploaded from memory and not written since is only to note the look: 1.1 ms a frame of the recording threads' wait for the lock (vk_draw.cpp:2943 and :3960). Here the same questions are asked without it: uploaded, not the GPU's, not sparse or virtual (their page walks write the texture), not held back once, no CPU write into its storage since upload_gen (memory_written_runs: the page generations, stamped at the submit's capture), no GPU write into it not yet taken (gpu_wrote_pending, under its own small mutex), and not uploaded by a later ...",
-   "comment": "(Stream PIPE1) RX_VK_TOUCH_FAST=1: the first look of a submission at an unchanged texture without ParLock ---- texture_touch_quick answers a texture already looked at in this submission (checked_epoch). Its first look in a submission (380 a big command buffer in the Market, BIND1/TEXRES1) took ParLock for texture_touch, whose work for a texture uploaded from memory and not written since is only to note the look: 1.1 ms a frame of the recording threads' wait for the lock (vk_draw.cpp:2943 and :3960). Here the same questions are asked without it: uploaded, not the GPU's, not sparse or virtual (their page walks write the texture), not held back once, no CPU write into its storage since upload_gen (memory_written_runs: the page generations, stamped at the submit's capture), no GPU write into it not yet taken (gpu_wrote_pending, under its own small mutex), and not uploaded by a later ...",
+   "values": "text (`0` named)",
+   "explanation": "(Stream PIPE1) RX_VK_TOUCH_FAST (on by default, =0 off): the first look of a submission at an unchanged texture without ParLock ---- texture_touch_quick answers a texture already looked at in this submission (checked_epoch). Its first look in a submission (380 a big command buffer in the Market, BIND1/TEXRES1) took ParLock for texture_touch, whose work for a texture uploaded from memory and not written since is only to note the look: 1.1 ms a frame of the recording threads' wait for the lock (vk_draw.cpp:2943 and :3960). Here the same questions are asked without it: uploaded, not the GPU's, not sparse or virtual (their page walks write the texture), not held back once, no CPU write into its storage since upload_gen (memory_written_runs: the page generations, stamped at the submit's capture), no GPU write into it not yet taken (gpu_wrote_pending, under its own small mutex), and not ...",
+   "comment": "(Stream PIPE1) RX_VK_TOUCH_FAST (on by default, =0 off): the first look of a submission at an unchanged texture without ParLock ---- texture_touch_quick answers a texture already looked at in this submission (checked_epoch). Its first look in a submission (380 a big command buffer in the Market, BIND1/TEXRES1) took ParLock for texture_touch, whose work for a texture uploaded from memory and not written since is only to note the look: 1.1 ms a frame of the recording threads' wait for the lock (vk_draw.cpp:2943 and :3960). Here the same questions are asked without it: uploaded, not the GPU's, not sparse or virtual (their page walks write the texture), not held back once, no CPU write into its storage since upload_gen (memory_written_runs: the page generations, stamped at the submit's capture), no GPU write into it not yet taken (gpu_wrote_pending, under its own small mutex), and not ...",
    "documented_in": null,
    "source": "comment at gpu/vk/vk_texture.cpp",
    "documented": true,
@@ -29667,7 +29667,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_texture.cpp",
-     "line": 4698
+     "line": 4701
     }
    ],
    "default": "off (unset)",
@@ -30124,15 +30124,15 @@
    "files": [
     {
      "path": "gpu/vk/vk_texture.cpp",
-     "line": 5544
+     "line": 5547
     },
     {
      "path": "gpu/vk/vk_texture.cpp",
-     "line": 5556
+     "line": 5559
     },
     {
      "path": "gpu/vk/vk_texture.cpp",
-     "line": 5691
+     "line": 5694
     }
    ],
    "default": "70",
@@ -30153,7 +30153,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_texture.cpp",
-     "line": 5690
+     "line": 5693
     }
    ],
    "default": "80",
@@ -30425,7 +30425,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_texture.cpp",
-     "line": 4804
+     "line": 4807
     }
    ],
    "default": "unset",
@@ -30504,7 +30504,7 @@
     },
     {
      "path": "gpu/vk/vk_texture.cpp",
-     "line": 6352
+     "line": 6355
     },
     {
      "path": "gpu/vk/vk_xfer.cpp",

@@ -1,7 +1,7 @@
 # Copyright (C) 2026 Sacrappy
 
 """A texture's first look of a submission without ParLock (RX_VK_TOUCH_FAST, gpu/vk/touch_fast.h, stream PIPE1): the decision against the
-locked texture_touch's rules (tests/touch_fast_test.cpp), and the wiring in vk_texture.cpp and vk_draw.cpp (off by default, serial replay
+locked texture_touch's rules (tests/touch_fast_test.cpp), and the wiring in vk_texture.cpp and vk_draw.cpp (on by default, =0 off, serial replay
 untouched, the order of the reads, the check mode's locked answer, both ParLock touch sites asking it first).
 python -I -B tests/test_touch_fast.py [--cxx clang++]"""
 import argparse
@@ -21,7 +21,7 @@ def need(body, needles, where):
 def check_wiring():
     tex = (ROOT / "gpu/vk/vk_texture.cpp").read_text(encoding="utf-8")
     mode = tex[tex.index("int touch_fast_mode() {"):tex.index("std::atomic<int64_t> st_tf_skip")]
-    need(mode, ('env_on("RX_VK_TOUCH_FAST_CHECK")', 'getenv("RX_VK_TOUCH_FAST")', "check ? 2 : e && atoi(e) != 0 ? 1 : 0"), "touch_fast_mode")
+    need(mode, ('env_on("RX_VK_TOUCH_FAST_CHECK")', 'getenv("RX_VK_TOUCH_FAST")', "check ? 2 : e && atoi(e) == 0 ? 0 : 1"), "touch_fast_mode")
     dec = tex[tex.index("touch_fast::Verdict touch_fast_decide("):tex.index("void touch_fast_log()")]
     # (upload_gen read first, with acquire; upload_value / upload_seg after the memory look)
     a = dec.index("__atomic_load_n(&tex->upload_gen, __ATOMIC_ACQUIRE)")
