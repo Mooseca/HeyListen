@@ -27,6 +27,11 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "tests"))
 sys.path.insert(0, os.path.join(ROOT, "nx2"))
 os.environ.pop("A64_SUB_V", None)
+# (LIFT2's native floating point is on by default since 2026-11-23: its header calls the host's hos_fpcr_follow from a
+# constructor, which this standalone driver has no host for. This test is about the subtraction's V flag, so the native FP
+# options are off here; tests/test_native_fp.py tests them with the host's MXCSR follow)
+for _k in ("A64_NATIVE_FP", "A64_FPX_EASY", "A64_LOCAL_VREGS"):
+    os.environ[_k] = "0"
 import test_fpx_sticky as fs  # noqa: E402  (its compiler, target, build and run helpers; its paths on sys.path)
 
 SEED = 20261120
