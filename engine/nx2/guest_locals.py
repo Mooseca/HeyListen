@@ -27,7 +27,10 @@ lift.py asks before the functions are written change these from outside:
   - every function in no_local is written with the instructions' texts as without the flags as locals (the kit decides once for the
     whole lift how a scalar compare reads the flags; a patch finds its place by the context text), and the mentioned ones, whose text
     the hl_gates hashes and the other edits were recorded against, with the lift's other passes off too (A64_SUB_V, A64_VECFP,
-    A64_VBYTES, A64_VMOVES): their text is the lift's as before this change, to the byte.
+    A64_VBYTES, A64_VMOVES, and nx2/nativefp.py's A64_NATIVE_FP): their text is the lift's as before this change, to the byte.
+    (LIFT2) This holds whenever one of those passes is on, the locals off too (text_passes(); nx2/lift.py asks the keep_*
+    functions then): with the locals off and the other passes on, the gated functions were written with the passes' text and
+    every hl_gates gate and hook missed its recorded hash.
   - check_patched() looks at the written files afterwards and stops the lift if a function carries a text edit's mark and has locals.
 """
 import bisect
@@ -110,19 +113,40 @@ def keep_not_ran(lifter, ran=None):
 # (a function by its own head, a label, a hex address; not a function merely called: "f_80522050(c)" names the callee,
 # and the call's place is its return address, which is named too)
 _ADDRESS = re.compile(r"(?:void f_|L_|0x)(8[0-9a-fA-F]{7})(?![0-9a-fA-F])")
+# (LIFT2) a function named in prose, "f_810a7b70 sets up ..." or "nnMain (f_81222ce0)": the output size edits
+# (oot_patches.OUT_EDITS) name their functions only so, and two of their eight places hold no address the pattern above sees
+# (f_810a7b70's x0 + 724 and nnMain's 2560 x 1440): the lift gave those functions locals and the edits found nothing. A name
+# right before "(" is a call, whose callee keeps its locals. ProjectReLink (pixl27) keeps every f_ name of these files.
+_NAMED = re.compile(r"(?<![0-9A-Za-z_])f_(8[0-9a-fA-F]{7})(?![0-9a-fA-F(])")
 EDIT_FILES = ("oot_patches.py", "native_replace.py", "oot_native_resolution.py")
+
+
+def text_passes():
+    """a pass that changes the lifted text is on (the locals, A64_SUB_V, A64_VECFP, A64_VBYTES / A64_VMOVES, A64_NATIVE_FP): the
+    functions the text edits and the gates read are then written as main writes them (keep_mentioned's plain0), and the hot
+    ones without vecfp's `if` (keep_hot). (LIFT1's pieces 1-4 alone, with the locals off, wrote the gated functions with the
+    other passes' text: every hl_gates gate and hook missed its recorded hash)"""
+    import cmpflags
+    import fastvec
+    import nativefp
+    import vecfp
+    return bool(a64_lift.local_regs() or a64_lift.local_flags() or cmpflags.on() or vecfp.groups() or
+                fastvec.pass_on("VBYTES") or fastvec.pass_on("VMOVES") or nativefp.native_fp())
 
 
 def mentioned_addresses():
     """Every guest code address HeyListen's text edits name: the heads, labels and hex addresses of nx2/oot_patches.py,
-    native_replace.py and oot_native_resolution.py, and the addresses host/hl_*.c asks hl_gates.py to gate or hook (gates, step
-    hooks, movie hooks, lift hooks). An edit pins its place by such an address, so a function that holds one is a function an
-    edit may change, whatever else it wants to see before it acts: the lift leaves each as the edits expect it. An address
-    named for another reason costs one function its locals"""
+    native_replace.py and oot_native_resolution.py, the functions they name in prose (f_<address> not followed by a call's
+    parenthesis), and the addresses host/hl_*.c asks hl_gates.py to gate or hook (gates, step hooks, movie hooks, lift hooks).
+    An edit pins its place by such an address, so a function that holds one is a function an edit may change, whatever else
+    it wants to see before it acts: the lift leaves each as the edits expect it. An address named for another reason costs
+    one function its locals"""
     found = set()
     for name in EDIT_FILES:
         with open(os.path.join(HERE, name), encoding="utf-8") as f:
-            found |= {int(a, 16) for a in _ADDRESS.findall(f.read())}
+            s = f.read()
+        found |= {int(a, 16) for a in _ADDRESS.findall(s)}
+        found |= {int(a, 16) for a in _NAMED.findall(s)}
     import hl_gates
     for table in (hl_gates.wanted(), hl_gates.wanted_steps(), hl_gates.wanted_movies(), hl_gates.wanted_lifts()):
         found |= {int(a, 16) for a in table}
@@ -233,7 +257,7 @@ def install():
 
     def op_text(t, fpx):
         r = base_op_text(t, fpx)
-        if not local_flags():
+        if not (local_flags() or text_passes()):
             return r
         return _Both(r, t)
 

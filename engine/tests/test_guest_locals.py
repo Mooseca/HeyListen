@@ -72,6 +72,13 @@ def check_sets():
     gates = set(int(a, 16) for a in hl_gates.wanted())
     if not gates or not gates <= m:
         fail("the hl_gates addresses are not all mentioned")
+    # (LIFT2) the output size edits' functions, named in prose only (f_810a7b70's x0 + 724 was written with locals: the lift
+    # stopped on OUT_EDITS [1]); a callee's name before its call's parenthesis is not one
+    for a in (0x81222ce0, 0x810a7b70, 0x80ea2f30, 0x836ce9d0, 0x83b7b340, 0x80b72340):
+        if a not in m:
+            fail("the output size edits' function %#x is not among the addresses the edits name" % a)
+    if gl._NAMED.findall("nnMain (f_81222ce0) puts; f_831cca50(c); f_810a7b70 sets; xf_80000000, f_8000") != ["81222ce0", "810a7b70"]:
+        fail("_NAMED: %s" % gl._NAMED.findall("nnMain (f_81222ce0) puts; f_831cca50(c); f_810a7b70 sets"))
     funcs = {0x80000000: [0x80000000, 0x80000004, 0x80000008], 0x80000100: [0x80000100, 0x80000104],
              0x80000200: [0x800001f0, 0x80000200], 0x80000300: [0x80000300], 0x80000400: [0x80000400]}
     L = Lifter(funcs, after=[0x80000104], plt=[0x80000400])
@@ -144,11 +151,84 @@ def check_patched():
             fail("check_patched let a marked function with locals through")
 
 
+def check_text_passes():
+    """(LIFT2) the main texts are kept whenever a pass changes the text, the locals off too; all off, none"""
+    names = ("A64_LOCAL_REGS", "A64_LOCAL_FLAGS", "A64_SUB_V", "A64_VECFP", "A64_VBYTES", "A64_VMOVES", "A64_NATIVE_FP")
+    saved = {n: os.environ.get(n) for n in names}
+    try:
+        for n in names:
+            os.environ[n] = "0"
+        import a64_lift
+        gl.install()
+        if gl.text_passes():
+            fail("text_passes() with every pass off")
+        for n in names[2:]:
+            os.environ[n] = "1"
+            if not gl.text_passes():
+                fail("text_passes() misses %s=1 with the locals off" % n)
+            os.environ[n] = "0"
+        if a64_lift.local_regs() != 0:
+            fail("A64_LOCAL_REGS=0 not read by the kit")
+    finally:
+        for n, v in saved.items():
+            if v is None:
+                os.environ.pop(n, None)
+            else:
+                os.environ[n] = v
+
+
+def check_vregs():
+    """(ProjectReLink, pixl27) nx2/nativefp.py's A64_LOCAL_VREGS: the vector registers a function names as locals, written
+    back and read again at the marks as the guest's ABI says (v0-v15 around calls, v16-v31 never there, all at an SVC)"""
+    import a64_lift
+    import nativefp
+    os.environ["A64_LOCAL_REGS"] = "6"
+    try:
+        gl.install()
+        mark = lambda k, i: "\x01%s%d\x01" % (k, i)   # noqa: E731
+        text = ("void f_80000000(Ctx *__restrict A64_NOESC c) {\n"
+                "    c->x[0] = c->x[1] + 1;\n"
+                "    { memcpy(c->vreg[3],c->vreg[17],16); }\n"
+                "    c->x[30] = 0x80000010ULL; " + mark("C", 2) + "f_80000100(c);" + mark("B", 2) + "\n"
+                "    a64_vset64(c->vreg[3],c->x[0]);\n"
+                "    " + mark("R", 4) + "return;\n"
+                "    " + mark("A", 5) + "TAILCALL(f_80000200);\n}\n")
+        v = lambda n: 1 << (nativefp.VSHIFT + n)   # noqa: E731
+        before = [0, 1, 1 | v(3) | v(17), v(17), v(3) | v(17), v(3) | v(17)]
+        dirty = (before, before)
+        out = nativefp.localize_regs(text, True, dirty)
+        lines = out.split("\n")
+        if "uint64_t v3_[2] = { c->vreg[3][0], c->vreg[3][1] }, v17_[2] = { c->vreg[17][0], c->vreg[17][1] };" not in out:
+            fail("vregs: no locals' declaration:\n" + out)
+        if "memcpy(v3_,v17_,16)" not in out or "a64_vset64(v3_,x0_)" not in out or "c->vreg[3]," in out or "c->vreg[17]," in out:
+            fail("vregs: the registers not renamed:\n" + out)
+        call = [x for x in lines if "f_80000100(c)" in x][0]
+        if "c->vreg[3][0] = v3_[0]" not in call.split("f_80000100")[0] or "c->vreg[17]" in call.split("f_80000100")[0]:
+            fail("vregs: before a call v0-v15 are written back, v16-v31 not: %r" % call)
+        after = call.split("f_80000100(c);")[1]
+        if "v3_[0] = c->vreg[3][0]" not in after or "v17_" in after:
+            fail("vregs: after a call v0-v15 are read again, v16-v31 not: %r" % call)
+        ret = [x for x in lines if "return;" in x][0]
+        if "c->vreg[3][0] = v3_[0]" not in ret or "v17" in ret:
+            fail("vregs: at a return v3 written back, v17 not: %r" % ret)
+        tail = [x for x in lines if "TAILCALL" in x][0]
+        if "c->vreg[17][0] = v17_[0]" not in tail or "c->vreg[3][0] = v3_[0]" not in tail:
+            fail("vregs: at a tail call everything written back: %r" % tail)
+        if nativefp.reg_writes("{ memcpy(c->vreg[3],c->vreg[17],16); c->x[2]=1; }") != (1 << 2) | v(3) | v(17):
+            fail("vregs: reg_writes")
+        if a64_lift.localize_regs is nativefp.localize_regs and not os.environ.get("A64_LOCAL_VREGS") == "1":
+            fail("vregs: installed with A64_LOCAL_VREGS unset")
+    finally:
+        os.environ.pop("A64_LOCAL_REGS", None)
+
+
 def main():
     check_switches()
     check_sets()
     check_undo()
     check_patched()
+    check_text_passes()
+    check_vregs()
     print("guest_locals: pass")
 
 
