@@ -443,6 +443,30 @@ void rbring_check(uint64_t gpu, uint64_t size) {
              (long long)st.age[1].exchange(0), (long long)st.age[2].exchange(0), (long long)st.age[3].exchange(0));
 }
 
+/// (EXPO1, a test) HL_RB_TEST_DIRECT=<frame>[:<every>] (default off): from that frame on (and again every <every> frames), the next written binding of each exposure-meter block (0x1040) the ring learned goes to guest memory directly, as a binding of a pool with no mirror does after a zone change: the freeze of 2026-11-23 on demand (with HL_RB_LAG_KEEP=0) and the ring's take-over (without)
+bool rbring_test_direct(uint64_t guest, uint64_t size) {
+    static const int64_t from = getenv("HL_RB_TEST_DIRECT") ? atoll(getenv("HL_RB_TEST_DIRECT")) : 0;
+    static const int64_t every = [] {
+        const char* e = getenv("HL_RB_TEST_DIRECT");
+        const char* c = e ? strchr(e, ':') : nullptr;
+        return c ? atoll(c + 1) : 0ll;
+    }();
+    if (from <= 0 || size != 0x1040 || !config().lag || !memory_is_meter(guest)) return false;
+    const int64_t f = rb_frame_now();
+    if (f < from) return false;
+    const int64_t round = every > 0 ? (f - from) / every : 0;   // (each block once a round)
+    std::lock_guard lk(mu);
+    const auto it = table.find({guest, size});
+    if (it == table.end()) return false;
+    static std::map<uint64_t, int64_t> done;   // (block -> the round it was sent direct in)
+    const auto d = done.find(guest);
+    if (d != done.end() && d->second >= round) return false;
+    done[guest] = round;
+    logf("vk: HL_RB_TEST_DIRECT: frame %lld, the binding of meter block %#llx sent to guest memory directly (writes %llu, staged %llu)",
+         (long long)f, (unsigned long long)guest, (unsigned long long)it->second.writes, (unsigned long long)it->second.staged);
+    return true;
+}
+
 /// (EXPO1, HL_METER_LOG) the ring's state of a range, for a log row: how it is served, its counters, the last staged binding, and its
 /// entries newest first (seq, tag, done or not, the first four words; "gone" when the ring went round over it)
 void rbring_describe(uint64_t guest, uint64_t size, char* out, size_t cap) {
