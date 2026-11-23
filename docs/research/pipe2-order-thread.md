@@ -22,24 +22,24 @@
    end) - the next zone's blocks have nothing staged yet; that is the meter's zone-change rule, not the order thread, and it is not
    fixed.
 4. **Next** (in order): the present out of the order thread's chain (a present thread, FIF's, without FIF's contention) for Kokiri's
-   ~0.3 ms; the two flashes' reads outside the capture view (stage 2: texture uploads, collected writes at replay time); the meter's
-   first reads after a zone change; a valid PROF_FINE pair on the on arm (`series.sh`'s comma bug is fixed); the PC 3050 list, which the
-   coordinator routes.
+   ~0.3 ms - the env knobs tried (thread priority, pool spin, four recorders, section 7) give at most +0.8% and leave the CPU above the
+   GPU at 0.6-0.7 ms; the two flashes' reads outside the capture view (stage 2: texture uploads, collected writes at replay time); the
+   meter's first reads after a zone change (section 6); a valid PROF_FINE pair on the on arm (`series.sh`'s comma bug is fixed); the PC
+   3050 list, which the coordinator routes.
 
 
 Branch `perf/pipe2` from origin/main 4b599eb04 (PIPE1 merged, `RX_VK_TOUCH_FAST` on). Worktree `E:\OOT\HeyListen-wt\pipe2`. Design:
 `pipe1-frame-overlap.md` section 3 (stages 0-3 with their gates). Main PC (RTX 5070); PC 3050 runs are routed by the coordinator.
 
-## State (PIPE2 continues; last edit 23 Nov ~23:45)
+## State (PIPE2 continues; last edit 24 Nov ~00:10)
 
-Where it stands: **the gate is measured and does not pass** (the Summary; section 5 for the fps, section 6 for the tour). The gate series
-ran on `pipe2e` (`0bb228966`) in one clean speed lease (22:19-22:57); the tour ran in slot a at 23:22-23:29. A small speed series of
-Kokiri candidate arms is queued (`E:\OOT\scratch-pipe2\tmp\s4-kokiri.sh`: off, on, `RX_VK_ORDER_PRIO=2`, `RX_VK_POOL_SPIN=200`,
-`RX_VK_PARALLEL=4`, two rounds; ticket `20261123-230415-pipe2-s4-speed-1a84`) for the ~0.3 ms Kokiri needs. Runner
-`build/s5/pipe2/series.sh` (a tag with a valid result is skipped, so a cut series resumes by re-requesting); the gate table:
-`python -I E:/OOT/scratch-pipe2/tmp/gate.py "p2g-*"`. Launches go through `E:\OOT\scratch-pipe2\tmp\launch.py` (a detached bash; the
-harness's shell alternates between Git bash and PowerShell, so a plain `nohup ... &` from a call is not dependable - a doubled launch
-cost one tour and one lease today). Shots: `E:\OOT\scratch-pipe2\shots\p2t2-{off,on}`.
+Where it stands: **the gate is measured and does not pass** (the Summary; section 5 for the fps, section 6 for the tour, section 7 for the
+knobs). The gate series ran on `pipe2e` (`0bb228966`) in one clean speed lease (22:19-22:57); the tour in slot a at 23:22-23:29; the
+Kokiri knobs in one clean speed lease at 23:40-00:02. Nothing of this stream is running or leased now; the machine is on another
+stream's build. Gate table: `python -I E:/OOT/scratch-pipe2/tmp/gate.py "p2g-*"` and `"p2c-*"`; shots
+`E:\OOT\scratch-pipe2\shots\p2t2-{off,on}`. Launches go through `E:\OOT\scratch-pipe2\tmp\launch.py` (a detached bash; the harness's
+shell alternates between Git bash and PowerShell, so a plain `nohup ... &` from a call is not dependable - a doubled launch cost one
+tour and one lease today).
 
 Clean baseline, castle off (the series' warm-up `p2s1-warm-c`, 127.2 fps from play + 10 s): frames 8.37-8.79 ms, the PT waited
 0.26 ms for the main thread's hand-over, the main thread 1.34-1.43 ms for the present (89-94% of frames over 0.5 ms): replay-bound, the
@@ -312,5 +312,25 @@ ZoraRiver_Child HyruleField_Child`):
   (`vk_003000.png` is the black HyruleField load in both; `vk_003600.png` is the cave mouth in HyruleField in both). The on arm's frame
   is a little brighter - the meter's one extra frame of lag (the ring at lag 3 instead of 2), as EXPO1/STEP1 described. Shots:
   `E:\OOT\scratch-pipe2\shots\p2t2-{off,on}\`.
+
+### 7. Kokiri's last 0.3 ms: the order thread's knobs (pipe2e, one clean speed lease 23:40-00:02, two interleaved rounds)
+
+Kokiri is the one scene whose +8% is not walled off by the GPU (section 3/5: the GPU needs 7.1-7.2 ms, the on frame is 7.73-7.90), so the
+order thread's chain got one more turn of knobs, all env-only on the same build:
+
+| arm | rounds (fps) | median | against off | frame (ms) | GPU (ms) | frame - GPU |
+|---|---|---:|---:|---:|---:|---:|
+| off | 122.5, 120.0 | 121.2 | - | 8.17, 8.50 | 7.10, 7.10 | 1.07, 1.40 |
+| on (base) | 129.0, 127.4 | 128.2 | **+5.7%** | 7.73, 7.80 | 7.10, 7.20 | 0.63, 0.60 |
+| on, `RX_VK_ORDER_PRIO=2` | 129.8, 128.4 | 129.1 | +6.5% | 7.70, 7.82 | 7.10, 7.10 | 0.60, 0.72 |
+| on, `RX_VK_POOL_SPIN=200` | 129.1, 128.3 | 128.7 | +6.2% | 7.77, 7.78 | 7.10, 7.10 | 0.67, 0.68 |
+| on, `RX_VK_PARALLEL=4` | 129.5, 126.1 | 127.8 | +5.4% | 7.70, 7.89 | 7.10, 7.10 | 0.60, 0.79 |
+
+**None of the knobs reaches +8%**: the thread's priority (+0.8%) and the pool's spin (+0.5%) are inside the rounds' spread (the base arm
+itself spread 129.0 / 127.4), and fewer recorders (PARALLEL=4) is not better. The CPU above the GPU stays at 0.6-0.7 ms whatever the
+knob: the order thread's chain is set by its jobs' serial part (the frame's last submit, the drain and the present), not by its
+scheduling or its workers' wake. That is where the 0.3 ms Kokiri needs would have to come from: the present out of the chain (a
+present thread of its own, FIF's, which contended for `sync_order_mu` when FIF tried it on the PT's side) or a shorter tail before the
+present.
 
 ## Dead ends
