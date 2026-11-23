@@ -28,6 +28,13 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # (python -I le
 import kit
 import nso2  # noqa: F401  (DT_RELR)
 import insn
+import guest_locals as local_regs   # (longshot #1576, Veix) registers and flags as C locals (A64_LOCAL_REGS, A64_LOCAL_FLAGS): nx2/guest_locals.py
+import dead_flags   # (longshot #1576) the kit's dead_flags, answered at once for a function that writes no flag
+import fastvec   # (longshot #1576, Veix) TBL / EXT, vector loads and DUP as single vector instructions (A64_VBYTES, A64_VMOVES)
+import vecfp   # (longshot #1782, snaildev99) SSE fast paths for lane-by-lane float forms (A64_VECFP)
+import fpxkeep   # (longshot #1905, snaildev99) NaN, infinite operands and exact-zero multiply-adds kept off the software bodies (A64_FPXKEEP)
+import cmpflags   # (longshot #1871, dyst) a subtraction's V as N xor (a < b): A64_SUB_V
+import nativefp   # (ProjectReLink, pixl27) native floating point in the hot functions, FPX_EASY, vector registers as locals
 import lift_fixes
 import chunks
 import standalone
@@ -41,7 +48,15 @@ import a64_lift
 import a64_rtgen
 
 insn.install()
+vecfp.install()   # (around insn's translate: the forms the kit's passes and the FP blocks leave, behind SSE fast paths)
+cmpflags.install()   # (around that translate: text only, after the forms are chosen)
+fpxkeep.install()   # (the kit's lane routes and wrappers, in a64_fpx.h's text)
+nativefp.install_regs()   # (ProjectReLink, pixl27) A64_LOCAL_VREGS: the kit's localize_regs as guest_locals wraps it
+local_regs.install()   # (the defaults; around the kit's localize_regs, op_text and Lifter.emit_function: the context kept where text edits read it)
+dead_flags.install()
+fastvec.install()   # (around the kit's hot_text, fpx_header and Lifter.emit_function: after the FP blocks)
 lift_fixes.install()
+nativefp.install()   # (ProjectReLink, pixl27) A64_NATIVE_FP, A64_FPX_EASY: around fpx_header, hot_text and emit_function, last
 
 
 def module_of(img, pc):
@@ -168,6 +183,15 @@ def main():
         import oot_view   # (fork: the gameplay view's hook, which oot_patches.py's patch_view no longer finds; host/hos_main.c)
         oot_view.install(L, img)
     L.discover(max_insns=a.max_func)
+    if local_regs.text_passes():   # (nx2/guest_locals.py: which functions keep the context, and keep main's text)
+        print("locals: %d functions with spliced code kept in the context" % local_regs.keep_spliced(L))
+        print("locals: %d functions entered above their first block kept in the context" % local_regs.keep_entered_below(L))
+        print("locals: %d functions that hold an address the text edits name kept in the context" % (
+            local_regs.keep_mentioned(L, local_regs.mentioned_addresses())))
+        print("locals: %d hot functions kept in the context (FP blocks)" % local_regs.keep_hot(L))
+        cold = local_regs.keep_not_ran(L)
+        print("locals: every other function has them (A64_LOCAL_FUNCS=<file> lists the ones that may)" if cold is None else
+              "locals: %d functions A64_LOCAL_FUNCS does not list kept in the context" % cold)
     print("discovered %d functions (%.0fs)" % (len(L.funcs), time.time() - t0))
     total = coverage(L, img, img_dir)
     jt = L.stats
@@ -188,6 +212,8 @@ def main():
         import oot_patches
         main_build = next((m["build_id"] for m in meta["modules"] if m["name"] == "main"), "")
         chunks.edit_c(gen, L.stats, a.standalone and main_build == oot_patches.LIFE_BUILD_ID, whole=not a.max_func)
+        if a64_lift.local_regs() or a64_lift.local_flags():   # (nx2/guest_locals.py: the edited functions kept the context)
+            print("locals: %d edited functions checked in the written C" % local_regs.check_patched(gen))
         a64_rtgen.write(gen)
         if a.standalone:
             start, exit_ = standalone.write_image_c(gen, img, meta, a.exefs)
@@ -197,6 +223,8 @@ def main():
             standalone.write_nvn_exports(gen, nvn)
             print("standalone: nvn2_exports.c (%d sdk NVN functions routed to host/nvn2.c)" % len(nvn))
         L.report()
+        if nativefp.report():
+            print(nativefp.report())
         print("interrupt polls: %d loop headers in %d functions" % (poll.stats["polls"], poll.stats["functions"]))
         print("wrote %d code files to %s (%.0fs)" % (len(files), gen, time.time() - t0))
     print("done (%.0fs)" % (time.time() - t0))

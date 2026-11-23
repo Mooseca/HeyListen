@@ -10,7 +10,7 @@ python -I engine/scripts/list_switches.py
 
 and commit both files. A test (`engine/tests/test_switches_documented.py`) fails when a switch read in the source is missing here or the data file is out of date.
 
-1429 switches: 56 players may be told to use, 378 diagnostic, 995 developer-only; 1223 have a real explanation and 206 are marked `undocumented`.
+1438 switches: 56 players may be told to use, 378 diagnostic, 1004 developer-only; 1228 have a real explanation and 210 are marked `undocumented`.
 
 ## How to set a switch
 
@@ -65,7 +65,7 @@ The entries below say what each one does, its values and default, and when it is
 | Area | Switches | Player | Diagnostic | Developer |
 |---|---:|---:|---:|---:|
 | [Renderer](#renderer-upscaling-frame-generation-hdr-v-sync-and-presentation) | 457 | 23 | 14 | 420 |
-| [Shaders and pipelines](#shaders-and-pipelines) | 125 | 6 | 0 | 119 |
+| [Shaders and pipelines](#shaders-and-pipelines) | 126 | 6 | 0 | 120 |
 | [Memory and textures](#memory-and-textures) | 190 | 10 | 0 | 180 |
 | [Audio](#audio) | 14 | 5 | 9 | 0 |
 | [Input and controllers](#input-and-controllers) | 13 | 1 | 12 | 0 |
@@ -73,7 +73,7 @@ The entries below say what each one does, its values and default, and when it is
 | [Host and OS (`HOS_*` and the system's variables)](#host-and-os-hos_-and-the-systems-variables) | 138 | 10 | 0 | 128 |
 | [Telemetry and crash reports](#telemetry-and-crash-reports) | 12 | 0 | 12 | 0 |
 | [Diagnostics and logging](#diagnostics-and-logging) | 295 | 0 | 295 | 0 |
-| [Build and lift time (`A64_*`, `RX_*` and `HOOKSHOT_*` the builder reads)](#build-and-lift-time-a64_-rx_-and-hookshot_-the-builder-reads) | 91 | 0 | 0 | 91 |
+| [Build and lift time (`A64_*`, `RX_*` and `HOOKSHOT_*` the builder reads)](#build-and-lift-time-a64_-rx_-and-hookshot_-the-builder-reads) | 99 | 0 | 0 | 99 |
 
 ## Renderer: upscaling, frame generation, HDR, V-Sync and presentation
 
@@ -613,7 +613,7 @@ Over the options file: the output resolution (0 2048x1152, 1 2560x1440, 2 3840x2
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1117`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1155`.
 
 #### `HOS_REALTIME_WINDOW` - diagnostic
 
@@ -4659,7 +4659,7 @@ The map of GPU buffer writes (it drops its lowest-addressed range past 65,536, c
 
 ## Shaders and pipelines
 
-125 switches of the shader translator and the pipeline cache.
+126 switches of the shader translator and the pipeline cache.
 
 ### Shader translation
 
@@ -5106,6 +5106,16 @@ undocumented: host/hos_main.c:562 (in `nv_cache_env()`) reads it as a text value
 **Set it:** In the process environment (or in a file named by `HOS_ENV_FILE`); `hookshot_env.txt` refuses this one. **Read at:** `host/hos_main.c:562`.
 
 ### Mesh, draws and synchronization
+
+#### `HOS_FPCR_SYNC` - developer
+
+A lift without the option never asks: MXCSR is left alone, as before. HOS_FPCR_SYNC=0: left alone in any build (then a native lift's FZ is the host's default, no flush: a measurement switch only).
+
+**Values:** text (`0` named). **Default:** unset.
+
+**When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
+
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:586`.
 
 #### `HOS_NVN_SYNC_BLOCK` - developer
 
@@ -9217,7 +9227,7 @@ TICK-062 A10, HOS_CORE_COUNT=1 (diagnostic, no behaviour change): per guest thre
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1024`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1062`.
 
 #### `HOS_CV_SIGNAL_FAST` - developer
 
@@ -9327,7 +9337,7 @@ HOS_POLL_SLEEP_NS=<ns> (experiment): a guest sleep of up to 100 us lasts at most
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1067`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1105`.
 
 #### `HOS_PRIO` - developer
 
@@ -9337,7 +9347,7 @@ The first matching entry wins. (2026-10-20: the castle's MainThread and ModuleSy
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:799`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:837`.
 
 #### `HOS_RELEASE_KEEP_CORE` - player
 
@@ -9357,7 +9367,7 @@ No virtual cores; the cores the game sees (6); no core kept for the replay (one 
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:764`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:802`.
 
 #### `HOS_SHORT_SLEEP_PAUSE` - developer
 
@@ -9377,7 +9387,7 @@ The game's sleeps under a millisecond (SleepThread): `0` all short sleeps yield 
 
 **When a player would use it:** Short sleeps cost CPU time: `=1` waits on the timer instead of yielding.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:912` and 1 more place.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:950` and 1 more place.
 
 #### `HOS_SPIN_ALWAYS` - developer
 
@@ -9427,7 +9437,7 @@ No virtual cores; the cores the game sees (6); no core kept for the replay (one 
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1399`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1438`.
 
 #### `HOS_VCORE_ESCAPE_EQ_US` - developer
 
@@ -9437,7 +9447,7 @@ A waiter better than a holder asks it to give the core up (vc_kick), which it do
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1734`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1773`.
 
 #### `HOS_VCORE_ESCAPE_US` - developer
 
@@ -9447,7 +9457,7 @@ A waiter better than a holder asks it to give the core up (vc_kick), which it do
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1735`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1774`.
 
 #### `HOS_VCORE_SLICE_US` - developer
 
@@ -9457,7 +9467,7 @@ The worst holder worse than t on a core t may use gives it up at its next checkp
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1736`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1775`.
 
 #### `HOS_VCORE_STARVE_US` - developer
 
@@ -9467,7 +9477,7 @@ A game thread that has waited this long for a virtual core (default 1000000, 1 s
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1737`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1776`.
 
 #### `HOS_VCORE_WHERE` - developer
 
@@ -9477,7 +9487,7 @@ HOS_VCORE_WHERE=all (diagnostic): at each of the first 12 escapes, where every t
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1685`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1724`.
 
 #### `HOS_WEB_SPIN_SLEEP` - developer
 
@@ -9487,7 +9497,7 @@ The web has no high-resolution timer, and its clock is a call into JavaScript: s
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:892`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:930`.
 
 #### `MESA_VK_ENABLE_SUBMIT_THREAD` - developer
 
@@ -9773,7 +9783,7 @@ The API is synchronous and single-stream: mf_av1_decode takes one temporal unit 
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1434`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1473`.
 
 #### `HOS_BG_RUN_US` - developer
 
@@ -9783,7 +9793,7 @@ HOS_BG_CAP=auto: the physical cores the game's threads have (the host's, less th
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1434`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1473`.
 
 #### `HOS_BG_THROTTLE` - developer
 
@@ -9793,7 +9803,7 @@ HOS_BG_CAP=auto: the physical cores the game's threads have (the host's, less th
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1967`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:2006`.
 
 #### `HOS_BG_WAIT_US` - developer
 
@@ -9803,7 +9813,7 @@ HOS_BG_CAP=auto: the physical cores the game's threads have (the host's, less th
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1434`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1473`.
 
 #### `HOS_COND_RECORD` - developer
 
@@ -10163,7 +10173,7 @@ HOS_OCB_HOLD_MS (default 2000): how many ms a new neighbouring map must stay the
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:808`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:846`.
 
 #### `HOS_OOT_CHEATS` - player
 
@@ -10213,7 +10223,7 @@ undocumented: host/hos_main.c:1086 (in `oot_teleport()`) reads it as a text valu
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:860`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:898`.
 
 #### `HOS_PGO` - developer
 
@@ -10233,7 +10243,7 @@ HOS_PIN=<name part>=<hex mask>,...[,*=<hex mask>] (experiment): host CPU affinit
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:798`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:836`.
 
 #### `HOS_POWER_THROTTLING` - developer
 
@@ -10333,7 +10343,7 @@ Over the options file: Resolution 100% (non-zero: Auto), Game speed Per frame (1
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1217`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1255`.
 
 #### `HOS_VC_YIELD_FAST` - developer
 
@@ -10343,7 +10353,7 @@ A yield takes the virtual-core lock every time, and twice when it gives the core
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1901`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1940`.
 
 #### `HOS_VI_DOUBLE` - developer
 
@@ -10857,7 +10867,7 @@ HOS_SLEEP_LOG=1 (diagnostic): guest sleeps by caller (LR) every 5 s: count, aske
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1072` and 1 more place.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1110` and 1 more place.
 
 #### `HOS_SPEED_LOG` - diagnostic
 
@@ -10887,17 +10897,17 @@ HOS_TICK_LOG=1 (diagnostic): who reads the clock, by caller (LR), every 5 s.
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1203`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1241`.
 
 #### `HOS_TLS_TRACE` - diagnostic
 
-undocumented: host/hos_thread.c:592 (in `thread_main()`) reads it as a text value: `if (hos_trace || getenv("HOS_TLS_TRACE"))`. No comment in the source says what it changes.
+undocumented: host/hos_thread.c:630 (in `thread_main()`) reads it as a text value: `if (hos_trace || getenv("HOS_TLS_TRACE"))`. No comment in the source says what it changes.
 
 **Values:** text. **Default:** unset.
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:592`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:630`.
 
 #### `HOS_TRACE` - diagnostic
 
@@ -10917,7 +10927,7 @@ HOS_VCORE_LOG=1 (diagnostic): with the "vcores:" line, each thread that waited f
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1547`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1586`.
 
 #### `HOS_VIDEO_LOG` - diagnostic
 
@@ -13557,9 +13567,19 @@ The Khronos validation layer.
 
 ## Build and lift time (`A64_*`, `RX_*` and `HOOKSHOT_*` the builder reads)
 
-91 switches read by the builder or the lifter, in their environment.
+99 switches read by the builder or the lifter, in their environment.
 
 ### Lift (A64_*)
+
+#### `A64_` - developer
+
+undocumented: nx2/fastvec.py:22 reads it as a text value: `return os.environ.get("A64_" + name, "1").strip().lower() not in ("0", "off", "false", "no")`. No comment in the source says what it changes.
+
+**Values:** text (`0` named). **Default:** unset.
+
+**When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
+
+**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/fastvec.py:22`.
 
 #### `A64_DEVIRT` - developer
 
@@ -13570,6 +13590,16 @@ undocumented: third_party/a64-kit/lift/a64_lift.py:1381 reads it as a path: `pat
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
 **Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `third_party/a64-kit/lift/a64_lift.py:1381`.
+
+#### `A64_FPXKEEP` - developer
+
+(Longshot) results kept off the software bodies: NaN operands (N), infinite operands (I), exact-zero multiply-adds (Z); nx2/fpxkeep.py, A64_FPXKEEP. Each a64_fpxk_* is called inside FPX1's gate (RECOMP_FPX_OPEN: round to nearest, DN = 0, no traps, FPSR.IXC set) past its fast path; 1 with the Arm result in *v and its flags or-ed into FPSR, else 0 (nothing written: the exact body runs). ----.
+
+**Values:** a whole number (`0` in the description). **Default:** 1.
+
+**When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
+
+**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/fpxkeep.py:261` and 1 more place.
 
 #### `A64_FPX_BLOCK_CVT` - developer
 
@@ -13610,6 +13640,16 @@ undocumented: third_party/a64-kit/lift/a64_block.py:56 reads it as a number: `re
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
 **Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `third_party/a64-kit/lift/a64_block.py:56`.
+
+#### `A64_FPX_EASY` - developer
+
+(ProjectReLink, pixl27; nx2/nativefp.py) A64_FPX_EASY: what the fast paths give up on, done with the host's own arithmetic where Arm's result is known without the software body (recomp_fpe_*): a NaN or an infinite operand, an invalid operation, an overflow, a subnormal operand, a tiny result. Called inside the RECOMP_FPX_OPEN gate only (round to nearest, no trap enabled, no default NaN, IXC raised already), after the fast tests and the rescues have refused the operation. 1: *v is Arm's result and FPSR has what Arm's operation raises (never 0 for these two: kept as a way out). tests/test_native_fp.py (easy): against the bodies, result and FPSR. ----.
+
+**Values:** text (`0` named). **Default:** unset.
+
+**When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
+
+**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/nativefp.py:78`.
 
 #### `A64_GRAN` - developer
 
@@ -13653,23 +13693,43 @@ undocumented: third_party/a64-kit/lift/a64_lift.py:2141 reads it as an on/off sw
 
 #### `A64_LOCAL_FLAGS` - developer
 
-undocumented: third_party/a64-kit/lift/a64_lift.py:514 reads it as a text value: `return bool(os.environ.get("A64_LOCAL_FLAGS"))`. No comment in the source says what it changes.
+undocumented: nx2/guest_locals.py:59 reads it as a number: `return os.environ.get("A64_LOCAL_FLAGS", "1")[:1] != "0"`. No comment in the source says what it changes.
 
-**Values:** text. **Default:** unset.
+**Values:** a whole number. **Default:** 1.
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `third_party/a64-kit/lift/a64_lift.py:514`.
+**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/guest_locals.py:59` and 1 more place.
 
-#### `A64_LOCAL_REGS` - developer
+#### `A64_LOCAL_FUNCS` - developer
 
-undocumented: third_party/a64-kit/lift/a64_lift.py:519 reads it as a text value: `v = os.environ.get("A64_LOCAL_REGS", "")`. No comment in the source says what it changes.
+undocumented: nx2/guest_locals.py:95 reads it as a text value: `v = os.environ.get("A64_LOCAL_FUNCS", "").strip()`. No comment in the source says what it changes.
 
 **Values:** text. **Default:** .
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `third_party/a64-kit/lift/a64_lift.py:519`.
+**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/guest_locals.py:95`.
+
+#### `A64_LOCAL_REGS` - developer
+
+undocumented: nx2/guest_locals.py:49 reads it as a text value: `v = os.environ.get("A64_LOCAL_REGS", "")`. No comment in the source says what it changes.
+
+**Values:** text. **Default:** .
+
+**When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
+
+**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/guest_locals.py:49` and 1 more place.
+
+#### `A64_LOCAL_VREGS` - developer
+
+undocumented: nx2/nativefp.py:84 reads it as a text value: `return on_by_default(os.environ.get("A64_LOCAL_VREGS"))`. No comment in the source says what it changes.
+
+**Values:** text (`0` named). **Default:** unset.
+
+**When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
+
+**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/nativefp.py:84`.
 
 #### `A64_MARK_EACH` - developer
 
@@ -13700,6 +13760,16 @@ undocumented: third_party/a64-kit/lift/a64_lift.py:238 reads it as an on/off swi
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
 **Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `third_party/a64-kit/lift/a64_lift.py:238`.
+
+#### `A64_NATIVE_FP` - developer
+
+(ProjectReLink, pixl27; nx2/nativefp.py) A64_NATIVE_FP: the hot functions' floating point on the host's instructions. See nx2/nativefp.py for what it keeps and what it does not ----.
+
+**Values:** text (`0` named). **Default:** unset.
+
+**When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
+
+**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/nativefp.py:72`.
 
 #### `A64_NO_SFCMP` - developer
 
@@ -13733,13 +13803,13 @@ undocumented: third_party/a64-kit/lift/a64_lift.py:190 reads it as an on/off swi
 
 #### `A64_PACKED_FLAGS` - developer
 
-undocumented: third_party/a64-kit/lift/a64_lift.py:578 reads it as an on/off switch: `if "c->v=" not in text or not os.environ.get("A64_PACKED_FLAGS"):`. No comment in the source says what it changes.
+undocumented: nx2/guest_locals.py:57 reads it as an on/off switch: `if os.environ.get("A64_PACKED_FLAGS"):`. No comment in the source says what it changes.
 
-**Values:** on or off (0, false, off, no and empty are off). **Default:** off (unset).
+**Values:** on or off (0, false, off, no and empty are off); the description names `0`. **Default:** off (unset).
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `third_party/a64-kit/lift/a64_lift.py:578`.
+**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/guest_locals.py:57` and 1 more place.
 
 #### `A64_SITE_PROFILE` - developer
 
@@ -13750,6 +13820,26 @@ undocumented: third_party/a64-kit/lift/a64_lift.py:578 reads it as an on/off swi
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
 **Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `third_party/a64-kit/rt/a64_rt.c:148` and 1 more place.
+
+#### `A64_SUB_V` - developer
+
+undocumented: nx2/cmpflags.py:39 reads it as a number: `v = os.environ.get("A64_SUB_V", "1").strip().lower()`. No comment in the source says what it changes.
+
+**Values:** a whole number. **Default:** 1.
+
+**When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
+
+**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/cmpflags.py:39` and 1 more place.
+
+#### `A64_VECFP` - developer
+
+(Longshot) SSE fast paths for lane-by-lane float forms (A64_VECFP, nx2/vecfp.py) ---- Each a64_vfx_<form> writes its destination and returns 1 only when every lane's native result is provably Arm's (FPX1's rules, a64_suyu.h); else it writes nothing and returns 0, and the instruction's own C runs.
+
+**Values:** a whole number. **Default:** 1.
+
+**When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
+
+**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/vecfp.py:55` and 1 more place.
 
 ### Builder and toolchain
 

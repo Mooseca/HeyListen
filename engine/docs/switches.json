@@ -2,8 +2,29 @@
  "schema": 1,
  "generated_by": "engine/scripts/list_switches.py",
  "scope": "C, C++ and headers under engine/ (engine/tests and vendored trees other than a64-kit excluded) and the Python the builder, the lifter and the scripts run: getenv, std::getenv, _wgetenv, the code's own env helpers and table-driven reads, and os.environ.",
- "count": 1429,
+ "count": 1438,
  "switches": [
+  {
+   "name": "A64_",
+   "area": "build",
+   "group": "Lift (A64_*)",
+   "audience": "developer",
+   "files": [
+    {
+     "path": "nx2/fastvec.py",
+     "line": 22
+    }
+   ],
+   "default": "unset",
+   "values": "text (`0` named)",
+   "explanation": "undocumented: nx2/fastvec.py:22 reads it as a text value: `return os.environ.get(\"A64_\" + name, \"1\").strip().lower() not in (\"0\", \"off\", \"false\", \"no\")`. No comment in the source says what it changes.",
+   "comment": null,
+   "documented_in": null,
+   "source": "undocumented",
+   "documented": false,
+   "set_via": "In the build's environment (the builder or the command line), before the build runs.",
+   "use": null
+  },
   {
    "name": "A64_DEVIRT",
    "area": "build",
@@ -22,6 +43,31 @@
    "documented_in": null,
    "source": "undocumented",
    "documented": false,
+   "set_via": "In the build's environment (the builder or the command line), before the build runs.",
+   "use": null
+  },
+  {
+   "name": "A64_FPXKEEP",
+   "area": "build",
+   "group": "Lift (A64_*)",
+   "audience": "developer",
+   "files": [
+    {
+     "path": "nx2/fpxkeep.py",
+     "line": 261
+    },
+    {
+     "path": "nx2/fpxkeep.py",
+     "line": 266
+    }
+   ],
+   "default": "1",
+   "values": "a whole number (`0` in the description)",
+   "explanation": "(Longshot) results kept off the software bodies: NaN operands (N), infinite operands (I), exact-zero multiply-adds (Z); nx2/fpxkeep.py, A64_FPXKEEP. Each a64_fpxk_* is called inside FPX1's gate (RECOMP_FPX_OPEN: round to nearest, DN = 0, no traps, FPSR.IXC set) past its fast path; 1 with the Arm result in *v and its flags or-ed into FPSR, else 0 (nothing written: the exact body runs). ----.",
+   "comment": "(Longshot) results kept off the software bodies: NaN operands (N), infinite operands (I), exact-zero multiply-adds (Z); nx2/fpxkeep.py, A64_FPXKEEP. Each a64_fpxk_* is called inside FPX1's gate (RECOMP_FPX_OPEN: round to nearest, DN = 0, no traps, FPSR.IXC set) past its fast path; 1 with the Arm result in *v and its flags or-ed into FPSR, else 0 (nothing written: the exact body runs). ----.",
+   "documented_in": null,
+   "source": "comment at nx2/fpxkeep.py",
+   "documented": true,
    "set_via": "In the build's environment (the builder or the command line), before the build runs.",
    "use": null
   },
@@ -106,6 +152,27 @@
    "documented_in": null,
    "source": "undocumented",
    "documented": false,
+   "set_via": "In the build's environment (the builder or the command line), before the build runs.",
+   "use": null
+  },
+  {
+   "name": "A64_FPX_EASY",
+   "area": "build",
+   "group": "Lift (A64_*)",
+   "audience": "developer",
+   "files": [
+    {
+     "path": "nx2/nativefp.py",
+     "line": 78
+    }
+   ],
+   "default": "unset",
+   "values": "text (`0` named)",
+   "explanation": "(ProjectReLink, pixl27; nx2/nativefp.py) A64_FPX_EASY: what the fast paths give up on, done with the host's own arithmetic where Arm's result is known without the software body (recomp_fpe_*): a NaN or an infinite operand, an invalid operation, an overflow, a subnormal operand, a tiny result. Called inside the RECOMP_FPX_OPEN gate only (round to nearest, no trap enabled, no default NaN, IXC raised already), after the fast tests and the rescues have refused the operation. 1: *v is Arm's result and FPSR has what Arm's operation raises (never 0 for these two: kept as a way out). tests/test_native_fp.py (easy): against the bodies, result and FPSR. ----.",
+   "comment": "(ProjectReLink, pixl27; nx2/nativefp.py) A64_FPX_EASY: what the fast paths give up on, done with the host's own arithmetic where Arm's result is known without the software body (recomp_fpe_*): a NaN or an infinite operand, an invalid operation, an overflow, a subnormal operand, a tiny result. Called inside the RECOMP_FPX_OPEN gate only (round to nearest, no trap enabled, no default NaN, IXC raised already), after the fast tests and the rescues have refused the operation. 1: *v is Arm's result and FPSR has what Arm's operation raises (never 0 for these two: kept as a way out). tests/test_native_fp.py (easy): against the bodies, result and FPSR. ----.",
+   "documented_in": null,
+   "source": "comment at nx2/nativefp.py",
+   "documented": true,
    "set_via": "In the build's environment (the builder or the command line), before the build runs.",
    "use": null
   },
@@ -204,13 +271,38 @@
    "audience": "developer",
    "files": [
     {
+     "path": "nx2/guest_locals.py",
+     "line": 59
+    },
+    {
      "path": "third_party/a64-kit/lift/a64_lift.py",
      "line": 514
     }
    ],
-   "default": "unset",
+   "default": "1",
+   "values": "a whole number",
+   "explanation": "undocumented: nx2/guest_locals.py:59 reads it as a number: `return os.environ.get(\"A64_LOCAL_FLAGS\", \"1\")[:1] != \"0\"`. No comment in the source says what it changes.",
+   "comment": null,
+   "documented_in": null,
+   "source": "undocumented",
+   "documented": false,
+   "set_via": "In the build's environment (the builder or the command line), before the build runs.",
+   "use": null
+  },
+  {
+   "name": "A64_LOCAL_FUNCS",
+   "area": "build",
+   "group": "Lift (A64_*)",
+   "audience": "developer",
+   "files": [
+    {
+     "path": "nx2/guest_locals.py",
+     "line": 95
+    }
+   ],
+   "default": "",
    "values": "text",
-   "explanation": "undocumented: third_party/a64-kit/lift/a64_lift.py:514 reads it as a text value: `return bool(os.environ.get(\"A64_LOCAL_FLAGS\"))`. No comment in the source says what it changes.",
+   "explanation": "undocumented: nx2/guest_locals.py:95 reads it as a text value: `v = os.environ.get(\"A64_LOCAL_FUNCS\", \"\").strip()`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -225,13 +317,38 @@
    "audience": "developer",
    "files": [
     {
+     "path": "nx2/guest_locals.py",
+     "line": 49
+    },
+    {
      "path": "third_party/a64-kit/lift/a64_lift.py",
      "line": 519
     }
    ],
    "default": "",
    "values": "text",
-   "explanation": "undocumented: third_party/a64-kit/lift/a64_lift.py:519 reads it as a text value: `v = os.environ.get(\"A64_LOCAL_REGS\", \"\")`. No comment in the source says what it changes.",
+   "explanation": "undocumented: nx2/guest_locals.py:49 reads it as a text value: `v = os.environ.get(\"A64_LOCAL_REGS\", \"\")`. No comment in the source says what it changes.",
+   "comment": null,
+   "documented_in": null,
+   "source": "undocumented",
+   "documented": false,
+   "set_via": "In the build's environment (the builder or the command line), before the build runs.",
+   "use": null
+  },
+  {
+   "name": "A64_LOCAL_VREGS",
+   "area": "build",
+   "group": "Lift (A64_*)",
+   "audience": "developer",
+   "files": [
+    {
+     "path": "nx2/nativefp.py",
+     "line": 84
+    }
+   ],
+   "default": "unset",
+   "values": "text (`0` named)",
+   "explanation": "undocumented: nx2/nativefp.py:84 reads it as a text value: `return on_by_default(os.environ.get(\"A64_LOCAL_VREGS\"))`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -303,6 +420,27 @@
    "documented_in": null,
    "source": "undocumented",
    "documented": false,
+   "set_via": "In the build's environment (the builder or the command line), before the build runs.",
+   "use": null
+  },
+  {
+   "name": "A64_NATIVE_FP",
+   "area": "build",
+   "group": "Lift (A64_*)",
+   "audience": "developer",
+   "files": [
+    {
+     "path": "nx2/nativefp.py",
+     "line": 72
+    }
+   ],
+   "default": "unset",
+   "values": "text (`0` named)",
+   "explanation": "(ProjectReLink, pixl27; nx2/nativefp.py) A64_NATIVE_FP: the hot functions' floating point on the host's instructions. See nx2/nativefp.py for what it keeps and what it does not ----.",
+   "comment": "(ProjectReLink, pixl27; nx2/nativefp.py) A64_NATIVE_FP: the hot functions' floating point on the host's instructions. See nx2/nativefp.py for what it keeps and what it does not ----.",
+   "documented_in": null,
+   "source": "comment at nx2/nativefp.py",
+   "documented": true,
    "set_via": "In the build's environment (the builder or the command line), before the build runs.",
    "use": null
   },
@@ -380,13 +518,17 @@
    "audience": "developer",
    "files": [
     {
+     "path": "nx2/guest_locals.py",
+     "line": 57
+    },
+    {
      "path": "third_party/a64-kit/lift/a64_lift.py",
      "line": 578
     }
    ],
    "default": "off (unset)",
-   "values": "on or off (0, false, off, no and empty are off)",
-   "explanation": "undocumented: third_party/a64-kit/lift/a64_lift.py:578 reads it as an on/off switch: `if \"c->v=\" not in text or not os.environ.get(\"A64_PACKED_FLAGS\"):`. No comment in the source says what it changes.",
+   "values": "on or off (0, false, off, no and empty are off); the description names `0`",
+   "explanation": "undocumented: nx2/guest_locals.py:57 reads it as an on/off switch: `if os.environ.get(\"A64_PACKED_FLAGS\"):`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -415,6 +557,56 @@
    "comment": "(A64_SITE_PROFILE: nothing remembered, every call counted) (a BR's x30 is not its site).",
    "documented_in": null,
    "source": "comment at third_party/a64-kit/rt/a64_rt.c",
+   "documented": true,
+   "set_via": "In the build's environment (the builder or the command line), before the build runs.",
+   "use": null
+  },
+  {
+   "name": "A64_SUB_V",
+   "area": "build",
+   "group": "Lift (A64_*)",
+   "audience": "developer",
+   "files": [
+    {
+     "path": "nx2/cmpflags.py",
+     "line": 39
+    },
+    {
+     "path": "nx2/cmpflags.py",
+     "line": 44
+    }
+   ],
+   "default": "1",
+   "values": "a whole number",
+   "explanation": "undocumented: nx2/cmpflags.py:39 reads it as a number: `v = os.environ.get(\"A64_SUB_V\", \"1\").strip().lower()`. No comment in the source says what it changes.",
+   "comment": null,
+   "documented_in": null,
+   "source": "undocumented",
+   "documented": false,
+   "set_via": "In the build's environment (the builder or the command line), before the build runs.",
+   "use": null
+  },
+  {
+   "name": "A64_VECFP",
+   "area": "build",
+   "group": "Lift (A64_*)",
+   "audience": "developer",
+   "files": [
+    {
+     "path": "nx2/vecfp.py",
+     "line": 55
+    },
+    {
+     "path": "nx2/vecfp.py",
+     "line": 64
+    }
+   ],
+   "default": "1",
+   "values": "a whole number",
+   "explanation": "(Longshot) SSE fast paths for lane-by-lane float forms (A64_VECFP, nx2/vecfp.py) ---- Each a64_vfx_<form> writes its destination and returns 1 only when every lane's native result is provably Arm's (FPX1's rules, a64_suyu.h); else it writes nothing and returns 0, and the instruction's own C runs.",
+   "comment": "(Longshot) SSE fast paths for lane-by-lane float forms (A64_VECFP, nx2/vecfp.py) ---- Each a64_vfx_<form> writes its destination and returns 1 only when every lane's native result is provably Arm's (FPX1's rules, a64_suyu.h); else it writes nothing and returns 0, and the instruction's own C runs.",
+   "documented_in": null,
+   "source": "comment at nx2/vecfp.py",
    "documented": true,
    "set_via": "In the build's environment (the builder or the command line), before the build runs.",
    "use": null
@@ -4460,7 +4652,7 @@
    "files": [
     {
      "path": "host/hos_thread.c",
-     "line": 1434
+     "line": 1473
     }
    ],
    "default": "unset",
@@ -4481,7 +4673,7 @@
    "files": [
     {
      "path": "host/hos_thread.c",
-     "line": 1434
+     "line": 1473
     }
    ],
    "default": "unset",
@@ -4502,7 +4694,7 @@
    "files": [
     {
      "path": "host/hos_thread.c",
-     "line": 1967
+     "line": 2006
     }
    ],
    "default": "unset",
@@ -4523,7 +4715,7 @@
    "files": [
     {
      "path": "host/hos_thread.c",
-     "line": 1434
+     "line": 1473
     }
    ],
    "default": "unset",
@@ -4586,7 +4778,7 @@
    "files": [
     {
      "path": "host/hos_thread.c",
-     "line": 1024
+     "line": 1062
     }
    ],
    "default": "off (unset)",
@@ -4897,6 +5089,27 @@
    "comment": "(Nx2/oot_native_resolution.py's cached-scale refresh: HOS_FIX_RES=1; #849's fixed-scale patch does it by default).",
    "documented_in": null,
    "source": "comment at host/hos_main.c",
+   "documented": true,
+   "set_via": "In `hookshot_env.txt`, or in the environment.",
+   "use": null
+  },
+  {
+   "name": "HOS_FPCR_SYNC",
+   "area": "shaders",
+   "group": "Mesh, draws and synchronization",
+   "audience": "developer",
+   "files": [
+    {
+     "path": "host/hos_thread.c",
+     "line": 586
+    }
+   ],
+   "default": "unset",
+   "values": "text (`0` named)",
+   "explanation": "A lift without the option never asks: MXCSR is left alone, as before. HOS_FPCR_SYNC=0: left alone in any build (then a native lift's FZ is the host's default, no flush: a measurement switch only).",
+   "comment": "A lift without the option never asks: MXCSR is left alone, as before. HOS_FPCR_SYNC=0: left alone in any build (then a native lift's FZ is the host's default, no flush: a measurement switch only).",
+   "documented_in": null,
+   "source": "comment at host/hos_thread.c",
    "documented": true,
    "set_via": "In `hookshot_env.txt`, or in the environment.",
    "use": null
@@ -7489,7 +7702,7 @@
    "files": [
     {
      "path": "host/hos_thread.c",
-     "line": 808
+     "line": 846
     }
    ],
    "default": "unset",
@@ -7598,7 +7811,7 @@
    "files": [
     {
      "path": "host/hos_thread.c",
-     "line": 860
+     "line": 898
     }
    ],
    "default": "unset",
@@ -7715,7 +7928,7 @@
    "files": [
     {
      "path": "host/hos_thread.c",
-     "line": 798
+     "line": 836
     }
    ],
    "default": "off (unset)",
@@ -7757,7 +7970,7 @@
    "files": [
     {
      "path": "host/hos_thread.c",
-     "line": 1067
+     "line": 1105
     }
    ],
    "default": "unset",
@@ -8009,7 +8222,7 @@
    "files": [
     {
      "path": "host/hos_thread.c",
-     "line": 1117
+     "line": 1155
     }
    ],
    "default": "off (unset)",
@@ -8051,7 +8264,7 @@
    "files": [
     {
      "path": "host/hos_thread.c",
-     "line": 799
+     "line": 837
     }
    ],
    "default": "off (unset)",
@@ -8256,7 +8469,7 @@
    "files": [
     {
      "path": "host/hos_thread.c",
-     "line": 764
+     "line": 802
     }
    ],
    "default": "off (unset)",
@@ -8616,7 +8829,7 @@
     },
     {
      "path": "host/hos_thread.c",
-     "line": 928
+     "line": 966
     }
    ],
    "default": "unset",
@@ -8637,11 +8850,11 @@
    "files": [
     {
      "path": "host/hos_thread.c",
-     "line": 912
+     "line": 950
     },
     {
      "path": "host/hos_thread.c",
-     "line": 914
+     "line": 952
     }
    ],
    "default": "off (unset)",
@@ -8683,11 +8896,11 @@
    "files": [
     {
      "path": "host/hos_thread.c",
-     "line": 1072
+     "line": 1110
     },
     {
      "path": "host/hos_thread.c",
-     "line": 1144
+     "line": 1182
     }
    ],
    "default": "off (unset)",
@@ -9018,7 +9231,7 @@
    "files": [
     {
      "path": "host/hos_thread.c",
-     "line": 1217
+     "line": 1255
     }
    ],
    "default": "off (unset)",
@@ -9039,7 +9252,7 @@
    "files": [
     {
      "path": "host/hos_thread.c",
-     "line": 1203
+     "line": 1241
     }
    ],
    "default": "off (unset)",
@@ -9060,12 +9273,12 @@
    "files": [
     {
      "path": "host/hos_thread.c",
-     "line": 592
+     "line": 630
     }
    ],
    "default": "unset",
    "values": "text",
-   "explanation": "undocumented: host/hos_thread.c:592 (in `thread_main()`) reads it as a text value: `if (hos_trace || getenv(\"HOS_TLS_TRACE\"))`. No comment in the source says what it changes.",
+   "explanation": "undocumented: host/hos_thread.c:630 (in `thread_main()`) reads it as a text value: `if (hos_trace || getenv(\"HOS_TLS_TRACE\"))`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -9102,7 +9315,7 @@
    "files": [
     {
      "path": "host/hos_thread.c",
-     "line": 1399
+     "line": 1438
     }
    ],
    "default": "unset",
@@ -9123,7 +9336,7 @@
    "files": [
     {
      "path": "host/hos_thread.c",
-     "line": 1734
+     "line": 1773
     }
    ],
    "default": "unset",
@@ -9144,7 +9357,7 @@
    "files": [
     {
      "path": "host/hos_thread.c",
-     "line": 1735
+     "line": 1774
     }
    ],
    "default": "unset",
@@ -9165,7 +9378,7 @@
    "files": [
     {
      "path": "host/hos_thread.c",
-     "line": 1547
+     "line": 1586
     }
    ],
    "default": "off (unset)",
@@ -9186,7 +9399,7 @@
    "files": [
     {
      "path": "host/hos_thread.c",
-     "line": 1736
+     "line": 1775
     }
    ],
    "default": "unset",
@@ -9207,7 +9420,7 @@
    "files": [
     {
      "path": "host/hos_thread.c",
-     "line": 1737
+     "line": 1776
     }
    ],
    "default": "unset",
@@ -9228,7 +9441,7 @@
    "files": [
     {
      "path": "host/hos_thread.c",
-     "line": 1685
+     "line": 1724
     }
    ],
    "default": "off (unset)",
@@ -9249,7 +9462,7 @@
    "files": [
     {
      "path": "host/hos_thread.c",
-     "line": 1901
+     "line": 1940
     }
    ],
    "default": "unset",
@@ -9568,7 +9781,7 @@
    "files": [
     {
      "path": "host/hos_thread.c",
-     "line": 892
+     "line": 930
     }
    ],
    "default": "off (unset)",
