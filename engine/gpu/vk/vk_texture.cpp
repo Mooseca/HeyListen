@@ -46,6 +46,7 @@
 #include "vk_dump.h"
 #include "vk_jobs.h"
 #include "gone_ring.h"   // (TICK-052)
+#include "touch_fast.h"   // (stream PIPE1, RX_VK_TOUCH_FAST)
 
 #include <span>
 
@@ -3834,6 +3835,9 @@ Texture* texture_touch(Texture* tex, bool for_sampling) {
             }
         }
         tex->uploaded = true;
+        // (stream PIPE1, RX_VK_TOUCH_FAST: upload_value / upload_seg above are stored before upload_gen; texture_touch_unlocked reads
+        // upload_gen first, so one that sees this upload's generation sees its segment too. A compiler barrier on x86)
+        std::atomic_thread_fence(std::memory_order_release);
         tex->upload_gen = gen;
         tex->gpu_written = false;
         tex->released = false;
@@ -4674,6 +4678,125 @@ bool texture_touch_quick(Texture* tex, bool for_sampling) {
     if (tex->upload_value == rec_value && tex->upload_seg > tl_seg) return par_why(PW_QUICK_LATER_SEG), false;
     if (par_stats_on && !(tex->uploaded && tex->checked_epoch == epoch)) par_why(!tex->uploaded ? PW_QUICK_NOT_UPLOADED : PW_QUICK_EPOCH);
     return tex->uploaded && tex->checked_epoch == epoch;
+}
+
+// ---- (stream PIPE1) RX_VK_TOUCH_FAST (on by default, =0 off): the first look of a submission at an unchanged texture without ParLock ----
+// texture_touch_quick answers a texture already looked at in this submission (checked_epoch). Its first look in a submission (380 a
+// big command buffer in the Market, BIND1/TEXRES1) took ParLock for texture_touch, whose work for a texture uploaded from memory and not
+// written since is only to note the look: 1.1 ms a frame of the recording threads' wait for the lock (vk_draw.cpp:2943 and :3960).
+// Here the same questions are asked without it: uploaded, not the GPU's, not sparse or virtual (their page walks write the texture),
+// not held back once, no CPU write into its storage since upload_gen (memory_written_runs: the page generations, stamped at the
+// submit's capture), no GPU write into it not yet taken (gpu_wrote_pending, under its own small mutex), and not uploaded by a later
+// segment of this submission (read after upload_gen: texture_touch stores that first). Then the look is noted (checked_epoch: the
+// value the locked path would store; a concurrent locked look stores the same). Anything else: false, and the caller takes the lock.
+// RX_VK_TOUCH_FAST_CHECK=1 (implies it): each look the unlocked path answered is asked again under ParLock the locked way (the memory,
+// the GPU writes, the segment order); a disagreement is counted, logged and handed to texture_touch, so the check changes nothing seen.
+// Logged every 1200 presents: looks answered without the lock, sent to it (and why), the check's comparisons and disagreements.
+// On by default since PIPE1's A/B (5070, 3 rounds each: Market +0.2%, castle +0.8%, Kokiri +0.5%, all inside the spread; PC 3050 equal) and
+// its checks (6.5 M unlocked looks asked again under the lock in the Market, the castle and Kokiri: 0 disagreed): leaner (ParLock's takes
+// 610 -> 280 a big command buffer in the Market), the same answers. RX_VK_TOUCH_FAST=0: the locked look, as before
+namespace {
+int touch_fast_mode() {   // (0 off, 1 on, 2 on with the check)
+    static const int v = [] {
+        const bool check = env_on("RX_VK_TOUCH_FAST_CHECK");
+        const char* e = getenv("RX_VK_TOUCH_FAST");
+        const int m = check ? 2 : e && atoi(e) == 0 ? 0 : 1;
+        logf("vk: a texture's first look of a submission: %s (RX_VK_TOUCH_FAST)",
+             m == 2 ? "without ParLock when unchanged, checked under it (RX_VK_TOUCH_FAST_CHECK)" : m ? "without ParLock when unchanged" : "under ParLock, as before");
+        return m;
+    }();
+    return v;
+}
+std::atomic<int64_t> st_tf_skip{0}, st_tf_locked{0}, st_tf_dirty{0}, st_tf_later{0}, st_tf_checked{0}, st_tf_differ{0};
+std::atomic<uint64_t> st_tf_logged_at{0};
+/// gpu_wrote_into's question without its answer's side effect (gpu_wrote_seen): a GPU write into the storage not taken yet
+bool gpu_wrote_pending(const Texture& tex) {
+    std::lock_guard lk(gpu_wrote_mu);
+    const uint64_t lo = tex.gpu, hi = tex.gpu + std::max<uint64_t>(tex.guest_size, 1);
+    if (write_history_on()) return gpu_hist.newest(lo, hi, tex.gpu_written ? tex.id : 0) > tex.gpu_wrote_seen;
+    if (gpu_wrote.empty()) return false;
+    auto it = gpu_wrote.upper_bound(lo);
+    if (it != gpu_wrote.begin()) --it;
+    for (; it != gpu_wrote.end() && it->first < hi; ++it)
+        if (it->second.first > lo && it->second.second <= completed_value && it->second.second > tex.gpu_wrote_seen) return true;
+    return false;
+}
+touch_fast::Verdict touch_fast_decide(Texture* tex, bool for_sampling, uint32_t& since) {
+    static const bool debug_reupload = getenv("RX_VK_REUPLOAD_DIM") != nullptr;
+    touch_fast::In in;
+    in.for_sampling = for_sampling;
+    in.uploaded = tex->uploaded;
+    in.gpu_written = tex->gpu_written;
+    in.sparse = tex->sparse;
+    in.virtual_storage = tex->gpu >= (1ull << 40);
+    in.deferred_before = tex->defer_frame != 0;
+    in.debug_reupload = debug_reupload;
+    in.rec_value = rec_value, in.seg = tl_seg;
+    since = __atomic_load_n(&tex->upload_gen, __ATOMIC_ACQUIRE);
+    return touch_fast::decide(
+        in,
+        [&] {
+            static thread_local Ranges dirty;
+            return texture_dirty(*tex, since, dirty);
+        },
+        [&] { return gpu_wrote_pending(*tex); },
+        [&](touch_fast::In& o) {
+            o.upload_value = __atomic_load_n(&tex->upload_value, __ATOMIC_ACQUIRE);
+            o.upload_seg = __atomic_load_n(&tex->upload_seg, __ATOMIC_ACQUIRE);
+        });
+}
+void touch_fast_log() {
+    // (every 1200 presents counted from the first look: a run of 110 s at 50 fps has ~5,500 presents, and the first 3600-present version
+    // logged its first line only after twice that, never in such a run: the PC 3050's check run, 23 Nov)
+    const uint64_t f = frame_no;
+    uint64_t at = st_tf_logged_at.load(std::memory_order_relaxed);
+    if (!at) {   // (the first call starts the clock; f + 1 is never 0)
+        st_tf_logged_at.compare_exchange_strong(at, f + 1);
+        return;
+    }
+    if (f + 1 < at + 1200 || !st_tf_logged_at.compare_exchange_strong(at, f + 1)) return;
+    logf("vk: a texture's first look of a submission (RX_VK_TOUCH_FAST, 1200 presents): %lld without ParLock, %lld under it (%lld written since, "
+         "%lld uploaded by a later segment, %lld other cases); check: %lld asked again under the lock, %lld disagreed",
+         (long long)st_tf_skip.exchange(0), (long long)(st_tf_dirty.load() + st_tf_later.load() + st_tf_locked.load()),
+         (long long)st_tf_dirty.exchange(0), (long long)st_tf_later.exchange(0), (long long)st_tf_locked.exchange(0),
+         (long long)st_tf_checked.exchange(0), (long long)st_tf_differ.exchange(0));
+}
+}  // namespace
+bool texture_touch_unlocked(Texture* tex, bool for_sampling) {
+    const int mode = touch_fast_mode();
+    if (!mode || !tex || !par_active.load(std::memory_order_relaxed)) return false;   // (serial: no lock to save, the old path bit for bit)
+    touch_fast_log();
+    uint32_t since = 0;
+    const touch_fast::Verdict v = touch_fast_decide(tex, for_sampling, since);
+    if (v != touch_fast::Verdict::Skip) {
+        (v == touch_fast::Verdict::LockedDirty ? st_tf_dirty : v == touch_fast::Verdict::LockedLaterSeg ? st_tf_later : st_tf_locked)
+            .fetch_add(1, std::memory_order_relaxed);
+        return false;
+    }
+    if (mode == 2) {   // (the check: the same questions under the lock, the locked path's answer used)
+        ParLock lk;
+        st_tf_checked.fetch_add(1, std::memory_order_relaxed);
+        static thread_local Ranges dirty;
+        // (the memory since the generation the unlocked look read: the page generations do not move inside a submission's replay, so
+        // a write it missed is still there, even if a locked look has uploaded it meanwhile; the GPU's and the order's as they are now.
+        // A texture the GPU has written meanwhile is not a disagreement: its contents are the GPU's, nothing is uploaded for it)
+        const bool later = tex->upload_value == rec_value && tex->upload_seg > tl_seg;
+        const bool cpu = texture_dirty(*tex, since, dirty);
+        const bool gpu = !tex->gpu_written && gpu_wrote_pending(*tex);
+        if (cpu || gpu || later) {
+            const int64_t n = st_tf_differ.fetch_add(1, std::memory_order_relaxed) + 1;
+            if (n <= 12 || n % 1000 == 0)
+                logf("vk: RX_VK_TOUCH_FAST_CHECK: texture #%u %#llx %ux%u NVN %#x looked unchanged without the lock, not under it (CPU write %d, "
+                     "GPU write %d, later segment %d; %lld so)", tex->id, (unsigned long long)tex->gpu, tex->width, tex->height,
+                     tex->nvn_format, (int)cpu, (int)gpu, (int)later, (long long)n);
+            tex->checked_epoch = epoch - 1;   // (the locked look below is a first look: it checks the memory and uploads)
+            texture_touch(tex, for_sampling);
+            return true;
+        }
+    }
+    if (tex->checked_epoch != epoch) tex->checked_epoch = epoch;   // (as the locked path's first store; TICK-052: only when it differs)
+    st_tf_skip.fetch_add(1, std::memory_order_relaxed);
+    return true;
 }
 void texture_gpu_wrote(uint64_t gpu, uint64_t size) {
     if (!gpu || !size) return;
