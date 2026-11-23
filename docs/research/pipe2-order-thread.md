@@ -6,8 +6,9 @@ Branch `perf/pipe2` from origin/main 4b599eb04 (PIPE1 merged, `RX_VK_TOUCH_FAST`
 
 ## State
 
-- Stage 0 (slack counters, `host/hos_slack.c`) and stage 1 (`RX_VK_ORDER_THREAD`, `vk_replay.cpp`) written, not built yet.
-- Next: build `pipe2a` under a build lease, `tests/run_all.py`, a function run, then the slack runs and the A/B.
+- Commits: 1da506c92 (stage 0), 9581e0cae (stage 1), 59e05cc3e (tests, switch docs), then the readback join narrowed (pipe2b).
+- Build `pipe2a` (9581e0cae + test fixes): runs, function runs below. Build `pipe2b` (own-thread readback join) building.
+- Next: function run of pipe2b, then the A/B (castle, Kokiri, Market) and the 4-zone tour.
 
 ## Stage 0: the stages' slack (`HL_SLACK`, on; =0 off)
 
@@ -48,7 +49,19 @@ What it does (`vk_replay.cpp`, block after `cpu_wait_open`):
 
 ## Attempts and measures
 
-(none yet)
+### 1. pipe2a, function runs (slot a, 23 Nov 15:12, machine shared: fps not comparable)
+
+| run | fps | stage 0 slack (each 600-frame window) | order thread |
+|---|---:|---|---|
+| castle, off | 119.9 | PT waits 0.22-0.65 ms, main's present wait 1.31-1.60 ms a frame (85-98% of frames > 0.5 ms): replay-bound | - |
+| castle, on | 121.1 | PT waits 7.6-8.1 ms, main 0.00: game-bound | idle 2.8 ms a frame; one readback a frame joined, 2.2-2.3 ms a frame |
+| Kokiri, on | 73.4 | PT 11.0 ms, main 0.00 | idle 4.2-4.3 ms; one readback a frame joined, 3.7-3.8 ms a frame |
+
+No crash, 0 flashes (the detector was off in these runs: no shots), the meter not held (0 of 2000). The overlap works (the PT waits for
+the main thread, the main thread never for the present; fence waits, polls, catch-ups and event polls never had to wait for the order
+thread) but one CPU readback a frame not served by the ring joined *every* job handed over, so the main thread waited for the replay
+of the frame before again (Kokiri fell to 73 fps). Inline, a reader only had its own thread's submits replayed; the other threads'
+(the PT's) were being replayed beside it. Fixed in pipe2b: `RX_VK_ORDER_RB_JOIN=1` (default) waits for the reading thread's own jobs.
 
 ## Dead ends
 
