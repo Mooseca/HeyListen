@@ -8252,10 +8252,12 @@ std::mutex& submit_order_mu_ref() { return submit_order_mu; }
 // poll waits for its submission's job too; RX_VK_ORDER_SIGNAL_MS=<ms> (200): how long a present waits for the CPU's signal its
 // frame's stopped work waits for; RX_VK_ORDER_PRIO=<0|1|2> (1): the thread's priority. Off by default.
 bool order_thread_on() {
+    // (PIPE2) RX_VK_ORDER_THREAD=1 (off by default): the replay on an order thread, the submitting threads return after the capture
     static const bool v = getenv("RX_VK_ORDER_THREAD") && atoi(getenv("RX_VK_ORDER_THREAD")) != 0 && sync_waits_on();
     return v;
 }
 int ot_ahead() {
+    // (PIPE2) RX_VK_ORDER_AHEAD=<n> (2, 1..4): with the order thread, how many presents the game may hand over not yet shown
     static const int n = std::clamp(getenv("RX_VK_ORDER_AHEAD") ? atoi(getenv("RX_VK_ORDER_AHEAD")) : 2, 1, 4);
     return n;
 }
@@ -8315,6 +8317,7 @@ void ot_run(Job& j) {
     case JOB_PRESENT: {   // (present()'s, as it was inline: the frame's stopped work drained, then shown)
         perf_parts::Scope perf_entry(perf_parts::t_render);
         if (signal_capture_on()) {   // (the CPU's signal this frame's stopped work waits for, made by the main thread: FIF's rule)
+            // (PIPE2) RX_VK_ORDER_SIGNAL_MS=<ms> (200; 0: no wait): how long the order thread's present waits for the CPU's signal
             static const int ms = getenv("RX_VK_ORDER_SIGNAL_MS") ? std::max(0, atoi(getenv("RX_VK_ORDER_SIGNAL_MS"))) : 200;
             std::unique_lock lk(submit_order_mu);
             if (ms && cpu_wait_open(j.value)) {
@@ -8343,6 +8346,7 @@ void ot_run(Job& j) {
 }
 void ot_main() {
     SetThreadDescription(GetCurrentThread(), L"mkw_vk order thread");
+    // (PIPE2) RX_VK_ORDER_PRIO=<0|1|2> (1): the order thread's priority, normal, above normal or highest
     static const int prio = getenv("RX_VK_ORDER_PRIO") ? atoi(getenv("RX_VK_ORDER_PRIO")) : 1;
     SetThreadPriority(GetCurrentThread(), prio >= 2 ? THREAD_PRIORITY_HIGHEST : prio == 1 ? THREAD_PRIORITY_ABOVE_NORMAL : THREAD_PRIORITY_NORMAL);
     ot_self = true;
@@ -8424,6 +8428,7 @@ void ot_join_all(int site) {
 /// ran out while its submission waited for the order thread); *timeout_ns is what is left of the wait
 bool ot_wait_for(uint64_t f, uint64_t* timeout_ns) {
     if (ot_self || ot_value_done.load(std::memory_order_acquire) >= f) return true;
+    // (PIPE2) RX_VK_ORDER_POLL_JOIN=1: with the order thread, a fence poll waits for its submission's job (default: told not yet)
     static const bool poll_join = getenv("RX_VK_ORDER_POLL_JOIN") && atoi(getenv("RX_VK_ORDER_POLL_JOIN")) != 0;
     if (!*timeout_ns && !poll_join) return ot_note(OT_POLL, 0, false), false;
     const int64_t t0 = ot_now();
@@ -9013,7 +9018,8 @@ int jitter_option(int id) {
 static int release_may_wait() {
     static const bool hint = !getenv("RX_VK_RELEASE_HINT") || atoi(getenv("RX_VK_RELEASE_HINT")) != 0;
     if (!hint) return 1;
-    if (async_on() || order_thread_on()) return 0;   // (a job queued: nothing waited for here)
+    if (async_on()) return 0;   // (a job queued: nothing waited for here)
+    if (order_thread_on()) return 0;   // (PIPE2: a job of the order thread too)
     if (!sync_order_mu.mu.try_lock()) return 1;
     sync_order_mu.mu.unlock();
     if (!replay_mu.try_lock()) return 1;
