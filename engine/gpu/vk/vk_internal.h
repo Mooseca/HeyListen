@@ -479,6 +479,12 @@ bool rbring_quiet(uint64_t guest, uint64_t size);
 void rbring_quiet_result(uint64_t size, bool changed);
 void rbring_apply(uint64_t gpu, uint64_t size);
 void rbring_check(uint64_t gpu, uint64_t size);
+/// (EXPO1, HL_METER_LOG) the ring's state of a range as one line of text (served or not, counters, entries newest first)
+void rbring_describe(uint64_t guest, uint64_t size, char* out, size_t cap);
+/// (EXPO1, a test, HL_RB_TEST_DIRECT) true: this written binding of a meter block goes to guest memory directly (vk_memory.cpp gpu_buffer_bind)
+bool rbring_test_direct(uint64_t guest, uint64_t size);
+/// (EXPO1, HL_METER_LOG=<rows>, default off: the exposure meter's diagnostic rows; vk_draw.cpp)
+int meter_log_rows();
 /// (FIF1, vk_replay.cpp) the ring's frame count: presents_now, or with RX_VK_FRAMES_IN_FLIGHT the game's own count of presents; an entry's
 /// tag (the count at its submission's submit); and the wait (bounded) for the replay to have staged the frames a read at frame c may get
 int64_t rb_frame_now();
