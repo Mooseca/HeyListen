@@ -3,13 +3,13 @@
 
 ## Summary (this session, end of the gate series; 23 Nov 23:05)
 
-1. **The gate does not pass on the fps conditions.** One clean speed lease, `pipe2e` (`0bb228966`), 3 interleaved rounds a scene, fps
-   from play + 10 s: **castle-move +6.2%** (median 127.6 -> 135.5; rounds +0.6 / +7.0 / +4.9), **kokiri-idle +4.7%** (121.2 -> 126.9;
-   +6.7 / +3.1 / +4.5) against the brief's +8%. **The Market is inside its spread** (the clean round +0.3%, its frame p50 equal within
-   1%; the other two rounds hitched in both arms). **The meter is not frozen and not held: 0 of 2000 reads given the last result again
-   in every on run** (308-496 before the fix in this session). Flashes and pictures: **not measured** (the tour was killed by my own
-   doubled launch, its retry refused by runguard's RAM guard while another game held a slot, a third attempt queued behind the other
-   streams' leases and still waiting).
+1. **The gate does not pass.** One clean speed lease, `pipe2e` (`0bb228966`), 3 interleaved rounds a scene, fps from play + 10 s:
+   **castle-move +6.2%** (median 127.6 -> 135.5; rounds +0.6 / +7.0 / +4.9), **kokiri-idle +4.7%** (121.2 -> 126.9; +6.7 / +3.1 / +4.5)
+   against the brief's +8%. **The Market is inside its spread** (the clean round +0.3%, its frame p50 equal within 1%; the other two
+   rounds hitched in both arms). **The meter is not held over a run** (0 of 2000 reads given the last result again in every on run;
+   308-496 before the fix) **but the warp tour freezes it in both arms** (off's last window 2000 of 2000, the on arm 395/681 and 11 at
+   the end). **Flashes: the on arm has 2 real one-frame picture differences in Zora's River plus one warp transition frame, the off arm
+   0** (section 6); the pictures are otherwise right (same scenes, textures, HUD; the on arm one frame of exposure lag brighter).
 2. **Why, from the same counters: the overlap works and the GPU's own work is the floor.** In every on run the PT waits 5.6-10.3 ms for
    the main thread's hand-over and the main thread 0.00 ms for the present (1.4-1.7 off); the order thread idles 0.01-0.18 ms in the
    replay-bound scenes and 1.9-2.9 in the game-bound Market. The CPU work above the GPU's own time per frame fell by 27-33% (castle
@@ -17,27 +17,29 @@
    Kokiri (91-93%): **the castle's whole room is ~+6.7%** (the order thread takes +6.2% of it) and **Kokiri's ~+11%**, of which +4.7%
    is taken - Kokiri's +8% misses by ~0.3 ms of CPU above the GPU (needs 0.38, has 0.70). PIPE1's +10-16% upper bounds did not include
    the GPU's share.
-3. **The meter's held reads are fixed** (`0bb228966`, section 4/5): the ring hands the meter's block its last applied entry back when no
-   entry is new, which is the value the meter hold used to supply.
+3. **The meter's held reads are fixed for a run** (`0bb228966`, sections 4-6): the ring hands the meter's block its last applied entry
+   back when no entry is new. Over the warp tour both arms still hold reads after a zone change (off worse: 2000 of 2000 frozen at the
+   end) - the next zone's blocks have nothing staged yet; that is the meter's zone-change rule, not the order thread, and it is not
+   fixed.
 4. **Next** (in order): the present out of the order thread's chain (a present thread, FIF's, without FIF's contention) for Kokiri's
-   ~0.3 ms; the tour for the flashes and the pictures; a valid PROF_FINE pair on the on arm (`series.sh`'s comma bug is fixed); the PC
-   3050 list, which the coordinator routes.
+   ~0.3 ms; the two flashes' reads outside the capture view (stage 2: texture uploads, collected writes at replay time); the meter's
+   first reads after a zone change; a valid PROF_FINE pair on the on arm (`series.sh`'s comma bug is fixed); the PC 3050 list, which the
+   coordinator routes.
 
 
 Branch `perf/pipe2` from origin/main 4b599eb04 (PIPE1 merged, `RX_VK_TOUCH_FAST` on). Worktree `E:\OOT\HeyListen-wt\pipe2`. Design:
 `pipe1-frame-overlap.md` section 3 (stages 0-3 with their gates). Main PC (RTX 5070); PC 3050 runs are routed by the coordinator.
 
-## State (PIPE2 continues; last edit 23 Nov ~23:10)
+## State (PIPE2 continues; last edit 23 Nov ~23:45)
 
-Where it stands: **the gate series is done** (`pipe2e`, `0bb228966`, one clean speed lease 22:19-22:57, 19 runs, sections 4-5): castle
-+6.2% (median), Kokiri +4.7%, Market inside its spread in the clean round, the meter at 0 held reads; **the fps gate does not pass** and
-section 5 says why (the GPU's own 7.1-7.7 ms a frame; the castle's whole room is ~+6.7%). The flashes/pictures are still unmeasured: a
-slot lease for the tour (`build/s5/pipe2/tour.sh`, tags `p2t2-*`, `RX_VK_SHOTS` per arm under `E:\OOT\scratch-pipe2\shots`) is queued
-behind foot2-T9's and zone4's speed leases (ticket `20261123-230212-pipe2-slot-e6c9`). Runner: `build/s5/pipe2/series.sh` (a tag with
-a valid result is skipped, so a cut series resumes by re-requesting); list `E:\OOT\scratch-pipe2\tmp\s1-series.sh`, log
-`build/s5/pipe2/series-s1.log`; launches through `E:\OOT\scratch-pipe2\tmp\launch.py` (a detached bash; the harness's shell alternates
-between Git bash and PowerShell, so a plain `nohup ... &` is not dependable - a doubled launch cost one tour and one lease today). Gate
-table: `python -I E:/OOT/scratch-pipe2/tmp/gate.py "p2g-*"`.
+Where it stands: **the gate is measured and does not pass** (the Summary; section 5 for the fps, section 6 for the tour). The gate series
+ran on `pipe2e` (`0bb228966`) in one clean speed lease (22:19-22:57); the tour ran in slot a at 23:22-23:29. A small speed series of
+Kokiri candidate arms is queued (`E:\OOT\scratch-pipe2\tmp\s4-kokiri.sh`: off, on, `RX_VK_ORDER_PRIO=2`, `RX_VK_POOL_SPIN=200`,
+`RX_VK_PARALLEL=4`, two rounds; ticket `20261123-230415-pipe2-s4-speed-1a84`) for the ~0.3 ms Kokiri needs. Runner
+`build/s5/pipe2/series.sh` (a tag with a valid result is skipped, so a cut series resumes by re-requesting); the gate table:
+`python -I E:/OOT/scratch-pipe2/tmp/gate.py "p2g-*"`. Launches go through `E:\OOT\scratch-pipe2\tmp\launch.py` (a detached bash; the
+harness's shell alternates between Git bash and PowerShell, so a plain `nohup ... &` from a call is not dependable - a doubled launch
+cost one tour and one lease today). Shots: `E:\OOT\scratch-pipe2\shots\p2t2-{off,on}`.
 
 Clean baseline, castle off (the series' warm-up `p2s1-warm-c`, 127.2 fps from play + 10 s): frames 8.37-8.79 ms, the PT waited
 0.26 ms for the main thread's hand-over, the main thread 1.34-1.43 ms for the present (89-94% of frames over 0.5 ms): replay-bound, the
@@ -274,14 +276,41 @@ The gate, condition by condition:
 | castle-move +8% or more against off | +6.2% median (+4.1% mean; +0.6 / +7.0 / +4.9 by round) | **no** |
 | Kokiri +8% or more against off | +4.7% median (+4.8% mean; +3.1 / +6.7 / +4.5) | **no** |
 | Market not below the spread | the clean round +0.3%; the frame medians 9.28-9.57 (on) against 9.39-9.47 (off), inside 1%; the run means are hitch-dominated on both sides (frames over 25 ms: off 8 / 126 / 35, on 13 / 156 / 81) | yes |
-| the meter not frozen, M near 0 | 0 of 2000 in every on run and every window against 308-496 before `0bb228966` (off: 0-1) | yes |
-| 0 flashes over a warp tour, pictures right | not measured: the tour's first attempt was killed by a doubled launch, the second refused by runguard's RAM guard (another game in a slot); a slot lease for it is queued behind the other streams' speed leases | no data |
+| the meter not frozen, M near 0 | over a run: 0 of 2000 in every on run and every window, against 308-496 before `0bb228966` (off: 0-1); **over the warp tour: 395/681 on, and the off arm freezes at 2000** (section 6) | yes over a run, **no over the tour** |
+| 0 flashes over a warp tour, pictures right | **3 flashes on the on arm** (2 real one-frame ground/texture differences at presents 6366/6374 in Zora's River, 1 warp transition frame at 6605), **0 off**; the pictures otherwise right (section 6) | **no** (the flashes) |
 
 The overlap's own evidence in these runs: the PT waits 5.6-10.3 ms for the main thread's hand-over in every on run and the main thread
 0.00 ms for the present (1.4-1.7 off); the order thread idles 0.01-0.18 ms a frame in the replay-bound scenes (it, not the GPU queue,
 was the bound) and 1.9-2.9 ms in the game-bound Market; the fence join (the game's own `nvnSyncWait` on the PT's fence, answered when
 the order thread reaches it) costs 0.40-0.86 ms a frame on the main thread's side.
 
-## Dead ends
+### 6. The tour: flashes, the meter across zone changes, the pictures (pipe2e, slot a, 23:22-23:29, `tour.sh` with `RX_VK_FLASH=1 RX_VK_SHOT_EVERY=1`)
 
-(none yet)
+The warp tour (`E:/OOT/scratch-foot1/tour_live.sh`: Market save, `kokiri-idle` inputs, `!cheat 1001` HyruleField, `1002` Kakariko,
+`1012` ZoraRiver, `1007` HyruleField at 15/45/75/105 s after play; one shot every present; the flash detector's own period, so the run
+is slow and the readbacks are staggered). Both arms reached all five maps (`Market_Child HyruleField_Child KakarikoVillage_Child
+ZoraRiver_Child HyruleField_Child`):
+
+| arm | run rate (play + 10 s) | frames over 50 ms | flashes (`vk: flash at`) | the meter's windows (2000 reads each) | shots |
+|---|---:|---:|---|---|---|
+| off (`p2t2-off`) | 43.1 fps (mean 23.19 ms) | 133 (max 463 ms) | **0** | 13, 1164, **2000** | 26 |
+| on (`p2t2-on`) | 37.4 fps (mean 26.72 ms) | 65 (max 8238 ms, a zone load) | **3** (presents 6366, 6374, 6605) | 17, 395, 681, 11 | 37 (3 flash triples + 3 dumps) |
+
+- **Flashes: the on arm has 3, the off arm 0.** Presents 6366 and 6374 (Zora's River, 74 presents after its load) are small (75 and 69
+  of 2304 cells, peak 67-70, all in cells 19-33 x 28-35, the ground below Link) and the middle frame's ground is missing the stone
+  texture patch its two neighbours both have (`flash_6366_b.png` against `_a`/`_c`, identical to each other). Present 6605 is the
+  HyruleField warp's own transition frame (1202 cells, the screen mostly black with the sky above - the same kind of frame the off arm
+  has as a plain black load frame at present 3000). So the tour gives **2 real one-frame picture differences on the on arm** (a texture
+  read a frame ahead: stage 2's exposure, the reads outside the capture view) and one transition frame the detector cannot tell from a
+  flash.
+- **The meter across the warps is bad in both arms, worse off**: the off arm's last window is **2000 of 2000 held (frozen)**, the on
+  arm's are 395 and 681 (20-34%) and its last is 11. The freezes follow the zone changes (the new zone's blocks have nothing staged yet;
+  a read then finds the game's own zero and the hold supplies the last result). This is not the order thread's doing - the off arm
+  freezes hardest - but it means **the gate's "M near 0" is not met over a warp tour by either arm**; over a run with no zone change it
+  is (the gate series' on runs: 0 of 2000, section 5).
+- **The pictures are otherwise right**: at the same presents both arms show the same scene, textures, geometry and HUD
+  (`vk_003000.png` is the black HyruleField load in both; `vk_003600.png` is the cave mouth in HyruleField in both). The on arm's frame
+  is a little brighter - the meter's one extra frame of lag (the ring at lag 3 instead of 2), as EXPO1/STEP1 described. Shots:
+  `E:\OOT\scratch-pipe2\shots\p2t2-{off,on}\`.
+
+## Dead ends
