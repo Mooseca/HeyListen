@@ -250,6 +250,8 @@ void memory_end_submission(VkCommandBuffer cmd);
 bool memory_wb_pending();
 void memory_wb_flush_queue();
 bool memory_wb_flush_own();
+/// (WBL1) a texture's storage [gpu, gpu + size) is registered: its pages put off are written back, none put off again
+void memory_wb_texture(uint64_t gpu, uint64_t size);
 /// The game made a memory pool (gpu address, bytes): imported in the background, before it is used
 /// RX_VK_CHECKPOINTS: the draws the GPU reached, logged once the device is lost (vk_draw.cpp)
 void checkpoints_report();

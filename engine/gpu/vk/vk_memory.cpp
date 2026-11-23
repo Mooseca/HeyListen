@@ -108,6 +108,8 @@ struct Pool {
     std::vector<uint64_t> wbl_pending, wbl_mixed;
     std::vector<uint32_t> wbl_gen;         // (a page put off: its generation when it was, the GPU's own stamp of its write)
     std::vector<uint32_t> wbl_cpu_frame;   // (a page: the frame of the last sync that found it written by the CPU; see wbl_put_off)
+    std::vector<uint32_t> wbl_seen;        // (a page: the frame a run of a written binding last covered it)
+    std::vector<uint8_t> wbl_streak;       // (and in how many frames running; saturates at 255)
     std::vector<uint64_t> wbl_flushing;    // (a bit a page: in this recording's flush, memory_wb_flush_queue: not put off again by it)
     std::vector<uint32_t> wbl_flush_words; // (the words of wbl_flushing that are not zero)
     uint32_t wbl_pending_n = 0;
@@ -5023,10 +5025,19 @@ bool wbl_flush_own() {   // (RX_VK_WB_LAZY_OWN=1: see memory_wb_flush_own)
 // is written back or no longer put off. The first touch of it faults: counted as a read or a write, with the code that did it,
 // and the page is given back until it is put off again. A READ is the case the write-back put off gets wrong: the CPU saw
 // guest memory without the GPU's words. Not for playing: a system call handed such a page fails instead of faulting.
+// WBL1: the guard is also the mechanism (RX_VK_WB_LAZY_PROTECT, on with RX_VK_WB_LAZY; =0 off): a read of a page put off that nothing
+// announced (no invalidate: OoT's f_812f0fc0 reads GPU results of the 144 MB pools, ProjectReLink's guard found none in its scenes, the
+// 3050's Hyrule Field found 262 pages) faults, the page is given back at once and queued (wbl_fault_pages); the next recording's end
+// writes it back and never puts it off again (wbl_note_read). That first read sees the page as guest memory has it, once a page; every
+// later one the GPU's words. RX_VK_WB_GUARD=1 adds the log lines (the first reads and who made them)
+bool wbl_guard_diag() {
+    static const bool on = getenv("RX_VK_WB_GUARD") && atoi(getenv("RX_VK_WB_GUARD")) != 0;
+    return on;
+}
 bool wbl_guard_on() {
 #ifdef _WIN32
-    static const bool on = getenv("RX_VK_WB_GUARD") && atoi(getenv("RX_VK_WB_GUARD")) != 0;
-    return on && wbl_on();
+    static const bool protect = !getenv("RX_VK_WB_LAZY_PROTECT") || atoi(getenv("RX_VK_WB_LAZY_PROTECT")) != 0;
+    return (protect || wbl_guard_diag()) && wbl_on();
 #else
     return false;
 #endif
@@ -5040,7 +5051,8 @@ WbGuardPool wbl_guard_pools[32];   // (never taken out: the handler reads it wit
 std::atomic<int> wbl_guard_n{0};
 std::atomic<uint8_t*> wbl_guard_base{nullptr};
 std::atomic<int64_t> st_wbg_reads{0}, st_wbg_writes{0}, st_wbg_armed{0};
-std::mutex wbl_guard_mu;   // (the tallies by code address)
+std::mutex wbl_guard_mu;   // (the tallies by code address, and the pages read)
+std::vector<uint64_t> wbl_fault_pages;   // (guest pages a game thread read while they were put off; wbl_guard_mu)
 std::map<uint64_t, int64_t> wbl_guard_read_pcs, wbl_guard_write_pcs;
 std::string wbl_guard_where(uint64_t pc) {   // (a code address as module+offset)
     HMODULE m = nullptr;
@@ -5077,8 +5089,9 @@ LONG CALLBACK wbl_guard_handler(EXCEPTION_POINTERS* e) {
             {
                 std::lock_guard lk(wbl_guard_mu);
                 (write ? wbl_guard_write_pcs : wbl_guard_read_pcs)[pc]++;
+                if (!write && wbl_fault_pages.size() < (1u << 20)) wbl_fault_pages.push_back(g >> kPageShift);
             }
-            if (!write && k <= 24)
+            if (!write && k <= 24 && wbl_guard_diag())
                 logf("vk: write-back guard: READ of a page put off, guest %#llx (pool %#llx), by %s", (unsigned long long)g,
                      (unsigned long long)lo, wbl_guard_where(pc).c_str());
         }
@@ -5174,6 +5187,8 @@ void wbl_tables(Pool& p) {
     p.wbl_flushing.resize((size_t)(pool_pages + 63) / 64, 0);
     p.wbl_gen.resize((size_t)pool_pages, 0);
     p.wbl_cpu_frame.resize((size_t)pool_pages, wbl_frame_now);
+    p.wbl_seen.resize((size_t)pool_pages, 0);
+    p.wbl_streak.resize((size_t)pool_pages, 0);
 }
 std::vector<Pool*> wbl_flushing_pools;   // (pools with pages in this recording's flush)
 /// (pools_mu held) the pool's pages put off, as runs of offsets, and none put off any more. period > 1: only those of the
@@ -5222,6 +5237,28 @@ void wbl_pending_take(Pool& p, std::vector<std::pair<uint64_t, uint64_t>>& out, 
     if (run_hi) out.push_back({run_lo, run_hi});
     p.wbl_pending_n = period > 1 ? p.wbl_pending_n - std::min(taken, p.wbl_pending_n) : 0;
 }
+/// (pools_mu held; a recording's end) the pages a thread read while they were put off: written back, never put off again
+void wbl_note_read(uint64_t guest, uint64_t size);
+void wbl_faults_drain() {
+#ifdef _WIN32
+    static thread_local std::vector<uint64_t> got;
+    got.clear();
+    {
+        std::lock_guard lk(wbl_guard_mu);
+        if (wbl_fault_pages.empty()) return;
+        got.swap(wbl_fault_pages);
+    }
+    static const uint64_t region = wb_defer::region_bytes(getenv("RX_VK_WB_LAZY_REGION_KB"));
+    uint64_t last = ~0ull;
+    std::sort(got.begin(), got.end());
+    for (const uint64_t pg : got) {   // (the region around each page, once)
+        const uint64_t base = wb_defer::region_base(pg << kPageShift, region);
+        if (base == last) continue;
+        last = base;
+        wbl_note_read(base, region);
+    }
+#endif
+}
 /// (pools_mu held) The pool's pages put off go to wbl_orphans, to be copied whole into guest memory at the next recording's end, and
 /// its tables go: its shadow is going (retired, VRAM short, the mirror given back), and with it the diff the flush would run. A page
 /// the CPU has written since it was put off stays as the CPU has it
@@ -5252,6 +5289,7 @@ void wbl_orphan_pool(Pool& p) {
     std::erase(wbl_pending_pools, &p);   // (a retired pool is destroyed later: not left in these lists)
     std::erase(wbl_flushing_pools, &p);
     p.wbl_pending.clear(), p.wbl_mixed.clear(), p.wbl_gen.clear(), p.wbl_cpu_frame.clear(), p.wbl_flushing.clear(), p.wbl_flush_words.clear();
+    p.wbl_seen.clear(), p.wbl_streak.clear();
 }
 // (2026-11-13) What the release of a mirror holding left-out write-backs does with one left-out page (TICK-023): copy the mirror's
 // bytes back into guest memory only while they are still the newest bytes of a live pool's page.
@@ -8397,6 +8435,7 @@ void wbl_put_off(Pool& p, std::vector<VkBufferCopy>& runs) {
     static const uint64_t min_run = wb_defer::min_run_bytes(getenv("RX_VK_WB_LAZY_MIN_KB"));
     const uint64_t pool_n = p.hi - p.lo, pool_pages = (pool_n + 4095) >> kPageShift, page0 = p.lo >> kPageShift;
     const uint32_t quiet = wbl_quiet_frames();
+    static const uint32_t hot_need = wb_defer::hot_frames(getenv("RX_VK_WB_LAZY_HOT"));
     static thread_local std::vector<VkBufferCopy> out;
     out.clear();
     bool any = false;
@@ -8417,6 +8456,12 @@ void wbl_put_off(Pool& p, std::vector<VkBufferCopy>& runs) {
             const bool flushing = (p.wbl_flushing[pg >> 6] & bit) != 0;   // (its turn in the flush is this recording: written back now)
             const bool read = !rb_pages.empty() && rb_pages.count((uint32_t)(page0 + pg)) != 0;
             const uint64_t age = wbl_frame_now - p.wbl_cpu_frame[pg];
+            // (the frames running the GPU has written this page, counted once a frame)
+            if (p.wbl_seen[pg] != wbl_frame_now) {
+                p.wbl_streak[pg] = p.wbl_seen[pg] + 1 == wbl_frame_now ? (uint8_t)std::min<unsigned>(255u, p.wbl_streak[pg] + 1u) : 1;
+                p.wbl_seen[pg] = wbl_frame_now;
+            }
+            if (!wb_defer::hot_enough(p.wbl_streak[pg], hot_need)) continue;
             if (!wb_defer::page_may_wait(known, mixed, read, flushing, age, quiet)) {
                 // (a page the CPU wrote lately is one it may read as well: OoT's f_80361c80 reads the counters the GPU left at the
                 // head of 18 buffers of the 144 MB pool and clears them, every frame (ProjectReLink's guard, hs1040). Such a page is
@@ -8512,7 +8557,7 @@ bool memory_wb_pending() {
              st_wbl_put_off / 600.0, st_wbl_flushed / 600.0, st_wbl_at_sync / 600.0, st_wbl_at_read / 600.0, st_wbl_cpu_recent / 600.0,
              (long long)st_wbl_orphaned, (long long)st_wbl_orphan_skipped, (long long)st_wbl_no_table);
         st_wbl_put_off = st_wbl_flushed = st_wbl_at_sync = st_wbl_at_read = st_wbl_cpu_recent = 0;
-        if (wbl_guard_on()) wbl_guard_report(600);
+        if (wbl_guard_on()) wbl_guard_report(600);   // (the pages armed, and the reads and writes that found them armed)
     }
     const uint64_t period = wbl_period(), phase = wbl_frame_now % period;
     // (RX_VK_WB_LAZY_OWN=1: all of them every n-th frame, in a recording of their own)
@@ -8566,6 +8611,11 @@ void memory_wb_flush_queue() {
 /// than no put off at all: a submission more a frame)
 bool memory_wb_flush_own() {
     return wbl_flush_own();
+}
+void memory_wb_texture(uint64_t gpu, uint64_t size) {
+    if (!size || !wbl_on()) return;
+    std::lock_guard lk(pools_mu);
+    wbl_note_read(gpu, size);
 }
 namespace {
 /// (pools_mu held; a recording's end) The orphans' copies, whole pages from the mirrors the pools had into the guest memory buffers
@@ -8850,6 +8900,7 @@ void memory_end_submission(VkCommandBuffer cmd) {
         }
     }
     rbring_flush(cmd, mem_rec_value);   // (STEP1, HL_RB_LAG: the staged ranges into the readback ring)
+    wbl_faults_drain();   // (WBL1: pages a thread read while they were put off)
     wbl_orphans_record(cmd);   // (WBL1: the pages put off of pools whose shadow went, copied whole)
     static const bool no_writeback = getenv("RX_VK_NO_WRITEBACK") != nullptr;   // (an experiment: none)
     if (no_writeback) writebacks.clear();

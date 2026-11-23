@@ -43,6 +43,35 @@ inline bool page_may_wait(bool known, bool mixed, bool read, bool flushing, uint
     return known && !mixed && !read && !flushing && cpu_age >= quiet;
 }
 
+/// A page is put off only once the GPU has written it in `need` frames running (RX_VK_WB_LAZY_HOT, default 1: every page). MEASURED
+/// at 8: the pages written are other ones from frame to frame, 1,270 a frame were put off instead of 10,400 (the 5070 castle-move), so
+/// the saving was gone; kept as a knob
+inline bool hot_enough(uint32_t streak, uint32_t need) { return streak >= need; }
+
+/// RX_VK_WB_LAZY_HOT (default 1 frame, at least 1)
+inline uint32_t hot_frames(const char* env) {
+    if (env && *env) {
+        const long v = std::atol(env);
+        return v < 1 ? 1u : (uint32_t)v;
+    }
+    return 1;
+}
+
+/// A read of a page put off teaches the region around it (RX_VK_WB_LAZY_REGION_KB, default 4096, a power of two, at least 4): MEASURED on the
+/// 5070, a page at a time did not converge (the pages a game thread reads move along the pool from frame to frame, ~200 new ones a window);
+/// the region's pages are written back and not put off again. region_bytes 0: the page only
+inline uint64_t region_bytes(const char* env) {
+    uint64_t kb = 4096;
+    if (env && *env) {
+        const long v = std::atol(env);
+        kb = v < 4 ? 4u : (uint64_t)v;
+    }
+    uint64_t p = 4;
+    while (p < kb) p <<= 1;   // (rounded up to a power of two)
+    return p << 10;
+}
+inline uint64_t region_base(uint64_t guest, uint64_t region) { return guest & ~(region - 1); }
+
 /// The flush spread over `period` presents: a 64-page word of a pool's table is written back at the present whose number is its
 /// index modulo period (period 1: all of them every present)
 inline bool word_in_share(uint64_t word, uint64_t period, uint64_t phase) { return period <= 1 || word % period == phase; }

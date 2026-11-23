@@ -20,6 +20,8 @@ def check_source():
                    'getenv("RX_VK_WB_LAZY_QUIET")',
                    'getenv("RX_VK_WB_LAZY_MIN_KB")',
                    'getenv("RX_VK_WB_LAZY_OWN")',
+                   'getenv("RX_VK_WB_LAZY_HOT")',
+                   "wb_defer::hot_enough(p.wbl_streak[pg], hot_need)",
                    "wb_defer::on(env, link_d2h_gbps, line)",
                    "wb_defer::page_may_wait(known, mixed, read, flushing, age, quiet)",
                    "wb_defer::word_in_share(w, period, phase)",
@@ -29,6 +31,10 @@ def check_source():
                    # the sync flushes a page put off that the CPU wrote, ahead of its copies
                    "wbl_sync_flush(p, wbl_sync_pages);",
                    "wbl_note_read(guest, size);",
+                   "wbl_faults_drain();",
+                   "void memory_wb_texture(uint64_t gpu, uint64_t size)",
+                   'getenv("RX_VK_WB_LAZY_REGION_KB")',
+                   'getenv("RX_VK_WB_LAZY_PROTECT")',
                    # a mirror with pages waiting is not given back; a pool's shadow going orphans them
                    "!p.wbl_pending_n",
                    "wbl_orphan_pool(p);",

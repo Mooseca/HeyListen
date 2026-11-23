@@ -5608,7 +5608,12 @@ bool tex_pages_any(uint64_t gpu, uint64_t size) {
     }
     return false;
 }
-void texture_created_of(const nvn_tex* t) { tex_pages_add(t, +1); }
+void texture_created_of(const nvn_tex* t) {
+    tex_pages_add(t, +1);
+    // (WBL1, RX_VK_WB_LAZY) the texture's texels are read from guest memory when it is first used: pages of its storage that a GPU
+    // write put off are written back now, ahead of that read, and not put off again (the guard found the texture upload reading them)
+    if (t && t->gpu && t->gpu < (1ull << 39) && t->L.size) memory_wb_texture(t->gpu, t->L.size);
+}
 uint64_t fence();
 // ---- (stream R2) RX_VK_RB_PROF=1: every CPU read of GPU results (invalidate) timed by phase, and what it waited for, by the
 // thread that read and by range; a line every 300 presents. Phases: 0 the ticket's wait for the replay section in progress
