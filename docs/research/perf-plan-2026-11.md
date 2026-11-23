@@ -67,3 +67,12 @@ The owner's order (22 Nov, evening): keep going until fps rises by **30% or more
 | MEMO1 cross-frame repetition | running | – |
 | SMALL1 small command buffers | A/B running | – |
 | WBL1 lazy write-back for slow PCIe | build queued | – |
+
+## 23 Nov
+
+| Item | State | Note |
+|---|---|---|
+| LIFT2 native FP, FPX_EASY, local vregs | on by default on local main 1434a3edd, not pushed | 5070 Market +10-12%; =0 gives the exact path back. Of run_all's 4 failures, test_cmpflags is fixed (its standalone driver runs with the options off); test_nup_paths (no symlink privilege), test_nup_read_name (no zstandard) and test_renderer_new_handler (MSVC clang: no oldnames.lib) come from this PC's setup, not LIFT2 |
+| 3050 GPU cost at 1440p 100% | profiled (Task 28) | passes 9.1-12.9 ms, compute 3.4-4.5 ms, write-backs 0.8-1.4 ms, barriers and copies about 0.9 ms |
+| FP16 instead of FP32 | dropped | Ampere consumer GPUs (GA10x) run non-tensor FP16 at the FP32 rate; the game's TAAU network already uses the tensor cores. Only register and bandwidth savings would remain, at a precision risk |
+| PASS1 pass map on the 3050 | next, once an agent finishes (weekly usage at 88% with four agents running) | per pass and dispatch: what it draws (intermediate captures), ms at 100% and 50%, bound type. Then VRS 2x2 on low-frequency passes (VK_KHR_fragment_shading_rate), quality options (12288² shadow map, grass, volumetric fog), load/store ops, barrier cuts and merging the 1x1x1 (0.2 ms) and 47-per-frame dispatches |
