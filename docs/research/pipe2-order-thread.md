@@ -1,34 +1,43 @@
 <!-- Copyright (C) 2026 Sacrappy -->
 # PIPE2: the stages' slack and the replay on an order thread (23 Nov 2026 -)
 
-## Summary (this session, in progress at 21:45)
+## Summary (this session, end of the gate series; 23 Nov 23:05)
 
-1. **Stage 1 works and the overlap is real, but the wall is the GPU.** One clean interleaved round on `pipe2e` (castle-move): on 138.6
-   against off 137.8 fps (+0.6%), the frame's median 6.38 against 6.68 ms, and **the CPU work above the GPU's own time halved** (frame -
-   GPU: 0.66 ms on, 1.39 off). The PT waits 5.6 ms for the main thread, the main thread never for the present, the order thread idles
-   0.18 ms, the fence join costs 0.40 ms (section 4).
-2. **The gate's +8% is measured against the GPU's 5-8 ms a frame**, which PIPE1's upper bounds did not include: in the played windows the
-   engine's GPU time is 5.0-7.9 ms a frame in the castle (89-92% of the frame in the slow windows) and 7.2-7.4 in Kokiri (85-91%). The
-   castle's ceiling at the walk's slow part is ~123-128 fps and the off arm is already there; Kokiri has ~10% (section 3).
-3. **The meter's held reads are fixed** (`0bb228966`): the on arm's log now reads "2000 reads, 0 of them given the last result again"
-   (308-496 of 2000 before the fix, 0 off) (section 4).
-4. **Not measured yet**: the rest of the gate series (Kokiri, the Market, more castle rounds) - queued under a speed lease that the
-   machine's other streams keep taking; the flash/picture tour (the first attempt was killed by a launch mistake, the second refused by
-   runguard's RAM guard with another game in a slot); the PROF_FINE pair.
+1. **The gate does not pass on the fps conditions.** One clean speed lease, `pipe2e` (`0bb228966`), 3 interleaved rounds a scene, fps
+   from play + 10 s: **castle-move +6.2%** (median 127.6 -> 135.5; rounds +0.6 / +7.0 / +4.9), **kokiri-idle +4.7%** (121.2 -> 126.9;
+   +6.7 / +3.1 / +4.5) against the brief's +8%. **The Market is inside its spread** (the clean round +0.3%, its frame p50 equal within
+   1%; the other two rounds hitched in both arms). **The meter is not frozen and not held: 0 of 2000 reads given the last result again
+   in every on run** (308-496 before the fix in this session). Flashes and pictures: **not measured** (the tour was killed by my own
+   doubled launch, its retry refused by runguard's RAM guard while another game held a slot, a third attempt queued behind the other
+   streams' leases and still waiting).
+2. **Why, from the same counters: the overlap works and the GPU's own work is the floor.** In every on run the PT waits 5.6-10.3 ms for
+   the main thread's hand-over and the main thread 0.00 ms for the present (1.4-1.7 off); the order thread idles 0.01-0.18 ms in the
+   replay-bound scenes and 1.9-2.9 in the game-bound Market. The CPU work above the GPU's own time per frame fell by 27-33% (castle
+   0.73 -> 0.53 ms, Kokiri 1.04 -> 0.70). The GPU needs 7.6-7.7 ms a frame in the castle (94-95% of the on frame) and 7.1-7.2 in
+   Kokiri (91-93%): **the castle's whole room is ~+6.7%** (the order thread takes +6.2% of it) and **Kokiri's ~+11%**, of which +4.7%
+   is taken - Kokiri's +8% misses by ~0.3 ms of CPU above the GPU (needs 0.38, has 0.70). PIPE1's +10-16% upper bounds did not include
+   the GPU's share.
+3. **The meter's held reads are fixed** (`0bb228966`, section 4/5): the ring hands the meter's block its last applied entry back when no
+   entry is new, which is the value the meter hold used to supply.
+4. **Next** (in order): the present out of the order thread's chain (a present thread, FIF's, without FIF's contention) for Kokiri's
+   ~0.3 ms; the tour for the flashes and the pictures; a valid PROF_FINE pair on the on arm (`series.sh`'s comma bug is fixed); the PC
+   3050 list, which the coordinator routes.
 
 
 Branch `perf/pipe2` from origin/main 4b599eb04 (PIPE1 merged, `RX_VK_TOUCH_FAST` on). Worktree `E:\OOT\HeyListen-wt\pipe2`. Design:
 `pipe1-frame-overlap.md` section 3 (stages 0-3 with their gates). Main PC (RTX 5070); PC 3050 runs are routed by the coordinator.
 
-## State (PIPE2 continues; last edit 23 Nov ~19:00)
+## State (PIPE2 continues; last edit 23 Nov ~23:10)
 
-Where it stands: the gate series for `pipe2e` is **queued** (ticket `20261123-202924-pipe2-s1-speed-d880`, 22 runs to do: castle 6, Kokiri 7,
-Market 7, the PROF_FINE pair last; a speed lease at priority 2, third in a queue of foot2-T7 and zone4's speed leases, so it has not
-started as of 20:55). Runner `build/s5/pipe2/series.sh` (a tag with a valid result is skipped, so a cut series resumes by re-requesting);
-its list is `E:\OOT\scratch-pipe2\tmp\s1-series.sh`, log `build/s5/pipe2/series-s1.log`; launches go through
-`E:\OOT\scratch-pipe2\tmp\launch.py` (a detached bash; the harness's shell alternates between Git bash and PowerShell, so a plain
-`nohup ... &` from a call is not dependable - a doubled launch cost one tour and one lease today). The gate table:
-`python -I E:/OOT/scratch-pipe2/tmp/gate.py "p2g-*"`.
+Where it stands: **the gate series is done** (`pipe2e`, `0bb228966`, one clean speed lease 22:19-22:57, 19 runs, sections 4-5): castle
++6.2% (median), Kokiri +4.7%, Market inside its spread in the clean round, the meter at 0 held reads; **the fps gate does not pass** and
+section 5 says why (the GPU's own 7.1-7.7 ms a frame; the castle's whole room is ~+6.7%). The flashes/pictures are still unmeasured: a
+slot lease for the tour (`build/s5/pipe2/tour.sh`, tags `p2t2-*`, `RX_VK_SHOTS` per arm under `E:\OOT\scratch-pipe2\shots`) is queued
+behind foot2-T9's and zone4's speed leases (ticket `20261123-230212-pipe2-slot-e6c9`). Runner: `build/s5/pipe2/series.sh` (a tag with
+a valid result is skipped, so a cut series resumes by re-requesting); list `E:\OOT\scratch-pipe2\tmp\s1-series.sh`, log
+`build/s5/pipe2/series-s1.log`; launches through `E:\OOT\scratch-pipe2\tmp\launch.py` (a detached bash; the harness's shell alternates
+between Git bash and PowerShell, so a plain `nohup ... &` is not dependable - a doubled launch cost one tour and one lease today). Gate
+table: `python -I E:/OOT/scratch-pipe2/tmp/gate.py "p2g-*"`.
 
 Clean baseline, castle off (the series' warm-up `p2s1-warm-c`, 127.2 fps from play + 10 s): frames 8.37-8.79 ms, the PT waited
 0.26 ms for the main thread's hand-over, the main thread 1.34-1.43 ms for the present (89-94% of frames over 0.5 ms): replay-bound, the
@@ -182,15 +191,18 @@ frames, in its slow ones 7.6-8.1 against 8.4-8.8.
 
 What it means for the gate: **the frame cannot be shorter than the GPU's work plus the present's ~0.2 ms.**
 
-- **castle**: the ceiling is 7.8-8.1 ms a frame (123-128 fps), and the two off runs are at 126.4-127.2 fps: **the scene is at the GPU's
-  ceiling today**; the gate's +8% (7.9 ms frames from a 8.5 ms median, ~137 fps) would need the GPU's own work to drop by half a
-  millisecond, which no CPU-side change can do. Some windows are already there (7.84 ms of frame against 6.44 of GPU in `p2g-warm-c`).
-- **Kokiri**: the ceiling is 7.4-7.6 ms (132-135 fps) against 8.2-8.6: +8% (128 fps, 7.8 ms) is inside it, by ~0.3 ms.
+- **castle**: the off frame is 8.43 ms against 7.70 of GPU work: 0.73 ms of CPU above the GPU, of which the present needs ~0.2. So the
+  best possible frame is ~7.9 ms (126.6 fps) and the off fps 127.6 is already there in the run's average: **the castle has at most
+  ~+6.7% of room**, and the on arm takes +6.2% of it (section 5). The +8% the gate asks for needs a frame of 7.85 ms, which is below
+  the GPU's own work in the scene's slow windows (7.6-7.7 + 0.2).
+- **Kokiri**: the off frame is 8.24 against 7.20 of GPU work: 1.04 ms of CPU above the GPU, so a frame of ~7.4 ms (+11%) is the
+  ceiling and +8% (7.58) needs 0.38 ms of overhead. The on arm gets to 0.70 (7.90) - +4.7%, i.e. half the room is still there.
 
 So PIPE1's upper bounds (+10-16%, +16-21%, section 3 there) were read off the traces and did not include the GPU's share: **on this PC
-the castle has ~0-3% of room and Kokiri ~10%**, not 10-21%. PIPE1's traced castle window ran at 7.59 ms a frame, which today's GPU work
+the castle has ~6.7% of room and Kokiri ~11%**, not 10-21%, and of that the order thread as built (the present in its own chain) takes
++6.2% and +4.7%. PIPE1's traced castle window ran at 7.59 ms a frame, which today's GPU work
 (7.6-8.0) would not allow: the scene moment (the camera turns move the GPU's work between 5.4 and 8.1 ms a frame within one run) or the
-builds differ; the series' own GPU lines say which.
+builds differ.
 
 ### 4. The first clean on/off pair (castle-move, pipe2e, 21:21-21:27: the lease was cut by another agent's game after three runs)
 
@@ -211,6 +223,64 @@ Three things:
   enough, and the hitches (18-26 frames over 50 ms, max 300-450 ms: a load hitch inside the window) are in both arms.
 - **The meter's fix holds**: `p2g-c-on-1`'s log has `exposure sums: 2000 reads, 0 of them given the last result again` in every window
   (the runs before the fix gave 308-496 of 2000 on the on arm, 0 off): `0bb228966` does what it says.
+
+### 5. The gate series (pipe2e, one clean speed lease, 22:19-22:57, 19 runs, 3 interleaved rounds a scene, fps from play + 10 s)
+
+| scene | round | off | on | on/off |
+|---|---|---:|---:|---:|
+| castle-move | 1 | 137.8 | 138.6 | +0.6% |
+| | 2 | 126.6 | 135.5 | +7.0% |
+| | 3 | 127.6 | 133.8 | +4.9% |
+| | **median** | **127.6** | **135.5** | **+6.2%** (mean 130.7 -> 136.0, +4.1%) |
+| kokiri-idle | 1 | 120.9 | 129.0 | +6.7% |
+| | 2 | 123.1 | 126.9 | +3.1% |
+| | 3 | 121.2 | 126.7 | +4.5% |
+| | **median** | **121.2** | **126.9** | **+4.7%** (mean 121.7 -> 127.5, +4.8%) |
+| market-spin | 1 | 101.3 | 101.6 | +0.3% |
+| | 2 | 84.7 (34 frames over 50 ms) | 86.9 (21) | +2.6% |
+| | 3 | 99.1 (10) | 87.5 (22) | -11.7% |
+| | **median** | 99.1 | 87.5 | -11.7% (mean 95.0 -> 92.0, -3.2%) |
+
+Warm-ups (off arm): castle 126.4, Kokiri 121.8, Market 103.2 fps. The PROF_FINE pair at the end does not count: `series.sh` passed
+`RX_VK_PROF_FINE=1,RX_VK_ORDER_THREAD=1` as one `export`, so the "on" prof run had neither switch (its slack line is the inline arm's:
+PT waits 0.27, main 1.65); it is a fourth off sample (127.9) and the comma is now turned into a space in `series.sh`.
+
+The counters behind the numbers (medians of the last five 600-present windows, `python -I E:/OOT/scratch-pipe2/tmp/gate.py "p2g-*"`):
+
+| | castle off | castle on | Kokiri off | Kokiri on | Market off | Market on |
+|---|---:|---:|---:|---:|---:|---:|
+| frame (ms) | 8.43 | 8.13 | 8.24 | 7.90 | 9.89 | 10.50 |
+| PT waits for the main thread | 0.23 | 7.75 | 0.40 | 7.20 | 1.39 | 9.67 |
+| main waits for the present | 1.52 | 0.00 | 1.62 | 0.00 | 0.39 | 0.00 |
+| GPU time (ms) | 7.70 | 7.60 | 7.20 | 7.20 | 7.20 | 7.00 |
+| frame - GPU (CPU above the GPU) | 0.73 | 0.53 | 1.04 | 0.70 | 2.69 | 3.50 |
+| order thread idle (ms) | - | 0.01 | - | 0.16 | - | 2.30 |
+| fence join (ms) | - | 0.82 | - | 0.80 | - | 0.15 |
+
+**The gate does not pass: castle +6.2%, Kokiri +4.7% (the brief's +8%), the Market inside its spread in the one clean round (+0.3%,
+the other two rounds hitched on both sides: the Market's frame p50 is 9.3-9.6 ms in every run while the mean is 9.8-11.8), the meter at
+0 held reads.** What the overlap does is exactly what section 3 predicted: the CPU work above the GPU's own time falls by 27-33%
+(castle 0.73 -> 0.53, Kokiri 1.04 -> 0.70) and the PT's wait moves from the present to the main thread (1.52 -> 0.00 present wait,
+0.23 -> 7.75 hand-over wait). What is left above the GPU is 0.5-0.7 ms, the present (0.18-0.2) and the last submission's latency in
+the frame. **The castle's +8% is not there at all**: its whole room is ~+6.7% (section 3), and the order thread takes +6.2% of it.
+**Kokiri misses +8% by ~0.3 ms**: +8% needs 0.38 ms of CPU above the GPU and the arm has 0.70. The next lever for that 0.3 ms is the
+present out of the replay's chain (a present thread of its own, FIF's, without the contention FIF met) or the replay's tail; behind
+both sits the GPU's own work (94-95% of the frame in the castle's slow windows, 91-93% in Kokiri's).
+
+The gate, condition by condition:
+
+| the brief's gate | measured | verdict |
+|---|---|---|
+| castle-move +8% or more against off | +6.2% median (+4.1% mean; +0.6 / +7.0 / +4.9 by round) | **no** |
+| Kokiri +8% or more against off | +4.7% median (+4.8% mean; +3.1 / +6.7 / +4.5) | **no** |
+| Market not below the spread | the clean round +0.3%; the frame medians 9.28-9.57 (on) against 9.39-9.47 (off), inside 1%; the run means are hitch-dominated on both sides (frames over 25 ms: off 8 / 126 / 35, on 13 / 156 / 81) | yes |
+| the meter not frozen, M near 0 | 0 of 2000 in every on run and every window against 308-496 before `0bb228966` (off: 0-1) | yes |
+| 0 flashes over a warp tour, pictures right | not measured: the tour's first attempt was killed by a doubled launch, the second refused by runguard's RAM guard (another game in a slot); a slot lease for it is queued behind the other streams' speed leases | no data |
+
+The overlap's own evidence in these runs: the PT waits 5.6-10.3 ms for the main thread's hand-over in every on run and the main thread
+0.00 ms for the present (1.4-1.7 off); the order thread idles 0.01-0.18 ms a frame in the replay-bound scenes (it, not the GPU queue,
+was the bound) and 1.9-2.9 ms in the game-bound Market; the fence join (the game's own `nvnSyncWait` on the PT's fence, answered when
+the order thread reaches it) costs 0.40-0.86 ms a frame on the main thread's side.
 
 ## Dead ends
 
