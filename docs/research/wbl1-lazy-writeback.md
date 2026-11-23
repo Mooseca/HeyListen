@@ -93,3 +93,32 @@ Auto on slow links is the intended default, but NOT yet: keep it off by default 
 `memory_end_submission`, `mirror_free`, `shadow_free`, `mirrors_give_back`, `memory_cpu_reads`), `vk_replay.cpp` (`do_present`,
 `texture_created_of`), `vk_internal.h`, `engine/tests/test_wb_defer.{cpp,py}`, regenerated `docs/SWITCHES.md` and
 `engine/docs/switches.json`, README credit. Scratch: `E:\OOT\scratch-wbl1`; logs `build/s5/{ab-*wbl*,*wbl[1-4]*}`.
+
+## Update 2026-11-23: settle, and the 3050's wbl4 results
+
+- 3050 (wbl4, read protection on, auto gate): Hyrule hyrule-walk 42.3 -> 45.1 (+7 %, p99 -9 ms; the first run list: 41.0 -> 43.0), Market castle-move 48.0 -> 48.7 (+1.2 %);
+  write-back runs 58.9 -> 16.7 MB a frame (Hyrule), 52.0 -> 15.2 (Market). Guard first-touch reads: Hyrule 203 (texture unswizzle 201, game 2),
+  Market 215 (210 + 5), Kokiri village 1 (a new reader, hookshot_vk +0x3b17f1, guest 0x103d37f000; unresolved, the wbl4 map was not kept).
+- Added after that (commit 08d0b3377, NOT yet built or run): `memory_wbl_settle` in `guest_bytes` (vk_texture.cpp): before a texture upload reads
+  guest memory, the pending pages of exactly that range (CPU-unwritten) are copied from their mirrors by a one-off command buffer, fence-waited,
+  and written into guest memory (`RX_VK_WB_LAZY_SETTLE=0` off). The guard's fault handler does the same for the 4 MB region of a faulting page,
+  on any reader's thread, with try-locks only (falls back to the old learn-and-write-back-later path when a lock is busy).
+- perf/wbl1 was rebased on main d929c4759 (only the generated switch lists conflicted).
+
+## State at stop (2026-11-23 reboot)
+
+Done: port of RX_VK_WB_LAZY with guard, protection, region learning, texture registration write-back, settle (commits on perf/wbl1; last
+commit see `git log -1`); main-PC results above (MB a frame 55 -> 17, fps noise); 3050 results of wbl4.
+Half done: the settle code (08d0b3377) compiles (clang syntax + object check) and test_wb_defer passes, but it has never been BUILT or RUN.
+Unknown until run: a stall or deadlock of the settle on the replay thread, the guard counts with settle (expect texture reads and game reads
+about 0), fps unchanged. The default is still OFF (RX_VK_WB_LAZY unset = auto on slow links is the intended default only after the 3050 confirms
+the settle build: guard Hyrule / Market / Kokiri village, fps Hyrule and Market 3 rounds A off / B auto).
+Exact next command (after the reboot, nothing is leased): `cd /e/OOT/HeyListen && nohup bash /e/OOT/scratch-wbl1/all6.sh > /e/OOT/scratch-wbl1/all6.out 2>&1 &`
+(builds wbl6 at build priority 1 with mkg -Owner wbl1, then guard + shots runs under a slot lease and the castle-move/market-spin off/on A/B under
+speed leases, priority 2, bin/wbl6; results in build/s5/t-wbl6* and abc7.out/abm7.out; save the wbl6 map first:
+`cp /e/OOT/builder-work/sa/build/{hookshot_vk.map,hookshot_vk.sym,HeyListen.sym} /e/OOT/scratch-wbl1/wbl6map/` to resolve guard readers).
+Then: send the 3050 confirm list for bin\wbl6 (guard on Hyrule, Market, Kokiri village; fps Hyrule and Market, 3 rounds A off / B auto); if it
+confirms, make the auto gate the default (it already is when RX_VK_WB_LAZY is unset: check the default-off statement in this doc and the
+final report), update this doc, commit, report.
+Leases/scripts in use at the stop: only a queued build ticket (wbl1, prio 1, released at the stop) from /e/OOT/scratch-wbl1/build9.sh under
+all6.sh; no game, no slot, no speed lease. Scratch: E:\OOT\scratch-wbl1 (scripts build*.sh func*.sh runs*.sh all*.sh), logs build/s5/*wbl*.
