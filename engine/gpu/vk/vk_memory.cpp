@@ -6698,6 +6698,13 @@ BufferRef gpu_buffer_bind(uint64_t gpu, uint64_t size, bool written) {
             if (kb) logf("vk: write-backs only of written bindings up to %llu KB (RX_VK_WB_MAX_KB)", (unsigned long long)kb);
             return kb << 10;
         }();
+        // (EXPO1, a test: HL_RB_TEST_DIRECT, vk_rbring.cpp) one binding of an exposure-meter block goes to guest memory directly, as a
+        // binding of a pool with no mirror does (the direct path above): what made the meter freeze, on purpose
+        if (p->buffer && p->memory && size == 0x1040 && rbring_test_direct(guest, size)) {
+            p->direct_write_epoch = mirror_epoch;
+            wb_pages_note(p->lo + off, p->lo + std::min(off + size, p->hi - p->lo), mem_rec_value);
+            return {p->buffer, off, size, 0};
+        }
         // (STEP1, HL_RB_LAG) a range the CPU reads back that the readback ring stages: no write-back, the submission's end copies it
         if ((!wb_max || size <= wb_max) && !rbring_stage_bind(guest, size, p->mirror, off))
             writebacks.push_back({p, off, std::min(off + size, p->hi - p->lo)});
