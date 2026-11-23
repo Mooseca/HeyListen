@@ -8263,7 +8263,7 @@ int ot_ahead() {
     return n;
 }
 thread_local bool ot_self = false;
-thread_local uint64_t ot_my_seq = 0;   // (the last job this thread handed over)
+thread_local uint64_t ot_my_seq = 0;   // (the last submission this thread handed over)
 std::mutex ot_mu;
 std::condition_variable ot_cv, ot_done_cv;
 std::deque<Job> ot_jobs;               // (ot_mu)
@@ -8389,7 +8389,7 @@ void ot_push(Job&& j) {
     {
         std::lock_guard lk(ot_mu);
         j.seq = ++ot_seq_pushed;
-        ot_my_seq = j.seq;
+        if (j.kind == JOB_SUBMIT) ot_my_seq = j.seq;   // (its submits: what it replayed itself inline; registrations never waited)
         if (j.kind == JOB_PRESENT) ot_presents++;
         ot_jobs.push_back(std::move(j));
     }
@@ -8433,7 +8433,7 @@ void ot_join_all(int site) {
 }
 /// (PIPE2) a CPU readback the ring does not serve. In the replay inline, the reading thread's own submits had been replayed by now
 /// (on it), while the other threads' were being replayed beside it (OoT's main thread reads while the PT replays the frame before):
-/// so it waits for the jobs this thread handed over (RX_VK_ORDER_RB_JOIN=1, the default); =2: every job handed over (all threads'),
+/// so it waits for the submissions this thread handed over (RX_VK_ORDER_RB_JOIN=1, the default); =2: every job handed over (all threads'),
 /// =0: none. RX_VK_ORDER_LOG=1: the first 60 reads that waited, by range
 void ot_join_readback(uint64_t gpu, uint64_t size) {
     // (PIPE2) RX_VK_ORDER_RB_JOIN=<0|1|2> (1): what a CPU readback waits for with the order thread: nothing, this thread's jobs, all jobs
