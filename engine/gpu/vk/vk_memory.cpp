@@ -168,6 +168,7 @@ struct SrwMutex {   // (a slim reader/writer lock: half std::mutex's cost, taken
     SRWLOCK l = SRWLOCK_INIT;
     void lock() { AcquireSRWLockExclusive(&l); }
     void unlock() { ReleaseSRWLockExclusive(&l); }
+    bool try_lock() { return TryAcquireSRWLockExclusive(&l) != 0; }   // (WBL1: the guard's fault handler)
 };
 SrwMutex pools_mu;
 uint32_t generation = ~0u;
@@ -5094,6 +5095,16 @@ LONG CALLBACK wbl_guard_handler(EXCEPTION_POINTERS* e) {
             if (!write && k <= 24 && wbl_guard_diag())
                 logf("vk: write-back guard: READ of a page put off, guest %#llx (pool %#llx), by %s", (unsigned long long)g,
                      (unsigned long long)lo, wbl_guard_where(pc).c_str());
+            // (WBL1) whatever thread read it: the region's pending pages are settled before the read goes on (the pages are accessible
+            // now, and the settle takes none of the locks it would have to wait for: if one is busy the read sees guest memory as it is)
+            static const bool settle = !getenv("RX_VK_WB_LAZY_SETTLE") || atoi(getenv("RX_VK_WB_LAZY_SETTLE")) != 0;
+            static thread_local bool inside = false;
+            if (!write && settle && !inside) {
+                static const uint64_t region = wb_defer::region_bytes(getenv("RX_VK_WB_LAZY_REGION_KB"));
+                inside = true;
+                memory_wbl_settle_try(wb_defer::region_base(g, region), region);
+                inside = false;
+            }
         }
         return EXCEPTION_CONTINUE_EXECUTION;
     }
@@ -9438,6 +9449,159 @@ int memory_mirror_read(uint64_t guest, uint64_t size, void* out) {
     std::memcpy(out, stage_map, size);
     return 1;
 }
+// ---- (WBL1) a texture upload reads guest pages that hold put-off write-backs: settled first ----
+// The CPU unswizzle of a texture's texels (vk_texture.cpp guest_bytes) reads guest memory as it is, once: texels a compute pass wrote
+// there (the guard of RX_VK_WB_GUARD found the upload reading pages put off, 200-450 a run). Before the read, exactly the pending pages in
+// [guest, guest + size) that the CPU has not written since are copied from their mirrors into a host buffer by a command buffer of their
+// own, submitted after everything submitted before (the queue's order puts the shaders' writes first), waited for with a fence of its own,
+// and written into guest memory; they are shared from then on (never put off again). One wait a call, however many pages and pools, and
+// none when no page of the range is pending (the check is a lock and a few words). RX_VK_WB_LAZY_SETTLE=0: off. Returns the pages settled
+std::atomic<int64_t> st_wbl_settled_pages{0}, st_wbl_settles{0}, st_wbl_settle_us{0};
+// try_only (the guard's fault handler, on the thread that read the page: it may hold any of these locks): no lock is waited for, a
+// pending late fix is not waited for; if one is busy the pages stay as they are and the read sees guest memory as it is (the region is
+// then written back at the next recording's end, as without the settle)
+static int64_t wbl_settle_impl(uint64_t guest, uint64_t size, bool try_only) {
+    static const bool on = !getenv("RX_VK_WB_LAZY_SETTLE") || atoi(getenv("RX_VK_WB_LAZY_SETTLE")) != 0;
+    if (!on || !size || guest >= (1ull << 40)) return 0;
+    struct Piece {
+        VkBuffer mirror;
+        uint64_t src, guest, stage, n;   // (offset in the mirror, guest address, offset in the stage, bytes)
+    };
+    static thread_local std::vector<Piece> pieces;
+    static std::mutex one;   // (one settle at a time: its command buffer, fence and staging are shared)
+    static VkCommandPool cpool = VK_NULL_HANDLE;
+    static VkCommandBuffer cmd = VK_NULL_HANDLE;
+    static VkFence fence = VK_NULL_HANDLE;
+    static VkBuffer stage = VK_NULL_HANDLE;
+    static VmaAllocation stage_alloc = nullptr;
+    static void* stage_map = nullptr;
+    static uint64_t stage_size = 0;
+    pieces.clear();
+    std::unique_lock<std::mutex> ok_one(one, std::defer_lock);
+    if (try_only ? !ok_one.try_lock() : (ok_one.lock(), false)) return 0;
+    uint64_t total = 0;
+    bool recording = false;
+    const auto abandon = [&] {   // (the pages are shared and not pending, the copy was not made: guest memory keeps what it has)
+        if (recording) vkEndCommandBuffer(cmd);
+        recording = false;
+        return (int64_t)0;
+    };
+    {
+        std::unique_lock lk(pools_mu, std::defer_lock);
+        if (try_only ? !lk.try_lock() : (lk.lock(), false)) return 0;
+        if (!wbl_on() || wbl_pending_pools.empty()) return 0;
+        const uint64_t end = guest + size;
+        auto it = imported.upper_bound(guest);
+        if (it != imported.begin()) --it;
+        for (; it != imported.end() && it->second.lo < end; ++it) {
+            Pool& p = it->second;
+            if (p.hi <= guest || !p.wbl_pending_n || !p.mirror || !p.buffer || p.mstate != Pool::MIRROR_ON) continue;
+            const uint64_t a = std::max(guest, p.lo), b = std::min(end, p.hi);
+            for (uint64_t pi = (a - p.lo) >> kPageShift; pi <= (b - 1 - p.lo) >> kPageShift && (pi >> 6) < p.wbl_pending.size(); pi++) {
+                const uint64_t bit = 1ull << (pi & 63);
+                if (!(p.wbl_pending[pi >> 6] & bit)) continue;
+                // (a page the CPU wrote since it was put off keeps the CPU's words: its pool's next sync writes the GPU's back first)
+                if (page_gen((p.lo >> kPageShift) + pi) != p.wbl_gen[pi]) continue;
+                p.wbl_pending[pi >> 6] &= ~bit;
+                p.wbl_pending_n--;
+                p.wbl_mixed[pi >> 6] |= bit;
+                if (wbl_guard_on()) wbl_guard_disarm(p, pi << kPageShift, (pi + 1) << kPageShift);
+                shadow_forget(p, pi << kPageShift, 4096);   // (guest memory takes the page whole: the shadow reads it again)
+                const uint64_t off = pi << kPageShift, n = std::min<uint64_t>(4096, p.hi - p.lo - off);
+                if (!pieces.empty() && pieces.back().mirror == p.mirror && pieces.back().src + pieces.back().n == off) {
+                    pieces.back().n += n;
+                } else {
+                    pieces.push_back({p.mirror, off, p.lo + off, total, n});
+                }
+                total += n;
+            }
+        }
+        if (pieces.empty()) return 0;
+        if (!cpool) {
+            VkCommandPoolCreateInfo pi{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
+            pi.queueFamilyIndex = dev.queue_family;
+            pi.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+            if (vkCreateCommandPool(dev.device, &pi, nullptr, &cpool) != VK_SUCCESS) return cpool = VK_NULL_HANDLE, 0;
+            VkCommandBufferAllocateInfo ai{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+            ai.commandPool = cpool, ai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY, ai.commandBufferCount = 1;
+            VkFenceCreateInfo fi{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+            if (vkAllocateCommandBuffers(dev.device, &ai, &cmd) != VK_SUCCESS || vkCreateFence(dev.device, &fi, nullptr, &fence) != VK_SUCCESS)
+                return 0;
+        }
+        if (total > stage_size) {
+            if (stage) destroy_buffer(stage, stage_alloc), stage = VK_NULL_HANDLE, stage_size = 0;
+            const uint64_t want = std::max<uint64_t>(total, 8ull << 20);
+            if (!create_buffer(want, VK_BUFFER_USAGE_TRANSFER_DST_BIT, true, stage, stage_alloc, &stage_map)) return 0;
+            stage_size = want;
+        }
+        vkResetCommandPool(dev.device, cpool, 0);
+        VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+        bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+        if (vkBeginCommandBuffer(cmd, &bi) != VK_SUCCESS) return 0;
+        recording = true;
+        VkMemoryBarrier2 mb{VK_STRUCTURE_TYPE_MEMORY_BARRIER_2};   // (after every write submitted before)
+        mb.srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+        mb.srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT;
+        mb.dstStageMask = VK_PIPELINE_STAGE_2_COPY_BIT;
+        mb.dstAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT;
+        VkDependencyInfo di{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
+        di.memoryBarrierCount = 1, di.pMemoryBarriers = &mb;
+        vkCmdPipelineBarrier2(cmd, &di);
+        for (const Piece& pc : pieces) {
+            const VkBufferCopy r{pc.src, pc.stage, pc.n};
+            vkCmdCopyBuffer(cmd, pc.mirror, stage, 1, &r);
+        }
+        mirror_reads.fetch_add(1);   // (no mirror is destroyed under the copy: reap_mirrors waits)
+    }
+    VkMemoryBarrier2 hb{VK_STRUCTURE_TYPE_MEMORY_BARRIER_2};
+    hb.srcStageMask = VK_PIPELINE_STAGE_2_COPY_BIT;
+    hb.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+    hb.dstStageMask = VK_PIPELINE_STAGE_2_HOST_BIT;
+    hb.dstAccessMask = VK_ACCESS_2_HOST_READ_BIT;
+    VkDependencyInfo hd{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
+    hd.memoryBarrierCount = 1, hd.pMemoryBarriers = &hb;
+    vkCmdPipelineBarrier2(cmd, &hd);
+    const auto t0 = std::chrono::steady_clock::now();
+    bool done = vkEndCommandBuffer(cmd) == VK_SUCCESS;
+    recording = false;
+    if (done) {
+        VkCommandBufferSubmitInfo cb{VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO};
+        cb.commandBuffer = cmd;
+        VkSubmitInfo2 si{VK_STRUCTURE_TYPE_SUBMIT_INFO_2};
+        si.commandBufferInfoCount = 1, si.pCommandBufferInfos = &cb;
+        vkResetFences(dev.device, 1, &fence);
+        {
+            if (!try_only) late_fix_wait_unlocked();
+            std::unique_lock qk(dev.present_mu, std::defer_lock);   // (one queue: submits and presents take turns)
+            if (try_only ? qk.try_lock() : (qk.lock(), true)) {
+                queue_flush_locked();
+                done = vkQueueSubmit2(dev.queue, 1, &si, fence) == VK_SUCCESS;
+            } else {
+                done = false;
+            }
+        }
+        done = done && vkWaitForFences(dev.device, 1, &fence, VK_TRUE, 5000000000ull) == VK_SUCCESS;
+    }
+    mirror_reads.fetch_sub(1);
+    if (!done) return abandon();
+    invalidate_mapped(stage_alloc, total);
+    int64_t pages = 0;
+    for (const Piece& pc : pieces) {
+        host->gpu_write(pc.guest, (const uint8_t*)stage_map + pc.stage, pc.n);
+        pages += (int64_t)((pc.n + 4095) >> kPageShift);
+    }
+    st_wbl_settled_pages += pages, st_wbl_settles++;
+    st_wbl_settle_us += std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - t0).count();
+    static std::atomic<int> logged{0};
+    if (logged++ < 12)
+        logf("vk: write-back put off: %lld pages settled for a texture upload (%llu bytes at %#llx, %lld ms; %lld settles, %lld pages so far)",
+             (long long)pages, (unsigned long long)size, (unsigned long long)guest,
+             (long long)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count(),
+             (long long)st_wbl_settles.load(), (long long)st_wbl_settled_pages.load());
+    return pages;
+}
+int64_t memory_wbl_settle(uint64_t guest, uint64_t size) { return wbl_settle_impl(guest, size, false); }
+int64_t memory_wbl_settle_try(uint64_t guest, uint64_t size) { return wbl_settle_impl(guest, size, true); }
 // ---- (RX_VK_POOL_MIRROR_CHECK=1) the never-imported mirrors compared with guest memory ----
 // Every 2 s a thread of its own takes the next never-imported pool with its mirror on, never written by the GPU, synced in a
 // submission before the one being recorded, reads its mirror back (memory_mirror_read: after everything submitted) and compares it

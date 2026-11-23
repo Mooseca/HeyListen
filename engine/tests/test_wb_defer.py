@@ -33,6 +33,11 @@ def check_source():
                    "wbl_note_read(guest, size);",
                    "wbl_faults_drain();",
                    "void memory_wb_texture(uint64_t gpu, uint64_t size)",
+                   "int64_t memory_wbl_settle(uint64_t guest, uint64_t size)",
+                   "memory_wbl_settle_try(wb_defer::region_base(g, region), region);",
+                   'getenv("RX_VK_WB_LAZY_SETTLE")',
+                   "int64_t memory_wbl_settle(uint64_t guest, uint64_t size)",
+                   'getenv("RX_VK_WB_LAZY_SETTLE")',
                    'getenv("RX_VK_WB_LAZY_REGION_KB")',
                    'getenv("RX_VK_WB_LAZY_PROTECT")',
                    # a mirror with pages waiting is not given back; a pool's shadow going orphans them
@@ -47,6 +52,12 @@ def check_source():
     # the order in the write-back loop: TICK-015's filter, then the put off
     if mem.index("if (wb_lazy_on()) lazy_filter(*p, runs);") > mem.index("wbl_put_off(*p, runs);"):
         raise SystemExit("vk_memory.cpp: the put off must come after TICK-015's filter")
+    tex = (ROOT / "gpu/vk/vk_texture.cpp").read_text(encoding="utf-8")
+    if "memory_wbl_settle(gpu, n);" not in tex:
+        raise SystemExit("vk_texture.cpp guest_bytes no longer settles")
+    tex = (ROOT / "gpu/vk/vk_texture.cpp").read_text(encoding="utf-8")
+    if "memory_wbl_settle(gpu, n);" not in tex:
+        raise SystemExit("vk_texture.cpp guest_bytes no longer settles")
     rep = (ROOT / "gpu/vk/vk_replay.cpp").read_text(encoding="utf-8")
     for needle in ("const bool wb_flush = memory_wb_pending();",
                    "if (wb_flush && !memory_wb_flush_own()) memory_wb_flush_queue();"):
