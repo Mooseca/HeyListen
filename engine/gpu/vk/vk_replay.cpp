@@ -5323,6 +5323,8 @@ int64_t thread_cpu_100ns() {
     if (!GetThreadTimes(GetCurrentThread(), &c, &e, &k, &u)) return 0;
     return (int64_t)((((uint64_t)k.dwHighDateTime << 32) | k.dwLowDateTime) + (((uint64_t)u.dwHighDateTime << 32) | u.dwLowDateTime));
 }
+bool order_thread_on();
+bool ot_pending();   // (PIPE4: jobs handed over to the order thread and not yet run; below)
 void sync_watch() {
     SetThreadDescription(GetCurrentThread(), L"mkw_vk order");
     for (;;) {
@@ -5349,6 +5351,18 @@ void sync_watch() {
         }
         tl_ev("watch-");
         const double held = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - blocked_since).count();
+        // (PIPE4) with the order thread, a queue stopped for hold_ms is not let past its wait while submissions handed over are
+        // still to be replayed: the work that sets its event may be one of them (inline it had not been submitted yet). Forced
+        // anyway, the lit passes ran before the lighting work they wait for and the scene came out black for a frame (the dark
+        // frames of the warp tour). RX_VK_ORDER_WATCH_PENDING=1: forced as before
+        static const bool watch_pending = getenv("RX_VK_ORDER_WATCH_PENDING") && atoi(getenv("RX_VK_ORDER_WATCH_PENDING")) != 0;
+        if (blocked_n.load() && held > hold_ms() && order_thread_on() && !watch_pending && ot_pending()) {
+            static std::atomic<int64_t> spared{0};
+            if (const int64_t k = ++spared; k <= 8 || k % 1000 == 0)
+                logf("vk: order thread: a queue stopped %.0f ms not let past its wait, submissions handed over are still to be replayed (%lld so far)",
+                     held, (long long)k);
+            continue;
+        }
         if (blocked_n.load() && held > hold_ms()) {
             drain(3);
             update_blocked();
@@ -8442,6 +8456,10 @@ void ot_main() {
         }
         if (wake) ot_done_cv.notify_all();
     }
+}
+bool ot_pending() {
+    std::lock_guard lk(ot_mu);
+    return !ot_jobs.empty();
 }
 /// a job to the order thread, in order (the caller holds submit_order_mu for submits and presents: their values in the same order)
 void ot_push(Job&& j) {
