@@ -241,13 +241,20 @@ Series 1 and 2 of check runs with the switch on (main PC, slot a, machine shared
 thread finished a job in the last 250 ms), here merged under the per-submission state: one tour, no hang at a load, no dark frame.
 One tour is not a verdict (pipe4f had one clean tour before it hung).
 
-**Open defect: with `RX_VK_SUB_OVERLAP=1` the load of a Market save did not finish in 2 runs of 2 on `dec1a`** (Kokiri's did, 2 of 2;
-without the switch the Market's did, 2 of 2), and did finish in the one run on `dec2a` with `RX_VK_CAP_DEPTH=2` and diagnostics on.
-Not explained. One cause was found by reading and removed in `e67d919c8` (build `dec2b`): CRASH3's guessed write-backs kept their
-snapshots in one map that every submission's start cleared, so a pending submission's guessed write-backs were never checked and
-never written once the next one had begun; the snapshots are now the submission's own (`MemSub::guess_snaps`). Whether that was the
-load's cause is not shown: it needs `dec2b` run on a Market save with the switch alone, twice or more (series 3 below), and the
-same on `dec2a` to tell the fix from the capture depth.
+**Loads that never reach play: not the switch's doing, as far as this day's runs can say.** With `RX_VK_SUB_OVERLAP=1` the load of
+a Market save did not finish in 2 runs of 2 on `dec1a` (15:27-15:33; the load screen at 0.1-0.6 fps for 5-11 s at a time, then idle
+at 360 fps until "skip title: gave up after 120 s"), which looked like the switch. It is not shown to be: (1) the same run reached
+play on `dec2a` (`dec2a-m-on`); (2) in series 3 a run with **no switch** failed the same way (`dec2b-warm`, Kokiri, 16:14: the load
+screen until the title skip gave up; "the game read no controller for 11.2 s", presents at 0.1-0.3 fps) and the next one never left
+the first screen (`dec2b-m-on-a`, 1 draw a frame at 360 fps for 150 s); (3) other streams' runs on this PC gave up at the title the
+same way today (`c3-v42b` 13:10, `U-d1` 13:30, `U-d2` 13:36, `c3-v42d` 14:01, `V-t` and `p4t13-on` 14:16: `skip title: gave up` in
+their `build/s5/<run>/game_log.txt`). The machine ran two games and a build or a lift through all of it. To settle on a quiet
+machine: the Market save with the switch alone, three runs, on `dec2b`.
+
+One real gap was found by reading while looking for a cause and removed in `e67d919c8` (build `dec2b`): CRASH3's guessed write-backs
+kept their snapshots in one map that every submission's start cleared; a pending submission's guessed write-backs would not be
+checked or written once the next one had begun. With SUB1 B as built the pending end is always sent before the next submission's
+start, so this was not live; it would be with the lanes. The snapshots are now the submission's own (`MemSub::guess_snaps`).
 
 ### 4.3 Stage 2 (`RX_VK_LANES`), not built: the recipe, from the code as merged
 
