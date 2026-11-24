@@ -124,7 +124,11 @@ PIPE4 (lease name `pipe4`, scratch `E:\OOT\scratch-pipe4`, scripts `build/s5/pip
   (129.5, +2.3%), every on run above every off run; p50 7.99-8.24 off, 7.73-7.97 on; frames over 25 ms 1/0/0 off, 0/2/0 on.
   kokiri-idle off 116.5 / 116.0, on 123.9 (one round: +6.5%); p50 8.52-8.57 off, 8.03 on. Market not run. The meter (exposure sums
   given the last result again): castle 1 of 8000 a run off, 0 on; Kokiri 2 of 16000 off, 0 on.
-- pipe4e built (12:21-12:28, tests 504 passed / the 3 known failures). Tours `p4t10-on`, `p4t11-on` queued on a slot (`s8.log`).
+- pipe4e built (12:21-12:28, tests 504 passed / the 3 known failures). Tours `p4t10-on`, `p4t11-on` (slot a 13:09-13:21): 0
+  flashes, but **the game froze**: 6 frames after play in `p4t10-on`, presents stopped 81 s after play in `p4t11-on` (Zora's River).
+  With the next present waiting behind the held one, the jobs behind it never ran while the game's threads joined them before the
+  main thread's signal. Fix `714f7dad7` (pipe4f): the next present forces the held one again (as pipe4c); a held present with
+  nothing behind it waits up to 2 s. Build and tours `p4t12-on`, `p4t13-on` queued (`s9.sh`, `s9.log`).
 
 Where it stands: the three tasks of the brief are done and measured. (1) The present thread works and is safe, but **the gate that
 keeps the GPU's order takes the present's serial part back into the chain** (Kokiri 0.47-0.51 ms a frame, chain 7.76 against 7.79):
