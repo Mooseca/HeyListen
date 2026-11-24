@@ -55,6 +55,7 @@
 #include "completion_tracker.h"   // (stream ORDER2: the recordings' completion tracked off the order thread)
 #include "feed_stats.h"           // (stream ORDER3: why the GPU sat idle between recordings)
 #include "submit_seq.h"           // (stream DECOUPLE: the lanes' submit sequencer, RX_VK_LANES / RX_VK_LANES_CHECK)
+#include "timeline_order.h"       // (DECOUPLE3: the timeline's signals never go back, a present held by the order thread)
 #include "vk_jobs.h"
 #include "storm_hold.h"
 #include "vk_shader.h"
@@ -641,8 +642,14 @@ bool readback_strict_slow(uint64_t size) {
     static const readback_late::Rules meter = readback_late::parse("1040,c0");
     return limit > 0 && present_ms_ema.load(std::memory_order_relaxed) > limit && readback_late::wanted(meter, size, false);
 }
+// (DECOUPLE3) the value of a present handed over to the order thread and not recorded yet (0: none): the recordings behind it signal
+// below it (timeline_order::signal_at), so its own signal still rises (section 4.9: the load hang)
+std::atomic<uint64_t> ot_held_present{0};
+std::atomic<int64_t> st_signal_back{0};   // (signals that would have gone back on the timeline: must read 0)
 void note_signal_sent(uint64_t v) {
     uint64_t cur = tl_signal_sent.load(std::memory_order_relaxed);
+    if (v < cur && st_signal_back.fetch_add(1, std::memory_order_relaxed) < 8)
+        logf("vk: a timeline signal %llu below one already sent (%llu): the timeline went back", (unsigned long long)v, (unsigned long long)cur);
     while (v > cur && !tl_signal_sent.compare_exchange_weak(cur, v, std::memory_order_release, std::memory_order_relaxed)) {}
 }
 int64_t st_lf_thread, st_lf_blocked, st_lf_held_cbs;   // (dev.present_mu: fixes applied by the fix thread, by a flush that waited)
@@ -672,6 +679,7 @@ void late_fix_flush_locked() {
 } // namespace
 void vk_tl_note(const char* what, uint64_t a, uint64_t b) { tl_ev(what, a, b); }
 uint64_t vk_timeline_signal_sent() { return tl_signal_sent.load(std::memory_order_acquire); }
+uint64_t vk_timeline_held_present() { return ot_held_present.load(std::memory_order_acquire); }   // (DECOUPLE3: timeline_order.h)
 void vk_timeline_wait_sent(uint64_t v) {
     if (!timeline || completed() >= v) return;
     VkSemaphoreWaitInfo wi{VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO};
@@ -687,8 +695,20 @@ void vk_timeline_wait_sent(uint64_t v) {
 thread_local bool tl_poll = false;
 bool late_fix_wait_unlocked() {
     WaitScope wait_scope(WS_LATE_FIX);   // (DECOUPLE: the stall watch's site)
+    const auto w0 = std::chrono::steady_clock::now();
     for (uint64_t lv; (lv = memory_late_fix_pending()) && completed() < lv;) {
         if (tl_poll) return false;   // (a poll: what is held is not done anyway; the fix thread sends it)
+        // (DECOUPLE3, a last resort: the cause of the load hang is fixed in timeline_order.h) a fix whose value the timeline has not
+        // reached in 2 s is applied as it is, as late_fix_flush_locked does after its own 2 s, and said: a value nothing will reach
+        // again (the timeline gone back) held every recording behind it for good
+        if (std::chrono::steady_clock::now() - w0 > std::chrono::seconds(2)) {
+            static std::atomic<int> logged{0};
+            if (logged++ < 8)
+                logf("vk: a late fix's value %llu not reached in 2 s (done %llu, the highest signal sent %llu): applied as it is",
+                     (unsigned long long)lv, (unsigned long long)completed(), (unsigned long long)tl_signal_sent.load());
+            memory_late_fix_apply(lv);
+            break;
+        }
         const auto t0 = std::chrono::steady_clock::now();
         vk_timeline_wait_sent(lv);
         st_lf_wait_ns.fetch_add(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - t0).count(),
@@ -5385,9 +5405,8 @@ void finish_recording_deferred(uint64_t value) {
     rec_shared_note(kRsEndSubmission);
     const MemView view = memory_view();
     memory_submission_handoff(view);
-    const uint64_t oldest = oldest_unfinished();
-    const uint64_t at = oldest == UINT64_MAX ? done_max : std::min(done_max, oldest - 1);
-    const bool signal = at > signaled;
+    const uint64_t at = timeline_order::signal_at(done_max, oldest_unfinished(), ot_held_present.load(std::memory_order_acquire));
+    const bool signal = timeline_order::signal_moves(at, signaled);   // (DECOUPLE3: below a present the order thread holds)
     if (signal) signaled = at;
     EarlyGroup& G = *defer_group;
     SubmitPrep P;
@@ -5428,9 +5447,8 @@ void finish_recording(uint64_t value) {
     rec_shared_note(kRsEndSubmission);
     memory_end_submission(r.cmd);
     full_barrier(r.cmd, "barrier (recording end)");
-    const uint64_t oldest = oldest_unfinished();
-    const uint64_t at = oldest == UINT64_MAX ? done_max : std::min(done_max, oldest - 1);
-    const bool signal = at > signaled;
+    const uint64_t at = timeline_order::signal_at(done_max, oldest_unfinished(), ot_held_present.load(std::memory_order_acquire));
+    const bool signal = timeline_order::signal_moves(at, signaled);   // (DECOUPLE3: below a present the order thread holds)
     if (signal) signaled = at;
     submit_recording(r, signal, at);
 }
@@ -7590,7 +7608,15 @@ void do_present(const nvn_tex* t, const int crop[4]) {
         if (wb_flush && !memory_wb_flush_own()) memory_wb_flush_queue();
         memory_end_submission(r.cmd);
         full_barrier(r.cmd);
-        submit_recording(r);   // (nothing is stopped at a present: drain)
+        {   // (DECOUPLE3) its own value, never below a signal already sent: the recordings behind a present the order thread held
+            // signal below it (timeline_order::signal_at). Were one above it, the timeline would go back (the load hang, 4.9)
+            const bool rises = timeline_order::signal_moves(value, signaled);
+            static int64_t back = 0;
+            if (!rises && back++ < 8)
+                logf("vk: a present's value %llu is not above the timeline's last signal %llu: not signalled", (unsigned long long)value,
+                     (unsigned long long)signaled);
+            submit_recording(r, rises);   // (nothing is stopped at a present: drain)
+        }
         if (pushed.load() < value) pushed = value;
         done_max = std::max(done_max, value), signaled = std::max(signaled, value);
         if (wb_flush && memory_wb_flush_own()) {
@@ -9048,7 +9074,11 @@ void ot_main() {
         if (got) ot_cur_kind.store((int)j.kind, std::memory_order_relaxed), ot_cur_value.store(j.value, std::memory_order_relaxed);
         else if (holding) ot_cur_kind.store(-2, std::memory_order_relaxed), ot_cur_value.store(held.value, std::memory_order_relaxed);
         if (got && j.kind == JOB_PRESENT) {
+            // (DECOUPLE3) its value, until it is recorded: the recordings of the jobs run behind it while it is held signal below it
+            // (finish_recording: timeline_order::signal_at), so its own signal rises; before, it went back on the timeline (4.9)
+            ot_held_present.store(j.value, std::memory_order_release);
             if (ot_present_run(j, ms == 0)) {
+                ot_held_present.store(0, std::memory_order_release);
                 finish(j);
             } else {
                 ot_sig_waits++;
@@ -9071,6 +9101,7 @@ void ot_main() {
                         logf("vk: order thread: the present after %lld forced (%s; value %llu)", (long long)presents_now,
                              next_present ? "the next present came" : "waited its time", (unsigned long long)held.value);
                 }
+                ot_held_present.store(0, std::memory_order_release);
                 finish(held);
                 holding = false;
                 ot_holding.store(false, std::memory_order_release);

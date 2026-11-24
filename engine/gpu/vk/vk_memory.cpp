@@ -3860,6 +3860,7 @@ bool late_fix_slot_pending(uint32_t gen, uint32_t slot, uint64_t* value) {
     return false;
 }
 std::atomic<int64_t> st_late_deferred{0}, st_late_def_pages{0}, st_late_def_tex{0}, st_late_def_unsent{0};
+std::atomic<int64_t> st_late_held{0};   // (DECOUPLE3: takes whose late value is behind a present the order thread holds: not waited for)
 uint64_t memory_late_fix_pending() { return late_fix_top.load(std::memory_order_acquire); }
 size_t late_fix_count() {
     std::lock_guard lk(late_fix_mu);
@@ -4097,11 +4098,20 @@ bool take_capture(std::unique_ptr<Capture> c, uint64_t value, uint64_t completed
             const int64_t p90 = p90_us.load(std::memory_order_relaxed);
             const int cap_ms = adapt ? (int)std::clamp<int64_t>(k * p90 / 1000, wait_max_ms, std::max(wait_max_ms, 250)) : wait_fixed_ms;
             const uint64_t done0 = vk_timeline_completed();
-            const bool must_wait = adapt && done0 < c->late_value;
+            // (DECOUPLE3) a late value behind a present the order thread holds is not signalled before that present is recorded
+            // (timeline_order.h): no wait can reach it now, so the take goes on at once as a wait that ran out would (the submit's
+            // copy of its late pages kept), and the cap does not learn from it
+            const uint64_t held = vk_timeline_held_present();
+            const bool behind_held = held && c->late_value >= held && c->late_value > vk_timeline_signal_sent();
+            if (behind_held && st_late_held.fetch_add(1, std::memory_order_relaxed) % 600 == 0)
+                logf("vk: captures' late pages behind a present the order thread holds, not waited for: %lld",
+                     (long long)st_late_held.load(std::memory_order_relaxed));
+            const bool must_wait = adapt && done0 < c->late_value && !behind_held;
             const auto tw = std::chrono::steady_clock::now();
-            if (done0 < c->late_value) gpu_tail_note_late(c->late_value);   // (TICK-057: a real wait)
+            if (done0 < c->late_value && !behind_held) gpu_tail_note_late(c->late_value);   // (TICK-057: a real wait)
             bool done = true;
-            if (cap_ms > 0) done = vk_timeline_wait_for(c->late_value, (uint32_t)cap_ms);
+            if (behind_held) done = false;
+            else if (cap_ms > 0) done = vk_timeline_wait_for(c->late_value, (uint32_t)cap_ms);
             else vk_timeline_wait(c->late_value);   // (RX_VK_CAPTURE_WAIT_MAX_MS=0: no cap of its own, the wait's 250 ms)
             if (must_wait) {
                 const int64_t took = done ? std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - tw).count()
