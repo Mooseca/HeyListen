@@ -76,6 +76,7 @@ int snap(int, int v) { return v; }
 namespace mr { constexpr int kMax = 8; }
 void restart_values(int*) {}
 struct { void note(const int*) {} } restart_state;
+void prompts_at_once(const Row&) {}   /* (the Button prompts row's live offer) */
 %(is_slider)s
 %(stops)s
 %(snap)s

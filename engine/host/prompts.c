@@ -1222,7 +1222,7 @@ void hos_prompts_live(void) {
    them, a mod's own file, a mod's size table that cannot take ours: the same whatever the face) */
 static volatile LONG romfs_state[3];
 
-/* what the Insert menu's Button prompts row can change at once (vk_api.h HOS_PROMPTS_LIVE_*): the parts the game has loaded
+/* what the Insert menu's Button prompts row can change at once (gpu/vk/vk_opt_ids.h HL_PROMPTS_LIVE_*, pushed to the menu in hos_prompts_live): the parts the game has loaded
    from files served here, found, and the ones none was served for (a restart changes them no more); 0 with none found */
 int hos_prompts_live_parts(void) {
     const int found = (tex.l.base ? LIVE_TEXTURES : 0) | (lay.base ? LIVE_LAYOUTS : 0) |

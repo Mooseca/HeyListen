@@ -59,6 +59,7 @@ int step_upscaler(int, int dir, unsigned) { return dir; }
 namespace mr { constexpr int kMax = 8; }
 void restart_values(int*) {}
 struct { void note(const int*) {} } restart_state;
+void prompts_at_once(const Row&) {}   /* (the Button prompts row's live offer) */
 bool can_mic() { return false; }
 /* FRAMEGEN_ROWS */
 namespace fgr = mkwvk::framegen_rows;

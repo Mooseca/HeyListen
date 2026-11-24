@@ -677,7 +677,7 @@ static void pads_read(uint64_t *buttons, int32_t stick[4]) {
     }
     InterlockedExchange(&pad_raw_now, (LONG)raw);
     {   /* (Auto's device in use: a button, or a stick past halfway) */
-        const uint64_t pressed = raw & ~(1ULL << HOS_PAD_TOUCHPAD);
+        const uint64_t pressed = raw & ((1ULL << HOS_PAD_N) - 1);   /* (the touchpad's click is the menu's, not a play) */
         int strong = 0;
         for (int i = 0; i < 4; i++) strong |= s[i] > 16384 || s[i] < -16384;
         if (pressed || strong) __atomic_store_n(&input_pad_ns, now, __ATOMIC_RELAXED);
