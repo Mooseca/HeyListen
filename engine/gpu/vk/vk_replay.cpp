@@ -8322,120 +8322,6 @@ const char* const kOtSite[OT_SITES] = {"fence waits", "polls told not yet", "cat
 std::atomic<int64_t> ot_join_n[OT_SITES], ot_join_ns[OT_SITES], ot_join_waited[OT_SITES];
 int64_t ot_idle_ns = 0, ot_sig_waits = 0, ot_sig_late = 0, ot_depth_sum = 0, ot_depth_max = 0, ot_jobs_n = 0;   // (the order thread's)
 int64_t ot_now() { return std::chrono::steady_clock::now().time_since_epoch().count(); }
-// (PIPE3) RX_VK_ORDER_PRESENT_THREAD (1, with the order thread; 0: the present in the order thread's chain): the present is a job
-// of a thread of its own. The order thread hands it over as it reaches it (so every submission before it is replayed: the present's
-// drain and its recording see the whole frame) and goes on with the next job; what a submission's GPU order needs is kept by
-// ot_present_join(): a submission handed over after a present does not replay until that present's blit is submitted, so nothing of
-// the next frame reaches the GPU before the picture the present shows. The present thread takes sync_order_mu only while it drains
-// and records (the order thread has no submission to replay there in the usual frame: the next frame's come a frame later), which is
-// what FIF's present thread did not have: with it, the blocking waits the present makes (the CPU's signal, the swapchain's) are off
-// the chain the frame's replay runs in.
-bool ot_present_thread_on() {
-    // (PIPE3) RX_VK_ORDER_PRESENT_THREAD=<0|1> (1): with the order thread, a thread of its own for the present
-    static const bool v = [] {
-        const char* e = getenv("RX_VK_ORDER_PRESENT_THREAD");
-        const bool off = e && atoi(e) == 0;
-        return order_thread_on() && !off;
-    }();
-    return v;
-}
-std::mutex otp_mu;                     // (the present thread's queue and its progress)
-std::condition_variable otp_cv, otp_done_cv;
-std::deque<Job> otp_jobs;              // (otp_mu)
-int otp_pending = 0;                   // (handed over, not finished: otp_mu)
-std::atomic<uint64_t> otp_seq_done{0}; // (the last present finished)
-int otp_waiters = 0;                   // (otp_mu)
-int64_t otp_n = 0, otp_sig_ns = 0, otp_lock_ns = 0, otp_drain_ns = 0, otp_do_ns = 0, otp_gate_ns = 0, otp_gate_n = 0;
-void ot_log();   // (below: the order thread's and the present's lines, at a present)
-void otp_main() {
-    SetThreadDescription(GetCurrentThread(), L"mkw_vk present thread");
-    // (PIPE3) RX_VK_ORDER_PRESENT_PRIO=<0|1|2> (1): the present thread's priority, as the order thread's
-    static const int prio = getenv("RX_VK_ORDER_PRESENT_PRIO") ? atoi(getenv("RX_VK_ORDER_PRESENT_PRIO")) : 1;
-    SetThreadPriority(GetCurrentThread(), prio >= 2 ? THREAD_PRIORITY_HIGHEST : prio == 1 ? THREAD_PRIORITY_ABOVE_NORMAL : THREAD_PRIORITY_NORMAL);
-    for (;;) {
-        Job j;
-        {
-            std::unique_lock lk(otp_mu);
-            otp_cv.wait(lk, [] { return !otp_jobs.empty(); });
-            j = std::move(otp_jobs.front());
-            otp_jobs.pop_front();
-        }
-        if (signal_capture_on()) {   // (the CPU's signal this frame's stopped work waits for, made by the main thread: FIF's rule)
-            // (PIPE2) RX_VK_ORDER_SIGNAL_MS=<ms> (200; 0: no wait): how long the present waits for the CPU's signal
-            static const int ms = getenv("RX_VK_ORDER_SIGNAL_MS") ? std::max(0, atoi(getenv("RX_VK_ORDER_SIGNAL_MS"))) : 200;
-            const int64_t t1 = ot_now();
-            {
-                std::unique_lock lk(submit_order_mu);
-                if (ms && cpu_wait_open(j.value)) {
-                    ot_sig_waits++;
-                    if (!signal_cv.wait_for(lk, std::chrono::milliseconds(ms), [&j] { return !cpu_wait_open(j.value); })) ot_sig_late++;
-                }
-            }
-            otp_sig_ns += ot_now() - t1;
-        }
-        const int64_t t2 = ot_now();
-        {
-            std::unique_lock order(sync_order_mu, std::defer_lock);
-            {
-                WaitScope wait_scope(WS_LOCK_SUBMIT);
-                order.lock();
-            }
-            otp_lock_ns += ot_now() - t2;
-            ReplayPin pin;
-            const int64_t t3 = ot_now();
-            {
-                WaitScope wait_scope(WS_DRAIN);
-                drain(0);
-            }
-            otp_drain_ns += ot_now() - t3;
-            update_blocked();
-            present_value = j.value;
-            if (ubo_check_on()) ubo_check_frame();
-            const int64_t t4 = ot_now();
-            do_present(j.has_tex ? &j.tex : nullptr, j.has_crop ? j.crop : nullptr);
-            otp_do_ns += ot_now() - t4;
-        }
-        otp_n++;
-        ot_log();
-        {
-            std::lock_guard lk(otp_mu);
-            otp_pending--;
-        }
-        otp_done_cv.notify_all();
-        {   // (the game may hand over another present: at most RX_VK_ORDER_AHEAD not yet shown)
-            std::lock_guard lk(ot_mu);
-            ot_presents--;
-        }
-        ot_done_cv.notify_all();
-        otp_seq_done.store(j.seq, std::memory_order_release);
-    }
-}
-void otp_push(Job&& j) {
-    static std::once_flag once;
-    std::call_once(once, [] {
-        std::thread(otp_main).detach();
-        logf("vk: the present runs on a thread of its own, out of the order thread's chain (RX_VK_ORDER_PRESENT_THREAD=1)");
-    });
-    {
-        std::lock_guard lk(otp_mu);
-        otp_pending++;
-        otp_jobs.push_back(std::move(j));
-    }
-    otp_cv.notify_one();
-}
-/// before a submission handed over after a present replays: that present's blit is on the GPU (nothing of this frame's goes to the
-/// queue before the picture the present shows). Not on the order thread's chain in the usual frame: the next frame's submissions come
-/// a frame later, when the present is long done.
-void ot_present_join() {
-    if (!ot_present_thread_on()) return;
-    std::unique_lock lk(otp_mu);
-    if (otp_pending <= 0) return;
-    const int64_t t0 = ot_now();
-    otp_waiters++;
-    otp_done_cv.wait(lk, [] { return otp_pending <= 0; });
-    otp_waiters--;
-    otp_gate_ns += ot_now() - t0, otp_gate_n++;
-}
 void ot_note(int site, int64_t ns, bool waited) {
     ot_join_n[site].fetch_add(1, std::memory_order_relaxed);
     if (waited) ot_join_waited[site].fetch_add(1, std::memory_order_relaxed), ot_join_ns[site].fetch_add(ns, std::memory_order_relaxed);
@@ -8454,19 +8340,9 @@ void ot_log() {   // (the order thread, at a present)
         n += snprintf(line + n, sizeof line - n, " %s %lld/%lld %.2f;", kOtSite[k], (long long)ot_join_waited[k].exchange(0),
                       (long long)ot_join_n[k].exchange(0), ot_join_ns[k].exchange(0) / 1e6 / f);
     logf("%s", line);
-    if (ot_present_thread_on()) {   // (PIPE3: the present's own chain, on its thread: where its time went)
-        const double p = otp_n ? (double)otp_n : 1.0;
-        logf("vk: the present's thread (%lld presents, %.2f ms a present): the CPU's signal %.2f ms, waiting for the order thread's frame %.2f, "
-             "draining %.2f, recorded and shown %.2f; the order thread waited for a present's blit %lld times, %.2f ms a frame",
-             (long long)otp_n, (otp_sig_ns + otp_lock_ns + otp_drain_ns + otp_do_ns) / 1e6 / p, otp_sig_ns / 1e6 / p, otp_lock_ns / 1e6 / p,
-             otp_drain_ns / 1e6 / p, otp_do_ns / 1e6 / p, (long long)otp_gate_n, otp_gate_ns / 1e6 / f);
-        otp_n = otp_sig_ns = otp_lock_ns = otp_drain_ns = otp_do_ns = otp_gate_ns = otp_gate_n = 0;
-    }
     frames = 0, t0 = now, ot_idle_ns = ot_sig_waits = ot_sig_late = ot_depth_sum = ot_depth_max = ot_jobs_n = 0;
 }
 void ot_run(Job& j) {
-    // (PIPE3) any job that may put work on the GPU waits for a present handed over before it (the registrations, copies only, do not)
-    if (j.kind != JOB_PRESENT && j.kind != JOB_REGISTER_TEXTURE && j.kind != JOB_REGISTER_SAMPLER) ot_present_join();
     switch (j.kind) {
     case JOB_SUBMIT: {   // (submit_q's sync-waits replay, as it was inline)
         perf_parts::Scope perf_entry(perf_parts::t_render);
@@ -8486,10 +8362,6 @@ void ot_run(Job& j) {
     } break;
     case JOB_PRESENT: {   // (present()'s, as it was inline: the frame's stopped work drained, then shown)
         perf_parts::Scope perf_entry(perf_parts::t_render);
-        if (ot_present_thread_on()) {   // (PIPE3: the present's chain, on a thread of its own; every submission before it is replayed)
-            otp_push(std::move(j));
-            break;
-        }
         if (signal_capture_on()) {   // (the CPU's signal this frame's stopped work waits for, made by the main thread: FIF's rule)
             // (PIPE2) RX_VK_ORDER_SIGNAL_MS=<ms> (200; 0: no wait): how long the order thread's present waits for the CPU's signal
             static const int ms = getenv("RX_VK_ORDER_SIGNAL_MS") ? std::max(0, atoi(getenv("RX_VK_ORDER_SIGNAL_MS"))) : 200;
@@ -8549,7 +8421,7 @@ void ot_main() {
         bool wake;
         {
             std::lock_guard lk(ot_mu);
-            if (j.kind == JOB_PRESENT && !ot_present_thread_on()) ot_presents--;   // (PIPE3: the present thread counts its own)
+            if (j.kind == JOB_PRESENT) ot_presents--;
             if (j.value) ot_value_done.store(j.value, std::memory_order_release);
             ot_seq_done.store(j.seq, std::memory_order_release);
             wake = ot_waiters > 0;

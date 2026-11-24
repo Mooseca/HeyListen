@@ -2,7 +2,7 @@
  "schema": 1,
  "generated_by": "engine/scripts/list_switches.py",
  "scope": "C, C++ and headers under engine/ (engine/tests and vendored trees other than a64-kit excluded) and the Python the builder, the lifter and the scripts run: getenv, std::getenv, _wgetenv, the code's own env helpers and table-driven reads, and os.environ.",
- "count": 1466,
+ "count": 1464,
  "switches": [
   {
    "name": "A64_",
@@ -25311,11 +25311,11 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 8610
+     "line": 8482
     },
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 8622
+     "line": 8494
     }
    ],
    "default": "off (unset)",
@@ -25336,7 +25336,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 8529
+     "line": 8401
     }
    ],
    "default": "on (unless set to 0, false, off or no)",
@@ -25357,55 +25357,13 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 8639
+     "line": 8511
     }
    ],
    "default": "off (unset)",
    "values": "on or off (0, false, off, no and empty are off); the description names `0`, `1`",
    "explanation": "(PIPE2) RX_VK_ORDER_POLL_JOIN=1: with the order thread, a fence poll waits for its submission's job (default: told not yet).",
    "comment": "(PIPE2) RX_VK_ORDER_POLL_JOIN=1: with the order thread, a fence poll waits for its submission's job (default: told not yet).",
-   "documented_in": null,
-   "source": "comment at gpu/vk/vk_replay.cpp",
-   "documented": true,
-   "set_via": "In `hookshot_env.txt`, or in the environment.",
-   "use": null
-  },
-  {
-   "name": "RX_VK_ORDER_PRESENT_PRIO",
-   "area": "renderer",
-   "group": "HDR, V-Sync and presentation",
-   "audience": "diagnostic",
-   "files": [
-    {
-     "path": "gpu/vk/vk_replay.cpp",
-     "line": 8353
-    }
-   ],
-   "default": "1",
-   "values": "a whole number",
-   "explanation": "(PIPE3) RX_VK_ORDER_PRESENT_PRIO=<0|1|2> (1): the present thread's priority, as the order thread's.",
-   "comment": "(PIPE3) RX_VK_ORDER_PRESENT_PRIO=<0|1|2> (1): the present thread's priority, as the order thread's.",
-   "documented_in": null,
-   "source": "comment at gpu/vk/vk_replay.cpp",
-   "documented": true,
-   "set_via": "In `hookshot_env.txt`, or in the environment.",
-   "use": null
-  },
-  {
-   "name": "RX_VK_ORDER_PRESENT_THREAD",
-   "area": "renderer",
-   "group": "HDR, V-Sync and presentation",
-   "audience": "diagnostic",
-   "files": [
-    {
-     "path": "gpu/vk/vk_replay.cpp",
-     "line": 8336
-    }
-   ],
-   "default": "unset",
-   "values": "text",
-   "explanation": "(PIPE3) RX_VK_ORDER_PRESENT_THREAD=<0|1> (1): with the order thread, a thread of its own for the present.",
-   "comment": "(PIPE3) RX_VK_ORDER_PRESENT_THREAD=<0|1> (1): with the order thread, a thread of its own for the present.",
    "documented_in": null,
    "source": "comment at gpu/vk/vk_replay.cpp",
    "documented": true,
@@ -25420,7 +25378,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 8524
+     "line": 8396
     }
    ],
    "default": "1",
@@ -25441,7 +25399,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 8620
+     "line": 8492
     }
    ],
    "default": "1",
@@ -25462,17 +25420,13 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 8365
-    },
-    {
-     "path": "gpu/vk/vk_replay.cpp",
-     "line": 8495
+     "line": 8367
     }
    ],
    "default": "200",
    "values": "a whole number",
-   "explanation": "(The CPU's signal this frame's stopped work waits for, made by the main thread: FIF's rule) (PIPE2) RX_VK_ORDER_SIGNAL_MS=<ms> (200; 0: no wait): how long the present waits for the CPU's signal.",
-   "comment": "(The CPU's signal this frame's stopped work waits for, made by the main thread: FIF's rule) (PIPE2) RX_VK_ORDER_SIGNAL_MS=<ms> (200; 0: no wait): how long the present waits for the CPU's signal.",
+   "explanation": "(The CPU's signal this frame's stopped work waits for, made by the main thread: FIF's rule) (PIPE2) RX_VK_ORDER_SIGNAL_MS=<ms> (200; 0: no wait): how long the order thread's present waits for the CPU's signal.",
+   "comment": "(The CPU's signal this frame's stopped work waits for, made by the main thread: FIF's rule) (PIPE2) RX_VK_ORDER_SIGNAL_MS=<ms> (200; 0: no wait): how long the order thread's present waits for the CPU's signal.",
    "documented_in": null,
    "source": "comment at gpu/vk/vk_replay.cpp",
    "documented": true,
@@ -25796,7 +25750,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 9312
+     "line": 9184
     }
    ],
    "default": "0 (unset)",
@@ -27649,7 +27603,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 8969
+     "line": 8841
     },
     {
      "path": "gpu/vk/vk_shader.cpp",
@@ -27741,7 +27695,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 9226
+     "line": 9098
     }
    ],
    "default": "on (unless set to 0, false, off or no)",
@@ -29481,7 +29435,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 8749
+     "line": 8621
     }
    ],
    "default": "0",
@@ -29502,11 +29456,11 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 8656
+     "line": 8528
     },
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 8730
+     "line": 8602
     }
    ],
    "default": "on (unless set to 0, false, off or no)",
