@@ -3105,6 +3105,7 @@ thread_local VkCommandBuffer last_barrier_cmd = VK_NULL_HANDLE;   // (the comman
 thread_local uint64_t last_barrier_epoch = 0;
 thread_local uint64_t last_barrier_other = 0, last_barrier_xfer = 0;   // (TICK-016: the command buffer's counts at that barrier)
 std::atomic<int64_t> st_barriers_made{0}, st_barriers_left_out{0};
+void hz_clear(VkCommandBuffer cmd);   // (GPUPOV: the work recorded since a full barrier, vk_texture.cpp below)
 } // namespace
 void barrier_stats(int64_t* made, int64_t* left_out) {
     *made = st_barriers_made.load(std::memory_order_relaxed), *left_out = st_barriers_left_out.load(std::memory_order_relaxed);
@@ -3213,6 +3214,185 @@ void game_fragment_barrier(VkCommandBuffer cmd) {
     vkCmdPipelineBarrier2(cmd, &d);
     note_trust_point(cmd);   // (not a full one: last_barrier_cmd stays, and the next full barrier is recorded: work_epoch moved)
 }
+// ---- (GPUPOV) the work recorded since a full barrier, by what it wrote, and the barriers that separate no hazard ----
+// A barrier is needed only if work before it wrote something work after it reads (or writes). The engine records one before
+// every pass start, every dispatch and at each of the game's own nvnCommandBufferBarrier: ~380 a frame, and TICK-057's
+// RX_VK_TEST_BARRIER_DROP bound says their drains are the one engine-side GPU cost that shows (3050: gpu_ms 19.9 -> 16.8).
+// This keeps, per command buffer, what has been WRITTEN into it since its last recorded full barrier:
+//  - a pass's colour and depth targets (named: a Texture*);
+//  - anything else that writes memory (a dispatch, a copy, a clear, a fill or update, a write-back, or a draw whose program
+//    stores to a storage buffer or image): "unknown" here, and a barrier is kept, whatever the rest says.
+// A barrier may then be left out when the work it would separate names nothing it writes: the pass about to begin writes
+// neither a target written since the last barrier, and the draw about to be recorded samples none of them.
+// The elision needs the reads of the work AFTER the barrier, which is why a barrier is decided at the point where they are
+// known: at a pass start (the draw's descriptors are built before its pass begins, vk_draw.cpp begin_pass), and at the game's
+// own barrier, which is FOLDED (not recorded) and decided by the next barrier of the command buffer, no work in between.
+// Command buffers: one thread records a command buffer at a time (Vulkan's rule) and a recording's segments are command
+// buffers of their own, submitted in order (vk_replay.cpp), so a thread's own window is the command buffer's window.
+int hazard_mode() {
+    static const int v = [] {
+        const int e = getenv("RX_VK_BARRIER_HAZARD") ? atoi(getenv("RX_VK_BARRIER_HAZARD")) : 0;
+        const int m = e == 1 ? 1 : e;
+        if (m & 1)
+            logf("vk: barriers with no hazard (RX_VK_BARRIER_HAZARD=%d): the game's own barriers folded into the next barrier of "
+                 "their command buffer", m);
+        if (m & 2)
+            logf("vk: barriers with no hazard: a pass start's barrier left out when the work since the last recorded one wrote "
+                 "nothing it writes and nothing its draw samples");
+        return m;
+    }();
+    return v;
+}
+bool hazard_mode_on() { return hazard_mode() != 0; }
+namespace {
+struct HazardWindow {
+    VkCommandBuffer cmd = VK_NULL_HANDLE;
+    struct Written { VkImage image; const Texture* tex; };
+    Written written[32];
+    int nw = 0;
+    bool unknown = false;   // work that writes memory and is not named (see above)
+    bool folded = false;    // the game's barrier was left out here: the next barrier decides, no work was recorded since
+    // (GPUPOV) a pass start's barrier was left out: written[0, unsafe_bound) has no barrier before the work that follows, so a
+    // draw of that pass that reads one of them ends the pass (the barrier is then recorded by the pass it begins):
+    // hazard_draw_reads_unordered
+    bool unsafe_on = false;
+    int unsafe_bound = 0;
+};
+thread_local HazardWindow hz[4];   // (a recording's own command buffer, its upload buffer: the thread's last few)
+thread_local int hz_last = 0;
+// stats[kind][what]: kind 0 the game's, 1 pass starts, 2 dispatches, 3 others; what 0 checks, 1 named windows, 2 unknown
+// windows, 3 read-after-write hits, 4 elided
+std::atomic<int64_t> st_hz[4][5];
+std::atomic<int64_t> st_hz_folded{0}, st_hz_kept_after_fold{0};
+HazardWindow& hz_for(VkCommandBuffer cmd) {
+    for (int i = 0; i < 4; i++)
+        if (hz[i].cmd == cmd) return hz[i];
+    HazardWindow& w = hz[hz_last];
+    hz_last = (hz_last + 1) & 3;
+    w.cmd = cmd, w.nw = 0, w.unknown = false, w.folded = false, w.unsafe_on = false, w.unsafe_bound = 0;
+    return w;
+}
+/// A full barrier was recorded into cmd: what came before it is ordered, and the window starts again
+void hz_clear(VkCommandBuffer cmd) {
+    if (!hazard_mode_on()) return;
+    HazardWindow& w = hz_for(cmd);
+    w.nw = 0, w.unknown = false, w.folded = false, w.unsafe_on = false, w.unsafe_bound = 0;
+}
+bool hz_named(const HazardWindow& w, const Texture* t) {
+    // (by the image, not the Texture: two textures of one format class share an image (vk_texture.cpp format_class), and a
+    // mip or a layer of it is the same image too: a write to any of those is a write this one reads)
+    if (!t) return false;
+    for (int i = 0; i < w.nw; i++)
+        if (w.written[i].tex == t || (t->image && w.written[i].image == t->image)) return true;
+    return false;
+}
+} // namespace
+bool hazard_audit_on() {
+    static const bool v = getenv("RX_VK_BARRIER_AUDIT") && atoi(getenv("RX_VK_BARRIER_AUDIT")) != 0;
+    return v;
+}
+void hazard_note_xfer(VkCommandBuffer cmd) {
+    if (!hazard_mode_on() && !hazard_audit_on()) return;
+    if (!cmd) return;
+    hz_for(cmd).unknown = true;
+}
+/// Work that writes memory and is not named: a dispatch, a write-back, a draw whose program stores to memory
+void hazard_note_unknown(VkCommandBuffer cmd) {
+    if (!cmd) return;
+    if (!hazard_mode_on() && !hazard_audit_on()) return;
+    hz_for(cmd).unknown = true;
+}
+void hazard_note_pass(VkCommandBuffer cmd, const Texture* const* color, int n, const Texture* depth) {
+    if (!hazard_mode_on() && !hazard_audit_on()) return;
+    if (!cmd) return;
+    HazardWindow& w = hz_for(cmd);
+    for (int i = 0; i < n; i++)
+        if (color[i] && !hz_named(w, color[i]) && w.nw < 32) w.written[w.nw++] = {color[i]->image, color[i]};
+    if (depth && !hz_named(w, depth) && w.nw < 32) w.written[w.nw++] = {depth->image, depth};
+}
+/// Whether a barrier before this pass (and the draw it is about to record, which samples tex[0..ns)) may be left out.
+/// The audit counts what it found either way (RX_VK_BARRIER_AUDIT=1), the elision is RX_VK_BARRIER_HAZARD's bit 2.
+bool hazard_pass_barrier_elidable(VkCommandBuffer cmd, const Texture* const* color, int n, const Texture* depth,
+                                  const Texture* const* tex, size_t ns, const char* why) {
+    if (!hazard_mode_on() && !hazard_audit_on()) return false;
+    HazardWindow& w = hz_for(cmd);
+    const int kind = why && strstr(why, "pass start") ? 1 : 3;
+    st_hz[kind][0].fetch_add(1, std::memory_order_relaxed);
+    if (w.cmd != cmd || (w.nw == 0 && !w.unknown)) {
+        // (nothing recorded since the last barrier on this command buffer: the dedupe's case, not this one's)
+        return false;
+    }
+    if (w.unknown) {
+        st_hz[kind][2].fetch_add(1, std::memory_order_relaxed);
+        return false;
+    }
+    st_hz[kind][1].fetch_add(1, std::memory_order_relaxed);
+    bool raw = false;
+    for (int i = 0; i < n && !raw; i++)
+        raw = color[i] && hz_named(w, color[i]);
+    if (!raw && depth) raw = hz_named(w, depth);
+    for (size_t i = 0; i < ns && !raw; i++)
+        raw = tex[i] && hz_named(w, tex[i]);
+    if (raw) {
+        st_hz[kind][3].fetch_add(1, std::memory_order_relaxed);
+        return false;
+    }
+    if (!(hazard_mode() & 2)) return false;   // (the audit only: what would be left out)
+    st_hz[kind][4].fetch_add(1, std::memory_order_relaxed);
+    // (the barrier is gone: the images written before it have nothing ordering them against what this pass reads, so a later
+    // draw of the pass that reads one of them ends the pass: hazard_draw_reads_unordered)
+    w.unsafe_bound = w.nw, w.unsafe_on = true;
+    return true;
+}
+/// A draw of a pass whose start barrier was left out samples one of the images written before it: the pass ends here, and the
+/// pass begin that follows records the barrier (its own check now finds the read-after-write). Keeps the elision sound for the
+/// reads of a pass's later draws, which the first draw the barrier was decided at does not show.
+bool hazard_draw_reads_unordered(VkCommandBuffer cmd, const Texture* const* tex, size_t ns) {
+    if (!cmd || (!hazard_mode_on() && !hazard_audit_on())) return false;
+    HazardWindow& w = hz_for(cmd);
+    if (!w.unsafe_on) return false;
+    for (size_t i = 0; i < ns; i++) {
+        if (!tex[i]) continue;
+        for (int j = 0; j < w.unsafe_bound; j++)
+            if (w.written[j].tex == tex[i] || (tex[i]->image && w.written[j].image == tex[i]->image)) {
+                st_hz[1][3].fetch_add(1, std::memory_order_relaxed);
+                w.unsafe_on = false;
+                return true;
+            }
+    }
+    return false;
+}
+/// The game's own barrier at cmd: left out (folded) when what it would order is named and the next barrier of this command
+/// buffer decides instead, with no work in between (RX_VK_BARRIER_HAZARD bit 1). False: record it, as before.
+bool hazard_fold_game_barrier(VkCommandBuffer cmd) {
+    if (!hazard_mode_on() && !hazard_audit_on()) return false;
+    if (!cmd) return false;
+    HazardWindow& w = hz_for(cmd);
+    st_hz[0][0].fetch_add(1, std::memory_order_relaxed);
+    if (w.cmd != cmd) return false;
+    if (w.unknown) {
+        st_hz[0][2].fetch_add(1, std::memory_order_relaxed);
+        return false;
+    }
+    st_hz[0][1].fetch_add(1, std::memory_order_relaxed);   // (a window this barrier could have been folded into)
+    if (!(hazard_mode() & 1)) return false;                 // (the audit only: what would be folded)
+    if (w.folded) st_hz_kept_after_fold.fetch_add(1, std::memory_order_relaxed);   // (two of the game's in a row: one barrier)
+    w.folded = true;
+    // (the next barrier of this command buffer takes this one's place: the dedupe must not leave THAT one out as a repeat, which
+    // it would with nothing recorded in between. mesh_conv's batch records copies right after the game's barrier and has a
+    // barrier of its own (vk_draw.cpp): it is recorded, not deduped)
+    last_barrier_cmd = VK_NULL_HANDLE;
+    st_hz_folded.fetch_add(1, std::memory_order_relaxed);
+    return true;
+}
+/// The audit's counts, and the game's barriers folded so far
+void hazard_stats(int64_t out[4][5], int64_t* folded, int64_t* kept) {
+    for (int k = 0; k < 4; k++)
+        for (int j = 0; j < 5; j++) out[k][j] = st_hz[k][j].load(std::memory_order_relaxed);
+    *folded = st_hz_folded.load(std::memory_order_relaxed);
+    *kept = st_hz_kept_after_fold.load(std::memory_order_relaxed);
+}
+
 void full_barrier(VkCommandBuffer cmd, const char* why) {
     // (TICK-057, a measurement, never for play: RX_VK_TEST_BARRIER_DROP=1 leaves out the recordings' pass-start, dispatch and the
     // game's own barriers (not the uploads', the write-backs' or a segment's edges). The picture may be wrong: it bounds what the
@@ -3228,6 +3408,24 @@ void full_barrier(VkCommandBuffer cmd, const char* why) {
     if (drop_test && why && (((drop_test & 2) && !strcmp(why, "barrier (pass start)")) || ((drop_test & 4) && !strcmp(why, "barrier (dispatch)")) ||
                              ((drop_test & 8) && !strcmp(why, "barrier (the game's nvnCommandBufferBarrier)")))) {
         st_barriers_left_out.fetch_add(1, std::memory_order_relaxed);
+        return;
+    }
+    // (GPUPOV, RX_VK_REC_END_DROP=<mask>, off by default) a barrier at a recording's edge orders nothing inside its command
+    // buffer: nothing is recorded before the recording's start barrier or after its end barrier, so a narrower one would be a
+    // barrier of the same kind with nothing to drain. What the next submission reads is ordered by the submit's semaphore
+    // (device scope) and its fence (host scope), which every recording waits on (vk_replay.cpp submit_recording).
+    // 1: the recording-end barriers, 2: the recording-start ones. The answer to "can they be narrowed": nothing is left after
+    // them to narrow them FOR: either they go, or their cost is the drain of the write-backs before them.
+    static const int rec_edge = [] {
+        const int e = getenv("RX_VK_REC_END_DROP") ? atoi(getenv("RX_VK_REC_END_DROP")) : 0;
+        if (e) logf("vk: RX_VK_REC_END_DROP=%d: %s%s barriers left out (a measurement: RX_VK_PASS_TIMING's spans say what they cost)",
+                    e, e & 1 ? "recording-end " : "", e & 2 ? "recording-start" : "");
+        return e;
+    }();
+    if (rec_edge && why && (((rec_edge & 1) && !strcmp(why, "barrier (recording end)")) ||
+                            ((rec_edge & 2) && !strcmp(why, "barrier (recording start)")))) {
+        st_barriers_left_out.fetch_add(1, std::memory_order_relaxed);
+        hz_clear(cmd);
         return;
     }
     static const bool off = getenv("RX_VK_BARRIER_DEDUPE_OFF") != nullptr;
@@ -3254,6 +3452,7 @@ void full_barrier(VkCommandBuffer cmd, const char* why) {
     d.memoryBarrierCount = 1;
     d.pMemoryBarriers = &b;
     vkCmdPipelineBarrier2(cmd, &d);
+    hz_clear(cmd);   // (GPUPOV: what came before this one is ordered; the window starts again)
     last_barrier_cmd = cmd, last_barrier_epoch = work_epoch.load(std::memory_order_relaxed);
     last_barrier_cmd_work = all_work_slot(cmd).load(std::memory_order_relaxed);   // (TICK-057: with this barrier's own count)
     last_barrier_foreign = foreign_work.load(std::memory_order_relaxed);
@@ -3355,6 +3554,7 @@ void pass_start_barrier(VkCommandBuffer cmd) {
         d.memoryBarrierCount = 1;
         d.pMemoryBarriers = &b;
         vkCmdPipelineBarrier2(cmd, &d);
+        hz_clear(cmd);   // (GPUPOV: the work before waits here, in its attachment stages: the window starts again)
         return;
     }
     if (!game || par_active.load(std::memory_order_relaxed) || cmd != last_pass_end_cmd ||
@@ -3376,6 +3576,7 @@ void pass_start_barrier(VkCommandBuffer cmd) {
     d.memoryBarrierCount = 1;
     d.pMemoryBarriers = &b;
     vkCmdPipelineBarrier2(cmd, &d);
+    hz_clear(cmd);   // (GPUPOV)
     last_barrier_cmd = VK_NULL_HANDLE;   // (not a full one: the next full barrier is not left out after it)
 }
 

@@ -4894,7 +4894,12 @@ void begin_pass(VkCommandBuffer cmd, const Targets& at) {
     for (int i = 0; i < at.n && same; i++) same = ps.color[i] == at.color_view[i];
     if (same) return;
     end_pass(cmd);
-    pass_start_barrier(cmd);   // (what the pass before wrote, and the transfers before it: vk_texture.cpp)
+    // (GPUPOV) the barrier this pass starts with, left out when the work recorded since the command buffer's last one wrote
+    // nothing this pass writes and nothing the draw about to be recorded samples (RX_VK_BARRIER_HAZARD=2; with the audit on,
+    // it counts what it found either way). The draw's descriptors are built before its pass begins (draw(), build_descriptors)
+    if (!hazard_pass_barrier_elidable(cmd, at.color, at.n, at.depth, gfx_sampled().data(), gfx_sampled().size(), "barrier (pass start)"))
+        pass_start_barrier(cmd);   // (what the pass before wrote, and the transfers before it: vk_texture.cpp)
+    hazard_note_pass(cmd, at.color, at.n, at.depth);   // (GPUPOV: written from here on)
     work_since_barrier = true;
     VkRenderingAttachmentInfo ca[8]{};
     bool marks = !texture_marked(at.depth);
@@ -8607,11 +8612,18 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
     // compute-fallback mesh draw runs compute work of its own)
     if (mesh_batch.live() && (writes_memory(p) || p.fallback)) mesh_batch_drop();
     if (p.fallback && d.mesh && !fallback_record(cmd, p, d)) SKIP_HERE();
+    // (GPUPOV) this draw samples an image written before a pass start whose barrier was left out: the pass ends here and the
+    // one that begins after it records that barrier (hazard_pass_barrier_elidable finds the read then)
+    if (hazard_draw_reads_unordered(cmd, gfx_sampled().data(), gfx_sampled().size())) end_pass(cmd);
     {
         FINE_SCOPE(FT_HAZARD);
         begin_pass(cmd, at);
     }
     probe_draw(s, p, ps.draws);   // (hookshot: RX_VK_PROBE)
+    // (GPUPOV) a draw whose program stores to a storage buffer, an image or global memory: what it writes is not named, so the
+    // window says so and the next barrier is kept whatever else the window holds. After begin_pass's own decision, so it is
+    // about the work that follows this draw
+    if (writes_memory(p)) hazard_note_unknown(cmd);
     gprof_run(cmd, p.key);   // (RX_VK_PASS_TIMING=2)
     ps.prog = p.key;
     if (!ps.first_prog) ps.first_prog = p.key;
@@ -11459,6 +11471,7 @@ void dispatch(VkCommandBuffer cmd, NvnState& s, uint32_t x, uint32_t y, uint32_t
     else if (after_dispatch && ++st_dispatch_unordered % 50000 == 1)
         logf("vk: %lld dispatches right after another ordered by the game's barriers so far, with none of their own (RX_VK_GAME_ORDER)",
              (long long)st_dispatch_unordered);
+    hazard_note_unknown(cmd);   // (GPUPOV: a dispatch writes memory we do not name: the next barrier is kept)
     work_since_barrier = true;
     {   // (ported from hookshot 53eb0441, pixl27, RX_VK_METER_ZERO=0 turns it off) OoT's exposure meter: 435a0138b9013040 and
         // 592079442d7129da add a frame's sums into the first 16 bytes of their block, which the game reads and sets back to zero.
