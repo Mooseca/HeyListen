@@ -145,6 +145,9 @@ def main():
                    help="no extra entries at the code addresses ADR / ADRP+ADD take (nx2/adr_entries.py)")
     a = p.parse_args()
     a.exefs = a.exefs or kit.need_exefs()
+    if a.write:   # (one writer in the lifted C's folder: nx2/genlock.py)
+        import genlock
+        genlock.take(os.path.join(os.path.join(a.work, "sa") if a.standalone else a.work, "gen"), "lift.py")
     t0 = time.time()
     hle = ()
     if a.standalone:

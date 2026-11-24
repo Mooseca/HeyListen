@@ -25,6 +25,7 @@ Each is a runtime switch where it can be, so the game's own path stays reachable
 """
 import glob
 import os
+import re
 import sys
 import whole_write   # (rewrites written beside and moved over: issue 1197)
 
@@ -324,6 +325,23 @@ def patch_job_order(source):
     return source, done
 
 
+# (where each patch's text lives, for the message when it is not found: the function, and what to look at)
+WHERE = {"dynamic resolution branch": " (the branch at 0x8082640c, label %s)" % LABEL.rstrip(":;"),
+         "text speed block": " (f_80b1e140's letters block)", "fixed path's scale": " (the fixed path's scale)",
+         "player heart protection": " (the player's life)", "player flight": " (the player's movement)",
+         "player flight rotation": " (the player's flight rotation)", "free camera": " (the free camera)",
+         "mouse camera": " (the mouse camera)", "voice option check": " (the Voice Language option)",
+         "scene format": " (the scene buffer's format, found by name)"}
+
+
+def searched(gen):
+    """The files a patch looked in, for a message: how many, which first and last, and how many of them are parts"""
+    names = sorted(os.path.basename(p) for p in glob.glob(os.path.join(gen, "code_*.c")))
+    parts = sum(1 for n in names if re.fullmatch(r"code_\d{3}_\d+\.c", n))
+    return "%d code_*.c files in %s, %d of them parts, %s .. %s" % (len(names), gen, parts, names[0] if names else "none",
+                                                                  names[-1] if names else "none")
+
+
 def apply(gen, *, protect_hearts=False, required=False):
     """required: the lift of the supported build (LIFE_BUILD_ID), whole: a missing output-size edit stops it (apply_output_size).
     The other patches only warn when their place is not found once."""
@@ -409,7 +427,7 @@ def apply(gen, *, protect_hearts=False, required=False):
             whole_write.write_whole(path, out, newline="")
     for what, n in done.items():
         if n != (2 if what == "job order" else 1):
-            print("oot_patches: WARNING: the %s was found %d times" % (what, n))
+            print("oot_patches: WARNING: the %s was found %d times%s" % (what, n, WHERE.get(what, "")), "(searched %s)" % searched(gen))
     apply_output_size(gen, required=required)
 
 
@@ -473,11 +491,18 @@ OUT_EDITS = [
 ]
 
 
+# (each OUT_EDITS entry's place, in order)
+OUT_NAMES = ["f_810a7b70: the picture's 2560 x 1440", "f_810a7b70's config copy (+724)", "f_80ea2f30: the 3D's largest size",
+             "the 0x44f00000 / 0x44870000 sizes", "L_836cea54 in f_836ce9d0: the render targets' pool",
+             "f_83b7b340: the Graphics heap's size", "f_83b7b340: the module heap's budget", "f_80b72340: the heap made of what is left"]
+
+
 def apply_output_size(gen, required=False):
     """required (the supported build's whole lift): each edit must be made, or found made, exactly once, else SystemExit: without
     one the Insert menu's Output resolution is ignored, or a 4K output runs out of the render targets' pool. Elsewhere (another
     build, part of a lift, by hand) a warning"""
     found = [0] * len(OUT_EDITS)
+    where = [[] for _ in OUT_EDITS]
     for path in sorted(glob.glob(os.path.join(gen, "code_*.c"))):
         with open(path, encoding="utf-8", newline="") as f:
             s = f.read()
@@ -488,6 +513,8 @@ def apply_output_size(gen, required=False):
             made = s.count(new)
             raw = (s.replace(new, "\0") if made else s).count(old)
             found[i] += made + raw
+            if made + raw:
+                where[i].append(os.path.basename(path))
             if raw and not made:
                 s = s.replace(old, new)
                 hit = True
@@ -497,11 +524,20 @@ def apply_output_size(gen, required=False):
             whole_write.write_whole(path, s, newline="")
             print("oot_patches: output size in", os.path.basename(path))
     if found != [1] * len(OUT_EDITS):
+        for i, n in enumerate(found):
+            if n != 1:
+                print("oot_patches: output size edit %d (%s): found %d times, in %s" % (
+                    i, OUT_NAMES[i], n, ", ".join(where[i]) or "no file"))
         if required:
-            raise SystemExit("oot_patches: the output size places were found %s times, not once each (OUT_EDITS %s): the "
-                             "lifted C no longer has the text they match" % (found, [i for i, n in enumerate(found) if n != 1]))
+            raise SystemExit("oot_patches: the output size places were found %s times, not once each (OUT_EDITS %s: %s): the "
+                             "lifted C no longer has the text they match, or a file that held them is missing (searched %s)" % (
+                                 found, [i for i, n in enumerate(found) if n != 1],
+                                 "; ".join(OUT_NAMES[i] for i, n in enumerate(found) if n != 1), searched(gen)))
         print("oot_patches: WARNING: the output size places were found %s times" % found)
 
 
 if __name__ == "__main__":
-    apply(sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "work", "sa", "gen"))
+    import genlock
+    gen_dir = sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "work", "sa", "gen")
+    with genlock.hold(gen_dir, "oot_patches.py"):
+        apply(gen_dir)
