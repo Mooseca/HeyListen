@@ -22,7 +22,24 @@ other value that depends on another frame, so that nothing waits and frames can 
 5. **Not built**: the lanes themselves (`RX_VK_LANES`, section 4.3 has the recipe). `RX_VK_SUB_OVERLAP` and `RX_VK_ORDER_THREAD` do
    not work together yet (the first is left off when the second is on).
 
-## State (keep current; last edit 24 Nov 18:58, second session DECOUPLE2; see 4.6-4.7 for the latest)
+## State (keep current; last edit 24 Nov 22:15, third session DECOUPLE3; see 4.8-4.9 for the latest)
+
+- **Third session (DECOUPLE3, from 21:25)**: the order thread's load hang (4.8). Build `dec3d` (= `1bf55240d`, the stall watch)
+  queued 21:27 (`E:\OOT\scratch-decouple\build-dec3d.sh`, log `build-dec3d.log`; DECOUPLE2's request had been cancelled in the
+  queue). Ready to run once it exists: `loop3.sh` (as `loop.sh`, plus `AFF=<hex mask>`: the run under that CPU affinity through
+  `aff.py`, children inherit it; `FFF0` = 6 cores of the 7800X3D including the last one, which the host reserves for the replay, as
+  a 6-core PC; `EXTRA=` more ENV; a `hang-<tag>.txt` with the watch lines and the last 60 log lines per start that logged one) and
+  `list-3050-2.txt` (20 order-thread starts on the 3050 with the watch). DECOUPLE3 was stopped at 22:15, while the build ran:
+  the suite under the build lease, 513 passed / 3 known failed (`E:\OOT\scratch-decouple\tests-dec3d.log`); `build-dec3d.sh`
+  runs mkg on to the end and releases its lease by itself (`build rc=` and `DONE` in `build-dec3d.log`). **Next**: when `build
+  rc=0`, send `list-3050-2.txt` to the 3050, and launch `BINNAME=dec3d N=12 AFF=FFF0 TAG=ld3` with `loop3.sh` (a one-line
+  wrapper, through `launch.py`); a `STOP-loop3` file in the scratch folder stops it between starts. Read `hang-*.txt`.
+  Code read so far, no cause proven: in kO1 and mO3 every renderer line stops with the presents, and a guest thread is held
+  ~2 s on a virtual core at that moment (kO1: OptimizeChangeBanc "held 2000 ms at ntdll"; mO3: a vcores wait of 1975 ms).
+  Unbounded waits a game thread or the order thread can reach: `wait_value` (`vkWaitSemaphores` UINT64_MAX; the readback path
+  in `invalidate` when the value is not recorded yet), `ot_wait_until` (fence waits with no timeout, catch-ups, event polls).
+  Lock order seen: sync_order_mu -> replay_mu -> submit_order_mu (resume_queue's capture on the order thread);
+  `rx_nvn_event_signal` and `rx_nvn_texture_created` keep their virtual core while they take renderer locks.
 
 - **Second session (from 16:40)**, section 4.4: `b49b55244` the submit sequencer, the render conditions per group,
   `RX_VK_LANES_CHECK=1` (build `dec3a`, suite 513 passed / 3 known failed, `E:\OOT\scratch-decouple\tests-dec3a.log`). **The check
