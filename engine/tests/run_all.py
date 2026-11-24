@@ -186,6 +186,7 @@ ARGS = {
     "tests/test_gone_ring.py": ["--cxx", "g++"],
     "tests/test_split_count.py": ["--cxx", "g++"],
     "tests/test_mirror_inherit.py": ["--cxx", "{cxx}"],
+    "tests/test_retired_bound.py": ["--cxx", "{cxx}"],
     "tests/test_menu_hit.py": ["--cxx", "g++"],
     "tests/test_ui_record.py": ["--cxx", "{cxx}", "--headers", "{vulkan_headers}"],
     "tests/test_game_font.py": ["--cxx", "{cxx}"],
