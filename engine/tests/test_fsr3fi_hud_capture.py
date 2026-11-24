@@ -115,6 +115,7 @@ CAPTURE_PREFIX = r'''
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <initializer_list>
 #include <mutex>
 #include <string>
 #include <utility>
@@ -139,6 +140,25 @@ void logf(const char*, ...) {}
 uint64_t next_handle = 0x1000;
 template <class T> T handle() { return (T)(uintptr_t)(next_handle += 0x10); }
 int made_images = 0;
+constexpr uint32_t FG_HUD_COMP_SPV[] = {0};
+struct { Img frames[2]; VkSampler nearest = VK_NULL_HANDLE; } fg;
+int made_pipes = 0;
+bool make_pipe(Pipe& p, const uint32_t*, size_t, std::initializer_list<VkDescriptorType> types, uint32_t push) {
+    CHECK(types.size() == 4 && push == 16);
+    p.pipe = handle<VkPipeline>(), p.layout = handle<VkPipelineLayout>(), p.set = handle<VkDescriptorSetLayout>();
+    return ++made_pipes, true;
+}
+// (the HUD-less pass: its pipeline, its bindings, its push constants)
+struct Pass { VkPipeline pipe; std::vector<VkImageView> views; int32_t pc[4]; uint32_t w, h; };
+std::vector<Pass> passes;
+void pass(VkCommandBuffer, const Pipe& p, std::initializer_list<std::pair<VkImageView, VkSampler>> bindings, uint32_t w,
+          uint32_t h, const void* push = nullptr, uint32_t push_bytes = 0) {
+    Pass r{p.pipe, {}, {}, w, h};
+    for (const auto& b : bindings) r.views.push_back(b.first);
+    CHECK(push && push_bytes == sizeof r.pc);
+    std::memcpy(r.pc, push, sizeof r.pc);
+    passes.push_back(r);
+}
 bool make_img(Img& i, uint32_t, uint32_t, VkFormat, VkImageUsageFlags) {
     i.image = handle<VkImage>(), i.view = handle<VkImageView>();
     return ++made_images, true;
@@ -183,11 +203,13 @@ int main(int argc, char** argv) {
 
     if (!switch_on) {   // (the switch off, the default: nothing copied, nothing taken, whatever the frame is)
         framegen_hud_before(cmd, &picture, 0);
-        CHECK(copies.empty() && made_images == 0);
+        CHECK(copies.empty() && made_images == 0 && passes.empty() && made_pipes == 0);
         CHECK(!hud_source(cmd, 0, 2560, 1440, 0, 0, 2560, 1440, false) && !hud.ready && hud.captured == 0);
         std::puts("capture off: ok");
         return 0;
     }
+    fg.frames[0] = {handle<VkImage>(), nullptr, handle<VkImageView>()};
+    fg.frames[1] = {handle<VkImage>(), nullptr, handle<VkImageView>()};
     const auto present = [&](uint32_t w = 2560, uint32_t h = 1440, bool pq = false) {
         return hud_source(cmd, 0, w, h, 0, 0, w, h, pq);
     };
@@ -197,13 +219,24 @@ int main(int argc, char** argv) {
     CHECK(copies.size() == 1 && copies[0].src == picture.image && copies[0].w == 2560 && copies[0].h == 1440);
     CHECK(copies[0].dst == hud.before[0].image);
     CHECK(present() && hud.ready && hud.captured == 1);
+    // (the picture as presented copied too, and the HUD-less pass run over the frame, the picture before the HUD, and that copy)
+    CHECK(copies.size() == 2 && copies[1].src == picture.image && copies[1].dst == hud.after[0].image);
+    CHECK(passes.size() == 1 && passes[0].views.size() == 4 && passes[0].views[0] == fg.frames[0].view &&
+          passes[0].views[1] == hud.before[0].view && passes[0].views[2] == hud.after[0].view &&
+          passes[0].views[3] == hud.hudless.view && passes[0].w == 2560 && passes[0].h == 1440);
+    CHECK(passes[0].pc[0] == 0 && passes[0].pc[1] == 0 && passes[0].pc[2] == 2560 && passes[0].pc[3] == 1440);
     // (and not the next present's too: the next one with no upscale since (a menu, a movie, loading) goes on as it is)
     CHECK(!present() && !hud.ready && hud.captured == 1);
 
     // (the next frame's copy goes into the other of the two, the frame before's stays)
     framegen_hud_before(cmd, &picture, 0);
-    CHECK(copies.size() == 2 && copies[1].dst == hud.before[1].image && hud.before[0].image != hud.before[1].image);
-    CHECK(present() && hud.captured == 2);
+    CHECK(copies.size() == 3 && copies[2].dst == hud.before[1].image && hud.before[0].image != hud.before[1].image);
+    CHECK(present() && hud.captured == 2 && hud.after[0].image != hud.after[1].image);
+    // (a crop of the picture: the pass's corner in it)
+    framegen_hud_before(cmd, &picture, 0);
+    CHECK(hud_source(cmd, 0, 2560, 1440, 320, 0, 1920, 1440, false) && passes.back().pc[0] == 320 &&
+          passes.back().pc[2] == 1920 && passes.back().w == 1920);
+    CHECK(hud.hudless.image && hud.captured == 3);
 
     // (the picture destroyed since the copy, or moved to another image: nothing to take)
     framegen_hud_before(cmd, &picture, 0);
@@ -242,7 +275,7 @@ int main(int argc, char** argv) {
     big.image = handle<VkImage>(), big.width = 3840, big.height = 2160, big.gpu = 0x90000000;
     alive.push_back({big.gpu, &big});
     framegen_hud_before(cmd, &big, 0);
-    CHECK(copies.back().w == 3840 && copies.back().h == 2160 && hud.dead.size() == 2);
+    CHECK(copies.back().w == 3840 && copies.back().h == 2160 && hud.dead.size() >= 4);
     CHECK(present(3840, 2160));
     frame_no += 10;
     CHECK(!present());   // (frees the retired images: the GPU is past them)
@@ -286,7 +319,7 @@ def main():
         run([str(sel_exe)])
 
         cap_cpp, cap_exe = Path(temp) / "capture.cpp", Path(temp) / "capture.exe"
-        img = between(fg, "struct Img {", "struct OutSet {")
+        img = between(fg, "struct Img {", "struct OutSet {") + between(fg, "struct Pipe {", "struct State {")
         hud = between(fg, "struct HudState {", "} // namespace\n\nvoid framegen_hud_before(")
         cap_cpp.write_text(CAPTURE_PREFIX + img + CAPTURE_STUBS + hud + block(fg, "void framegen_hud_before(") + CAPTURE_SUFFIX,
                            encoding="utf-8")

@@ -38,6 +38,7 @@
 #include "shaders/fg_copy_comp_spv.h"
 #include "shaders/fg_copy_pq_comp_spv.h"    // (HeyListen: fg_copy.comp with FG_PQ, an RGB10A2 destination)
 #include "shaders/fg_flow_comp_spv.h"
+#include "shaders/fg_hud_comp_spv.h"   // (AMD FSR 3.1's HUD-less colour: hud_source)
 #include "shaders/fg_luma_comp_spv.h"
 #include "shaders/fg_median_comp_spv.h"
 #include "shaders/fg_scale_comp_spv.h"
@@ -761,12 +762,21 @@ VkImage framegen_made_image(uint32_t* w, uint32_t* h) {
 // when it was made since the last present, still is the picture it was made from (texture_alive) and is the presented
 // picture's size; a present without one (a menu, a movie, a loading screen: no gameplay upscale) goes on as before, the
 // picture as presented.
+// (ported from Longshot 310e7c9df, #1487, and d664e3428, #1538, by HumanBean) Then the copy, cropped as the frame, is FSR 3.1's
+// HUD-less colour (shaders/fg_hud.comp: hud.hudless): it interpolates that, the HUD in neither frame, and lays this frame's HUD
+// over the made frame where the presented frame differs from it (vk_fsr3fi.h Inputs::present). The copy only where the HUD is:
+// elsewhere the presented frame's own pixels, or FSR 3.1 finds the two different everywhere (the copy is linear light, the
+// frame sRGB-encoded) and every made frame is the presented one.
 namespace {
 struct HudState {
     std::mutex mu;   // (framegen_hud_before is called from the replay's workers)
-    bool failed = false;
-    // (the picture after the upscale: its format and size; two of them, this frame's at k and the frame before's at k ^ 1)
-    Img before[2];
+    bool init = false, failed = false;
+    Pipe mask;   // (shaders/fg_hud.comp)
+    // (the picture after the upscale, and as presented: its format and size; two of each, this frame's at k and the frame
+    // before's at k ^ 1)
+    Img before[2], after[2];
+    Img hudless;   // (the picture before the HUD, cropped as the frame, RGBA8: FSR 3.1's HUD-less colour)
+    uint32_t sw = 0, sh = 0;   // (the crop's size, hudless')
     int k = 0;
     VkFormat format = VK_FORMAT_UNDEFINED;
     uint32_t pw = 0, ph = 0;
@@ -774,7 +784,7 @@ struct HudState {
     const Texture* tex = nullptr;       // (and its texture, at gpu: not read unless texture_alive finds it still there)
     uint64_t gpu = 0;
     bool fresh = false;                 // (copied since the last present)
-    bool ready = false;                 // (this present has its HUD-less picture)
+    bool ready = false;                 // (this present's HUD-less colour is made: fsr3fi_frame gives it)
     struct Dead {
         uint64_t frame, value;
         Img img;
@@ -815,10 +825,10 @@ bool hudless_wanted() {
     return on;
 }
 
-/// This present's HUD-less picture (hud.ready), when the picture was copied after its upscale this frame and is the presented
-/// picture's size. False: none, the present as it is
+/// This present's HUD-less colour (hud.hudless: the copy of the picture, cropped as the frame, equal to the frame wherever no HUD
+/// was drawn), from the game's frame cropped into fg.frames[cur] (at x0, y0 of the presented picture, sw x sh): when the picture
+/// was copied after its upscale this frame and is the presented picture's size. False: none, the present as it is
 bool hud_source(VkCommandBuffer cmd, int cur, uint32_t sw, uint32_t sh, int x0, int y0, uint32_t w, uint32_t h, bool pq) {
-    (void)cmd, (void)cur, (void)x0, (void)y0, (void)w, (void)h;
     std::lock_guard lk(hud.mu);
     hud_free_dead();
     hud.ready = false;
@@ -827,11 +837,42 @@ bool hud_source(VkCommandBuffer cmd, int cur, uint32_t sw, uint32_t sh, int x0, 
     if (!fresh || hud.failed || pq || !hud.picture || hud.pw != sw || hud.ph != sh || !fsr3fi::frames_wanted() ||
         !texture_alive(hud.gpu, hud.tex, hud.picture))   // (the picture destroyed since, or moved: nothing to copy from)
         return false;
+    if (!hud.init) {
+        hud.init = true;
+        const VkDescriptorType S = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, I = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+        if (!make_pipe(hud.mask, FG_HUD_COMP_SPV, sizeof FG_HUD_COMP_SPV, {S, S, S, I}, 16)) {
+            hud.failed = true;
+            logf("vk: fsr3fi: the HUD-less pass's pipeline was not made: the picture as presented");
+            return false;
+        }
+    }
+    const int k = hud.k;
+    if (hud.sw != w || hud.sh != h) {
+        hud_retire(hud.hudless);
+        hud.sw = w, hud.sh = h;
+    }
+    if (!hud_image(cmd, hud.after[k], sw, sh, hud.format, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT) ||
+        !hud_image(cmd, hud.hudless, w, h, VK_FORMAT_R8G8B8A8_UNORM,
+                   VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT)) {
+        hud.failed = true;
+        logf("vk: fsr3fi: the HUD-less images (%ux%u) were not made: the picture as presented", w, h);
+        return false;
+    }
+    full_barrier(cmd);   // (the picture's last writes and reads, and the last readers of the HUD-less colour)
+    const VkImageCopy c{{VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, {0, 0, 0}, {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, {0, 0, 0},
+                        {sw, sh, 1}};
+    vkCmdCopyImage(cmd, hud.picture, VK_IMAGE_LAYOUT_GENERAL, hud.after[k].image, VK_IMAGE_LAYOUT_GENERAL, 1, &c);
+    full_barrier(cmd);
+    const int32_t pc[4] = {x0, y0, (int32_t)w, (int32_t)h};
+    pass(cmd, hud.mask,
+         {{fg.frames[cur].view, fg.nearest}, {hud.before[k].view, fg.nearest}, {hud.after[k].view, fg.nearest},
+          {hud.hudless.view, VK_NULL_HANDLE}},
+         w, h, pc, sizeof pc);
     static bool told = false;
     if (!told) {
         told = true;
-        logf("vk: fsr3fi: the picture from before the HUD is captured at the gameplay upscale (%ux%u, format %d)", sw, sh,
-             (int)hud.format);
+        logf("vk: fsr3fi: the picture from before the HUD is captured at the gameplay upscale, and made the HUD-less colour of the "
+             "frame (%ux%u, format %d)", sw, sh, (int)hud.format);
     }
     hud.captured++;
     hud.k ^= 1;   // (this frame's picture is the next one's frame before; the next copy goes into the other)
@@ -849,7 +890,7 @@ void framegen_hud_before(VkCommandBuffer cmd, Texture* picture, uint32_t level) 
     std::lock_guard lk(hud.mu);
     if (hud.failed) return;
     if (hud.format != picture->format || hud.pw != picture->width || hud.ph != picture->height) {
-        for (int i = 0; i < 2; i++) hud_retire(hud.before[i]);
+        for (int i = 0; i < 2; i++) hud_retire(hud.before[i]), hud_retire(hud.after[i]);
         hud.format = picture->format, hud.pw = picture->width, hud.ph = picture->height;
     }
     Img& before = hud.before[hud.k];
@@ -886,6 +927,13 @@ int fsr3fi_frame(VkCommandBuffer cmd, OutSet& set, int cur, uint32_t uw, uint32_
     fsr3fi::Inputs in;
     in.color = fg.frames[cur].view;
     in.color_image = fg.frames[cur].image;
+    {   // (RX_VK_FSR_FG_HUDLESS: the picture from before the HUD, interpolated; this frame, HUD and all, laid over it by FSR 3.1)
+        std::lock_guard lk(hud.mu);
+        if (hud.ready && hudless_wanted()) {
+            in.color = hud.hudless.view, in.color_image = hud.hudless.image;
+            in.present = fg.frames[cur].view;
+        }
+    }
     in.color_format = frame_format(fg.pq);   // (ensure_size, for fg.frames: RGB10A2 for Native HDR's PQ picture)
     in.native_pq = native_pq;
     in.max_luminance = native_pq ? (float)std::clamp(opts.hdr_peak, 400, 10000) : 1.0f;

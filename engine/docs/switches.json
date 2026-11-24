@@ -20065,7 +20065,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_framegen.cpp",
-     "line": 560
+     "line": 561
     }
    ],
    "default": "on (unless set to 0, false, off or no)",
@@ -20107,7 +20107,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_framegen.cpp",
-     "line": 242
+     "line": 243
     }
    ],
    "default": "8",
@@ -20400,7 +20400,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_fsr3fi.cpp",
-     "line": 338
+     "line": 339
     }
    ],
    "default": "unset",
@@ -20421,7 +20421,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_framegen.cpp",
-     "line": 812
+     "line": 822
     }
    ],
    "default": "unset",
@@ -30341,12 +30341,12 @@
    "files": [
     {
      "path": "gpu/vk/vk_framegen.cpp",
-     "line": 687
+     "line": 688
     }
    ],
    "default": "off (unset)",
    "values": "on or off (0, false, off, no and empty are off)",
-   "explanation": "undocumented: gpu/vk/vk_framegen.cpp:687 (in `framegen_scale()`) reads it as an on/off switch: `static const bool report = getenv(\"RX_VK_UPSCALE_LOG\") != nullptr;`. No comment in the source says what it changes.",
+   "explanation": "undocumented: gpu/vk/vk_framegen.cpp:688 (in `framegen_scale()`) reads it as an on/off switch: `static const bool report = getenv(\"RX_VK_UPSCALE_LOG\") != nullptr;`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",

@@ -49,8 +49,9 @@ def main():
         color += '\n'+block(fi, 'void colour_constants(')
         start = fi.index('    const float max_luminance = in.native_pq')
         end = fi.index('    const int32_t rw =', start)
-        color += '\nstruct {bool first_frame=true,native_pq=false;float max_luminance=1;uint64_t sequence=0;} g;\n'
-        color += 'struct Input {bool reset=false,native_pq=false;float max_luminance=1;uint64_t sequence=1;};\n'
+        color += '\nstruct {bool first_frame=true,native_pq=false,hudless=false;float max_luminance=1;uint64_t sequence=0;} g;\n'
+        color += '#define VK_NULL_HANDLE nullptr\n'
+        color += 'struct Input {bool reset=false,native_pq=false;float max_luminance=1;uint64_t sequence=1;void* present=nullptr;};\n'
         color += 'bool reset_for(const Input& in){'+fi[start:end]+'return reset;}\n'
         begin = fi.index('    if (in.native_pq &&')
         finish = fi.index('    if (!prepare(', begin)
