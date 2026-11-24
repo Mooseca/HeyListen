@@ -189,7 +189,7 @@ def check_whole(gen_dir, want):
     if n != want:
         raise SystemExit("chunks: %s holds %d function definitions in %d files, the lift wrote %d: another process wrote in it "
                          "meanwhile (a second lift or build on the same work folder, or one a stopped wrapper left running), or "
-                         "an earlier lift's files are still there. Stop it, then lift again" % (gen_dir, n, len(got), want))
+                         "an earlier lift's files are still there. Wait for it to end, then lift again" % (gen_dir, n, len(got), want))
 
 
 def write(L, gen_dir, img_dir, rechunk=False, counters=(), jobs=None):

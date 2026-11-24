@@ -24,8 +24,12 @@ def lock_path(gen):
 
 def read_holder(path):
     try:
-        with open(path, encoding="utf-8") as f:
-            pid, _, rest = f.read(200).strip().partition(" ")
+        fd = os.open(path, os.O_RDONLY)   # (no buffer: a buffered read asks for a block that spans the locked byte, and
+        try:                              #  Windows then refuses the whole read, so the refusal named no holder)
+            text = os.read(fd, 200).decode("utf-8", "replace")
+        finally:
+            os.close(fd)
+        pid, _, rest = text.strip().partition(" ")
         return int(pid), rest
     except (OSError, ValueError):
         return 0, ""
