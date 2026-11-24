@@ -118,9 +118,13 @@ PIPE4 (lease name `pipe4`, scratch `E:\OOT\scratch-pipe4`, scripts `build/s5/pip
   200 ms without the CPU's signal (`p4t8-on`: forced 1483 and 3210, right after the flashes): the frame shown without the main
   thread's writes up to its signal. Fix `e42aa06b0` (pipe4e): the held present waits up to 2 s (`RX_VK_ORDER_SIGNAL_MS`, was 200)
   and the next present waits behind it instead of forcing it - the Presentation Thread held at `RX_VK_ORDER_AHEAD`, as inline.
-- Queued: the fps gate on pipe4c (= the engine code before `e42aa06b0`; `s7.sh`, `s7.log`, `build/s5/pipe4/gate.sh pipe4c p4g`,
-  table `python -I E:/OOT/scratch-pipe4/tmp/gate.py p4g`), then `s8.sh` (`s8.log`): build pipe4e with the tests, tours
-  `p4t10-on`, `p4t11-on`.
+- The main PC gate on pipe4c (speed lease 12:28-12:49, slot c; `python -I E:/OOT/scratch-pipe4/tmp/gate.py p4g`, runs
+  `build/s5/p4g-*`), **cut after Kokiri's second off run**: the coordinator moved fps A/Bs to the PC 3050 (owner's decision) and
+  four slot requests waited behind the lease. castle-move off 127.1 / 123.8 / 126.6 (median 126.6), on 129.5 / 127.8 / 131.7
+  (129.5, +2.3%), every on run above every off run; p50 7.99-8.24 off, 7.73-7.97 on; frames over 25 ms 1/0/0 off, 0/2/0 on.
+  kokiri-idle off 116.5 / 116.0, on 123.9 (one round: +6.5%); p50 8.52-8.57 off, 8.03 on. Market not run. The meter (exposure sums
+  given the last result again): castle 1 of 8000 a run off, 0 on; Kokiri 2 of 16000 off, 0 on.
+- pipe4e built (12:21-12:28, tests 504 passed / the 3 known failures). Tours `p4t10-on`, `p4t11-on` queued on a slot (`s8.log`).
 
 Where it stands: the three tasks of the brief are done and measured. (1) The present thread works and is safe, but **the gate that
 keeps the GPU's order takes the present's serial part back into the chain** (Kokiri 0.47-0.51 ms a frame, chain 7.76 against 7.79):
