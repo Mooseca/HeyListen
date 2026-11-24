@@ -86,6 +86,9 @@ struct Texture {
     uint64_t defer_frame = 0, defer_seen = 0;
     int64_t defer_ns = 0;
     uint32_t defer_asks = 0;
+    uint64_t bcd_key = 0;      // (TEXCACHE: held back while the disk cache reads its blocks: their key, 0 when not held)
+    int64_t bcd_hold_ns = 0;   // (since when)
+    bool bcd_keyed = false;    // (the hold was decided once)
     uint64_t last_frame = 0;  // the present it was last used in (the cache's age)
     uint64_t first_render_frame = 0;   // the present it was first rendered into in (0: never)
     uint64_t last_value = 0;  // the timeline value of the last submission that used it

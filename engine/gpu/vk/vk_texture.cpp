@@ -57,6 +57,8 @@
 #include "host_shaders/bc_encoder_comp_spv.h"
 #include "shaders/astc_bc_encode_comp_spv.h"
 #include "bc_levels.h"
+#include "vk_bc_disk.h"   // (TEXCACHE: the BC blocks on disk between sessions)
+#include "vk_paths.h"
 #include "msync_diff.h"   // (TICK-051: the BC cache's content hash)
 #include "astc_bc_policy.h"
 #include "astc_cpu_policy.h"
@@ -1319,6 +1321,8 @@ struct BcCacheEntry {
     uint64_t made_value = 0;   // (the submission that writes its blocks: read only once the GPU is done with it. The parallel
                                // replay's segments are queued in their order, not in the order they record: a hit in an
                                // earlier segment of the same submission would copy blocks not yet written)
+    void* mapped = nullptr;                    // (TEXCACHE: its blocks on the CPU, for the disk writer)
+    std::shared_ptr<std::atomic<int>> pin;     // (TEXCACHE: not freed while the disk writer still reads it)
 };
 std::mutex bcc_mu;
 std::unordered_map<uint64_t, BcCacheEntry> bcc;   // (bcc_mu)
@@ -1379,11 +1383,198 @@ void bcc_trim_locked() {
         bcc.erase(old);
     }
 }
+// ---- (TEXCACHE) the BC disk cache's side here (vk_bc_disk.h): the pool its reads ahead land in, the transcodes waiting to be written ----
+// perf/bc7c ran 78 fps against 112 with its disk cache on (any arm, cold or warm) on the RTX 5070. What it did that this does not:
+// a miss read the disk on the render thread (3 ms a read); a read put its blocks into the memory cache past RX_VK_BC_CACHE_LAZY,
+// filling it (1 GB of host-cached buffers) and trimming it by a scan of every entry under bcc_mu, which every ASTC upload takes;
+// every transcode made a host buffer for the writer, with no bound on the bytes waiting for a writer at background priority; and
+// every ASTC upload folded the three encoder shaders' SPIR-V (180 KB) and asked the file system for the game folder (the start
+// call's arguments). Here: the render thread only takes a buffer the thread already filled (bcd_take) or asks for a read ahead
+// (bcdisk::probe); the pool and the writer's backlog are bounded; the encoder hash and the folder are worked out once. Its
+// render-thread time is counted (st_bcd_rt_ns, the "BC disk cache" line)
+struct BcdPending { uint64_t key; BcCacheEntry e; bool in_ram; };
+std::mutex bcd_mu;
+std::vector<BcdPending> bcd_pending;               // (bcd_mu) transcodes whose blocks go to the writer once the GPU wrote them
+std::unordered_map<uint64_t, BcCacheEntry> bcd_pool;   // (bcd_mu) blocks read ahead, until a texture takes them
+uint64_t bcd_pool_bytes = 0;                       // (bcd_mu)
+std::atomic<int64_t> st_bcd_rt_ns{0}, st_bcd_rt_max_ns{0}, st_bcd_pool_dropped{0}, st_bcd_pool_peak{0}, st_bcd_pool_evicted{0};
+thread_local bool tl_disk_hit = false;   // (this upload came from the disk cache: upload()'s route)
+// (why a GPU ASTC upload was not one for the disk cache: a part of the texture (dirty layers), a BC3 or resized image (AMD's
+// uneven levels), not BC (RGBA8: under the size floor, 3D, over 2048), or no batched pieces; count and guest MB)
+enum { BCD_PART, BCD_BC3, BCD_NOT_BC, BCD_OTHER, BCD_WHY };
+std::atomic<int64_t> st_bcd_why_n[BCD_WHY], st_bcd_why_b[BCD_WHY];
+std::atomic<int64_t> st_bcd_key_ns{0};   // (hashing the ASTC bytes for the key, render thread)
+std::atomic<int64_t> st_bcd_held{0}, st_bcd_held_in{0}, st_bcd_held_out{0}, st_bcd_hold_key_ns{0};
+std::atomic<int64_t> st_bcd_hold_frames{0}, st_bcd_hold_max_ns{0};   // (presents with a texture held, the longest hold)
+std::atomic<uint64_t> bcd_hold_last_frame{0};
+uint64_t bcd_encoder() {   // (the shaders that make the blocks, with texcache_pack.h's key revision and format)
+    static const uint64_t v = [] {
+        uint64_t h = 0xBC7C000000000001ull;
+        auto fold = [&](const uint32_t* p, size_t n) {
+            for (size_t i = 0; i < n; i++) h = msync_diff::fmix64((h ^ p[i]) + 0x9E3779B97F4A7C15ull);
+        };
+        fold(ASTC_DECODER_COMP_SPV, sizeof ASTC_DECODER_COMP_SPV / 4);
+        fold(BC_ENCODER_COMP_SPV, sizeof BC_ENCODER_COMP_SPV / 4);
+        fold(ASTC_BC_ENCODE_COMP_SPV, sizeof ASTC_BC_ENCODE_COMP_SPV / 4);
+        return texcache::encoder_version(h);
+    }();
+    return v;
+}
+uint64_t bcd_pool_cap() {
+    // (TEXCACHE) RX_VK_BC_DISK_POOL_MB=<MB> (by default from the machine's RAM: 1024 with 24 GB or more, 512 with 14 GB, else 256):
+    // host memory the BC disk cache's reads ahead may fill before textures take them. Laptop list 2 (15 GB, 10-11 GB free): 1024 served
+    // 3502 of 3951 on-disk textures and was never full, 384 served 2732 of 3616, 128 served 718 of 1691. (texcache4 asked the RAM free
+    // at the first read, after the game's own load: 512 on that laptop)
+    static const uint64_t v = [] {
+        int def = 256;
+#ifdef _WIN32
+        MEMORYSTATUSEX ms{};
+        ms.dwLength = sizeof ms;
+        if (GlobalMemoryStatusEx(&ms)) def = (int)texcache::pool_mb_for_ram(ms.ullTotalPhys);
+#else
+        def = 512;
+#endif
+        const uint64_t mb = bcdisk::env_mb("RX_VK_BC_DISK_POOL_MB", def, 16);
+        logf("vk: BC disk cache: read-ahead pool %llu MB%s", (unsigned long long)(mb >> 20),
+             getenv("RX_VK_BC_DISK_POOL_MB") ? " (RX_VK_BC_DISK_POOL_MB)" : " (from the machine's RAM)");
+        return mb;
+    }();
+    return v;
+}
+/// Whether the disk cache is on (its thread and scan begun at the first call): RX_VK_BC_DISK, or the device's class
+/// (texcache_pack.h on_by_default); one log line says the choice and why
+bool bcd_on() {
+    static const bool v = [] {
+        const int env = bcdisk::env_choice();
+        const char* why = "RX_VK_BC_DISK";
+        const bool integrated = dev.props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU;
+        const uint64_t vram = device_vram_bytes();
+        const bool on = env >= 0 ? env == 1 : texcache::on_by_default(integrated, astc_ready() && bc_ready(), vram, &why);
+        const bool started = on && bcdisk::start(bcd_encoder(), game_dir_path());
+        logf("vk: BC disk cache %s (%s%s; %s, %llu MB of VRAM)%s", started ? "on" : "off", env >= 0 ? "" : "by default: ", why,
+             integrated ? "integrated GPU" : "discrete GPU", (unsigned long long)(vram >> 20),
+             started ? ": the transcoded textures are kept in the game folder (hookshot_texcache_*), made on this PC from your game, never to share" : "");
+        return started;
+    }();
+    return v;
+}
+/// (the disk thread) a pool buffer filled by fill; 1 put, 0 the pool is full, -1 failed
+int bcd_sink(uint64_t key, uint32_t size, const std::function<bool(uint8_t*)>& fill) {
+    const uint64_t now_ms = (uint64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
+                                std::chrono::steady_clock::now().time_since_epoch()).count();
+    std::vector<BcCacheEntry> evicted;
+    {
+        std::lock_guard lk(bcd_mu);
+        if (bcd_pool.count(key)) return 1;
+        // (TEXCACHE) RX_VK_BC_DISK_POOL_STALE_MS=<ms> (0 by default: never): a full pool lets go of blocks read ahead longer ago than
+        // this, oldest first, for a run a texture just asked for. Off: at 5000 on the main PC's tour the pool let go of 3829-8416 blocks
+        // that later runs read again (4.3-9.8 GB read for 543-2393 taken, against 3.1 GB for 1067 without it)
+        static const uint64_t stale = getenv("RX_VK_BC_DISK_POOL_STALE_MS") ? (uint64_t)std::max(0, atoi(getenv("RX_VK_BC_DISK_POOL_STALE_MS"))) : 0;
+        while (bcd_pool_bytes + size > bcd_pool_cap() && stale) {
+            auto old = bcd_pool.end();
+            for (auto it = bcd_pool.begin(); it != bcd_pool.end(); ++it)
+                if (now_ms - it->second.tick > stale && (old == bcd_pool.end() || it->second.tick < old->second.tick)) old = it;
+            if (old == bcd_pool.end()) break;
+            evicted.push_back(old->second), bcd_pool_bytes -= old->second.bytes, bcd_pool.erase(old);
+            st_bcd_pool_evicted++;
+        }
+        if (bcd_pool_bytes + size > bcd_pool_cap()) {
+            if (!evicted.empty()) {
+                std::lock_guard lk2(bcc_mu);
+                for (BcCacheEntry& e : evicted) bcc_dead.push_back(e);
+            }
+            return 0;
+        }
+        bcd_pool_bytes += size;   // (held for it while it is read)
+    }
+    if (!evicted.empty()) {
+        std::lock_guard lk(bcc_mu);
+        for (BcCacheEntry& e : evicted) bcc_dead.push_back(e);
+    }
+    BcCacheEntry e;
+    e.bytes = size;
+    bool ok;
+    {
+        MemKindScope mem_kind_(MemKind::BcCache);
+        ok = create_buffer_cached(size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, e.buf, e.alloc, &e.mapped);
+    }
+    if (ok && !fill((uint8_t*)e.mapped)) destroy_buffer(e.buf, e.alloc), ok = false;
+    if (ok) flush_mapped(e.alloc, size);
+    std::lock_guard lk(bcd_mu);
+    if (!ok) {
+        bcd_pool_bytes -= size;
+        return -1;
+    }
+    e.tick = now_ms;   // (when it was read: one not taken within RX_VK_BC_DISK_POOL_MS goes)
+    bcd_pool.emplace(key, e);
+    st_bcd_pool_peak.store(std::max<int64_t>(st_bcd_pool_peak.load(), (int64_t)bcd_pool_bytes), std::memory_order_relaxed);
+    return 1;
+}
+/// (render thread) the blocks of key from the pool, taken out (the caller lets the buffer go once its copy is done)
+BcCacheEntry bcd_take(uint64_t key, uint64_t size) {
+    std::lock_guard lk(bcd_mu);
+    auto it = bcd_pool.find(key);
+    if (it == bcd_pool.end() || it->second.bytes != size) return {};
+    BcCacheEntry e = it->second;
+    bcd_pool.erase(it);
+    bcd_pool_bytes -= e.bytes;
+    return e;
+}
+void bcd_hooks() {
+    static std::once_flag once;
+    std::call_once(once, [] {
+        bcdisk::Store& s = bcdisk::store();
+        s.have = [](uint64_t k) {
+            std::lock_guard lk(bcd_mu);
+            return bcd_pool.count(k) != 0;
+        };
+        s.sink = bcd_sink;
+    });
+}
+
 /// (texture_frame) the entries let go once the GPU is done with them
 void bcc_free_done(uint64_t completed) {
+    if (bcd_on()) {   // (TEXCACHE: the blocks the GPU has written go to the disk writer; pool buffers not taken in time go)
+        std::vector<BcdPending> ready;
+        std::vector<BcCacheEntry> old;
+        {
+            std::lock_guard lk(bcd_mu);
+            for (size_t i = 0; i < bcd_pending.size();) {
+                if (bcd_pending[i].e.made_value <= completed) {
+                    ready.push_back(bcd_pending[i]);
+                    bcd_pending[i] = bcd_pending.back(), bcd_pending.pop_back();
+                } else {
+                    i++;
+                }
+            }
+            // (TEXCACHE) RX_VK_BC_DISK_POOL_MS=<ms> (60000 by default): blocks read ahead and not taken within it go
+            static const uint64_t keep = getenv("RX_VK_BC_DISK_POOL_MS") ? (uint64_t)std::max(1000, atoi(getenv("RX_VK_BC_DISK_POOL_MS"))) : 60000;
+            const uint64_t now_ms = (uint64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
+                                        std::chrono::steady_clock::now().time_since_epoch()).count();
+            if (frame_no % 60 == 0)
+                for (auto it = bcd_pool.begin(); it != bcd_pool.end();) {
+                    if (now_ms - it->second.tick > keep) {
+                        old.push_back(it->second), bcd_pool_bytes -= it->second.bytes, it = bcd_pool.erase(it);
+                        st_bcd_pool_dropped++;
+                    } else {
+                        ++it;
+                    }
+                }
+        }
+        for (BcdPending& p : ready) {
+            invalidate_mapped(p.e.alloc, p.e.bytes);
+            auto pin = p.e.pin;
+            bcdisk::submit(p.key, (const uint8_t*)p.e.mapped, (uint32_t)p.e.bytes, [pin] { pin->fetch_sub(1); });
+            if (!p.in_ram) old.push_back(p.e);
+        }
+        if (!old.empty()) {
+            std::lock_guard lk(bcc_mu);
+            for (BcCacheEntry& e : old) bcc_dead.push_back(e);
+        }
+    }
     std::lock_guard lk(bcc_mu);
     for (auto it = bcc_dead.begin(); it != bcc_dead.end();) {
-        if (it->last_value > completed) { ++it; continue; }
+        if (it->last_value > completed || (it->pin && it->pin->load() > 0)) { ++it; continue; }
         destroy_buffer(it->buf, it->alloc);
         it = bcc_dead.erase(it);
     }
@@ -1436,9 +1627,16 @@ bool upload_astc_gpu(Texture& tex, uint64_t total, const Ranges* dirty) {
     const bool all = layers.size() == tex.layers;
     // (TICK-051) the BC cache: a whole upload of a texture the batched path transcodes, looked up by its bytes
     const uint64_t align0 = std::max<uint64_t>(dev.props.limits.minStorageBufferOffsetAlignment, 4);
-    const bool cache_this = bcc_cap() && astc_batch_on() && all && tex.bc && !tex.bc_resized && bc_mode(tex.format) != 3;
-    uint64_t cache_key = 0;
+    // (TEXCACHE: the disk cache by the same key, RX_VK_BC_DISK)
+    const bool disk = bcd_on();
+    const bool cache_this = (bcc_cap() || disk) && astc_batch_on() && all && tex.bc && !tex.bc_resized && bc_mode(tex.format) != 3;
+    uint64_t cache_key = 0, disk_key = 0;
     std::vector<AstcPiece> pieces;
+    if (disk && !cache_this) {
+        const int why = !all ? BCD_PART : !tex.bc ? BCD_NOT_BC : tex.bc_resized || bc_mode(tex.format) == 3 ? BCD_BC3 : BCD_OTHER;
+        st_bcd_why_n[why].fetch_add(1, std::memory_order_relaxed), st_bcd_why_b[why].fetch_add((int64_t)total, std::memory_order_relaxed);
+    }
+    const auto key_t0 = std::chrono::steady_clock::now();
     if (cache_this) {
         pieces = astc_pieces(tex, layers, tail, tail0, align0);
         uint64_t h = bcc_fold(bcc_fold(bcc_fold(0x42434361636865ull, (uint64_t)tex.format), (uint64_t)tex.width << 32 | tex.height),
@@ -1456,8 +1654,14 @@ bool upload_astc_gpu(Texture& tex, uint64_t total, const Ranges* dirty) {
             h = bcc_bytes_hash(h, guest_bytes(tex.gpu + at, n, hs), n);
         }
         cache_key = h | 1;
+        if (disk) disk_key = cache_key, bcdisk::use(disk_key);   // (TEXCACHE: onto the map's list)
+        st_bcd_key_ns.fetch_add(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - key_t0).count(),
+                                std::memory_order_relaxed);
         BcCacheEntry hit;
-        {
+        bool from_disk = false;
+        if (!bcc_cap()) {
+            cache_key = 0;
+        } else {
             std::lock_guard lk(bcc_mu);
             auto it = bcc.find(cache_key);
             if (it != bcc.end() && it->second.bytes == bcc_size(tex, pieces) && it->second.made_value <= completed_value) {
@@ -1471,6 +1675,22 @@ bool upload_astc_gpu(Texture& tex, uint64_t total, const Ranges* dirty) {
                 if (bcc_lazy() && !bcc_evicting.load(std::memory_order_relaxed))
                     cache_key = 0, st_bcc_skipped.fetch_add(1, std::memory_order_relaxed);   // (not stored: RX_VK_BC_CACHE_LAZY)
             }
+        }
+        if (!hit.buf && disk_key) {   // (TEXCACHE: blocks read ahead from the disk, or a read ahead asked for: never a wait)
+            const auto t0 = std::chrono::steady_clock::now();
+            bcd_hooks();
+            const uint64_t size = bcc_size(tex, pieces);
+            hit = bcd_take(disk_key, size);
+            if (hit.buf) {
+                from_disk = tl_disk_hit = true;
+                hit.last_value = rec_value;
+                bcdisk::took(disk_key, (uint32_t)size);
+            } else {
+                bcdisk::probe(disk_key, (uint32_t)size);
+            }
+            const int64_t ns = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - t0).count();
+            st_bcd_rt_ns.fetch_add(ns, std::memory_order_relaxed);
+            if (ns > st_bcd_rt_max_ns.load(std::memory_order_relaxed)) st_bcd_rt_max_ns.store(ns, std::memory_order_relaxed);
         }
         if (hit.buf) {
             VkCommandBuffer cmd = upload_cmd();
@@ -1486,8 +1706,13 @@ bool upload_astc_gpu(Texture& tex, uint64_t total, const Ranges* dirty) {
             full_barrier(cmd);
             vkCmdCopyBufferToImage(cmd, hit.buf, tex.image, VK_IMAGE_LAYOUT_GENERAL, (uint32_t)regions.size(), regions.data());
             full_barrier(cmd);
-            st_bcc_hits.fetch_add(1, std::memory_order_relaxed);
-            st_bcc_hit_bytes.fetch_add((int64_t)hit.bytes, std::memory_order_relaxed);
+            if (from_disk) {   // (its buffer goes once the GPU has copied it)
+                std::lock_guard lk(bcc_mu);
+                bcc_dead.push_back(hit);
+            } else {
+                st_bcc_hits.fetch_add(1, std::memory_order_relaxed);
+                st_bcc_hit_bytes.fetch_add((int64_t)hit.bytes, std::memory_order_relaxed);
+            }
             return true;
         }
     }
@@ -1537,24 +1762,39 @@ bool upload_astc_gpu(Texture& tex, uint64_t total, const Ranges* dirty) {
         if (astc_batch_on() && !tex.bc_resized && bc_mode(tex.format) != 3 && bc_layers() == kBcLayers && bc_layer_views[kBcLayers - 1]) {
             if (pieces.empty()) pieces = astc_pieces(tex, layers, tail, tail0, align);
             BcCacheEntry entry;   // (TICK-051: a whole one with no alpha found for a BC1 image: its blocks kept)
-            if (cache_key && !alpha) {
-                entry.bytes = bcc_size(tex, pieces);
+            // (TEXCACHE: and written to disk when it is not there, the writer's backlog bounded: bcdisk::wants reserves room)
+            const uint64_t entry_bytes = bcc_size(tex, pieces);
+            const bool to_disk = disk_key && !alpha && bcdisk::wants(disk_key, (uint32_t)entry_bytes);
+            if ((cache_key || to_disk) && !alpha) {
+                entry.bytes = entry_bytes;
                 MemKindScope mem_kind_(MemKind::BcCache);
                 if (!create_buffer_cached(entry.bytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, entry.buf,
-                                          entry.alloc, nullptr))
+                                          entry.alloc, to_disk ? &entry.mapped : nullptr))
                     entry = BcCacheEntry{};
             }
+            if (to_disk && !entry.buf) bcdisk::unreserve(disk_key, (uint32_t)entry_bytes);
             astc_bc_batched(cmd, tex, pieces, staged, s, entry.buf ? &entry : nullptr);
             if (entry.buf) {
-                std::lock_guard lk(bcc_mu);
-                entry.last_value = entry.made_value = rec_value, entry.tick = ++bcc_tick;
-                auto [it, fresh] = bcc.emplace(cache_key, entry);
-                if (!fresh) {   // (another thread's of the same bytes meanwhile: one kept)
-                    bcc_dead.push_back(entry);
-                } else {
-                    bcc_bytes += entry.bytes;
-                    st_bcc_stores.fetch_add(1, std::memory_order_relaxed);
-                    bcc_trim_locked();
+                entry.last_value = entry.made_value = rec_value;
+                if (to_disk) entry.pin = std::make_shared<std::atomic<int>>(1);
+                bool kept = false;
+                {
+                    std::lock_guard lk(bcc_mu);
+                    entry.tick = ++bcc_tick;
+                    if (cache_key) {
+                        auto [it, fresh] = bcc.emplace(cache_key, entry);
+                        if (fresh) {
+                            kept = true;
+                            bcc_bytes += entry.bytes;
+                            st_bcc_stores.fetch_add(1, std::memory_order_relaxed);
+                            bcc_trim_locked();
+                        }
+                    }
+                    if (!kept && !to_disk) bcc_dead.push_back(entry);   // (another thread's of the same bytes meanwhile: one kept)
+                }
+                if (to_disk) {
+                    std::lock_guard lk(bcd_mu);
+                    bcd_pending.push_back({disk_key, entry, kept});
                 }
             }
             st_astc++;
@@ -1606,6 +1846,38 @@ bool upload_astc_gpu(Texture& tex, uint64_t total, const Ranges* dirty) {
                 else
                     bc_encode_into(cmd, iw, ih, n, tex, level, layers[k0], 0, 0, small ? bc_small_view : VK_NULL_HANDLE);
                 k0 = k1;
+            }
+        }
+        // (TEXCACHE) one layer a run (cards under 8 GB: bc_layers() 1, so not the batched path above, the PC 3050 and the
+        // integrated GPUs): the blocks are copied back out of the image for the disk writer, the regions a hit copies in
+        if (disk_key && !alpha && !pieces.empty()) {
+            const uint64_t entry_bytes = bcc_size(tex, pieces);
+            if (bcdisk::wants(disk_key, (uint32_t)entry_bytes)) {
+                BcCacheEntry entry;
+                entry.bytes = entry_bytes;
+                bool ok;
+                {
+                    MemKindScope mem_kind_(MemKind::BcCache);
+                    ok = create_buffer_cached(entry.bytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT, entry.buf, entry.alloc, &entry.mapped);
+                }
+                if (!ok) {
+                    bcdisk::unreserve(disk_key, (uint32_t)entry_bytes);
+                } else {
+                    const uint64_t bb = bc_mode(tex.format) == 1 ? 8 : 16;
+                    std::vector<VkBufferImageCopy> regions;
+                    uint64_t at = 0;
+                    for (const AstcPiece& pc : pieces) {
+                        regions.push_back(VkBufferImageCopy{at, 0, 0, {VK_IMAGE_ASPECT_COLOR_BIT, pc.level, pc.layer, 1}, {0, 0, 0}, {pc.iw, pc.ih, 1}});
+                        at += (uint64_t)((pc.iw + 3) / 4) * ((pc.ih + 3) / 4) * bb;
+                    }
+                    full_barrier(cmd);
+                    vkCmdCopyImageToBuffer(cmd, tex.image, VK_IMAGE_LAYOUT_GENERAL, entry.buf, (uint32_t)regions.size(), regions.data());
+                    full_barrier(cmd);
+                    entry.last_value = entry.made_value = rec_value;
+                    entry.pin = std::make_shared<std::atomic<int>>(1);
+                    std::lock_guard lk(bcd_mu);
+                    bcd_pending.push_back({disk_key, entry, false});
+                }
             }
         }
         st_astc++;
@@ -2047,7 +2319,7 @@ static bool drawable_format(const Texture& t) {
 // (hookshot, smoothness) What a frame's uploads cost by the way they went: when a frame's uploads take over 50 ms (the stutters at
 // area loads and in walking, 180-360 ms frames of 250-450 MB: Discord and the frame trace, 2026-11-09), one log line of the routes
 // (ASTC on the GPU, unswizzled on the GPU, on the CPU), their count, MB and ms, and the slowest textures
-enum UpRoute { UP_ASTC, UP_GPU, UP_CPU, UP_COUNT };
+enum UpRoute { UP_ASTC, UP_GPU, UP_CPU, UP_DISK, UP_COUNT };
 thread_local int up_route = UP_CPU;
 struct UpStat { int64_t n = 0, bytes = 0, ns = 0; };
 UpStat up_frame[UP_COUNT];
@@ -2155,7 +2427,7 @@ void upload_frame_report() {
     static int logged;
     if (ns >= 50000000 && logged < 300) {
         logged++;
-        static const char* names[UP_COUNT] = {"ASTC on the GPU", "unswizzled on the GPU", "on the CPU"};
+        static const char* names[UP_COUNT] = {"ASTC on the GPU", "unswizzled on the GPU", "on the CPU", "ASTC from the disk cache"};
         char line[900];
         int k = snprintf(line, sizeof line, "vk: a frame's uploads took %.0f ms:", ns / 1e6);
         for (int r = 0; r < UP_COUNT; r++)
@@ -2297,7 +2569,10 @@ bool upload_inner(Texture& tex, const Ranges* dirty) {
                  (unsigned long long)tex.first_seen);
         }
     }
-    if (tex.astc && (up_route = UP_ASTC, upload_astc_gpu(tex, total, dirty))) return true;
+    if (tex.astc && (up_route = UP_ASTC, tl_disk_hit = false, upload_astc_gpu(tex, total, dirty))) {
+        if (tl_disk_hit) up_route = UP_DISK;   // (TEXCACHE: its own route in the "a frame's uploads took" lines)
+        return true;
+    }
     up_route = UP_CPU;
     if (tex.bc) return false;   // (no CPU path into BC3)
     // (the GPU's unswizzle reads guest memory as it is: not where the capture kept the storage as it was at its submit)
@@ -3743,6 +4018,82 @@ uint32_t texture_epoch() {
 }
 
 thread_local bool upload_defer_ok = false;
+namespace {
+/// (TEXCACHE) The disk cache's key of a whole upload of tex, as upload_astc_gpu works it out (same pieces, same hash); false: not
+/// a texture the cache takes
+bool bcd_key_of(const Texture& tex, uint64_t& key, uint64_t& size) {
+    if (tex.type != VK_IMAGE_TYPE_2D || tex.samples != VK_SAMPLE_COUNT_1_BIT || !astc_ready()) return false;
+    if (!astc_batch_on() || !tex.bc || tex.bc_resized || bc_mode(tex.format) == 3) return false;
+    const uint64_t total = tex.guest_size;
+    const uint64_t layer_size = tex.layers > 1 ? tex.L.layer_size : std::max<uint64_t>(tex.L.layer_size, total);
+    const uint64_t tail0 = level_geo(tex, 0).offset;
+    if (!total || !layer_size || tail0 >= layer_size || (tail0 & 15) || (layer_size & 15)) return false;
+    const uint64_t tail = layer_size - tail0;
+    std::vector<uint32_t> layers(tex.layers);
+    for (uint32_t i = 0; i < tex.layers; i++) layers[i] = i;
+    const uint64_t align0 = std::max<uint64_t>(dev.props.limits.minStorageBufferOffsetAlignment, 4);
+    const std::vector<AstcPiece> pieces = astc_pieces(tex, layers, tail, tail0, align0);
+    uint64_t h = bcc_fold(bcc_fold(bcc_fold(0x42434361636865ull, (uint64_t)tex.format), (uint64_t)tex.width << 32 | tex.height),
+                          (uint64_t)tex.layers << 32 | tex.levels);
+    for (const AstcPiece& pc : pieces) {
+        h = bcc_fold(h, (uint64_t)pc.level << 32 | pc.layer);
+        h = bcc_fold(h, pc.from);
+        h = bcc_bytes_hash(h, (const uint8_t*)&pc.pc, sizeof pc.pc);
+    }
+    std::vector<uint8_t> hs;
+    for (size_t k = 0; k < layers.size(); k++) {
+        const uint64_t at = (uint64_t)layers[k] * layer_size + tail0;
+        if (at >= total) { h = bcc_fold(h, ~0ull); continue; }
+        const uint64_t n = std::min(tail, total - at);
+        h = bcc_bytes_hash(h, guest_bytes(tex.gpu + at, n, hs), n);
+    }
+    key = h | 1;
+    size = bcc_size(tex, pieces);
+    return true;
+}
+// (TEXCACHE) RX_VK_BC_DISK_HOLD_MS=<ms> (0 by default: never; an experiment): a new ASTC texture whose blocks the disk cache has,
+// and not yet read, is held back like the upload budget's deferral (its draws left out) while its record is read before any other,
+// up to this long; then it is transcoded. Off: at 400 ms on the main PC's tour it left draws out in 1044 presents, mid-play too (the
+// flash detector caught Kakariko's ground and walls missing, flash_5601), and 1028 of 2446 holds timed out and were transcoded anyway
+bool bcd_hold(Texture& tex) {
+    static const int64_t hold_ns = (int64_t)((getenv("RX_VK_BC_DISK_HOLD_MS") ? atof(getenv("RX_VK_BC_DISK_HOLD_MS")) : 0.0) * 1e6);
+    if (!hold_ns || !bcd_on()) return false;
+    if (!tex.bcd_keyed) {
+        tex.bcd_keyed = true;
+        const int64_t t0 = steady_ns();
+        uint64_t key = 0, size = 0;
+        const bool ok = bcd_key_of(tex, key, size);
+        st_bcd_hold_key_ns.fetch_add(steady_ns() - t0, std::memory_order_relaxed);
+        if (!ok) return false;
+        {
+            std::lock_guard lk(bcd_mu);
+            if (bcd_pool.count(key)) return false;   // (read already: the upload takes it)
+        }
+        if (!bcdisk::want_now(key, (uint32_t)size)) return false;   // (not on disk: transcoded as before)
+        tex.bcd_key = key, tex.bcd_hold_ns = t0;
+        st_bcd_held.fetch_add(1, std::memory_order_relaxed);
+    }
+    if (!tex.bcd_key) return false;
+    {
+        std::lock_guard lk(bcd_mu);
+        if (bcd_pool.count(tex.bcd_key)) {   // (in: the upload takes it now)
+            const int64_t held = steady_ns() - tex.bcd_hold_ns;
+            if (held > st_bcd_hold_max_ns.load(std::memory_order_relaxed)) st_bcd_hold_max_ns.store(held, std::memory_order_relaxed);
+            tex.bcd_key = 0;
+            st_bcd_held_in.fetch_add(1, std::memory_order_relaxed);
+            return false;
+        }
+    }
+    if (steady_ns() - tex.bcd_hold_ns > hold_ns) {   // (too long: transcoded)
+        tex.bcd_key = 0;
+        st_bcd_held_out.fetch_add(1, std::memory_order_relaxed);
+        if (hold_ns > st_bcd_hold_max_ns.load(std::memory_order_relaxed)) st_bcd_hold_max_ns.store(hold_ns, std::memory_order_relaxed);
+        return false;
+    }
+    if (bcd_hold_last_frame.exchange(frame_no, std::memory_order_relaxed) != frame_no) st_bcd_hold_frames.fetch_add(1, std::memory_order_relaxed);
+    return true;
+}
+}  // namespace
 /// (hookshot) Set when this thread's texture_touch held a sampled ASTC texture back (upload_defer): the draw whose
 /// descriptor build looked it up is left out of the frame instead of sampling the placeholder (vk_draw.cpp). Only
 /// ever set inside a draw's sampled-texture lookups — upload_defer_ok is false everywhere else — and cleared by that
@@ -3772,12 +4123,15 @@ namespace {
 bool upload_defer(Texture& tex) {
     static const int64_t budget_ns = (int64_t)(getenv("RX_VK_UPLOAD_BUDGET_MS") ? atof(getenv("RX_VK_UPLOAD_BUDGET_MS")) : 40.0) * 1000000;
     static const bool summed = getenv("RX_VK_UPLOAD_BUDGET_SUM") && atoi(getenv("RX_VK_UPLOAD_BUDGET_SUM")) != 0;
-    if (!budget_ns || !upload_defer_ok || tex.uploaded || !tex.astc || tex.gpu_written) return false;
-    const int64_t spent = summed ? frame_upload_ns.load(std::memory_order_relaxed) : tl_upload_frame == frame_no ? tl_upload_ns : 0;
-    // (STUT1, RX_VK_UPLOAD_BUDGET_FRAME_MS=<ms>, 0 (off) by default: also once every thread's uploads this present summed reach this,
-    // whichever thread looks up: the per-thread budget alone lets each of the parallel replay's workers spend its own 40 ms)
-    static const int64_t frame_ns = (int64_t)((getenv("RX_VK_UPLOAD_BUDGET_FRAME_MS") ? atof(getenv("RX_VK_UPLOAD_BUDGET_FRAME_MS")) : 0.0) * 1e6);
-    if (spent < budget_ns && (!frame_ns || frame_upload_ns.load(std::memory_order_relaxed) < frame_ns)) return false;
+    if (!upload_defer_ok || tex.uploaded || !tex.astc || tex.gpu_written) return false;
+    if (!bcd_hold(tex)) {   // (TEXCACHE: held anyway while its blocks are read from the disk cache)
+        if (!budget_ns) return false;
+        const int64_t spent = summed ? frame_upload_ns.load(std::memory_order_relaxed) : tl_upload_frame == frame_no ? tl_upload_ns : 0;
+        // (STUT1, RX_VK_UPLOAD_BUDGET_FRAME_MS=<ms>, 0 (off) by default: also once every thread's uploads this present summed reach this,
+        // whichever thread looks up: the per-thread budget alone lets each of the parallel replay's workers spend its own 40 ms)
+        static const int64_t frame_ns = (int64_t)((getenv("RX_VK_UPLOAD_BUDGET_FRAME_MS") ? atof(getenv("RX_VK_UPLOAD_BUDGET_FRAME_MS")) : 0.0) * 1e6);
+        if (spent < budget_ns && (!frame_ns || frame_upload_ns.load(std::memory_order_relaxed) < frame_ns)) return false;
+    }
     st_deferred.fetch_add(1, std::memory_order_relaxed), st_deferred_frame.fetch_add(1, std::memory_order_relaxed);
     tex.defer_asks++;
     if (tex.defer_seen != frame_no) {   // (the deferral's age: the distinct textures, and when each was first held back)
@@ -5581,8 +5935,56 @@ void texture_complete_writes(uint64_t completed) {
 void texture_frame(uint64_t completed) {
     ledger_frame();   // (RX_VK_LEDGER)
     upload_frame_report();
-    if (bcc_cap()) {   // (TICK-051: the BC cache's entries let go, and every 600 frames what it did)
+    if (bcc_cap() || bcd_on()) {   // (TICK-051: the BC cache's entries let go, and every 600 frames what it did)
         bcc_free_done(completed);
+        if (bcd_on() && frame_no % 15 == 0 && host && host->perf_info) {   // (TEXCACHE: the map now, for the maps' lists)
+            char name[120] = "";
+            int64_t movie[5] = {};
+            host->perf_info(name, sizeof name, movie);
+            bcdisk::set_map(name);
+            if (frame_no % 1800 == 0) bcdisk::save_maps();
+        }
+        if (bcd_on()) {   // (TEXCACHE: writes stopped, said once)
+            static bool told;
+            if (!told && bcdisk::store().write_off.load(std::memory_order_relaxed)) {
+                told = true;
+                const char* w = bcdisk::store().write_off_why.load();
+                logf("vk: BC disk cache: no more writes this session (%s); what is on disk is still read", w ? w : "?");
+            }
+        }
+        if (bcd_on() && frame_no % 600 == 0) {   // (TEXCACHE)
+            bcdisk::Store& d = bcdisk::store();
+            size_t pool_n, pend_n;
+            uint64_t pool_b;
+            {
+                std::lock_guard lk(bcd_mu);
+                pool_n = bcd_pool.size(), pool_b = bcd_pool_bytes, pend_n = bcd_pending.size();
+            }
+            logf("vk: BC disk cache (RX_VK_BC_DISK): %lld textures from it (%llu MB), %lld found on disk, %lld not; render thread %.1f ms "
+                 "in all (the longest %.3f ms); read ahead %lld (%llu MB, %lld ms on its thread, pool full %lld times), pool %zu "
+                 "(%llu MB, peak %llu), %lld not taken in time; written %lld (%llu MB, %lld ms), %zu waiting for the GPU, %lld MB "
+                 "for the writer, %lld not written (backlog full); copied forward %lld, rotations %lld, bad %lld; on disk %llu MB; "
+                 "the index took %lld ms%s; maps: %lld changes, %lld keys listed, %lld read from the map's list (%lld MB, pool full %lld times); held back %lld (in %lld, timed out %lld; keys %.0f ms; presents with one held %lld, the longest hold %.0f ms); pool let go of %lld stale for newer runs; keys hashed %.0f ms; not for the cache: "
+                 "part of a texture %lld (%lld MB), BC3/resized %lld (%lld MB), not BC %lld (%lld MB), other %lld (%lld MB)",
+                 (long long)d.st_hits.load(), (unsigned long long)(d.st_hit_bytes.load() >> 20), (long long)d.st_probe_found.load(),
+                 (long long)d.st_probe_missing.load(), (double)st_bcd_rt_ns.load() / 1e6, (double)st_bcd_rt_max_ns.load() / 1e6,
+                 (long long)d.st_ahead.load(), (unsigned long long)(d.st_ahead_bytes.load() >> 20), (long long)d.st_read_ms.load(),
+                 (long long)d.st_ahead_full.load(), pool_n, (unsigned long long)(pool_b >> 20),
+                 (unsigned long long)(st_bcd_pool_peak.load() >> 20), (long long)st_bcd_pool_dropped.load(),
+                 (long long)d.st_written.load(), (unsigned long long)(d.st_write_bytes.load() >> 20), (long long)d.st_write_ms.load(),
+                 pend_n, (long long)(d.write_pending.load() >> 20), (long long)d.st_write_skipped.load(), (long long)d.st_forward.load(),
+                 (long long)d.st_rotations.load(), (long long)d.st_bad.load(), (unsigned long long)(bcdisk::disk_bytes() >> 20),
+                 (long long)d.st_scan_ms.load(), d.ready.load() ? "" : " (not done)", (long long)d.st_map_changes.load(),
+                 (long long)d.st_map_listed.load(), (long long)d.st_map_read.load(), (long long)(d.st_map_read_bytes.load() >> 20),
+                 (long long)d.st_map_full.load(), (long long)st_bcd_held.load(),
+                 (long long)st_bcd_held_in.load(), (long long)st_bcd_held_out.load(), st_bcd_hold_key_ns.load() / 1e6,
+                 (long long)st_bcd_hold_frames.load(), st_bcd_hold_max_ns.load() / 1e6,
+                 (long long)st_bcd_pool_evicted.load(),
+                 st_bcd_key_ns.load() / 1e6, (long long)st_bcd_why_n[BCD_PART].load(), (long long)(st_bcd_why_b[BCD_PART].load() >> 20),
+                 (long long)st_bcd_why_n[BCD_BC3].load(), (long long)(st_bcd_why_b[BCD_BC3].load() >> 20),
+                 (long long)st_bcd_why_n[BCD_NOT_BC].load(), (long long)(st_bcd_why_b[BCD_NOT_BC].load() >> 20),
+                 (long long)st_bcd_why_n[BCD_OTHER].load(), (long long)(st_bcd_why_b[BCD_OTHER].load() >> 20));
+        }
         if (frame_no % 600 == 0) {
             std::lock_guard lk(bcc_mu);
             logf("vk: BC cache (RX_VK_BC_CACHE_MB): %zu entries, %llu MB; %lld textures from it (%llu MB copied), %lld stored, so far; "

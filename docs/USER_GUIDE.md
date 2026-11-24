@@ -40,6 +40,11 @@ quick. If the preparation is closed early, or the shader cache (`hookshot_progra
 start prepares again. The builder keeps its build files in `%LOCALAPPDATA%\HeyListenBuilder` so updates only recompile what changed
 (*Free up space* on the last page removes them).
 
+On integrated graphics and on graphics cards with less than 10 GB of video memory, the game also keeps its converted textures in
+the game folder (`hookshot_texcache_a.pack`, `hookshot_texcache_b.pack`, `hookshot_texcache_maps.bin`, 4 GB at most, oldest
+first out; it never fills the last GB of the disk) so that places you come back to load with less work. They are made on your PC
+from your own game: never share them. Deleting them is safe (they are made again); `RX_VK_BC_DISK=0` turns this off, `=1` on.
+
 ## 4. Play
 
 Press **Play**, or use the *HeyListen* shortcut on the desktop or in the Start menu. The game folder's `HeyListen.exe` starts it too

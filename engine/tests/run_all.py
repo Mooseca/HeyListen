@@ -104,6 +104,7 @@ ARGS = {
     "tests/test_vk_collect_window.py": ["--cxx", "{cxx}"],
     "tests/test_astc_cpu.py": ["--cxx", "{cxx}"],
     "tests/test_astc_cpu_policy.py": ["--cxx", "{cxx}"],
+    "tests/test_texcache_pack.py": ["--cxx", "{cxx}"],
     "tests/test_capture_past_end.py": ["--cxx", "{cxx}"],
     "tests/test_target_pool_cap.py": ["--cxx", "{cxx}"],
     "tests/test_present_mode.py": ["--cxx", "{cxx}"],
