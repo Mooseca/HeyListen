@@ -25311,11 +25311,11 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 8514
+     "line": 8577
     },
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 8526
+     "line": 8589
     }
    ],
    "default": "off (unset)",
@@ -25336,7 +25336,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 8429
+     "line": 8441
     }
    ],
    "default": "on (unless set to 0, false, off or no)",
@@ -25357,7 +25357,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 8543
+     "line": 8606
     }
    ],
    "default": "off (unset)",
@@ -25378,7 +25378,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 8424
+     "line": 8436
     }
    ],
    "default": "1",
@@ -25399,7 +25399,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 8524
+     "line": 8587
     }
    ],
    "default": "1",
@@ -25420,13 +25420,13 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 8391
+     "line": 8449
     }
    ],
    "default": "200",
    "values": "a whole number",
-   "explanation": "(The CPU's signal this frame's stopped work waits for, made by the main thread: FIF's rule) (PIPE2) RX_VK_ORDER_SIGNAL_MS=<ms> (200; 0: no wait): how long the order thread's present waits for the CPU's signal.",
-   "comment": "(The CPU's signal this frame's stopped work waits for, made by the main thread: FIF's rule) (PIPE2) RX_VK_ORDER_SIGNAL_MS=<ms> (200; 0: no wait): how long the order thread's present waits for the CPU's signal.",
+   "explanation": "(PIPE2) RX_VK_ORDER_SIGNAL_MS=<ms> (200; 0: no wait): how long the order thread's present waits for the CPU's signal its frame's stopped work waits for and for the work its stopped queues wait for (PIPE4), running the jobs behind it meanwhile.",
+   "comment": "(PIPE2) RX_VK_ORDER_SIGNAL_MS=<ms> (200; 0: no wait): how long the order thread's present waits for the CPU's signal its frame's stopped work waits for and for the work its stopped queues wait for (PIPE4), running the jobs behind it meanwhile.",
    "documented_in": null,
    "source": "comment at gpu/vk/vk_replay.cpp",
    "documented": true,
@@ -25483,8 +25483,8 @@
    ],
    "default": "off (unset)",
    "values": "on or off (0, false, off, no and empty are off); the description names `0`, `1`",
-   "explanation": "(PIPE4) with the order thread, a queue stopped for hold_ms is not let past its wait while submissions handed over are still to be replayed: the work that sets its event may be one of them (inline it had not been submitted yet). Forced anyway, the lit passes ran before the lighting work they wait for and the scene came out black for a frame (the dark frames of the warp tour). RX_VK_ORDER_WATCH_PENDING=1: forced as before.",
-   "comment": "(PIPE4) with the order thread, a queue stopped for hold_ms is not let past its wait while submissions handed over are still to be replayed: the work that sets its event may be one of them (inline it had not been submitted yet). Forced anyway, the lit passes ran before the lighting work they wait for and the scene came out black for a frame (the dark frames of the warp tour). RX_VK_ORDER_WATCH_PENDING=1: forced as before.",
+   "explanation": "(PIPE4) with the order thread, a queue stopped for hold_ms is not let past its wait while submissions handed over are still to be replayed or a present is held for them (ot_main forces it at its time): the work that sets its event may be one of them (inline it had not been submitted yet). Forced anyway, the lit passes ran before the lighting work they wait for and the scene came out black for a frame (the dark frames of the warp tour). RX_VK_ORDER_WATCH_PENDING=1: forced as before.",
+   "comment": "(PIPE4) with the order thread, a queue stopped for hold_ms is not let past its wait while submissions handed over are still to be replayed or a present is held for them (ot_main forces it at its time): the work that sets its event may be one of them (inline it had not been submitted yet). Forced anyway, the lit passes ran before the lighting work they wait for and the scene came out black for a frame (the dark frames of the warp tour). RX_VK_ORDER_WATCH_PENDING=1: forced as before.",
    "documented_in": null,
    "source": "comment at gpu/vk/vk_replay.cpp",
    "documented": true,
@@ -25771,7 +25771,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 9216
+     "line": 9279
     }
    ],
    "default": "0 (unset)",
@@ -27624,7 +27624,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 8873
+     "line": 8936
     },
     {
      "path": "gpu/vk/vk_shader.cpp",
@@ -27716,7 +27716,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 9130
+     "line": 9193
     }
    ],
    "default": "on (unless set to 0, false, off or no)",
@@ -29456,7 +29456,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 8653
+     "line": 8716
     }
    ],
    "default": "0",
@@ -29477,11 +29477,11 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 8560
+     "line": 8623
     },
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 8634
+     "line": 8697
     }
    ],
    "default": "on (unless set to 0, false, off or no)",

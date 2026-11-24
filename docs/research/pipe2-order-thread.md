@@ -76,6 +76,13 @@ PIPE4 (lease name `pipe4`, scratch `E:\OOT\scratch-pipe4`, scripts `build/s5/pip
   HUD and Navi right; `flash_7268_{a,b}.png`) - Longshot's "lit pass before its producer" picture, an ordering fault rather than a
   late read. The same tour's order stats: 294 waits gone past (19 forced by presents) on, 39 (2) off. Building `pipe4a` with a log
   of each wait gone past and of a present's signal let go, then one on tour (`p4t1-on`), to tie them to the flash presents.
+- `p4t1-on` (pipe4a, slot b, 08:25; the machine loaded: 17.8 fps, the game ended at play + 75 s, Zora's River not reached, 0
+  flashes): 31 waits gone past, **all by time** (`sync_watch`, hold 50 ms), none by a present, no signal let go; at present 5864 eleven
+  waits of one lighting submission with events 19 values short (`0x100d6c80xx == 13046, has 13027`) - the same events and the same
+  19-value gap as PIPE3's lines right after its two dark frames. Cause: `sync_watch` forces a queue stopped 50 ms past its wait
+  without knowing that the work setting the event may be among the submissions handed over to the order thread and not replayed yet.
+  Fix `pipe4b`: the watch does not force while the order thread has jobs queued (`RX_VK_ORDER_WATCH_PENDING=1`: as before). Built
+  with the tests, then tours on / off / on (`p4t2-on`, `p4t2-off`, `p4t3-on`): `E:\OOT\scratch-pipe4\tmp\s2.log`.
 
 Where it stands: the three tasks of the brief are done and measured. (1) The present thread works and is safe, but **the gate that
 keeps the GPU's order takes the present's serial part back into the chain** (Kokiri 0.47-0.51 ms a frame, chain 7.76 against 7.79):

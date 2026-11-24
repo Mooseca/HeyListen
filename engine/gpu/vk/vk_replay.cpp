@@ -5352,7 +5352,7 @@ void sync_watch() {
         tl_ev("watch-");
         const double held = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - blocked_since).count();
         // (PIPE4) with the order thread, a queue stopped for hold_ms is not let past its wait while submissions handed over are
-        // still to be replayed: the work that sets its event may be one of them (inline it had not been submitted yet). Forced
+        // still to be replayed or a present is held for them (ot_main forces it at its time): the work that sets its event may be one of them (inline it had not been submitted yet). Forced
         // anyway, the lit passes ran before the lighting work they wait for and the scene came out black for a frame (the dark
         // frames of the warp tour). RX_VK_ORDER_WATCH_PENDING=1: forced as before
         static const bool watch_pending = getenv("RX_VK_ORDER_WATCH_PENDING") && atoi(getenv("RX_VK_ORDER_WATCH_PENDING")) != 0;
@@ -8339,6 +8339,7 @@ uint64_t ot_seq_pushed = 0;            // (ot_mu)
 int ot_presents = 0;                   // (handed over, not yet shown: ot_mu)
 int ot_waiters = 0;                    // (threads in ot_done_cv: ot_mu)
 std::atomic<uint64_t> ot_seq_done{0}, ot_value_done{0};
+std::atomic<bool> ot_holding{false};   // (PIPE4: ot_main holds a present not ready yet; it forces it itself at its time)
 std::unordered_map<uint64_t, uint64_t> ot_q_last;   // (queue -> its last submission handed over: submit_order_mu)
 // (the joins by site, the order thread's idle time and its queue, logged every 600 presents)
 enum { OT_FENCE, OT_POLL, OT_CATCHUP, OT_READBACK, OT_EVENT, OT_PRESENT_SLOT, OT_SITES };
@@ -8366,6 +8367,43 @@ void ot_log() {   // (the order thread, at a present)
     logf("%s", line);
     frames = 0, t0 = now, ot_idle_ns = ot_sig_waits = ot_sig_late = ot_depth_sum = ot_depth_max = ot_jobs_n = 0;
 }
+// (PIPE4) The present job: the frame's stopped work drained, then shown. Not forced (force false) it is shown only when it is
+// ready - the CPU's signal its frame's stopped work waits for has come and, the stopped queues that can go on gone on, no queue is
+// stopped at a submission before it - and false is returned otherwise: ot_main runs the jobs behind it meanwhile (up to the next
+// present), since the work that sets the events the stopped queues wait for can be one of them. Forced at once before, the lit
+// passes ran before the lighting work they wait for whenever the game was slow to hand the frame's last submissions over (a zone's
+// loading frames): the scene black for a frame, sometimes several (the warp tour's dark frames)
+bool ot_stopped_before(uint64_t value) {   // (sync_order_mu held)
+    for (const auto& [queue, q] : qruns)
+        if (q.blocked() && q.oldest() <= value) return true;
+    return false;
+}
+bool ot_present_run(Job& j, bool force) {
+    perf_parts::Scope perf_entry(perf_parts::t_render);
+    if (!force && signal_capture_on()) {   // (the CPU's signal this frame's stopped work waits for, made by the main thread: FIF's rule)
+        std::lock_guard lk(submit_order_mu);
+        if (cpu_wait_open(j.value)) return false;
+    }
+    std::lock_guard order(sync_order_mu);
+    ReplayPin pin;
+    if (!force) {
+        burst_begin(0);
+        schedule();
+        burst_end();
+        update_blocked();
+        if (ot_stopped_before(j.value)) return false;
+    }
+    {
+        WaitScope wait_scope(WS_DRAIN);
+        drain(0);
+    }
+    update_blocked();
+    present_value = j.value;
+    if (ubo_check_on()) ubo_check_frame();
+    do_present(j.has_tex ? &j.tex : nullptr, j.has_crop ? j.crop : nullptr);
+    ot_log();
+    return true;
+}
 void ot_run(Job& j) {
     switch (j.kind) {
     case JOB_SUBMIT: {   // (submit_q's sync-waits replay, as it was inline)
@@ -8384,33 +8422,7 @@ void ot_run(Job& j) {
         submit_job(j.handles, j.value, j.queue);
         update_blocked();
     } break;
-    case JOB_PRESENT: {   // (present()'s, as it was inline: the frame's stopped work drained, then shown)
-        perf_parts::Scope perf_entry(perf_parts::t_render);
-        if (signal_capture_on()) {   // (the CPU's signal this frame's stopped work waits for, made by the main thread: FIF's rule)
-            // (PIPE2) RX_VK_ORDER_SIGNAL_MS=<ms> (200; 0: no wait): how long the order thread's present waits for the CPU's signal
-            static const int ms = getenv("RX_VK_ORDER_SIGNAL_MS") ? std::max(0, atoi(getenv("RX_VK_ORDER_SIGNAL_MS"))) : 200;
-            std::unique_lock lk(submit_order_mu);
-            if (ms && cpu_wait_open(j.value)) {
-                ot_sig_waits++;
-                if (!signal_cv.wait_for(lk, std::chrono::milliseconds(ms), [&j] { return !cpu_wait_open(j.value); })) {
-                    ot_sig_late++;
-                    logf("vk: order thread: the present after %lld let go of the CPU's signal after %d ms (value %llu)", (long long)presents_now,
-                         ms, (unsigned long long)j.value);
-                }
-            }
-        }
-        std::lock_guard order(sync_order_mu);
-        ReplayPin pin;
-        {
-            WaitScope wait_scope(WS_DRAIN);
-            drain(0);
-        }
-        update_blocked();
-        present_value = j.value;
-        if (ubo_check_on()) ubo_check_frame();
-        do_present(j.has_tex ? &j.tex : nullptr, j.has_crop ? j.crop : nullptr);
-        ot_log();
-    } break;
+    case JOB_PRESENT: ot_present_run(j, true); break;   // (ot_main defers it: ot_present_run)
     case JOB_TEXTURE_RELEASED: texture_released_sync(&j.tex); break;
     case JOB_PROGRAM_RELEASED: program_released_sync(&j.prog); break;
     case JOB_REGISTER_TEXTURE: register_texture_copy(j.id, j.tex, j.has_view ? &j.view : nullptr); break;
@@ -8432,32 +8444,83 @@ void ot_main() {
             SetThreadAffinityMask(GetCurrentThread(), (DWORD_PTR)m);
             replay_pin_depth = 1;   // (the ReplayPins inside its jobs then change nothing)
         }
-    for (;;) {
-        Job j;
-        {
-            std::unique_lock lk(ot_mu);
-            if (ot_jobs.empty()) {
-                const int64_t t0 = ot_now();
-                ot_cv.wait(lk, [] { return !ot_jobs.empty(); });
-                ot_idle_ns += ot_now() - t0;
-            }
-            ot_depth_sum += (int64_t)ot_jobs.size(), ot_jobs_n++, ot_depth_max = std::max<int64_t>(ot_depth_max, (int64_t)ot_jobs.size());
-            j = std::move(ot_jobs.front());
-            ot_jobs.pop_front();
-        }
-        ot_run(j);
+    // (PIPE2) RX_VK_ORDER_SIGNAL_MS=<ms> (200; 0: no wait): how long the order thread's present waits for the CPU's signal its
+    // frame's stopped work waits for and for the work its stopped queues wait for (PIPE4), running the jobs behind it meanwhile
+    static const int ms = getenv("RX_VK_ORDER_SIGNAL_MS") ? std::max(0, atoi(getenv("RX_VK_ORDER_SIGNAL_MS"))) : 200;
+    auto finish = [](const Job& j) {
         bool wake;
         {
             std::lock_guard lk(ot_mu);
             if (j.kind == JOB_PRESENT) ot_presents--;
-            if (j.value) ot_value_done.store(j.value, std::memory_order_release);
-            ot_seq_done.store(j.seq, std::memory_order_release);
+            if (j.value && j.value > ot_value_done.load(std::memory_order_relaxed)) ot_value_done.store(j.value, std::memory_order_release);
+            if (j.seq > ot_seq_done.load(std::memory_order_relaxed)) ot_seq_done.store(j.seq, std::memory_order_release);
             wake = ot_waiters > 0;
         }
         if (wake) ot_done_cv.notify_all();
+    };
+    Job held;              // (a present not ready yet: PIPE4)
+    bool holding = false;
+    int64_t held_until = 0;
+    for (;;) {
+        Job j;
+        bool got = false, next_present = false;
+        {
+            std::unique_lock lk(ot_mu);
+            if (!holding) {
+                if (ot_jobs.empty()) {
+                    const int64_t t0 = ot_now();
+                    ot_cv.wait(lk, [] { return !ot_jobs.empty(); });
+                    ot_idle_ns += ot_now() - t0;
+                }
+            } else if (ot_jobs.empty()) {   // (a short wait: the CPU's signal comes by no job)
+                const int64_t t0 = ot_now();
+                ot_cv.wait_for(lk, std::chrono::milliseconds(1), [] { return !ot_jobs.empty(); });
+                ot_idle_ns += ot_now() - t0;
+            }
+            if (!ot_jobs.empty()) {
+                if (holding && ot_jobs.front().kind == JOB_PRESENT) {
+                    next_present = true;   // (presents in order: the held one first)
+                } else {
+                    ot_depth_sum += (int64_t)ot_jobs.size(), ot_jobs_n++, ot_depth_max = std::max<int64_t>(ot_depth_max, (int64_t)ot_jobs.size());
+                    j = std::move(ot_jobs.front());
+                    ot_jobs.pop_front();
+                    got = true;
+                }
+            }
+        }
+        if (got && j.kind == JOB_PRESENT) {
+            if (ot_present_run(j, ms == 0)) {
+                finish(j);
+            } else {
+                ot_sig_waits++;
+                held = std::move(j), holding = true, held_until = ot_now() + (int64_t)ms * 1000000;
+                ot_holding.store(true, std::memory_order_release);
+            }
+            continue;
+        }
+        if (got) {
+            ot_run(j);
+            finish(j);
+        }
+        if (holding) {
+            const bool force = next_present || ot_now() >= held_until;
+            if (ot_present_run(held, force)) {
+                if (force) {
+                    ot_sig_late++;
+                    static int64_t logged = 0;
+                    if (logged++ < 40)
+                        logf("vk: order thread: the present after %lld forced (%s; value %llu)", (long long)presents_now,
+                             next_present ? "the next present came" : "waited its time", (unsigned long long)held.value);
+                }
+                finish(held);
+                holding = false;
+                ot_holding.store(false, std::memory_order_release);
+            }
+        }
     }
 }
 bool ot_pending() {
+    if (ot_holding.load(std::memory_order_acquire)) return true;
     std::lock_guard lk(ot_mu);
     return !ot_jobs.empty();
 }
