@@ -11,10 +11,11 @@
    present in the chain (section 10): the next frame's submits reach the order thread before the present is done, so there is
    nothing to overlap. In the castle 0.33-0.43 ms a frame; in the game-bound Market 0.39 ms in 194 of 600 frames, where the order
    thread has 1.9 ms of idle and the present thread's 0.46 ms a present does fit out of the way.
-2. **The Kotiri numbers are in one usable lease** (02:33-02:54): off 105.1 / 118.5 / 112.1, on with the present in the chain
-   128.1 / 92.6, on with the present thread 128.1 / 115.2 / 119.9 fps (medians 112.1 / 110.4 / 119.9, +7.0% for the present thread).
-   The frame the order thread's chain is: 8.28-8.48 off, 7.79-7.86 (chain) and 7.76 (present thread) on, against 7.10-7.20 of GPU:
-   the present thread's win is inside the rounds' spread and its chain is the same as the present-in-chain arm's.
+2. **The Kokiri numbers are in one usable lease** (02:33-02:54): off 105.1 / 118.5 / 112.1, on with the present in the chain
+   128.1 / 92.6, on with the present thread 128.1 / 115.2 / 119.9 fps (medians 112.1 / 110.4 / 119.9: the present thread +7.0%
+   against off, +8.6% against the present-in-chain arm's median, on rounds that hitched differently). The frame the order thread's
+   chain gives: 8.28-8.48 ms off, 7.79-7.86 (present in the chain) and 7.76 (present thread) on, against 7.10-7.20 of GPU work:
+   the present thread's chain is the same as the present-in-chain arm's.
    **The castle series is not usable**: the machine was not fit during its lease (39-115 frames over 50 ms in every run, loads
    48-109 s against PIPE2's 40.4, the off arm as bad as the on arms).
 3. **The Market's extra frames over 25 ms are the game's own loaders** (section 10a, one run each arm with `HL_STALL_WATCH=50`):
