@@ -49,6 +49,10 @@ def main():
     code = "\n".join(line.split("//")[0] for line in mem.splitlines())
     need(len(re.findall(r"\bmem_rec_value\b", code)) == 4, "mem_rec_value is read other than through rec_value_of() (its declaration, write and accessor)")
     need(len(re.findall(r"\bmirror_epoch\b", code)) == 5, "mirror_epoch is read other than through rec_epoch() (its declaration, bump, memory_epoch and accessor)")
+    # (DECOUPLE) the guessed write-backs' snapshots are the submission's own: one map cleared at each submission's start lost a pending one's
+    need(code.count("guess_snaps") == 5 and "lists().guess_snaps.try_emplace({p, lo});" in code
+         and "sub.guess_snaps.lower_bound({p, 0})" in code and "sub.guess_snaps.clear();" in code,
+         "the guessed ranges' snapshots are not kept per submission (MemSub::guess_snaps, taken through lists(), used and emptied by its own end)")
     need(rep.count("memory_recording_thread(j->r->value,") == 2 and rep.count("memory_recording_thread_end();") == 2,
          "a segment's worker does not set and clear its recording's value and epoch (both record paths)")
     need("G.view = memory_view();" in rep and "const MemView seg_view = memory_view();" in rep, "a group does not take the view of the submission it begins in")

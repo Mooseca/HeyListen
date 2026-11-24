@@ -74,6 +74,10 @@ struct MemSub {
     std::vector<Pool*> synced;
     std::vector<WriteBack> writebacks;
     RbPending rb;          // (the readback ring's staged ranges)
+    // (CRASH3's guessed ranges' snapshots, (pool, offset) -> guest memory's bytes at the first binding. DECOUPLE: this submission's own.
+    // One map cleared at each submission's start lost a pending submission's snapshots when the next one began before its end
+    // (RX_VK_SUB_OVERLAP): its guessed write-backs were then never checked and never landed)
+    std::map<std::pair<Pool*, uint64_t>, std::vector<uint8_t>> guess_snaps;
     uint32_t gen_end = 0;  // (RX_VK_SUB_OVERLAP: the generation its pools are current as of, taken at its handoff; 0: gen_now at its end, as before)
 };
 namespace {
@@ -7170,13 +7174,12 @@ bool wb_guess_checked_on() {
     return on;
 }
 thread_local bool tl_bind_guess = false;
-// (the guessed ranges' snapshots, this submission's: (pool, offset) -> guest memory's bytes at the first binding, right after the
+// (the guessed ranges' snapshots, this submission's (MemSub::guess_snaps, through lists()): taken at the first binding, right after the
 // mirror's sync; pools_mu held, emptied with the write-backs)
-std::map<std::pair<Pool*, uint64_t>, std::vector<uint8_t>> guess_snaps;
 void guess_snap_take(Pool* p, uint64_t lo, uint64_t hi) {
     static uint8_t* const base = host->guest_base ? host->guest_base() : nullptr;
     if (!base || hi <= lo) return;
-    auto [it, made] = guess_snaps.try_emplace({p, lo});
+    auto [it, made] = lists().guess_snaps.try_emplace({p, lo});
     if (!made && it->second.size() >= hi - lo) return;   // (the first binding's: the closest to the sync)
     it->second.assign(base + p->lo + lo, base + p->lo + hi);
 }
@@ -8147,7 +8150,6 @@ void memory_begin_submission() {
     mirror_epoch++;
     mirror_upload = true;
     sub_cur = std::make_shared<MemSub>();   // (stream SUB1: a fresh pair of lists; a group of the submission before keeps its own)
-    guess_snaps.clear();
     imports_give_back();
     if (tex_capture_on()) publish_tex_spans(texture_frame_no());
     if (!mirror_on()) return;
@@ -9428,7 +9430,7 @@ void end_submission_impl(VkCommandBuffer cmd, MemSub& sub) {
                     // (the run's snapshot from its bindings' ones; a byte none of them took is not known: never written)
                     const uint64_t so = staged.snaps.size();
                     staged.snaps.resize(so + 2 * r.size, 0);
-                    for (auto it = guess_snaps.lower_bound({p, 0}); it != guess_snaps.end() && it->first.first == p; ++it) {
+                    for (auto it = sub.guess_snaps.lower_bound({p, 0}); it != sub.guess_snaps.end() && it->first.first == p; ++it) {
                         const uint64_t lo = it->first.second, hi = lo + it->second.size();
                         const uint64_t x = std::max<uint64_t>(lo, r.dstOffset), y = std::min<uint64_t>(hi, r.dstOffset + r.size);
                         if (x >= y) continue;
@@ -9517,7 +9519,7 @@ void end_submission_impl(VkCommandBuffer cmd, MemSub& sub) {
         }
         transfer_barrier(cmd);
         writebacks.clear();
-        guess_snaps.clear();
+        sub.guess_snaps.clear();
     }
     wbl_no_defer = false;   // (WBL1: the frame's flush, if this was it, is recorded)
     for (Pool* p : wbl_flushing_pools) {
