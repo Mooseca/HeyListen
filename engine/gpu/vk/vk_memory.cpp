@@ -8788,12 +8788,20 @@ int64_t st_sw_runs = 0, st_sw_bytes = 0, st_sw_pages_written = 0, st_sw_pages_cp
 // (CRASH3: the guessed ranges' checked write-back, by page piece; staged_mu)
 constexpr uint64_t kStagedChecked = 1ull << 63;
 int64_t st_gw_runs = 0, st_gw_same = 0, st_gw_written = 0, st_gw_words = 0, st_gw_cpu_words = 0, st_gw_host_cpu = 0, st_gw_dead = 0;
+// (a checked piece whose submission is done: guest address, the mirror's bytes, the snapshot, the known mask (n bytes each).
+// memory_staged_apply runs in completed(), which a host path may call holding the host's lock, and the host's write takes that
+// lock: the pieces are written at the next memory_end_submission instead (guess_apply), as lazy_apply writes its own; staged_mu)
+struct GuessPiece {
+    uint64_t guest, value;
+    std::vector<uint8_t> bytes;
+};
+std::vector<GuessPiece> guess_pieces;
 }  // namespace mkwvk
 namespace mkwvk {
 /// (CRASH3) one page piece [a, e) of a guessed range: src the mirror's bytes after the submission, snap and known its snapshot
 /// (guest memory at the binding, as the mirror's sync took it): only the words the GPU changed and the CPU did not, through the
 /// host's checked write (a live pool; on a page written since the host's last collection, the plain write: each word was just
-/// found as the snapshot has it). staged_mu held
+/// found as the snapshot has it). memory_end_submission (guess_apply), pools_mu held
 void staged_checked_piece(uint64_t a, uint64_t e, const uint8_t* src, const uint8_t* snap, const uint8_t* known, uint64_t value,
                           WriteLive write_live, uint8_t* base) {
     if (!base) {
@@ -8815,6 +8823,24 @@ void staged_checked_piece(uint64_t a, uint64_t e, const uint8_t* src, const uint
     (any ? st_gw_written : st_gw_same)++;
 }
 }  // namespace mkwvk
+namespace mkwvk {
+/// (CRASH3; memory_end_submission, pools_mu held) the checked pieces of the submissions done, into guest memory
+void guess_apply() {
+    static thread_local std::vector<GuessPiece> todo;
+    {
+        std::lock_guard sk(staged_mu);
+        if (guess_pieces.empty()) return;
+        todo.swap(guess_pieces);
+    }
+    const WriteLive write_live = write_live_fn();
+    static uint8_t* const base = host->guest_base ? host->guest_base() : nullptr;
+    for (const GuessPiece& g : todo) {
+        const uint64_t n = g.bytes.size() / 3;
+        staged_checked_piece(g.guest, g.guest + n, g.bytes.data(), g.bytes.data() + n, g.bytes.data() + 2 * n, g.value, write_live, base);
+    }
+    todo.clear();
+}
+}  // namespace mkwvk
 void mkwvk::memory_staged_apply(uint64_t done) {
     memory_rb_check_poll(done);   // (READB2 CHECK: the refresh comparisons of the submissions done)
     if (staged_min.load(std::memory_order_acquire) > done) return;
@@ -8828,9 +8854,13 @@ void mkwvk::memory_staged_apply(uint64_t done) {
             for (uint64_t a = guest; a < guest + size;) {
                 const uint64_t e = std::min(guest + size, ((a >> 12) + 1) << 12);
                 const uint8_t* src = static_cast<const uint8_t*>(s.map) + off + (a - guest);
-                if (check & kStagedChecked) {   // (CRASH3: a guessed range, never over a CPU write)
+                if (check & kStagedChecked) {   // (CRASH3: a guessed range: its bytes kept for memory_end_submission, guess_apply)
                     const uint8_t* snap = s.snaps.data() + (check & ~kStagedChecked) + (a - guest);
-                    staged_checked_piece(a, e, src, snap, snap + size, s.value, write_live, base);
+                    GuessPiece g{a, s.value, std::vector<uint8_t>(3 * (e - a))};
+                    std::memcpy(g.bytes.data(), src, e - a);
+                    std::memcpy(g.bytes.data() + (e - a), snap, e - a);
+                    std::memcpy(g.bytes.data() + 2 * (e - a), snap + size, e - a);
+                    guess_pieces.push_back(std::move(g));
                     a = e;
                     continue;
                 }
@@ -8868,6 +8898,7 @@ void memory_end_submission(VkCommandBuffer cmd) {
     std::lock_guard lk(pools_mu);
     AccumTimer acc_timer_(st_acc_end_ns);
     lazy_apply();
+    guess_apply();   // (CRASH3: the guessed heads' checked pieces of the submissions done)
     {   // (RX_VK_POOL_MIRROR: beyond 16 spare staging buffers or 256 MB of them, the oldest given back)
         std::lock_guard sk(staged_mu);
         uint64_t held = 0;
