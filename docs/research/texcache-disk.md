@@ -131,6 +131,28 @@ was loaded (scene frames about 30 fps, a 7.9 s frame in off2): no timing is read
 - So texcache3 turns both off by default (RX_VK_BC_DISK_HOLD_MS=0, RX_VK_BC_DISK_POOL_STALE_MS=0); they stay as switches. The hold
   is not acceptable as it is: it leaves draws out wherever a texture is made again, not only at zone entries.
 
+## Why the main PC gains nothing (texcache4, quiet machine, speed lease, 24 Nov 20:08-)
+
+`E:\OOT\scratch-texcache\speedtour.sh` (speed lease, slot c, RAM wait before each run: no other game, 5000 MB free), the same
+6-warp tour; runs `E:\OOT\HeyListen\build\s5\st-texcache4-<arm>`. texcache4 lists each cache key under the map it was first wanted
+on (`hookshot_texcache_maps.bin`) and reads the entered map's list first. A prime run made the lists (1910 keys, 15 KB).
+- Scene frames: off1 128.1 fps, warm1 124.2 (quiet machine; steady fps is VAR1's question, not used here).
+- Zone entries, per warp (map line to scene; frames > 50 ms in the 10 s after): off1 16.6 s in all, 28 frames, worst 1083 ms;
+  warm1 17.8 s, 28 frames, worst 1668 ms. The same.
+- Served: 1551 textures from the cache against 3093 lookups found on disk and transcoded: 33% (texcache1-3: 26-30%). The map
+  lists were read (1383 records, 1145 MB) but 2743 read blocks aged out unused.
+- Why: the zone's textures are made in a burst in the same present as the "map:" line or the next one (warm1's log: map line
+  6476, then at 6486 one frame with 158 transcodes; Kakariko 9008 then 9014 with 251). Nothing a map change or a first texture
+  triggers can be read in time; the reads land after the burst and serve only textures made again later.
+- What serving the burst would save here: replay-thread CPU per texture in the upload frames (`E:\OOT\scratch-texcache\routes.py`):
+  transcode 0.269 ms (off1, 2051 textures) / 0.224 ms (warm1), disk hit 0.105 ms (344); non-ASTC CPU uploads 0.15 ms. Most of a
+  hit is hashing the ASTC bytes for the key (1034 ms in warm1's run; the off arm pays it too, the memory BC cache uses the same
+  key). The GPU transcode itself is about 1 ms of GPU a frame on this card. So with everything served an entry's upload frames
+  would lose about 40% (about 40 ms of a 100 ms frame); the rest is the non-ASTC uploads and the work that is not uploads. Getting
+  it needs the blocks in RAM before the burst: holding textures (rejected: draws left out) or reading the next map on a guess.
+- The laptop differs: at 10 fps the upload budget's deferral spreads the burst over many presents, and the reads keep up (list 2:
+  72-89% served, uploads while turning 16-34 ms a frame against 83-86 off).
+
 ## Laptop list 1 (texcache1, Vega 8, Hyrule Field camera turning, 24 Nov)
 
 Runs on the laptop `C:\Users\Yanis\Desktop\OOT\runs\amd-1124\TX1_off1, TX2_cold, TX3_warm, TX4_off2, TX5_warm2`; copies of four
@@ -154,6 +176,19 @@ off 8.1 / 10.2, cold 8.2 / 9.7, warm 10.6 / 11.2, off 8.0 / 10.1, warm 10.4 / 10
   for; ageing by time (RX_VK_BC_DISK_POOL_MS, 60 s), not presents (1800 presents is 3 minutes at 10 fps).
 - Writer: the cold run wrote 611 MB in 20 s (background mode: low IO priority) and 220 transcodes found the 256 MB backlog full.
   texcache2: RX_VK_BC_DISK_WRITE_BG=0 writes at normal IO priority (lowest CPU priority), to be tried on the laptop.
+
+## Laptop list 2 (texcache3, 24 Nov evening)
+
+Runs on the laptop `OOT\runs\amd-1124\TX2_1_off .. TX2_8_warm2`; numbers read by the laptop's session (relayed; run-to-run noise
+1-2 fps). Turning fps: off 6.3 / 6.9; cold 7.3; cold with normal IO priority 9.5; warm 9.1 / 9.7; bigpool (1024 MB) 11.0;
+smallpool (128 MB) 7.1; still 11-13 in every arm. GPU uploads a frame while turning: off 83 / 86, cold 82, cold-io 39, warm 34 / 26,
+bigpool 16, smallpool 71 ms. Served from the cache: warm 2732 of 3616 on-disk textures, bigpool 3502 of 3951 (pool never full),
+smallpool 718 of 1691. Writes: background mode left 212 transcodes unwritten in the cold run, normal IO priority 2. Working set
++300 to +900 MB against off, with 10.5-11 GB free.
+- So in texcache4: the pool's default from the RAM free at start (1024 MB with 8 GB free or more, 512 with 4 GB, else 256), and
+  writes at normal IO priority by default (RX_VK_BC_DISK_WRITE_BG=1 for background mode).
+- The "on the CPU" growth follows the pool: smallpool served least and was slowest; nothing points at memory pressure at 1024 MB
+  on that machine.
 
 ## CPU-decode chips (astc_cpu_policy.h)
 
