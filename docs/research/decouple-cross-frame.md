@@ -373,3 +373,46 @@ held reads as off.
   `texture_rb_refresh_now` and `memory_rb_segments_begin` (one global `rb_segs`: an older worker's refresh after it does not find
   its segment; the meter's held reads are the check), `texture_segments_begin` (per group since REC1), the conditions' list (per
   group, 4.4). Not proven: the check runs of series 5 are the proof.
+
+### 4.6 matrix81 (PC 3050): `RX_VK_SUB_OVERLAP` halves the fps, the cause, the fix; the CPU gate
+
+Copy `E:\OOT\scratch-decouple\3050\matrix81.txt`; logs on the 3050 `C:\OOT\pc3050s-out\dc81`, the ones read here copied to
+`E:\OOT\scratch-decouple\3050\dc81\` (kA1, kB1, kChk, hB1, hT). Build `dec1a`, default ini, replay inline.
+
+| arm | Kokiri fps (3 passes) | Hyrule fps (3 passes) |
+|---|---|---|
+| plain | 58.5 / 58.3 / 58.3 | 56.6 / 57.1 / 57.6 |
+| `RX_VK_SUB_OVERLAP=1` | 30.3 / 30.3 / 30.3 | 25.5 / 25.6 / 25.9 (531-599 frames over 50 ms each) |
+| both checks (kChk) | 30.2 | |
+| `pipe4f` order thread, `HOS_THREAD_TIMES=5` (hT) | | 52.7 |
+
+**The cause** (kA1 against kB1): the mirror syncs copy 10.39 MB a submission under the switch against 0.13 MB
+(`vk: msync bytes`: presync 10.389, "guest memory 10.268"), 1,538,659-1,577,122 dirty pages from guest memory in 600 submissions
+against 0 (`vk: mirror syncs (600 submits)`); the GPU's "uploads" 12.5 ms a frame against 0.2; the presents alternate 2-3 ms and
+42-44 ms intervals (`present_trace.csv`: medians 15.5 against 17.6 ms, but the long ones 42-44). The main PC had it too, unseen in
+fps: `dec2a-chk-on` 3,061,542 and `dec2b-tour-on` 4,744,625 pages from guest memory against 0 in `dec1a-chk-off`, `dec2a-ot-on`,
+`dec3a-lc-k` (`build/s5/<run>/game_log.txt`). Mechanism: `memory_submission_handoff` fixes the submission's synced generation
+(`gen_end`) at the handoff; the last group's segments then stamp the pages their GPU writes touch (`memory_stamp_gpu`) with newer
+generations, so the next submission's syncs find those pages dirty with no capture of that generation and copy them again from guest
+memory. Without the switch the end takes `gen_now`, those stamps included. **Fix `64f941b83`** (+ test `52aaa76d4`): the end takes
+`gen_now` unless a generation for the CPU's writes (`gen_cpu_last`: a collection, a capture's take, the lazy write-back's flush
+stamps) was taken since the handoff, which today's joins rule out (the next submission's memory work joins first). The lanes across
+submissions will need a per-page answer there. Build `dec3c`; series 7 (`c7.sh`) checks the counter and the tour. **dec3b's step 3a
+carries the same loss** (its `RX_VK_SUB_OVERLAP` arms run the same end); `RX_VK_LANES=1` alone does not (it never hands a submission
+off). No 3050 list with `RX_VK_SUB_OVERLAP` arms before series 7 reads 0 pages from guest memory.
+
+**The gate.** hT (Hyrule, order thread, 17.89 ms a frame; `prof: threads in 5 s`, last block): our threads 201% of a logical CPU
+(order thread 81, replay workers 19+20+18+22, capture copy 6+7+6+7, held submits 8, Presentation Thread 7), the game's named threads
+279% (main 29, module workers 28+22+26+20+21, executors 22+22+23+18+15+17, navmesh 10, texture compaction 6), three unnamed threads
+95 + 94 + 92% (not identified); 761% in all on a 6-core / 12-thread CPU. The slack line: "the PT waited 15.82 ms a frame for the main
+thread's hand-over ... game-bound"; the order thread idle 0.18 ms a frame. LIFT3's sampled profile (Market, 19.55 ms frames,
+`E:\OOT\scratch-lift3\p3050.ana.txt`): the game threads' non-waiting time 68 ms a frame (executors 39.8, module workers 22.8,
+main 5.5), about 3.5 cores; the replay thread busy 18.3 of 19.55 ms, 10.2 of them in the driver under the queue submits (the
+coordinator's reading of that run). Arithmetic, not a measure: the named threads' 4.8 CPUs at 17.89 ms are 85.9 ms of CPU a frame;
+at the GPU's 11.9 ms (hT's GPU time) that is 7.2 CPUs, at the lanes' 13.4 ms aim 6.4, both above the 6 cores (the unnamed 2.8 CPUs
+come on top if they scale with the frame). **Verdict: the i5-10400F cannot feed the lanes' aim at the default ini**: with about 5
+cores for these threads the frame bound by CPU is ~17 ms (85.9 / 5), today's 17.89 within a few percent; one lane (K=1) is the
+most to try there, and its gain is expected small until CPU is shed. Where to shed first: the three unnamed threads at 92-95% (to
+identify: if they spin, 2.8 CPUs), the order thread's 10.2 ms a frame in the driver's queue submits (fewer submissions: stage 4,
+`RX_VK_LANE_BATCH`), the capture copy threads (0.26 CPU), the held-submits thread (0.08). The lanes stand for machines with more
+cores (the 5070 / 7800X3D: 8 cores, 16 threads).
