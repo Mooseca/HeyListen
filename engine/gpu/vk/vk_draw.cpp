@@ -9503,11 +9503,11 @@ bool temporal_stand_in(VkCommandBuffer cmd, const NvnState& s, const Program& p)
 }
 /// (ported from Longshot 597c5a4e0 (#1464) and ed96031ac (#1691)) The picture a gameplay upscale writes (its output, found as
 /// temporal_stand_in finds it), for frame generation's HUD-less capture (vk_framegen.h framegen_hud_before: copied once the
-/// upscale wrote it, whichever drew it). Null unless AMD FSR 3.1's frame interpolation is asked for, or for any other dispatch.
+/// upscale wrote it, whichever drew it). Null unless the capture is wanted (framegen_hud_wanted), or for any other dispatch.
 /// At 100% render resolution the known gameplay pass writes the picture at the scene's own size: that is the picture too, an
 /// inferred dispatch (a shape, not a key) of the same size is not
 static Texture* upscale_picture(const NvnState& s, const Program& p, uint32_t* level) {
-    if (p.stages.empty() || !fsr3fi::frames_wanted()) return nullptr;
+    if (p.stages.empty() || !framegen_hud_wanted()) return nullptr;
     const Stage& st = p.stages[0];
     const bool known = gameplay_network(p.key);
     if (!known && !(st.info.uses_cooperative_matrix && st.info.texture_descriptors.size() == 1 &&
@@ -11292,7 +11292,7 @@ void dispatch(VkCommandBuffer cmd, NvnState& s, uint32_t x, uint32_t y, uint32_t
                                 (force_stub >= 2 || !gameplay_network(cp->key))));
     if ((!cp || cp->failed || slow_network) && upscale_stub(cmd, s, compute_code_key(s))) {
         // (a gameplay upscale's picture, as the dispatch below copies its own: frame generation's HUD-less capture)
-        if (stub_picture && fsr3fi::frames_wanted()) framegen_hud_before(cmd, stub_picture, 0);
+        if (stub_picture && framegen_hud_wanted()) framegen_hud_before(cmd, stub_picture, 0);
         return void(st_dispatches++);
     }
     if (slow_network) SKIP_HERE();   // (an earlier pass of the network: the stub is its last pass)

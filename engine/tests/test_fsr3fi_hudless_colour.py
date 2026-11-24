@@ -110,13 +110,13 @@ def check_wiring():
     record = block(fg, "bool hud_source(")
     assert "const int32_t pc[4] = {x0, y0, (int32_t)w, (int32_t)h};" in record
     assert ("{{fg.frames[cur].view, fg.nearest}, {hud.before[k].view, fg.nearest}, {hud.after[k].view, fg.nearest},\n"
-            "          {hud.hudless.view, VK_NULL_HANDLE}}") in record, "hud_source: frame, before, after, then the HUD-less image"
+            "          {hud.hudless[k].view, VK_NULL_HANDLE}}") in record, "hud_source: frame, before, after, then the HUD-less image"
     assert "VK_FORMAT_R8G8B8A8_UNORM" in record and "VK_IMAGE_USAGE_TRANSFER_SRC_BIT" in record   # (FSR keeps it as its previous source)
     assert "!hud_image(cmd, hud.after[k], sw, sh, hud.format" in record and "vkCmdCopyImage(cmd, hud.picture" in record, \
         "hud_source copies the picture as presented"
     frame = block(fg, "int fsr3fi_frame(")
-    assert "in.color = hud.hudless.view, in.color_image = hud.hudless.image;" in frame, "fsr3fi_frame: the HUD-less colour is FSR's colour"
-    assert "in.present = layered ? hud.hudless.view : fg.frames[cur].view;" in frame,         "fsr3fi_frame: the presented frame is FSR's present (the HUD-less colour with the HUD layer, which lays the HUD itself)"
+    assert "in.color = hud.hudless[hud.hl].view, in.color_image = hud.hudless[hud.hl].image;" in frame, "fsr3fi_frame: the HUD-less colour is FSR's colour"
+    assert "in.present = layered ? hud.hudless[hud.hl].view : fg.frames[cur].view;" in frame,         "fsr3fi_frame: the presented frame is FSR's present (the HUD-less colour with the HUD layer, which lays the HUD itself)"
     assert "hud.ready && hudless_wanted()" in frame, "fsr3fi_frame: only with the picture, only when asked for"
     fi = (ROOT / "gpu/vk/vk_fsr3fi.cpp").read_text(encoding="utf-8")
     gen = block(fi, "bool generate(VkCommandBuffer cmd, const Inputs& in)")

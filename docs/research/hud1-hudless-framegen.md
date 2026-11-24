@@ -9,7 +9,7 @@ every step behind a switch that is off by default.
 - [x] Step 1: HUD-less capture at the gameplay upscale dispatch, `RX_VK_FSR_FG_HUDLESS` (code and test done; commit below)
 - [x] Step 2: FSR 3.1 interpolates the HUD-less colour, the presented frame beside it (code, test, run_all done; pictures pending)
 - [x] Step 3: HUD layer fit and lay-over, `RX_VK_FSR_FG_HUD_LAYER` (code, test done; pictures pending)
-- [ ] Step 4: the same pair for the built-in interpolator, `RX_VK_FG_HUDLESS`
+- [x] Step 4: the same pair for the built-in interpolator, `RX_VK_FG_HUDLESS` (code, test done; pictures pending)
 - Not touched on purpose: DLSS-G, FSR 4 (the brief), Native HDR's PQ present (falls back to the presented picture), PsychoV35's
   RGBA16F picture (not copied: another encoding than the frame's).
 
@@ -55,3 +55,15 @@ every step behind a switch that is off by default.
   second pair of pictures).
 - `RX_VK_FSR_FG_HUD_LAYER=1` needs `RX_VK_FSR_FG_HUDLESS=1`; off by default.
 - Test: `engine/tests/test_fsr3fi_hud_layer.py` (the fit and the lay-over as C++, the framegen wiring with spies, the headers).
+
+## Step 4: the built-in interpolator
+
+- `RX_VK_FG_HUDLESS=1` (off by default): `framegen_hud_wanted()` (FSR 3.1 asked for with `RX_VK_FSR_FG_HUDLESS`, or this switch) now
+  decides the capture in vk_draw.cpp, so 3x to 8x and Auto, where FSR 3.1 is not asked for, get the picture from before the HUD.
+- `hud.hudless[2]` (two, at k like the pictures) and `hud.pair`: this present and the one before both had the HUD-less colour, the
+  same crop, and the HUD layer is made (the switch makes the fit pass itself). With the pair `framegen_record` finds its motion in
+  the HUD-less luma, blends `hudless[prev]` and `hudless[cur]` (both the Auto and the fixed-multiplier loops), and runs
+  `hud_composite` over each made frame (the layer: B + T * the made frame's scene, the presented pixel where T is not known).
+  The game's own frame (the set's last) stays the presented copy.
+- No pair (first present, a present without the picture, another crop, PQ, layer images or pipelines failing): as before.
+- Test: `engine/tests/test_fg_hudless.py` (the wiring) and the `builtin` fixture of `test_fsr3fi_hud_capture.py` (the pair).

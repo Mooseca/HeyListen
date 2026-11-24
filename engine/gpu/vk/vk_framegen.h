@@ -44,6 +44,10 @@ VkImage framegen_made_image(uint32_t* w, uint32_t* h);
 /// format or shape) is left alone
 struct Texture;
 void framegen_hud_before(VkCommandBuffer cmd, Texture* picture, uint32_t level);
+/// Whether the picture from before the HUD is wanted this present: frame generation is on and either AMD FSR 3.1's frame interpolation
+/// is asked for with RX_VK_FSR_FG_HUDLESS, or the built-in interpolation has RX_VK_FG_HUDLESS (vk_draw.cpp: the dispatch copies the
+/// picture only then)
+bool framegen_hud_wanted();
 /// After that recording's submit (value): the display thread shows its frames. held: the storm hold withheld this
 /// frame's present (storm_hold.h) — its frames are not shown, even if the hold lifts before the display thread gets there
 void framegen_queue(uint64_t value, bool held = false);

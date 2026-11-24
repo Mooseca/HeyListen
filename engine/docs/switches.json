@@ -2,7 +2,7 @@
  "schema": 1,
  "generated_by": "engine/scripts/list_switches.py",
  "scope": "C, C++ and headers under engine/ (engine/tests and vendored trees other than a64-kit excluded) and the Python the builder, the lifter and the scripts run: getenv, std::getenv, _wgetenv, the code's own env helpers and table-driven reads, and os.environ.",
- "count": 1455,
+ "count": 1456,
  "switches": [
   {
    "name": "A64_",
@@ -19581,6 +19581,27 @@
    "use": null
   },
   {
+   "name": "RX_VK_FG_HUDLESS",
+   "area": "renderer",
+   "group": "Frame generation",
+   "audience": "developer",
+   "files": [
+    {
+     "path": "gpu/vk/vk_framegen.cpp",
+     "line": 844
+    }
+   ],
+   "default": "unset",
+   "values": "text",
+   "explanation": "RX_VK_FG_HUDLESS (read once; off by default): the built-in interpolation blends the pictures from before the HUD of two frames and lays this frame's HUD over each made frame (by the HUD layer: how see-through it is).",
+   "comment": "RX_VK_FG_HUDLESS (read once; off by default): the built-in interpolation blends the pictures from before the HUD of two frames and lays this frame's HUD over each made frame (by the HUD layer: how see-through it is).",
+   "documented_in": null,
+   "source": "comment at gpu/vk/vk_framegen.cpp",
+   "documented": true,
+   "set_via": "In `hookshot_env.txt`, or in the environment.",
+   "use": null
+  },
+  {
    "name": "RX_VK_FIFO",
    "area": "renderer",
    "group": "Rendering and GPU",
@@ -20421,7 +20442,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_framegen.cpp",
-     "line": 831
+     "line": 834
     }
    ],
    "default": "unset",
@@ -20442,7 +20463,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_framegen.cpp",
-     "line": 841
+     "line": 854
     }
    ],
    "default": "unset",

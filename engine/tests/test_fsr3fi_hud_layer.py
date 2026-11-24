@@ -277,10 +277,11 @@ def check_wiring():
                  'getenv("RX_VK_FSR_FG_HUD_LAYER")', "return e && *e && atoi(e) != 0;"):
         assert need in fg, "vk_framegen.cpp: %r is missing" % need
     frame = block(fg, "int fsr3fi_frame(")
-    assert "in.present = layered ? hud.hudless.view : fg.frames[cur].view;" in frame, "FSR 3.1's present is the HUD-less colour: it lays nothing"
+    assert "in.present = layered ? hud.hudless[hud.hl].view : fg.frames[cur].view;" in frame, "FSR 3.1's present is the HUD-less colour: it lays nothing"
     copy = frame.index("vkCmdCopyImage(cmd, fsr3fi::made_image()")
-    assert frame.index("if (layered) {") > copy and "pass(cmd, hud.over_pipe," in frame[copy:], "the HUD goes over the made frame after its copy"
-    assert "{set.frame[0].view, VK_NULL_HANDLE}, {fg.frames[cur].view, fg.nearest}, {hud.layer.view, fg.nearest}" in frame
+    assert frame.index("if (layered) {") > copy and "hud_composite(cmd, set.frame[0].view, cur, uw, uh);" in frame[copy:],         "the HUD goes over the made frame after its copy"
+    compose = block(fg, "void hud_composite(")
+    assert "{{made, VK_NULL_HANDLE}, {fg.frames[cur].view, fg.nearest}, {hud.layer.view, fg.nearest}}" in compose
 
 
 def main():
@@ -312,10 +313,10 @@ def main():
 
         fg = (ROOT / "gpu/vk/vk_framegen.cpp").read_text(encoding="utf-8")
         img = between(fg, "struct Img {", "struct OutSet {") + between(fg, "struct Pipe {", "struct State {")
-        hud = between(fg, "struct HudState {", "} // namespace\n\nvoid framegen_hud_before(")
+        hud = between(fg, "struct HudState {", "} // namespace\n\nbool framegen_hud_wanted(")
         fix = tmp / "framegen.cpp"
-        fix.write_text(CAPTURE_PREFIX + img + CAPTURE_STUBS + hud + block(fg, "void framegen_hud_before(") + LAYER_SUFFIX,
-                       encoding="utf-8")
+        fix.write_text(CAPTURE_PREFIX + img + CAPTURE_STUBS + hud + block(fg, "bool framegen_hud_wanted(") +
+                       block(fg, "void framegen_hud_before(") + LAYER_SUFFIX, encoding="utf-8")
         fexe = tmp / "framegen.exe"
         subprocess.run([a.cxx, *flags, "-I" + str(a.headers), str(fix), "-o", str(fexe)], check=True)
         subprocess.run([str(fexe)], check=True)

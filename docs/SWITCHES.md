@@ -10,7 +10,7 @@ python -I engine/scripts/list_switches.py
 
 and commit both files. A test (`engine/tests/test_switches_documented.py`) fails when a switch read in the source is missing here or the data file is out of date.
 
-1455 switches: 56 players may be told to use, 380 diagnostic, 1019 developer-only; 1241 have a real explanation and 214 are marked `undocumented`.
+1456 switches: 56 players may be told to use, 380 diagnostic, 1020 developer-only; 1242 have a real explanation and 214 are marked `undocumented`.
 
 ## How to set a switch
 
@@ -64,7 +64,7 @@ The entries below say what each one does, its values and default, and when it is
 
 | Area | Switches | Player | Diagnostic | Developer |
 |---|---:|---:|---:|---:|
-| [Renderer](#renderer-upscaling-frame-generation-hdr-v-sync-and-presentation) | 460 | 23 | 14 | 423 |
+| [Renderer](#renderer-upscaling-frame-generation-hdr-v-sync-and-presentation) | 461 | 23 | 14 | 424 |
 | [Shaders and pipelines](#shaders-and-pipelines) | 126 | 6 | 0 | 120 |
 | [Memory and textures](#memory-and-textures) | 200 | 10 | 0 | 190 |
 | [Audio](#audio) | 14 | 5 | 9 | 0 |
@@ -77,7 +77,7 @@ The entries below say what each one does, its values and default, and when it is
 
 ## Renderer: upscaling, frame generation, HDR, V-Sync and presentation
 
-460 switches of the renderer: the upscaler, frame generation, HDR, V-Sync and what reaches the screen.
+461 switches of the renderer: the upscaler, frame generation, HDR, V-Sync and what reaches the screen.
 
 ### Upscaling (DLSS, FSR, TAAU)
 
@@ -433,6 +433,16 @@ NVIDIA DLSS Frame Generation (`gpu/vk/vk_dlss.cpp`) never / for the run whatever
 
 **Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_dlss.cpp:888`.
 
+#### `RX_VK_FG_HUDLESS` - developer
+
+RX_VK_FG_HUDLESS (read once; off by default): the built-in interpolation blends the pictures from before the HUD of two frames and lays this frame's HUD over each made frame (by the HUD layer: how see-through it is).
+
+**Values:** text. **Default:** unset.
+
+**When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
+
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_framegen.cpp:844`.
+
 #### `RX_VK_FRAMEGEN` - player
 
 No frame generation whatever the menu says; over the options file: its multiplier (still kept within what the Frame generation by mode makes, `framegen_now`: DLSS FG its runtime's most + 1, AMD FSR 3.1 2x, and under the Frame rate limit what leaves the game 20 frames a second), frame pacing, the upscaling filter.
@@ -481,7 +491,7 @@ RX_VK_FSR_FG_HUDLESS (read once; off by default): frame generation by AMD FSR 3.
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_framegen.cpp:831`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_framegen.cpp:834`.
 
 #### `RX_VK_FSR_FG_HUD_LAYER` - developer
 
@@ -491,7 +501,7 @@ RX_VK_FSR_FG_HUD_LAYER (read once; off by default): with the HUD-less colour, th
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_framegen.cpp:841`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_framegen.cpp:854`.
 
 ### HDR, V-Sync and presentation
 

@@ -50,10 +50,8 @@ struct StageInfo {
 struct Stage { StageInfo info; };
 struct Program { uint64_t key; std::vector<Stage> stages; };
 struct NvnState {};
-namespace fsr3fi {
-bool enabled = true;
-bool frames_wanted() { return enabled; }
-}
+bool hud_wanted = true;
+bool framegen_hud_wanted() { return hud_wanted; }
 
 Texture in_tex{1920, 1080, SCENE}, out_tex{1920, 1080, SCENE};
 uint32_t output_level = 0;
@@ -102,8 +100,8 @@ int main() {
     out_tex.format = MOVIE;
     expect("A non-scene image supplied a pre-HUD picture", full, nullptr);
     out_tex.format = SCENE;
-    fsr3fi::enabled = false;
-    expect("HUD capture ran with FSR frame generation inactive", full, nullptr);
+    hud_wanted = false;
+    expect("HUD capture ran with the capture not wanted", full, nullptr);
     std::puts("selector: ok");
 }
 '''
@@ -188,6 +186,7 @@ bool texture_alive(uint64_t gpu, const Texture* t, VkImage image) {
 }
 bool fg_on = true;
 bool framegen_on() { return fg_on; }
+bool framegen_hud_wanted();
 namespace fsr3fi {
 bool wanted = true;
 uint32_t frames_wanted() { return wanted ? 1u : 0u; }
@@ -197,7 +196,9 @@ uint32_t frames_wanted() { return wanted ? 1u : 0u; }
 CAPTURE_SUFFIX = r'''
 int main(int argc, char** argv) {
     const bool switch_on = argc < 2 || std::strcmp(argv[1], "off") != 0;
-    if (switch_on) putenv((char*)"RX_VK_FSR_FG_HUDLESS=1");
+    const bool built_in = argc > 1 && std::strcmp(argv[1], "builtin") == 0;   // (RX_VK_FG_HUDLESS alone: FSR 3.1 not asked for)
+    if (switch_on && !built_in) putenv((char*)"RX_VK_FSR_FG_HUDLESS=1");
+    if (built_in) putenv((char*)"RX_VK_FG_HUDLESS=1"), fsr3fi::wanted = false;
     const VkCommandBuffer cmd = (VkCommandBuffer)(uintptr_t)1;
     Texture picture;
     picture.image = handle<VkImage>(), picture.format = VK_FORMAT_B10G11R11_UFLOAT_PACK32;
@@ -217,6 +218,38 @@ int main(int argc, char** argv) {
         return hud_source(cmd, 0, w, h, 0, 0, w, h, pq);
     };
 
+    if (built_in) {   // (RX_VK_FG_HUDLESS alone, FSR 3.1 not asked for: the built-in interpolation's pair)
+        framegen_hud_before(cmd, &picture, 0);
+        CHECK(copies.size() == 1 && present() && hud.ready && hud.layered && hud.captured == 1);
+        CHECK(!hud.pair);   // (no frame before: this frame's picture alone)
+        const int first = hud.hl;
+        framegen_hud_before(cmd, &picture, 0);
+        CHECK(present() && hud.pair && hud.hl == (first ^ 1) && hud.hudless[0].image != hud.hudless[1].image &&
+              hud.hudless[hud.hl ^ 1].image);
+        CHECK(!present() && !hud.pair);   // (a present with no picture: the frame after it has no pair)
+        framegen_hud_before(cmd, &picture, 0);
+        CHECK(present() && !hud.pair);
+        framegen_hud_before(cmd, &picture, 0);
+        CHECK(present() && hud.pair);
+        // (another crop: no pair; the layer failing: no pair, the HUD-less colour alone)
+        framegen_hud_before(cmd, &picture, 0);
+        CHECK(hud_source(cmd, 0, 2560, 1440, 320, 0, 1920, 1440, false) && !hud.pair);
+        framegen_hud_before(cmd, &picture, 0);
+        CHECK(hud_source(cmd, 0, 2560, 1440, 320, 0, 1920, 1440, false) && hud.pair);
+        fail_layer_pipes = true, hud.fit_pipe = {}, hud.over_pipe = {};
+        framegen_hud_before(cmd, &picture, 0);
+        CHECK(present() && hud.ready && !hud.layered && !hud.pair);
+        fail_layer_pipes = false;
+        // (frame generation off: nothing copied, nothing taken)
+        const size_t b = copies.size();
+        fg_on = false;
+        framegen_hud_before(cmd, &picture, 0);
+        fg_on = true;
+        CHECK(copies.size() == b && !present());
+        std::puts("capture builtin: ok");
+        return 0;
+    }
+
     // (a frame of play: the picture copied after its upscale, taken at the present)
     framegen_hud_before(cmd, &picture, 0);
     CHECK(copies.size() == 1 && copies[0].src == picture.image && copies[0].w == 2560 && copies[0].h == 1440);
@@ -226,7 +259,7 @@ int main(int argc, char** argv) {
     CHECK(copies.size() == 2 && copies[1].src == picture.image && copies[1].dst == hud.after[0].image);
     CHECK(passes.size() == 1 && passes[0].views.size() == 4 && passes[0].views[0] == fg.frames[0].view &&
           passes[0].views[1] == hud.before[0].view && passes[0].views[2] == hud.after[0].view &&
-          passes[0].views[3] == hud.hudless.view && passes[0].w == 2560 && passes[0].h == 1440);
+          passes[0].views[3] == hud.hudless[0].view && passes[0].w == 2560 && passes[0].h == 1440);
     CHECK(passes[0].pc[0] == 0 && passes[0].pc[1] == 0 && passes[0].pc[2] == 2560 && passes[0].pc[3] == 1440);
     // (and not the next present's too: the next one with no upscale since (a menu, a movie, loading) goes on as it is)
     CHECK(!present() && !hud.ready && hud.captured == 1);
@@ -239,7 +272,7 @@ int main(int argc, char** argv) {
     framegen_hud_before(cmd, &picture, 0);
     CHECK(hud_source(cmd, 0, 2560, 1440, 320, 0, 1920, 1440, false) && passes.back().pc[0] == 320 &&
           passes.back().pc[2] == 1920 && passes.back().w == 1920);
-    CHECK(hud.hudless.image && hud.captured == 3);
+    CHECK(hud.hudless[0].image && hud.captured == 3);
 
     // (the picture destroyed since the copy, or moved to another image: nothing to take)
     framegen_hud_before(cmd, &picture, 0);
@@ -323,18 +356,19 @@ def main():
 
         cap_cpp, cap_exe = Path(temp) / "capture.cpp", Path(temp) / "capture.exe"
         img = between(fg, "struct Img {", "struct OutSet {") + between(fg, "struct Pipe {", "struct State {")
-        hud = between(fg, "struct HudState {", "} // namespace\n\nvoid framegen_hud_before(")
-        cap_cpp.write_text(CAPTURE_PREFIX + img + CAPTURE_STUBS + hud + block(fg, "void framegen_hud_before(") + CAPTURE_SUFFIX,
-                           encoding="utf-8")
+        hud = between(fg, "struct HudState {", "} // namespace\n\nbool framegen_hud_wanted(")
+        cap_cpp.write_text(CAPTURE_PREFIX + img + CAPTURE_STUBS + hud + block(fg, "bool framegen_hud_wanted(") +
+                           block(fg, "void framegen_hud_before(") + CAPTURE_SUFFIX, encoding="utf-8")
         run([a.cxx, *flags, "-I" + str(a.headers), str(cap_cpp), "-o", str(cap_exe)])
         run([str(cap_exe)])
         run([str(cap_exe), "off"])
+        run([str(cap_exe), "builtin"])
     # (the wiring the fixtures cannot see: the dispatch's call sites, and the sources of the picture)
     for need in ("framegen_hud_before(cmd, stub_picture, 0)", "framegen_hud_before(cmd, picture, picture_level)",
                  "if (fsr3_stand_in(cmd, s, p)) return framegen_hud_before(", "if (temporal_stand_in(cmd, s, p)) return framegen_hud_before(",
                  "if (off_stand_in(cmd, s, p)) return framegen_hud_before(", "if (taau_stand_in(cmd, s, p)) return framegen_hud_before("):
         assert need in draw, "vk_draw.cpp: %r is missing (the gameplay upscale's picture is copied after whoever drew it)" % need
-    assert "hudless_wanted()) hud_source(" in fg, "framegen_record: the HUD-less picture is taken at the present when asked for"
+    assert "framegen_hud_wanted() && hud_source(" in fg, "framegen_record: the HUD-less picture is taken at the present when asked for"
     print("fsr3fi hud capture: ok")
 
 
