@@ -186,6 +186,11 @@ ImportHolds import_holds;          // (issue 218: a failed import is not tried a
 std::mutex import_holds_mu;
 thread_local bool import_cooling = false;
 thread_local VkResult import_result = VK_SUCCESS;
+// (issues 131, 121, test hook) RX_VK_IMPORT_REFUSE_MB=<n>: an import that would take what is imported past n MB is refused as the
+// driver refuses it (VK_ERROR_INVALID_EXTERNAL_HANDLE), so that the give-back of a refused import (retired_emergency_free) runs
+// where the driver's own limit is out of reach. st_pinned counts the bytes of the imports made and not yet freed
+std::atomic<int64_t> st_pinned{0};
+inline void pinned_sub(uint64_t bytes) { st_pinned.fetch_sub((int64_t)bytes); }
 
 int64_t import_now_ms() {
     return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
@@ -471,6 +476,14 @@ bool import_pool(uint64_t lo, uint64_t hi, Pool& p) {
     p.hi = hi;
     uint8_t* ptr = host->guest_base() + lo;
     const uint64_t bytes = hi - lo;
+    {
+        static const uint64_t refuse = getenv("RX_VK_IMPORT_REFUSE_MB") ? strtoull(getenv("RX_VK_IMPORT_REFUSE_MB"), nullptr, 10) << 20 : 0;
+        if (refuse && (uint64_t)st_pinned.load() + bytes > refuse) {
+            import_result = VK_ERROR_INVALID_EXTERNAL_HANDLE;
+            import_remember_failure(lo, hi);
+            return false;
+        }
+    }
     using clk = std::chrono::steady_clock;
     const auto t0 = clk::now();
     clk::time_point t1, t2, t3, t4;
@@ -642,6 +655,7 @@ bool import_pool(uint64_t lo, uint64_t hi, Pool& p) {
         logf("vk: addr import %#llx..%#llx at gpu %#llx..%#llx", (unsigned long long)lo, (unsigned long long)hi,
              (unsigned long long)p.address, (unsigned long long)(p.address + (hi - lo)));
     t4 = clk::now();
+    st_pinned.fetch_add((int64_t)bytes);
     return true;
 }
 
@@ -4364,6 +4378,7 @@ void bg_drain() {
         if (imp != imported.end() && imp->second.hi >= p.hi) {
             destroy_import_buffer(p.buffer);
             vkFreeMemory(dev.device, p.memory, nullptr);
+            pinned_sub(p.hi - p.lo);
             for (VkDeviceMemory m : p.pieces) vkFreeMemory(dev.device, m, nullptr);
             continue;
         }
@@ -4382,6 +4397,7 @@ void bg_drain() {
             st_prefetch_dropped++;
             destroy_import_buffer(p.buffer);
             vkFreeMemory(dev.device, p.memory, nullptr);
+            pinned_sub(p.hi - p.lo);
             for (VkDeviceMemory m : p.pieces) vkFreeMemory(dev.device, m, nullptr);
             continue;
         }
@@ -7218,6 +7234,7 @@ void reap_mirrors() {   // (pools_mu held)
     while (!dead_imports.empty() && dead_imports.front().value <= mem_completed && mirror_epoch >= dead_imports.front().not_before) {
         destroy_import_buffer(dead_imports.front().buffer);
         vkFreeMemory(dev.device, dead_imports.front().memory, nullptr);
+        pinned_sub(dead_imports.front().bytes);
         for (VkDeviceMemory m : dead_imports.front().pieces) vkFreeMemory(dev.device, m, nullptr);
         if (dead_imports.front().hi) import_unpinned(dead_imports.front().lo, dead_imports.front().hi);
         else st_retired_imports_freed++, st_retired_import_bytes_freed += dead_imports.front().bytes;
@@ -7412,6 +7429,7 @@ uint64_t retired_emergency_free(uint64_t need) {
         if (freed >= need + (256ull << 20)) break;
         destroy_import_buffer(p.buffer);
         vkFreeMemory(dev.device, p.memory, nullptr);
+        pinned_sub(p.hi - p.lo);
         for (VkDeviceMemory m : p.pieces) vkFreeMemory(dev.device, m, nullptr);
         p.pieces.clear();
         p.buffer = VK_NULL_HANDLE, p.memory = VK_NULL_HANDLE, p.address = 0;
@@ -7746,6 +7764,7 @@ void imports_give_back() {   // (pools_mu held)
         Pool& p = evicted_pools.front().mapped();
         destroy_import_buffer(p.buffer);
         vkFreeMemory(dev.device, p.memory, nullptr);
+        pinned_sub(p.hi - p.lo);
         for (VkDeviceMemory m : p.pieces) vkFreeMemory(dev.device, m, nullptr);   // (a pool imported as several dma-bufs)
         evicted_pools.pop_front();
     }
