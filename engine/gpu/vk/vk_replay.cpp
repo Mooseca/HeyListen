@@ -8318,8 +8318,8 @@ std::mutex& submit_order_mu_ref() { return submit_order_mu; }
 // registrations and releases are jobs, in order with the submits. The game's present poll is answered at once (the host's
 // HOS_PRESENT_NOWAIT, on with this switch) and the readback ring serves entries 3 frames old (vk_rbring.cpp, as FIF1's).
 // RX_VK_ORDER_AHEAD=<n> (2): presents handed over and not yet shown before the present call waits; RX_VK_ORDER_POLL_JOIN=1: a
-// poll waits for its submission's job too; RX_VK_ORDER_SIGNAL_MS=<ms> (200): how long a present waits for the CPU's signal its
-// frame's stopped work waits for; RX_VK_ORDER_PRIO=<0|1|2> (1): the thread's priority. Off by default.
+// poll waits for its submission's job too; RX_VK_ORDER_SIGNAL_MS=<ms> (2000): how long a present waits for the CPU's signal its
+// frame's stopped work waits for (PIPE4: and for no queue stopped before it; the next present waits behind it); RX_VK_ORDER_PRIO=<0|1|2> (1): the thread's priority. Off by default.
 bool order_thread_on() {
     // (PIPE2) RX_VK_ORDER_THREAD=1 (off by default): the replay on an order thread, the submitting threads return after the capture
     static const bool v = getenv("RX_VK_ORDER_THREAD") && atoi(getenv("RX_VK_ORDER_THREAD")) != 0 && sync_waits_on();
@@ -8444,9 +8444,12 @@ void ot_main() {
             SetThreadAffinityMask(GetCurrentThread(), (DWORD_PTR)m);
             replay_pin_depth = 1;   // (the ReplayPins inside its jobs then change nothing)
         }
-    // (PIPE2) RX_VK_ORDER_SIGNAL_MS=<ms> (200; 0: no wait): how long the order thread's present waits for the CPU's signal its
+    // (PIPE2) RX_VK_ORDER_SIGNAL_MS=<ms> (2000; 0: no wait): how long the order thread's present waits for the CPU's signal its
     // frame's stopped work waits for and for the work its stopped queues wait for (PIPE4), running the jobs behind it meanwhile
-    static const int ms = getenv("RX_VK_ORDER_SIGNAL_MS") ? std::max(0, atoi(getenv("RX_VK_ORDER_SIGNAL_MS"))) : 200;
+    // (PIPE4: 2000. Inline the Presentation Thread cannot present before the main thread has handed the frame over, which comes
+    // after its signal; a present let go after 200 ms showed the frame without the CPU's writes up to the signal, darker for a few
+    // frames on a zone's first frames)
+    static const int ms = getenv("RX_VK_ORDER_SIGNAL_MS") ? std::max(0, atoi(getenv("RX_VK_ORDER_SIGNAL_MS"))) : 2000;
     auto finish = [](const Job& j) {
         bool wake;
         {
@@ -8479,7 +8482,10 @@ void ot_main() {
             }
             if (!ot_jobs.empty()) {
                 if (holding && ot_jobs.front().kind == JOB_PRESENT) {
-                    next_present = true;   // (presents in order: the held one first)
+                    next_present = true;   // (presents in order: the held one first; the next one waits, as the game would inline)
+                    const int64_t t0 = ot_now();
+                    ot_cv.wait_for(lk, std::chrono::milliseconds(1));
+                    ot_idle_ns += ot_now() - t0;
                 } else {
                     ot_depth_sum += (int64_t)ot_jobs.size(), ot_jobs_n++, ot_depth_max = std::max<int64_t>(ot_depth_max, (int64_t)ot_jobs.size());
                     j = std::move(ot_jobs.front());
@@ -8503,14 +8509,14 @@ void ot_main() {
             finish(j);
         }
         if (holding) {
-            const bool force = next_present || ot_now() >= held_until;
+            const bool force = ot_now() >= held_until;
             if (ot_present_run(held, force)) {
                 if (force) {
                     ot_sig_late++;
                     static int64_t logged = 0;
                     if (logged++ < 40)
                         logf("vk: order thread: the present after %lld forced (%s; value %llu)", (long long)presents_now,
-                             next_present ? "the next present came" : "waited its time", (unsigned long long)held.value);
+                             next_present ? "waited its time, the next present behind it" : "waited its time", (unsigned long long)held.value);
                 }
                 finish(held);
                 holding = false;

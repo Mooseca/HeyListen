@@ -3415,7 +3415,7 @@ undocumented: gpu/vk/vk_draw.cpp:10229 reads it as a text value: `bool warm = gp
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_replay.cpp:8606`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_replay.cpp:8612`.
 
 #### `RX_VK_ORDER_PRIO` - developer
 
@@ -3435,17 +3435,17 @@ undocumented: gpu/vk/vk_draw.cpp:10229 reads it as a text value: `bool warm = gp
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_replay.cpp:8587`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_replay.cpp:8593`.
 
 #### `RX_VK_ORDER_SIGNAL_MS` - developer
 
-(PIPE2) RX_VK_ORDER_SIGNAL_MS=<ms> (200; 0: no wait): how long the order thread's present waits for the CPU's signal its frame's stopped work waits for and for the work its stopped queues wait for (PIPE4), running the jobs behind it meanwhile.
+(PIPE2) RX_VK_ORDER_SIGNAL_MS=<ms> (2000; 0: no wait): how long the order thread's present waits for the CPU's signal its frame's stopped work waits for and for the work its stopped queues wait for (PIPE4), running the jobs behind it meanwhile (PIPE4: 2000. Inline the Presentation Thread cannot present before the main thread has handed the frame over, which comes after its signal; a present let go after 200 ms showed the frame without the CPU's writes up to the signal, darker for a few frames on a zone's first frames).
 
-**Values:** a whole number. **Default:** 200.
+**Values:** a whole number. **Default:** 2000.
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_replay.cpp:8449`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_replay.cpp:8452`.
 
 #### `RX_VK_ORDER_THREAD` - developer
 
@@ -3965,7 +3965,7 @@ Texture and sampler registrations: in order with the submits ---- A registration
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_replay.cpp:8936` and 2 more places.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_replay.cpp:8942` and 2 more places.
 
 #### `RX_VK_REJECT_KEYS` - developer
 
@@ -4005,7 +4005,7 @@ Texture and sampler registrations: in order with the submits ---- A registration
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_replay.cpp:9193`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_replay.cpp:9199`.
 
 #### `RX_VK_REMADE_SKIP` - developer
 
@@ -4445,7 +4445,7 @@ While the storm hold is on, n workers translate: the base ones (a third of the h
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_replay.cpp:8716`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_replay.cpp:8722`.
 
 #### `RX_VK_TABLE_NOW` - developer
 
@@ -8005,7 +8005,7 @@ Linux: a pool larger than udmabuf's limit (several dma-bufs in a sparse buffer) 
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_replay.cpp:8623` and 1 more place.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_replay.cpp:8629` and 1 more place.
 
 #### `RX_VK_WAIT_GPU` - developer
 
@@ -12227,7 +12227,7 @@ A count not there yet, a window of several draws, or a proxy in the segment itse
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_replay.cpp:8577` and 1 more place.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_replay.cpp:8583` and 1 more place.
 
 #### `RX_VK_ORDER_WATCH_PENDING` - diagnostic
 
@@ -13561,7 +13561,7 @@ RX_VK_MSYNC_DIFF_GROUP=<chunks> (1, 2, 4, 8): copy granularity (default 1, 256 b
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_replay.cpp:9279`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_replay.cpp:9285`.
 
 #### `RX_VK_PASS_SAMPLE_MASK` - diagnostic
 

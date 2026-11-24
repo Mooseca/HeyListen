@@ -25311,11 +25311,11 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 8577
+     "line": 8583
     },
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 8589
+     "line": 8595
     }
    ],
    "default": "off (unset)",
@@ -25357,7 +25357,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 8606
+     "line": 8612
     }
    ],
    "default": "off (unset)",
@@ -25399,7 +25399,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 8587
+     "line": 8593
     }
    ],
    "default": "1",
@@ -25420,13 +25420,13 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 8449
+     "line": 8452
     }
    ],
-   "default": "200",
+   "default": "2000",
    "values": "a whole number",
-   "explanation": "(PIPE2) RX_VK_ORDER_SIGNAL_MS=<ms> (200; 0: no wait): how long the order thread's present waits for the CPU's signal its frame's stopped work waits for and for the work its stopped queues wait for (PIPE4), running the jobs behind it meanwhile.",
-   "comment": "(PIPE2) RX_VK_ORDER_SIGNAL_MS=<ms> (200; 0: no wait): how long the order thread's present waits for the CPU's signal its frame's stopped work waits for and for the work its stopped queues wait for (PIPE4), running the jobs behind it meanwhile.",
+   "explanation": "(PIPE2) RX_VK_ORDER_SIGNAL_MS=<ms> (2000; 0: no wait): how long the order thread's present waits for the CPU's signal its frame's stopped work waits for and for the work its stopped queues wait for (PIPE4), running the jobs behind it meanwhile (PIPE4: 2000. Inline the Presentation Thread cannot present before the main thread has handed the frame over, which comes after its signal; a present let go after 200 ms showed the frame without the CPU's writes up to the signal, darker for a few frames on a zone's first frames).",
+   "comment": "(PIPE2) RX_VK_ORDER_SIGNAL_MS=<ms> (2000; 0: no wait): how long the order thread's present waits for the CPU's signal its frame's stopped work waits for and for the work its stopped queues wait for (PIPE4), running the jobs behind it meanwhile (PIPE4: 2000. Inline the Presentation Thread cannot present before the main thread has handed the frame over, which comes after its signal; a present let go after 200 ms showed the frame without the CPU's writes up to the signal, darker for a few frames on a zone's first frames).",
    "documented_in": null,
    "source": "comment at gpu/vk/vk_replay.cpp",
    "documented": true,
@@ -25771,7 +25771,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 9279
+     "line": 9285
     }
    ],
    "default": "0 (unset)",
@@ -27624,7 +27624,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 8936
+     "line": 8942
     },
     {
      "path": "gpu/vk/vk_shader.cpp",
@@ -27716,7 +27716,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 9193
+     "line": 9199
     }
    ],
    "default": "on (unless set to 0, false, off or no)",
@@ -29456,7 +29456,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 8716
+     "line": 8722
     }
    ],
    "default": "0",
@@ -29477,11 +29477,11 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 8623
+     "line": 8629
     },
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 8697
+     "line": 8703
     }
    ],
    "default": "on (unless set to 0, false, off or no)",
