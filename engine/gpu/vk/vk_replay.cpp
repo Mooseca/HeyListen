@@ -7100,14 +7100,15 @@ void do_present(const nvn_tex* t, const int crop[4]) {
             // its HUD's records before a pass read them: icons flashing mid-screen, the minimap drawn with another texture whenever the
             // camera moved, gone with the wait (48-56 fps there). RX_VK_WAIT_OWN=1 / 0 turns the wait on / off on any GPU; setting
             // RX_VK_WAIT_GPU (a ring of frames, above) leaves the default off
-            // (v0.4.4: RX_VK_WAIT_OWN=3, the default on an AMD integrated GPU: the frame before's work, the frame's own when it uploaded
+            // (v0.4.4: RX_VK_WAIT_OWN=3: the frame before's work, the frame's own when it uploaded
             // textures: the game one frame ahead as the console's two frames in flight, the GPU busy while it builds the next; =2 the
             // frame before's always; =1: the rule of v0.4.3, the frame's own; =0 off. wait_own.h)
+            // (24 Nov: the default is 1 again. On a Ryzen 7 5700U's graphics 3, 2 and 0 flicker the HUD while the camera turns, 1 does not)
             static const int own = [] {
                 const int m = wait_own::mode(getenv("RX_VK_WAIT_OWN"), getenv("RX_VK_WAIT_GPU") != nullptr,
                                              dev.props.vendorID == 0x1002 && dev.props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU);
                 if (m && !getenv("RX_VK_WAIT_OWN"))
-                    logf("vk: an AMD integrated GPU: each present waits for the GPU's work of the frame before, of its own frame when textures were uploaded (RX_VK_WAIT_OWN=1: its own frame's always, =2: the frame before's always, =0: not)");
+                    logf("vk: an AMD integrated GPU: each present waits for the GPU's work of its own frame (RX_VK_WAIT_OWN=2: of the frame before, =3: of the frame before, its own when textures were uploaded, =0: not)");
                 else if (m)
                     logf("vk: RX_VK_WAIT_OWN=%d: each present waits for the GPU's work of %s", m, m == 1 ? "its own frame" : m == 2 ? "the frame before" : "the frame before (its own when textures were uploaded)");
                 return m;
