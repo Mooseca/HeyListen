@@ -5,6 +5,11 @@
 - 24 Nov, commit on `fix/import-give-back`: bounded give-back of retired imports on every vendor, plus a give-back when an import
   is refused (`retired_bound.h`, `vk_memory.cpp`). Unit tests in `tests/test_retired_bound.py`. Build `amd2a` (whole suite, then
   mkg). NVIDIA tour and AMD laptop run list: see the end of this file.
+- 24 Nov 22:50: main PC tours (RTX 5070, build amd2a, warps, 300 s, bound forced to 1 MB): E:\OOT\HeyListenuild\s5md2v-tiny\game_log.txt:
+  19 maps, 49 retired imports (2075 MB) given back by the bounded path, 0 left, 0 FATAL/device lost; pictures identical to the
+  immediate-give-back reference. Laptop list 1 (Vega 8, Hyrule Field, E:\OOT\scratch-amd2\A1): all six arms clean, old rule included
+  (11 given back), so the old device loss is neither explained nor reproduced.
+- Stress hook RX_VK_RETIRE_STRESS (commit 4d967c418, build amd2b queued) and laptop list 2 for hundreds of give-backs.
 - NOT known: why the RX 6750 XT lost the device with PR 85's give-back. Nothing here can show it without an AMD machine; the new
   switches let the laptop tell which of the candidate causes it is.
 
