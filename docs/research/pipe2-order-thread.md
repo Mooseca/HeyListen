@@ -64,7 +64,18 @@
 Branch `perf/pipe2` from origin/main 4b599eb04 (PIPE1 merged, `RX_VK_TOUCH_FAST` on). Worktree `E:\OOT\HeyListen-wt\pipe2`. Design:
 `pipe1-frame-overlap.md` section 3 (stages 0-3 with their gates). Main PC (RTX 5070); PC 3050 runs are routed by the coordinator.
 
-## State (PIPE3 continues on perf/pipe2; last edit 24 Nov ~04:00)
+## State (PIPE4 continues on perf/pipe2; last edit 24 Nov ~08:00)
+
+PIPE4 (lease name `pipe4`, scratch `E:\OOT\scratch-pipe4`, scripts `build/s5/pipe4/{build,tour}.sh`, launches through
+`E:\OOT\scratch-pipe4\tmp\launch.py`):
+- Step 1 done: origin/main merged (`179d7e41c`; EXPO1, WBL1). PIPE2's meter fix `0bb228966` is kept: EXPO1's take-over covers a
+  range the ring does not serve (the zone change), PIPE2's covers a served meter block read with no new entry at lag 3 (the order
+  thread) - different paths in `rbring_apply`, no overlap; the rbring line carries both counts.
+- Step 2 done: the present thread removed (`cbec76010`, reverts `f109058c2`).
+- Step 3 lead: the two dark frames of PIPE3's tour (`build/s5/p3t-on`, presents 7268 and 7432) are the lit scene drawn black (sky,
+  HUD and Navi right; `flash_7268_{a,b}.png`) - Longshot's "lit pass before its producer" picture, an ordering fault rather than a
+  late read. The same tour's order stats: 294 waits gone past (19 forced by presents) on, 39 (2) off. Building `pipe4a` with a log
+  of each wait gone past and of a present's signal let go, then one on tour (`p4t1-on`), to tie them to the flash presents.
 
 Where it stands: the three tasks of the brief are done and measured. (1) The present thread works and is safe, but **the gate that
 keeps the GPU's order takes the present's serial part back into the chain** (Kokiri 0.47-0.51 ms a frame, chain 7.76 against 7.79):

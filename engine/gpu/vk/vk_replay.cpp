@@ -5214,6 +5214,16 @@ void drain(int why, uint64_t limit = UINT64_MAX) {   // (limit, stream R3: only 
         for (const auto& [queue, q] : qruns)
             if (q.blocked() && q.oldest() < best && q.oldest() <= limit) best = q.oldest(), bq = queue;
         if (best == UINT64_MAX) break;
+        if (qruns[bq].waiting) {   // (PIPE4: each wait gone past, by who made it go, for the flashes' correlation)
+            static int64_t logged = 0;
+            if (logged++ < 400) {
+                const nvn_p_wait_event w = wait_at(qruns[bq].p);
+                logf("vk: wait gone past (%s, present %lld): submission %llu (queue %#llx) waited for event %#llx %s %u, has %u",
+                     why == 0 ? "a present" : why == 1 ? "a release" : why == 2 ? "a wait for the replay" : "time", (long long)presents_now,
+                     (unsigned long long)qruns[bq].value, (unsigned long long)bq, (unsigned long long)w.gpu,
+                     w.mode == 0 ? "==" : ">=", w.value, event_value_in(ev_values, w.gpu));
+            }
+        }
         resume_queue(bq, qruns[bq].waiting);
     }
     burst_end();
@@ -8368,7 +8378,11 @@ void ot_run(Job& j) {
             std::unique_lock lk(submit_order_mu);
             if (ms && cpu_wait_open(j.value)) {
                 ot_sig_waits++;
-                if (!signal_cv.wait_for(lk, std::chrono::milliseconds(ms), [&j] { return !cpu_wait_open(j.value); })) ot_sig_late++;
+                if (!signal_cv.wait_for(lk, std::chrono::milliseconds(ms), [&j] { return !cpu_wait_open(j.value); })) {
+                    ot_sig_late++;
+                    logf("vk: order thread: the present after %lld let go of the CPU's signal after %d ms (value %llu)", (long long)presents_now,
+                         ms, (unsigned long long)j.value);
+                }
             }
         }
         std::lock_guard order(sync_order_mu);
