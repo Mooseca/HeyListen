@@ -181,7 +181,7 @@ classes measured so far differ by device class, not by a few percent.
   eviction off by default). Builds build/s5/bin/texcache1, texcache2, texcache3. Whole suite on 5d8066c3c: 510 passed, the 3 known
   failures and test_switches_documented (regenerated after, passes). Lists for texcache3: `E:\OOT\scratch-texcache\list-3050-2.txt`,
   `E:\OOT\scratch-texcache\list-laptop-2.txt` (list 1 of the laptop done; the 3050's list 1 dropped). Function check of texcache3
-  (one warm tour arm, flash detector, `E:\OOT\HeyListenuild\s5	c-texcache3-warm`): 878 textures from the disk (739 MB),
+  (one warm tour arm, flash detector, `E:\OOT\HeyListen\build\s5\tc-texcache3-warm`): 878 textures from the disk (739 MB),
   2506 found on disk, held back 0, flashes 0, no FATAL / device lost / VK_ERROR, render thread 5.2 ms in all. Cache folder for tests: `E:\OOT\scratch-texcache\cache`
   (2.7-4.2 GB, made by my runs; delete when done).
 - Next: the lists' results; then the default rule in code (device class, above) if the owner agrees.
