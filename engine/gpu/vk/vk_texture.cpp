@@ -1421,8 +1421,23 @@ uint64_t bcd_encoder() {   // (the shaders that make the blocks, with texcache_p
     return v;
 }
 uint64_t bcd_pool_cap() {
-    // (TEXCACHE) RX_VK_BC_DISK_POOL_MB=<MB> (384 by default): host memory the BC disk cache's reads ahead may fill before textures take them
-    static const uint64_t v = bcdisk::env_mb("RX_VK_BC_DISK_POOL_MB", 384, 16);
+    // (TEXCACHE) RX_VK_BC_DISK_POOL_MB=<MB> (by default from the RAM free at start: 1024 with 8 GB free or more, 512 with 4 GB, else
+    // 256): host memory the BC disk cache's reads ahead may fill before textures take them. Laptop list 2 (10-11 GB free): 1024 served
+    // 3502 of 3951 on-disk textures and was never full, 384 served 2732 of 3616, 128 served 718 of 1691
+    static const uint64_t v = [] {
+        int def = 256;
+#ifdef _WIN32
+        MEMORYSTATUSEX ms{};
+        ms.dwLength = sizeof ms;
+        if (GlobalMemoryStatusEx(&ms)) def = ms.ullAvailPhys >= (8ull << 30) ? 1024 : ms.ullAvailPhys >= (4ull << 30) ? 512 : 256;
+#else
+        def = 512;
+#endif
+        const uint64_t mb = bcdisk::env_mb("RX_VK_BC_DISK_POOL_MB", def, 16);
+        logf("vk: BC disk cache: read-ahead pool %llu MB%s", (unsigned long long)(mb >> 20),
+             getenv("RX_VK_BC_DISK_POOL_MB") ? " (RX_VK_BC_DISK_POOL_MB)" : " (from the RAM free at start)");
+        return mb;
+    }();
     return v;
 }
 /// Whether the disk cache is on (its thread and scan begun at the first call: the first ASTC upload)
@@ -1626,7 +1641,7 @@ bool upload_astc_gpu(Texture& tex, uint64_t total, const Ranges* dirty) {
             h = bcc_bytes_hash(h, guest_bytes(tex.gpu + at, n, hs), n);
         }
         cache_key = h | 1;
-        if (disk) disk_key = cache_key;
+        if (disk) disk_key = cache_key, bcdisk::use(disk_key);   // (TEXCACHE: onto the map's list)
         st_bcd_key_ns.fetch_add(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - key_t0).count(),
                                 std::memory_order_relaxed);
         BcCacheEntry hit;
@@ -5909,6 +5924,13 @@ void texture_frame(uint64_t completed) {
     upload_frame_report();
     if (bcc_cap() || bcd_on()) {   // (TICK-051: the BC cache's entries let go, and every 600 frames what it did)
         bcc_free_done(completed);
+        if (bcd_on() && frame_no % 15 == 0 && host && host->perf_info) {   // (TEXCACHE: the map now, for the maps' lists)
+            char name[120] = "";
+            int64_t movie[5] = {};
+            host->perf_info(name, sizeof name, movie);
+            bcdisk::set_map(name);
+            if (frame_no % 1800 == 0) bcdisk::save_maps();
+        }
         if (bcd_on() && frame_no % 600 == 0) {   // (TEXCACHE)
             bcdisk::Store& d = bcdisk::store();
             size_t pool_n, pend_n;
@@ -5921,7 +5943,7 @@ void texture_frame(uint64_t completed) {
                  "in all (the longest %.3f ms); read ahead %lld (%llu MB, %lld ms on its thread, pool full %lld times), pool %zu "
                  "(%llu MB, peak %llu), %lld not taken in time; written %lld (%llu MB, %lld ms), %zu waiting for the GPU, %lld MB "
                  "for the writer, %lld not written (backlog full); copied forward %lld, rotations %lld, bad %lld; on disk %llu MB; "
-                 "the index took %lld ms%s; held back %lld (in %lld, timed out %lld; keys %.0f ms; presents with one held %lld, the longest hold %.0f ms); pool let go of %lld stale for newer runs; keys hashed %.0f ms; not for the cache: "
+                 "the index took %lld ms%s; maps: %lld changes, %lld keys listed, %lld read from the map's list (%lld MB, pool full %lld times); held back %lld (in %lld, timed out %lld; keys %.0f ms; presents with one held %lld, the longest hold %.0f ms); pool let go of %lld stale for newer runs; keys hashed %.0f ms; not for the cache: "
                  "part of a texture %lld (%lld MB), BC3/resized %lld (%lld MB), not BC %lld (%lld MB), other %lld (%lld MB)",
                  (long long)d.st_hits.load(), (unsigned long long)(d.st_hit_bytes.load() >> 20), (long long)d.st_probe_found.load(),
                  (long long)d.st_probe_missing.load(), (double)st_bcd_rt_ns.load() / 1e6, (double)st_bcd_rt_max_ns.load() / 1e6,
@@ -5931,7 +5953,9 @@ void texture_frame(uint64_t completed) {
                  (long long)d.st_written.load(), (unsigned long long)(d.st_write_bytes.load() >> 20), (long long)d.st_write_ms.load(),
                  pend_n, (long long)(d.write_pending.load() >> 20), (long long)d.st_write_skipped.load(), (long long)d.st_forward.load(),
                  (long long)d.st_rotations.load(), (long long)d.st_bad.load(), (unsigned long long)(bcdisk::disk_bytes() >> 20),
-                 (long long)d.st_scan_ms.load(), d.ready.load() ? "" : " (not done)", (long long)st_bcd_held.load(),
+                 (long long)d.st_scan_ms.load(), d.ready.load() ? "" : " (not done)", (long long)d.st_map_changes.load(),
+                 (long long)d.st_map_listed.load(), (long long)d.st_map_read.load(), (long long)(d.st_map_read_bytes.load() >> 20),
+                 (long long)d.st_map_full.load(), (long long)st_bcd_held.load(),
                  (long long)st_bcd_held_in.load(), (long long)st_bcd_held_out.load(), st_bcd_hold_key_ns.load() / 1e6,
                  (long long)st_bcd_hold_frames.load(), st_bcd_hold_max_ns.load() / 1e6,
                  (long long)st_bcd_pool_evicted.load(),

@@ -11,7 +11,9 @@
 // begun again. Every record carries a hash of its blocks, checked on every read.
 #pragma once
 #include <cstdint>
+#include <cstddef>
 #include <cstring>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -189,6 +191,107 @@ struct AheadPlan {
         return true;
     }
     void reset() { lo = hi = 0; }
+};
+
+/// The maps' lists: for each map (the host's "map:" name), the cache keys its textures were first wanted with there, in that order.
+/// A map change reads the new map's list first (vk_bc_disk.h), in place of the creation order of the session that wrote the records
+/// (which served 23-30% of the on-disk textures on the main PC's tour). Kept in a file of its own beside the packs.
+struct MapLists {
+    static constexpr uint32_t kMaxMaps = 256, kMaxKeys = 16384;   // (bounds: the file stays small, a list of a zone fits)
+    struct List {
+        std::string name;
+        std::vector<uint64_t> keys;
+        uint64_t used = 0;   // (when it was last entered: the least recently entered map goes past kMaxMaps)
+    };
+    std::vector<List> maps;
+    uint64_t clock = 0;
+
+    int find(const std::string& name) const {
+        for (size_t i = 0; i < maps.size(); i++)
+            if (maps[i].name == name) return (int)i;
+        return -1;
+    }
+    /// The map entered: its list (made when new; the least recently entered one goes past the bound)
+    int enter(const std::string& name) {
+        int i = find(name);
+        if (i < 0) {
+            if (maps.size() >= kMaxMaps) {
+                size_t old = 0;
+                for (size_t k = 1; k < maps.size(); k++)
+                    if (maps[k].used < maps[old].used) old = k;
+                maps.erase(maps.begin() + (ptrdiff_t)old);
+            }
+            maps.push_back(List{name, {}, 0});
+            i = (int)maps.size() - 1;
+        }
+        maps[(size_t)i].used = ++clock;
+        return i;
+    }
+    /// key wanted on map i: appended when that list does not have it yet (true)
+    bool note(int i, uint64_t key) {
+        if (i < 0 || (size_t)i >= maps.size()) return false;
+        std::vector<uint64_t>& k = maps[(size_t)i].keys;
+        for (uint64_t x : k)
+            if (x == key) return false;
+        if (k.size() >= kMaxKeys) return false;
+        k.push_back(key);
+        return true;
+    }
+    /// keys appended to map `from` just before the map change was seen (the name is polled every 500 ms, after the zone's first
+    /// textures): moved to the end of map `to`'s list, in their order
+    void move(int from, int to, const std::vector<uint64_t>& keys) {
+        if (from < 0 || to < 0 || from == to || (size_t)from >= maps.size() || (size_t)to >= maps.size()) return;
+        std::vector<uint64_t>& f = maps[(size_t)from].keys;
+        for (uint64_t key : keys) {
+            for (size_t j = f.size(); j-- > 0;)
+                if (f[j] == key) {
+                    f.erase(f.begin() + (ptrdiff_t)j);
+                    break;
+                }
+            note(to, key);
+        }
+    }
+    /// The file: "HLTXMAPS", the encoder version, then per map: name length, name, key count, keys
+    std::vector<uint8_t> save(uint64_t encoder) const {
+        std::vector<uint8_t> b;
+        auto put = [&](const void* p, size_t n) { b.insert(b.end(), (const uint8_t*)p, (const uint8_t*)p + n); };
+        put("HLTXMAPS", 8);
+        put(&encoder, 8);
+        const uint32_t n = (uint32_t)maps.size();
+        put(&n, 4);
+        for (const List& l : maps) {
+            const uint32_t len = (uint32_t)l.name.size(), keys = (uint32_t)l.keys.size();
+            put(&len, 4), put(l.name.data(), len), put(&keys, 4), put(l.keys.data(), keys * 8ull);
+        }
+        return b;
+    }
+    /// false (and empty) when the file is not this format's or encoder's, or is cut short
+    bool load(const uint8_t* p, size_t n, uint64_t encoder) {
+        maps.clear(), clock = 0;
+        size_t at = 0;
+        auto get = [&](void* d, size_t k) {
+            if (at + k > n) return false;
+            std::memcpy(d, p + at, k), at += k;
+            return true;
+        };
+        char magic[8];
+        uint64_t enc = 0;
+        uint32_t count = 0;
+        if (!get(magic, 8) || std::memcmp(magic, "HLTXMAPS", 8) || !get(&enc, 8) || enc != encoder || !get(&count, 4) || count > kMaxMaps)
+            return false;
+        for (uint32_t i = 0; i < count; i++) {
+            uint32_t len = 0, keys = 0;
+            List l;
+            if (!get(&len, 4) || len > 4096) return maps.clear(), false;
+            l.name.resize(len);
+            if (!get(l.name.data(), len) || !get(&keys, 4) || keys > kMaxKeys) return maps.clear(), false;
+            l.keys.resize(keys);
+            if (!get(l.keys.data(), keys * 8ull)) return maps.clear(), false;
+            l.used = ++clock;
+            maps.push_back(std::move(l));
+        }
+        return true;
+    }
 };
 
 /// The encoder version a pack is written for: the shaders' hash (the caller folds the SPIR-V) with the key layout's revision

@@ -4,6 +4,7 @@
 #include "../gpu/vk/texcache_pack.h"
 
 #include <cstdio>
+#include <string>
 #include <vector>
 
 static int failures = 0;
@@ -166,6 +167,34 @@ int main() {
         expect(ap.next(500, 8, from, count) && from == 501 && count == 8, "a record elsewhere (another zone) starts a new run");
         ap.reset();
         expect(ap.next(0, 4, from, count) && from == 1 && count == 4, "after a reset (rotation) a new run");
+    }
+    // the maps' lists: first-use order per map, the late name's keys moved, the file round trip, a stale encoder, bounds
+    {
+        MapLists ml;
+        const int market = ml.enter("Market_Child (child)");
+        expect(ml.note(market, 1) && ml.note(market, 2) && !ml.note(market, 1), "a key listed once per map, in first-use order");
+        ml.note(market, 3), ml.note(market, 4);
+        const int field = ml.enter("HyruleField_Child (child)");
+        ml.move(market, field, {3, 4});   // (wanted in the 3 s before the field's name came)
+        expect(ml.maps[(size_t)market].keys == std::vector<uint64_t>({1, 2}), "the late keys left the old map");
+        expect(ml.maps[(size_t)field].keys == std::vector<uint64_t>({3, 4}), "and lead the new map's list, in order");
+        expect(ml.note(field, 1), "a key shared by two maps is on both lists");
+        expect(ml.enter("Market_Child (child)") == market, "a map entered again keeps its list");
+        const std::vector<uint8_t> b = ml.save(enc);
+        MapLists back;
+        expect(back.load(b.data(), b.size(), enc) && back.maps.size() == 2 && back.maps[1].keys == ml.maps[1].keys,
+               "the file round trip");
+        expect(!back.load(b.data(), b.size(), encoder_version(0x99)) && back.maps.empty(), "another encoder's file is not read");
+        expect(!back.load(b.data(), b.size() - 3, enc) && back.maps.empty(), "a cut file is not read");
+        MapLists many;
+        for (uint32_t i = 0; i < MapLists::kMaxMaps + 5; i++) many.enter("m" + std::to_string(i));
+        many.enter("m10");   // (entered again: the most recent)
+        many.enter("new");
+        expect(many.maps.size() == MapLists::kMaxMaps && many.find("m10") >= 0 && many.find("new") >= 0,
+               "past the bound the least recently entered map goes");
+        int kept = 0;
+        for (uint32_t i = 0; i < MapLists::kMaxKeys + 10; i++) kept += many.note(0, i + 1) ? 1 : 0;
+        expect(kept == (int)MapLists::kMaxKeys, "a list holds at most kMaxKeys");
     }
     if (failures) return 1;
     std::printf("texcache_pack: ok\n");

@@ -38,7 +38,7 @@ def check_source():
     for bad in ("read_blocks", "ifstream", "bcd_load"):
         if bad in up:
             raise SystemExit("upload_astc_gpu reads the disk (" + bad + ")")
-    for fn in ("inline bool probe(", "inline void took(", "inline bool wants("):
+    for fn in ("inline bool probe(", "inline void took(", "inline bool wants(", "inline void set_map(", "inline void use("):
         body = block(disk, fn)
         if "read_blocks" in body or "fstream" in body or "s.wr." in body:
             raise SystemExit(fn + " touches a file on the render thread")

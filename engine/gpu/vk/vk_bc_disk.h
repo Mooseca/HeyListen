@@ -54,6 +54,17 @@ struct Store {
     uint64_t encoder = 0;
     std::atomic<bool> ready{false};        // the scan is done
     texcache::AheadPlan ap;                // (mu) the read-ahead's runs
+    // (mu) the maps' lists (texcache_pack.h MapLists): the map now, the keys appended to it in the last seconds (moved to the next
+    // map when its name comes), and the map whose list is being read (from mr_pos; paused while the pool is full)
+    texcache::MapLists ml;
+    std::filesystem::path maps_path;
+    std::string map_name;
+    int map_cur = -1, mr_map = -1;
+    size_t mr_pos = 0;
+    bool mr_paused = false, ml_dirty = false;
+    uint64_t mr_gen = 0;
+    std::deque<std::pair<int64_t, uint64_t>> recent;   // (steady ms, key)
+    std::atomic<int64_t> st_map_changes{0}, st_map_read{0}, st_map_read_bytes{0}, st_map_full{0}, st_map_listed{0};
     // counters (the log line)
     std::atomic<int64_t> st_hits{0}, st_hit_bytes{0}, st_probe_found{0}, st_probe_missing{0}, st_written{0}, st_write_bytes{0};
     std::atomic<int64_t> st_bad{0}, st_ahead{0}, st_ahead_bytes{0}, st_ahead_full{0}, st_forward{0}, st_rotations{0};
@@ -64,12 +75,13 @@ struct Store {
     std::mutex wq_mu;
     std::condition_variable wq_cv;
     struct Job {
-        int kind;   // 0 write, 1 copy forward, 2 read ahead
+        int kind;   // 0 write, 1 copy forward, 2 read ahead, 4 read the map's list, 5 save the maps' lists
         uint64_t key;
         const uint8_t* data;
         uint32_t size;
         std::function<void()> done;
         uint32_t from, count;
+        std::vector<uint8_t> blob = {};
     };
     std::deque<Job> wq;     // writes and copies forward
     std::deque<Job> aq;     // reads ahead (they go first: a zone is loading)
@@ -136,9 +148,20 @@ inline void scan(Store& s) {
         if (keep < end) std::filesystem::resize_file(s.path[g], keep, ec);   // (a torn tail)
         valid[g] = true, seqs[g] = h.seq, ends[g] = keep;
     }
+    std::vector<uint8_t> mb;
+    {
+        std::error_code ec;
+        std::ifstream f(s.maps_path, std::ios::binary);
+        if (f) mb.assign(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
+    }
     {
         std::lock_guard lk(s.mu);
         s.ix.load(valid, seqs, ends, recs);
+        if (!s.ml.load(mb.data(), mb.size(), s.encoder)) s.ml = texcache::MapLists{};
+        if (!s.map_name.empty()) {   // (a map seen before the scan ended: its list is read now)
+            s.map_cur = s.ml.enter(s.map_name);
+            s.mr_map = s.map_cur, s.mr_pos = 0, s.mr_gen++;
+        }
     }
     s.st_scan_ms = ms_since(t0);
     s.ready.store(true, std::memory_order_release);
@@ -191,10 +214,11 @@ inline bool append(Store& s, uint64_t key, const uint8_t* data, uint32_t size) {
     return true;
 }
 
-// (TEXCACHE) RX_VK_BC_DISK_WRITE_BG=0 (1 by default): the BC disk cache's writes at normal IO priority (the thread's CPU priority lowest);
-// 1: Windows' background mode (low IO and CPU priority; the laptop's cold run wrote 611 MB in 20 s and left 220 transcodes unwritten)
+// (TEXCACHE) RX_VK_BC_DISK_WRITE_BG=1 (0 by default): the BC disk cache's writes in Windows' background mode (low IO and CPU priority);
+// 0: normal IO priority, the thread's CPU priority lowest. Laptop list 2: background mode left 212 transcodes unwritten in a cold run
+// (backlog full), normal priority 2, and the next warm run's uploads while turning were 39 ms a frame against 82
 inline bool write_bg() {
-    static const bool v = !getenv("RX_VK_BC_DISK_WRITE_BG") || atoi(getenv("RX_VK_BC_DISK_WRITE_BG")) != 0;
+    static const bool v = getenv("RX_VK_BC_DISK_WRITE_BG") && atoi(getenv("RX_VK_BC_DISK_WRITE_BG")) != 0;
     return v;
 }
 inline void background(bool on) {
@@ -221,6 +245,67 @@ inline void run(Store* sp) {
             s.wq_cv.wait(lk, [&] { return !s.wq.empty() || !s.aq.empty(); });
             if (!s.aq.empty()) j = s.aq.front(), s.aq.pop_front();
             else j = s.wq.front(), s.wq.pop_front();
+        }
+        if (j.kind == 4) {   // the map's list, in its first-use order, at normal priority (a zone is loading)
+            if (bg) background(false), bg = false;
+            const auto t0 = std::chrono::steady_clock::now();
+            for (;;) {
+                std::vector<uint64_t> keys;
+                uint64_t gen;
+                {
+                    std::lock_guard lk(s.mu);
+                    if (s.mr_map < 0 || (size_t)s.mr_map >= s.ml.maps.size()) break;
+                    const std::vector<uint64_t>& all = s.ml.maps[(size_t)s.mr_map].keys;
+                    if (s.mr_pos >= all.size()) {
+                        s.mr_map = -1;   // (done: the creation-order read-ahead may run again)
+                        break;
+                    }
+                    keys.assign(all.begin() + (ptrdiff_t)s.mr_pos, all.begin() + (ptrdiff_t)std::min(all.size(), s.mr_pos + 32));
+                    gen = s.mr_gen;
+                }
+                size_t done = 0;
+                bool full = false;
+                for (uint64_t key : keys) {
+                    if (!(s.have && s.have(key))) {
+                        texcache::Loc l;
+                        uint64_t seq;
+                        bool on = false;
+                        {
+                            std::lock_guard lk(s.mu);
+                            if (const texcache::Loc* q = s.ix.find(key)) l = *q, seq = s.ix.seq[l.gen], on = true;
+                        }
+                        if (on) {
+                            const int r = s.sink ? s.sink(key, l.size, [&](uint8_t* out) { return read_blocks(s, l, seq, out); }) : 0;
+                            if (r == 0) { full = true; break; }
+                            if (r < 0) s.st_bad++;
+                            else s.st_map_read++, s.st_map_read_bytes += l.size;
+                        }
+                    }
+                    done++;
+                }
+                std::lock_guard lk(s.mu);
+                if (gen != s.mr_gen) continue;   // (another map meanwhile: its list from its start)
+                s.mr_pos += done;
+                if (full) {
+                    s.mr_paused = true;   // (took() goes on once textures took blocks)
+                    s.st_map_full++;
+                    break;
+                }
+            }
+            s.st_read_ms += ms_since(t0);
+            continue;
+        }
+        if (j.kind == 5) {   // the maps' lists to their file (whole, through a temporary one)
+            std::error_code ec;
+            std::filesystem::create_directories(s.maps_path.parent_path(), ec);
+            std::filesystem::path tmp = s.maps_path;
+            tmp += ".tmp";
+            {
+                std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
+                f.write((const char*)j.blob.data(), (std::streamsize)j.blob.size());
+            }
+            std::filesystem::rename(tmp, s.maps_path, ec);
+            continue;
         }
         if (j.kind == 2) {   // read ahead at normal priority: a zone is loading and its textures are wanted now
             if (bg) background(false), bg = false;
@@ -296,6 +381,7 @@ inline bool start(uint64_t encoder, const std::filesystem::path& game_dir) {
         s.write_cap = env_mb("RX_VK_BC_DISK_WRITE_MB", 256, 16);
         s.path[0] = dir / "hookshot_texcache_a.pack";
         s.path[1] = dir / "hookshot_texcache_b.pack";
+        s.maps_path = dir / "hookshot_texcache_maps.bin";
         std::thread(run, &s).detach();
         ok = true;
     });
@@ -356,7 +442,7 @@ inline bool probe(uint64_t key, uint32_t size) {
             return false;
         }
         s.st_probe_found++;
-        ask = s.ap.next(l->order, ahead_count(), from, count);
+        ask = s.mr_map < 0 && s.ap.next(l->order, ahead_count(), from, count);
     }
     if (ask) {
         {
@@ -396,20 +482,80 @@ inline bool want_now(uint64_t key, uint32_t size) {
 inline void took(uint64_t key, uint32_t size) {
     Store& s = store();
     s.st_hits++, s.st_hit_bytes += size;
-    bool forward = false, ask = false;
+    bool forward = false, ask = false, resume = false;
     uint32_t from = 0, count = 0;
     {
         std::lock_guard lk(s.mu);
         const texcache::Loc* l = s.ix.find(key);
         if (!l) return;
         if (l->gen != s.ix.cur && s.queued.insert(key).second) forward = true;
-        ask = s.ap.next(l->order, ahead_count(), from, count);
+        ask = s.mr_map < 0 && s.ap.next(l->order, ahead_count(), from, count);
+        if (s.mr_paused) s.mr_paused = false, resume = true;
     }
-    if (!forward && !ask) return;
+    if (!forward && !ask && !resume) return;
     {
         std::lock_guard lk(s.wq_mu);
         if (forward) s.wq.push_back({1, key, nullptr, 0, {}, 0, 0});
         if (ask) s.aq.push_back({2, 0, nullptr, 0, {}, from, count});
+        if (resume) s.aq.push_front({4, 0, nullptr, 0, {}, 0, 0});
+    }
+    s.wq_cv.notify_one();
+}
+
+/// (render thread, every few presents) the host's map name ("" before a save is loaded): on a change, the keys appended to the old
+/// map in the last 3 s go to the new one, and the new map's list is read before anything else
+inline void set_map(const char* name) {
+    Store& s = store();
+    if (!name || !*name) return;
+    std::vector<uint8_t> blob;
+    {
+        std::lock_guard lk(s.mu);
+        if (s.map_name == name) return;
+        s.map_name = name;
+        if (!s.ready.load(std::memory_order_acquire)) return;   // (the scan enters it when it ends)
+        const int old = s.map_cur;
+        s.map_cur = s.ml.enter(name);
+        std::vector<uint64_t> moved;
+        const int64_t now = (int64_t)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+        for (const auto& [t, key] : s.recent)
+            if (now - t <= 3000) moved.push_back(key);
+        s.recent.clear();
+        s.ml.move(old, s.map_cur, moved);
+        s.mr_map = s.map_cur, s.mr_pos = 0, s.mr_paused = false, s.mr_gen++;
+        s.st_map_changes++;
+        if (s.ml_dirty) blob = s.ml.save(s.encoder), s.ml_dirty = false;
+    }
+    {
+        std::lock_guard lk(s.wq_mu);
+        s.aq.push_front({4, 0, nullptr, 0, {}, 0, 0});
+        if (!blob.empty()) s.wq.push_back({5, 0, nullptr, 0, {}, 0, 0, std::move(blob)});
+    }
+    s.wq_cv.notify_one();
+}
+/// (render thread) a texture of key wanted on the map now: appended to its list when new there
+inline void use(uint64_t key) {
+    Store& s = store();
+    if (!s.ready.load(std::memory_order_acquire)) return;
+    std::lock_guard lk(s.mu);
+    if (s.map_cur < 0 || !s.ml.note(s.map_cur, key)) return;
+    s.ml_dirty = true, s.st_map_listed++;
+    const int64_t now = (int64_t)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+    s.recent.emplace_back(now, key);
+    while (!s.recent.empty() && now - s.recent.front().first > 3000) s.recent.pop_front();
+}
+/// (render thread, now and then) the maps' lists saved when they changed
+inline void save_maps() {
+    Store& s = store();
+    if (!s.ready.load(std::memory_order_acquire)) return;
+    std::vector<uint8_t> blob;
+    {
+        std::lock_guard lk(s.mu);
+        if (!s.ml_dirty) return;
+        blob = s.ml.save(s.encoder), s.ml_dirty = false;
+    }
+    {
+        std::lock_guard lk(s.wq_mu);
+        s.wq.push_back({5, 0, nullptr, 0, {}, 0, 0, std::move(blob)});
     }
     s.wq_cv.notify_one();
 }
