@@ -10,6 +10,13 @@
   immediate-give-back reference. Laptop list 1 (Vega 8, Hyrule Field, E:\OOT\scratch-amd2\A1): all six arms clean, old rule included
   (11 given back), so the old device loss is neither explained nor reproduced.
 - Stress hook RX_VK_RETIRE_STRESS (commit 4d967c418, build amd2b queued) and laptop list 2 for hundreds of give-backs.
+- 25 Nov: laptop list 2 (stress, RX_VK_RETIRE_STRESS=30, E:\OOT\scratch-amd2\A2): arm 1 (keep) reproduces issue 131 on an AMD
+  driver (180 "not imported", 414 retired imports = 6711 MB, draws left out); arms 2-5 (the bound) ~1000 retirements and ~1000
+  give-backs, retired left 32-673 MB, no refusal, no device lost; the old rule (arm 6) survived too. The refusal safety net
+  (`retired_emergency_free`) was not exercised there (explicit KEEP_RETIRED=1 turns it off; the bound prevented refusals); test
+  switch RX_VK_IMPORT_REFUSE_MB (commit b2b74712b) and list-laptop-3.txt exercise it. Not run on the main PC: no build place
+  (amd2c withdrawn, the integration build carries it).
+- Test hooks, off by default: RX_VK_RETIRE_STRESS, RX_VK_RETIRE_STRESS_N, RX_VK_IMPORT_REFUSE_MB.
 - NOT known: why the RX 6750 XT lost the device with PR 85's give-back. Nothing here can show it without an AMD machine; the new
   switches let the laptop tell which of the candidate causes it is.
 
