@@ -116,9 +116,13 @@ const char* rb_thread_label() {
 // ---- (stream R3) RX_VK_WAIT_LOG=1: every wait of a thread inside the renderer, by site and thread, a line every 300 presents ----
 // (the pipeline question: does a game thread ever wait on the slot ring (uploads), a mirror sync, a capture's write-back or the replay's
 // lock, and for how long. Sites nest: a readback's wait_value sits inside its wait_recorded; each is its own total. Logging only)
-enum WaitSite { WS_SLOT, WS_VALUE, WS_RECORDED, WS_LOCK_SUBMIT, WS_LOCK_PRESENT, WS_DRAIN, WS_TICKET, WS_CAPTURE_WB, WS_CAPTURE_COPY, WS_COUNT };
+enum WaitSite { WS_SLOT, WS_VALUE, WS_RECORDED, WS_LOCK_SUBMIT, WS_LOCK_PRESENT, WS_DRAIN, WS_TICKET, WS_CAPTURE_WB, WS_CAPTURE_COPY,
+                WS_OT_DONE, WS_OT_SLOT, WS_OT_IDLE, WS_OT_JOB, WS_JOIN, WS_SIGNAL_LOCK, WS_LATE_FIX, WS_COUNT };
 const char* const kWaitSite[WS_COUNT] = {"slot ring (recording_wait)", "wait_value", "wait_recorded", "replay lock (submit)", "replay lock (present)",
-                                         "present drain", "readback ticket", "capture's write-back wait", "capture copy (not a wait)"};
+                                         "present drain", "readback ticket", "capture's write-back wait", "capture copy (not a wait)",
+                                         "the order thread's done marks", "a present slot (RX_VK_ORDER_AHEAD)", "order thread: idle",
+                                         "order thread: a job", "a group's segments (join)", "submit_order_mu (CPU signal or present)",
+                                         "a late fix (TICK-060)"};
 struct WaitAgg { int64_t n = 0, slow = 0, ns = 0, max = 0; };
 bool wait_log_on() {
     static const bool v = getenv("RX_VK_WAIT_LOG") != nullptr;
@@ -128,11 +132,41 @@ std::mutex wl_mu;
 std::map<std::pair<std::string, int>, WaitAgg> wl_agg;
 int64_t wl_from = 0, wl_next = 0;
 void wait_note(int site, int64_t ns);
+// (DECOUPLE) where each thread is among these sites now, for the order thread's stall watch (ot_watch): a slot a thread, the innermost
+// site and since when. Always kept (two relaxed stores a scope); read only when a stall is logged
+struct WhereSlot {
+    std::atomic<int> site{-1};
+    std::atomic<int64_t> since{0};
+    std::atomic<uint32_t> tid{0};
+};
+constexpr int kWhereSlots = 96;
+WhereSlot where_slots[kWhereSlots];
+std::atomic<int> where_n{0};
+thread_local int tl_where = -1;
 struct WaitScope {
     int site;
     int64_t t0 = 0;
-    explicit WaitScope(int s) : site(s) { if (wait_log_on()) t0 = std::chrono::steady_clock::now().time_since_epoch().count(); }
-    ~WaitScope() { if (t0) wait_note(site, std::chrono::steady_clock::now().time_since_epoch().count() - t0); }
+    WhereSlot* w = nullptr;
+    int prev_site = -1;
+    int64_t prev_since = 0;
+    explicit WaitScope(int s) : site(s) {
+        const int64_t now = std::chrono::steady_clock::now().time_since_epoch().count();
+        if (wait_log_on()) t0 = now;
+        if (tl_where < 0) {
+            tl_where = where_n.fetch_add(1, std::memory_order_relaxed);
+            if (tl_where < kWhereSlots) where_slots[tl_where].tid.store((uint32_t)GetCurrentThreadId(), std::memory_order_relaxed);
+        }
+        if (tl_where >= kWhereSlots) return;
+        w = &where_slots[tl_where];
+        prev_site = w->site.load(std::memory_order_relaxed), prev_since = w->since.load(std::memory_order_relaxed);
+        w->since.store(now, std::memory_order_relaxed), w->site.store(s, std::memory_order_release);
+    }
+    ~WaitScope() {
+        if (t0) wait_note(site, std::chrono::steady_clock::now().time_since_epoch().count() - t0);
+        if (w) w->site.store(prev_site, std::memory_order_release), w->since.store(prev_since, std::memory_order_relaxed);
+    }
+    WaitScope(const WaitScope&) = delete;
+    WaitScope& operator=(const WaitScope&) = delete;
 };
 void wait_note(int site, int64_t ns) {
     std::lock_guard lk(wl_mu);
@@ -652,6 +686,7 @@ void vk_timeline_wait_sent(uint64_t v) {
 // Thread's submits; a poll of the main thread's waited 7.5 ms under it in the first try). A poll does not wait at all
 thread_local bool tl_poll = false;
 bool late_fix_wait_unlocked() {
+    WaitScope wait_scope(WS_LATE_FIX);   // (DECOUPLE: the stall watch's site)
     for (uint64_t lv; (lv = memory_late_fix_pending()) && completed() < lv;) {
         if (tl_poll) return false;   // (a poll: what is held is not done anyway; the fix thread sends it)
         const auto t0 = std::chrono::steady_clock::now();
@@ -4030,6 +4065,7 @@ void early_join(EarlyGroup& G) {
         {
             const int64_t w0 = now_ns();
             jt_mark(9, (uint64_t)j->index);
+            WaitScope wait_scope(WS_JOIN);   // (DECOUPLE: the stall watch's site)
             spin_before_sleep([j] { return j->done.load(std::memory_order_acquire); });   // (stream ORDER3, RX_VK_POOL_SPIN)
             std::unique_lock l(G.seg_mu);
             G.seg_cv.wait(l, [j] { return j->done.load(); });
@@ -8819,6 +8855,9 @@ uint64_t ot_seq_pushed = 0;            // (ot_mu)
 int ot_presents = 0;                   // (handed over, not yet shown: ot_mu)
 int ot_waiters = 0;                    // (threads in ot_done_cv: ot_mu)
 std::atomic<uint64_t> ot_seq_done{0}, ot_value_done{0};
+std::atomic<int64_t> ot_last_present_push{0};   // (DECOUPLE: when the game last handed a present over, for the stall watch)
+std::atomic<int> ot_cur_kind{-1};          // (DECOUPLE: the job the order thread is on, for its stall watch)
+std::atomic<uint64_t> ot_cur_value{0};
 submit_seq::DoneHold ot_hold;   // (DECOUPLE, ot_mu: the done marks held while a submission's end is pending, RX_VK_SUB_OVERLAP)
 void ot_publish_locked() {      // (ot_mu)
     if (ot_hold.pub_value > ot_value_done.load(std::memory_order_relaxed)) ot_value_done.store(ot_hold.pub_value, std::memory_order_release);
@@ -8887,6 +8926,7 @@ bool ot_stopped_before(uint64_t value) {   // (sync_order_mu held)
 bool ot_present_run(Job& j, bool force) {
     perf_parts::Scope perf_entry(perf_parts::t_render);
     if (!force && signal_capture_on()) {   // (the CPU's signal this frame's stopped work waits for, made by the main thread: FIF's rule)
+        WaitScope wait_scope(WS_SIGNAL_LOCK);
         std::lock_guard lk(submit_order_mu);
         if (cpu_wait_open(j.value)) return false;
     }
@@ -8980,11 +9020,13 @@ void ot_main() {
             if (!holding) {
                 if (ot_jobs.empty()) {
                     const int64_t t0 = ot_now();
+                    WaitScope wait_scope(WS_OT_IDLE);
                     ot_cv.wait(lk, [] { return !ot_jobs.empty(); });
                     ot_idle_ns += ot_now() - t0;
                 }
             } else if (ot_jobs.empty()) {   // (a short wait: the CPU's signal comes by no job)
                 const int64_t t0 = ot_now();
+                WaitScope wait_scope(WS_OT_IDLE);
                 ot_cv.wait_for(lk, std::chrono::milliseconds(1), [] { return !ot_jobs.empty(); });
                 ot_idle_ns += ot_now() - t0;
             }
@@ -9002,6 +9044,9 @@ void ot_main() {
                 }
             }
         }
+        WaitScope job_scope(WS_OT_JOB);   // (DECOUPLE: the stall watch's site; the waits inside it nest)
+        if (got) ot_cur_kind.store((int)j.kind, std::memory_order_relaxed), ot_cur_value.store(j.value, std::memory_order_relaxed);
+        else if (holding) ot_cur_kind.store(-2, std::memory_order_relaxed), ot_cur_value.store(held.value, std::memory_order_relaxed);
         if (got && j.kind == JOB_PRESENT) {
             if (ot_present_run(j, ms == 0)) {
                 finish(j);
@@ -9034,6 +9079,62 @@ void ot_main() {
     }
 }
 uint64_t ot_progress() { return ot_seq_done.load(std::memory_order_acquire); }
+/// (DECOUPLE) the order thread's stall watch: when its done mark has not moved for 3 s with jobs handed over and not done (a load that never
+/// ends: PC 3050 matrix82 kO1 and mO3, presents stopped 4 s after "play: began"), a line says which job it is on and where every thread that
+/// passed one of the renderer's wait sites is now, with how long (WaitScope's table), then again every 10 s while it lasts (40 lines at most)
+std::string thread_name_of(uint32_t tid) {
+    std::string name;
+    if (HANDLE h = OpenThread(THREAD_QUERY_LIMITED_INFORMATION, FALSE, tid)) {
+        PWSTR d = nullptr;
+        if (SUCCEEDED(GetThreadDescription(h, &d)) && d) {
+            char b[128];
+            const int n = WideCharToMultiByte(CP_UTF8, 0, d, -1, b, sizeof b, nullptr, nullptr);
+            if (n > 1) name.assign(b, (size_t)n - 1);
+            LocalFree(d);
+        }
+        CloseHandle(h);
+    }
+    return name.empty() ? "thread " + std::to_string(tid) : name;
+}
+void ot_watch() {
+    SetThreadDescription(GetCurrentThread(), L"mkw_vk order watch");
+    uint64_t last_done = 0;
+    int64_t last_move = ot_now(), last_log = 0;
+    int logged = 0;
+    for (;;) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        const uint64_t done = ot_seq_done.load(std::memory_order_acquire);
+        uint64_t pushed;
+        size_t queued;
+        int presents, waiters;
+        {
+            std::lock_guard lk(ot_mu);
+            pushed = ot_seq_pushed, queued = ot_jobs.size(), presents = ot_presents, waiters = ot_waiters;
+        }
+        const int64_t now = ot_now();
+        const int64_t lp = ot_last_present_push.load(std::memory_order_relaxed);
+        const bool no_present = lp && now - lp > 5000000000ll;   // (the game handed no present over for 5 s: stuck before the renderer, or in it)
+        if (done != last_done || done >= pushed) last_done = done, last_move = now;
+        const bool stalled = now - last_move >= 3000000000ll;
+        if ((!stalled && !no_present) || now - last_log < 10000000000ll || logged >= 40) continue;
+        last_log = now, logged++;
+        std::string where;
+        const int n = std::min(where_n.load(std::memory_order_relaxed), kWhereSlots);
+        for (int k = 0; k < n; k++) {
+            const int site = where_slots[k].site.load(std::memory_order_acquire);
+            if (site < 0 || site >= WS_COUNT) continue;
+            const double for_s = (now - where_slots[k].since.load(std::memory_order_relaxed)) / 1e9;
+            char b[256];
+            snprintf(b, sizeof b, " %s: %s %.1f s;", thread_name_of(where_slots[k].tid.load(std::memory_order_relaxed)).c_str(), kWaitSite[site], for_s);
+            where += b;
+        }
+        logf("vk: order thread watch: %s; done mark still %.1f s: job %llu not done (%llu handed over, %zu queued; on job kind %d value %llu, -2: a held present), "
+             "presents handed over and not shown %d, threads waiting for it %d, its done value %llu, holding %d, stopped queues %d; where:%s",
+             no_present ? "no present handed over for 5 s or more" : "its done mark stopped", (now - last_move) / 1e9, (unsigned long long)(done + 1), (unsigned long long)pushed, queued, ot_cur_kind.load(),
+             (unsigned long long)ot_cur_value.load(), presents, waiters, (unsigned long long)ot_value_done.load(), (int)ot_holding.load(),
+             (int)blocked_n.load(), where.empty() ? " none" : where.c_str());
+    }
+}
 bool ot_pending() {
     if (ot_holding.load(std::memory_order_acquire)) return true;
     std::lock_guard lk(ot_mu);
@@ -9044,6 +9145,7 @@ void ot_push(Job&& j) {
     static std::once_flag once;
     std::call_once(once, [] {
         std::thread(ot_main).detach();
+        std::thread(ot_watch).detach();   // (DECOUPLE: a stall logged, never acted on)
         logf("vk: the replay runs on an order thread, the submitting threads return after the capture (RX_VK_ORDER_THREAD=1; "
              "%d presents ahead at most)", ot_ahead());
     });
@@ -9052,7 +9154,7 @@ void ot_push(Job&& j) {
         std::lock_guard lk(ot_mu);
         j.seq = ++ot_seq_pushed;
         if (j.kind == JOB_SUBMIT) ot_my_seq = j.seq;   // (its submits: what it replayed itself inline; registrations never waited)
-        if (j.kind == JOB_PRESENT) ot_presents++;
+        if (j.kind == JOB_PRESENT) ot_presents++, ot_last_present_push.store(ot_now(), std::memory_order_relaxed);
         ot_jobs.push_back(std::move(j));
     }
     ot_cv.notify_one();
@@ -9063,6 +9165,7 @@ bool ot_wait_until(P pred, uint64_t timeout_ns) {
     std::unique_lock lk(ot_mu);
     ot_waiters++;
     bool ok = true;
+    WaitScope wait_scope(WS_OT_DONE);   // (DECOUPLE: the stall watch's site)
     if (timeout_ns >= (1ull << 50)) ot_done_cv.wait(lk, pred);
     else ok = ot_done_cv.wait_for(lk, std::chrono::nanoseconds((int64_t)timeout_ns), pred);
     ot_waiters--;
@@ -9165,6 +9268,7 @@ void ot_present(const nvn_tex* t, const int crop[4]) {
         if (ot_presents >= ot_ahead()) {
             const int64_t t0 = ot_now();
             ot_waiters++;
+            WaitScope wait_scope(WS_OT_SLOT);   // (DECOUPLE: the stall watch's site)
             ot_done_cv.wait(lk, [] { return ot_presents < ot_ahead(); });
             ot_waiters--;
             ot_note(OT_PRESENT_SLOT, ot_now() - t0, true);

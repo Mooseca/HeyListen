@@ -190,6 +190,13 @@ def main():
          "a submission ended after its handoff leaves its own GPU writes to be synced again (RX_VK_SUB_OVERLAP: 10 MB a submission)")
     need(mem.count("gen_cpu_last = g;") == 3 and "if (!g) g = ++gen_now, gen_cpu_last = g;" in mem,
          "a generation taken for the CPU's writes is not noted (collection, capture's take, lazy flush)")
+    # (the order thread's stall watch: the wait sites keep a per-thread table, the watch reads it when the done mark stops)
+    ws = rp[rp.index("struct WaitScope {"):rp.index("void wait_note(int site, int64_t ns) {")]
+    need("w->since.store(now, std::memory_order_relaxed), w->site.store(s, std::memory_order_release);" in ws and "w->site.store(prev_site" in ws,
+         "a wait site does not note where its thread is, or does not put back the outer one")
+    need("std::thread(ot_watch).detach();" in rp and "vk: order thread watch: %s; done mark still %.1f s" in rp, "the order thread has no stall watch")
+    for site in ("WS_OT_DONE", "WS_OT_SLOT", "WS_OT_IDLE", "WS_OT_JOB", "WS_JOIN", "WS_SIGNAL_LOCK", "WS_LATE_FIX"):
+        need(rp.count("WaitScope wait_scope(" + site + ")") + rp.count("WaitScope job_scope(" + site + ")") >= 1, site + " is never noted")
     print("PASS the wiring")
 
 
