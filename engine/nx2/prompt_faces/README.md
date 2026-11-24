@@ -9,6 +9,7 @@ what it is made from, or draw it by hand and put it here.
 | Image | What it is | Made from |
 | --- | --- | --- |
 | `OcarinaButton<A B X Y L R>_00.<pad input>.png` | the ocarina's notes: the note of that Switch button when it is on that pad input | the face's icon for the pad input (`icons` in `nx2/prompt_faces.py`, a glyph of the face's Kenney font) |
+| `OcarinaButton<A B X Y L R>_00.key<code>.png` (the keyboard face) | the ocarina's notes: the note of that Switch button when it is on that key (`<code>`: the key's Windows virtual-key code in hex) | the key's icon in the face's font (`nx2/prompt_keys.py`), the key with its name cut out; the Switch's textures stay for a key with none |
 | `KeyTexFont<A B X Y>_00.<pad input>.png` | the white letters on black (the Talk ring's small buttons) | the icon's letter (its holes), or its shape when it has none |
 | `Controller_Pro.png` | the controller in the pause menu's controls page (System) | the face's `drawing` in `nx2/prompt_faces.py`, drawn by `nx2/prompt_draw.py` |
 | `Controller_Pro1.png`, `ControllerSh_Pro1.png` | the page's tinted copy of the controller, and its shadow | `Controller_Pro.png` (yours if you made one) |

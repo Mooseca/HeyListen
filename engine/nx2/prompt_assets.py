@@ -534,6 +534,13 @@ def keyboard_layers(tex, font):
             im.paste(Image.new("RGBA", icon.size, (255, 255, 255, 255)), o, shape)
             im.paste(Image.new("RGBA", icon.size, (0, 0, 0, 255)), o, holes)
             layers.append(Layer(f"{name}.key{k:02x}.png", name, SW[sw], k, im))
+    for layer in layers:   # (a hand-made image in nx2/prompt_faces/keyboard/ takes a layer's place, as for the other faces)
+        hand = override("keyboard", layer.name)
+        if hand:
+            im = Image.open(hand).convert(layer.im.mode)
+            if im.size != layer.im.size:
+                raise SystemExit(f"prompts: {hand} is {im.size[0]}x{im.size[1]}, the texture {layer.im.size[0]}x{layer.im.size[1]}")
+            layer.im = im
     return layers
 
 
