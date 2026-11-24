@@ -222,7 +222,7 @@ classes measured so far differ by device class, not by a few percent.
 
 ## State
 
-- 2026-11-24 21:05: perf/texcache commits c189dafe9 (texcache1), 5d8066c3c (2), a45465f05 (3), d7abeb700 (4: map lists, pool by RAM,
+- 2026-11-24 20:59: perf/texcache commits c189dafe9 (texcache1), 5d8066c3c (2), a45465f05 (3), d7abeb700 (4: map lists, pool by RAM,
   writes at normal IO priority), 63fc1fe6f (5: the first map's list read; pool by total RAM), plus notes. Whole suite on 63fc1fe6f:
   511 passed, the 3 known failures. Build texcache5 queued (behind VAR1's speed lease); texcache4 built and measured.
 - Lists for texcache5: `E:\OOT\scratch-texcache\list-3050-3.txt` (replaces list 2) and `list-laptop-3.txt` (list 3 ran on
