@@ -83,6 +83,16 @@ PIPE4 (lease name `pipe4`, scratch `E:\OOT\scratch-pipe4`, scripts `build/s5/pip
   without knowing that the work setting the event may be among the submissions handed over to the order thread and not replayed yet.
   Fix `pipe4b`: the watch does not force while the order thread has jobs queued (`RX_VK_ORDER_WATCH_PENDING=1`: as before). Built
   with the tests, then tours on / off / on (`p4t2-on`, `p4t2-off`, `p4t3-on`): `E:\OOT\scratch-pipe4\tmp\s2.log`.
+- pipe4b (tests 504 passed / the 3 known failures): **4 and 9 flashes on, 0 off** (`p4t2-on`, `p4t3-on`, `p4t2-off`, slot a
+  09:36-09:46, all reached Zora's River). The watch fix was not it (8 forces spared in one run). What ties: every flash sits at a
+  present that forced 14 waits (`wait gone past (a present, ...)`, events `0x100d6c80xx` 19 values short) and/or let go of the CPU's
+  signal after 200 ms: flashes 6358/6362/6520/6523 against forced presents 6357-6363 and 6512-6522 and let-go 6361/6365/6523
+  (`p4t2-on`); flashes 5712-5716 and 5936-5940 against let-go 5715/5939 and forced 5933-5942 (`p4t3-on`); the off arm 0 forced by a
+  present. **The dark frames are the order thread's present forcing the lit passes past their waits** while the work that sets
+  their events was still behind the present in the job queue (the game slow to hand the frame over: the zone's loading frames).
+- Fix `7ed2ea569` (pipe4c): the present is held, up to `RX_VK_ORDER_SIGNAL_MS` (200), until the signal has come and no queue is
+  stopped before it, the order thread running the jobs behind it meanwhile (up to the next present, which forces the held one);
+  the time watch does not force while one is held. Tours on / off / on: `p4t4-on`, `p4t4-off`, `p4t5-on` (`s3.log`).
 
 Where it stands: the three tasks of the brief are done and measured. (1) The present thread works and is safe, but **the gate that
 keeps the GPU's order takes the present's serial part back into the chain** (Kokiri 0.47-0.51 ms a frame, chain 7.76 against 7.79):
