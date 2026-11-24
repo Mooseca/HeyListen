@@ -196,6 +196,25 @@ int main() {
         for (uint32_t i = 0; i < MapLists::kMaxKeys + 10; i++) kept += many.note(0, i + 1) ? 1 : 0;
         expect(kept == (int)MapLists::kMaxKeys, "a list holds at most kMaxKeys");
     }
+    // who gets it by default, the pool by RAM, the disk's last GB
+    {
+        const char* why = nullptr;
+        const uint64_t GB = 1ull << 30;
+        expect(on_by_default(true, true, 512ull << 20, &why) && why, "an integrated GPU that transcodes ASTC (the Vega 8 laptop): on");
+        expect(!on_by_default(true, false, 512ull << 20, &why), "an integrated GPU that decodes ASTC on the CPU (890M): off, no BC blocks");
+        expect(on_by_default(false, true, 8 * GB, &why), "a discrete 8 GB card (RTX 3050): on");
+        expect(on_by_default(false, true, 10 * GB - 1, &why), "just under 10 GB: on");
+        expect(!on_by_default(false, true, 10 * GB, &why), "10 GB: off");
+        expect(!on_by_default(false, true, 12 * GB, &why), "a discrete 12 GB card (RTX 5070): off");
+        expect(!on_by_default(false, true, 0, &why), "VRAM not known: off");
+        expect(pool_mb_for_ram(32 * GB) == 1024 && pool_mb_for_ram(24 * GB) == 1024, "24 GB of RAM and more: 1024 MB");
+        expect(pool_mb_for_ram(16 * GB) == 512 && pool_mb_for_ram(15 * GB) == 512, "the 16 GB PCs and the 15 GB laptop: 512 MB");
+        expect(pool_mb_for_ram(8 * GB) == 256, "8 GB: 256 MB");
+        expect(room_to_write(5 * GB, 100 << 20), "5 GB free: a record is written");
+        expect(!room_to_write(GB + (50 << 20), 100 << 20), "it would eat into the last GB: not written");
+        expect(!room_to_write(GB / 2, 1), "under 1 GB free: nothing written");
+        expect(room_to_write(GB + 200, 200) && !room_to_write(GB + 199, 200), "the floor is exact");
+    }
     if (failures) return 1;
     std::printf("texcache_pack: ok\n");
     return 0;

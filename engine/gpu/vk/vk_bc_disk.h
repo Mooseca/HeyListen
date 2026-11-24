@@ -36,9 +36,10 @@
 
 namespace mkwvk::bcdisk {
 
-// (TEXCACHE) RX_VK_BC_DISK=1 (0 by default): the BC blocks of transcoded ASTC textures kept on disk between sessions (texcache_pack.h), read ahead off the render thread
-inline bool enabled() {
-    static const bool v = getenv("RX_VK_BC_DISK") && atoi(getenv("RX_VK_BC_DISK")) != 0;
+// (TEXCACHE) RX_VK_BC_DISK=1 / 0 (unset: on for integrated GPUs that transcode ASTC and discrete cards under 10 GB of VRAM, texcache_pack.h on_by_default): the BC blocks of transcoded ASTC textures kept on disk between sessions, read ahead off the render thread
+/// -1: RX_VK_BC_DISK unset (the device decides), else 0 or 1
+inline int env_choice() {
+    static const int v = getenv("RX_VK_BC_DISK") && *getenv("RX_VK_BC_DISK") ? (atoi(getenv("RX_VK_BC_DISK")) != 0) : -1;
     return v;
 }
 inline uint64_t env_mb(const char* name, int def, int floor) {
@@ -70,6 +71,8 @@ struct Store {
     std::atomic<int64_t> st_bad{0}, st_ahead{0}, st_ahead_bytes{0}, st_ahead_full{0}, st_forward{0}, st_rotations{0};
     std::atomic<int64_t> st_write_skipped{0}, st_scan_ms{0}, st_stale_deleted{0}, st_read_ms{0}, st_write_ms{0};
     std::atomic<int64_t> write_pending{0};   // bytes handed to the writer and not yet written
+    std::atomic<bool> write_off{false};     // writes stopped for this session (an IO error, or the disk's last GB): reads go on
+    std::atomic<const char*> write_off_why{nullptr};
     uint64_t write_cap = 0;
     // the thread's work
     std::mutex wq_mu;
@@ -187,13 +190,26 @@ inline bool append(Store& s, uint64_t key, const uint8_t* data, uint32_t size) {
         gen = s.ix.cur, at = s.ix.append_at(), seq = s.ix.seq[gen];
     }
     // (the file work with s.mu released: the render thread's lookups never wait for the disk)
+    {   // (never the disk's last GB: past it, no more writes this session)
+        std::error_code ec;
+        const std::filesystem::space_info sp = std::filesystem::space(s.path[gen].parent_path(), ec);
+        if (!ec && !texcache::room_to_write(sp.available, (uint64_t)size + sizeof(texcache::RecHeader) + sizeof(texcache::FileHeader))) {
+            s.write_off_why = "less than 1 GB free on its disk";
+            s.write_off = true;
+            return false;
+        }
+    }
     if (s.wr_gen != gen) {
         s.wr.close();
         std::error_code ec;
         std::filesystem::create_directories(s.path[gen].parent_path(), ec);
         const bool fresh = at == sizeof(texcache::FileHeader);
         s.wr.open(s.path[gen], std::ios::binary | std::ios::in | std::ios::out | (fresh ? std::ios::trunc : std::ios::openmode{}));
-        if (!s.wr) return false;
+        if (!s.wr) {   // (a read-only folder, a locked file: no writes this session, the cache still read)
+            s.write_off_why = "its folder could not be written";
+            s.write_off = true;
+            return false;
+        }
         s.wr_gen = gen;
         if (fresh) {
             const texcache::FileHeader h = texcache::make_header(s.encoder, seq);
@@ -205,8 +221,10 @@ inline bool append(Store& s, uint64_t key, const uint8_t* data, uint32_t size) {
     s.wr.write((const char*)&r, sizeof r);
     s.wr.write((const char*)data, size);
     s.wr.flush();
-    if (!s.wr) {
+    if (!s.wr) {   // (a write error, a full disk: the record's tail is cut at the next scan; no writes this session)
         s.wr.close(), s.wr_gen = -1;
+        s.write_off_why = "a write failed";
+        s.write_off = true;
         return false;
     }
     std::lock_guard lk(s.mu);
@@ -378,7 +396,6 @@ inline bool start(uint64_t encoder, const std::filesystem::path& game_dir) {
     static std::once_flag once;
     static bool ok = false;
     std::call_once(once, [&] {
-        if (!enabled()) return;
         Store& s = store();
         std::filesystem::path dir = game_dir;
         // (TEXCACHE) RX_VK_BC_DISK_DIR=<folder> (the game folder by default): where the two pack files of the BC disk cache live (made at runtime from your own game: never share or ship them)
@@ -387,8 +404,10 @@ inline bool start(uint64_t encoder, const std::filesystem::path& game_dir) {
             dir = std::filesystem::path(std::u8string(v.begin(), v.end()));
         }
         s.encoder = encoder;
-        // (TEXCACHE) RX_VK_BC_DISK_MB=<MB> (8192 by default; a 6-warp tour wrote 2 GB cold): the BC disk cache's size, both packs; the older half goes when the newer one is full (what was used again is copied forward first)
-        s.ix.cap = env_mb("RX_VK_BC_DISK_MB", 8192, 64);
+        // (TEXCACHE) RX_VK_BC_DISK_MB=<MB> (4096 by default): the BC disk cache's size on disk, both packs: a rolling window of the
+        // zones last played (a 6-zone tour wrote 2 GB, 150 s of Hyrule Field 0.75-0.85 GB); the older half goes when the newer one is
+        // full, what was used again copied forward first. Its folder also keeps 1 GB free at least
+        s.ix.cap = env_mb("RX_VK_BC_DISK_MB", 4096, 64);
         // (TEXCACHE) RX_VK_BC_DISK_WRITE_MB=<MB> (256 by default): blocks waiting for the BC disk cache's writer at most; transcodes past it are not written
         s.write_cap = env_mb("RX_VK_BC_DISK_WRITE_MB", 256, 16);
         s.path[0] = dir / "hookshot_texcache_a.pack";
@@ -404,7 +423,7 @@ inline bool start(uint64_t encoder, const std::filesystem::path& game_dir) {
 /// writer's backlog has room. True reserves the room: submit() or unreserve() follows
 inline bool wants(uint64_t key, uint32_t size) {
     Store& s = store();
-    if (!s.ready.load(std::memory_order_acquire)) return false;
+    if (!s.ready.load(std::memory_order_acquire) || s.write_off.load(std::memory_order_relaxed)) return false;
     if (s.write_pending.load(std::memory_order_relaxed) + size > (int64_t)s.write_cap) {
         s.st_write_skipped++;
         return false;

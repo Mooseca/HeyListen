@@ -294,6 +294,32 @@ struct MapLists {
     }
 };
 
+/// Who gets the disk cache when RX_VK_BC_DISK is not set (the owner's decision, 24 Nov, from the measures in
+/// docs/research/texcache-disk.md): integrated GPUs that transcode ASTC on the GPU (a Vega 8 laptop: +30% and more while the camera
+/// turns), and discrete cards with less than 10 GB of VRAM (an RTX 3050 8 GB: +2 to +6%, every warm run above every off one). Not
+/// cards with 10 GB and more (an RTX 5070 12 GB: no gain, the transcode is about 1 ms of GPU a frame there), not the chips that
+/// decode ASTC on the CPU (they make no BC blocks to keep). Returns the reason for the log line too
+inline bool on_by_default(bool integrated, bool astc_on_gpu, uint64_t vram_bytes, const char** why) {
+    const char* w;
+    bool on;
+    if (!astc_on_gpu) on = false, w = "ASTC is decoded on the CPU here: no BC blocks to keep";
+    else if (integrated) on = true, w = "an integrated GPU that transcodes ASTC";
+    else if (vram_bytes && vram_bytes < (10ull << 30)) on = true, w = "a discrete GPU with less than 10 GB of VRAM";
+    else on = false, w = "a discrete GPU with 10 GB of VRAM or more: nothing to gain";
+    if (why) *why = w;
+    return on;
+}
+/// The read-ahead pool by the machine's RAM: 1024 MB with 24 GB or more, 512 with 14 GB (the 16 GB PCs: on the 15 GB laptop 512
+/// served 87% of the on-disk textures and 1024 89%, the turning fps within the runs' noise, and the game's working set is already
+/// 8.4-11.8 GB), 256 below
+inline uint32_t pool_mb_for_ram(uint64_t total_bytes) {
+    return total_bytes >= (24ull << 30) ? 1024 : total_bytes >= (14ull << 30) ? 512 : 256;
+}
+/// A record of `size` bytes may be written while the disk keeps at least `floor` free after it (never the last GB of a disk)
+inline bool room_to_write(uint64_t available, uint64_t size, uint64_t floor = 1ull << 30) {
+    return available >= floor && available - floor >= size;
+}
+
 /// The encoder version a pack is written for: the shaders' hash (the caller folds the SPIR-V) with the key layout's revision
 /// and the format; a change of any of them starts empty packs
 constexpr uint32_t kKeyRev = 1;   // (bumped by hand when the key's layout or the blocks' meaning changes without the shaders)

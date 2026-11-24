@@ -29,6 +29,10 @@ def check_source():
         (disk, "s.write_pending.load(std::memory_order_relaxed) + size > (int64_t)s.write_cap"),
         (disk, "THREAD_MODE_BACKGROUND_BEGIN"),
         (disk, "texcache::header_ok(h, s.encoder)"),
+        (disk, "texcache::room_to_write(sp.available"),       # (never the disk's last GB)
+        (disk, "s.write_off_why = \"its folder could not be written\";"),   # (a read-only folder: writes off, reads on)
+        (tex, "texcache::on_by_default(integrated, astc_ready() && bc_ready(), vram, &why)"),
+        (tex, "env >= 0 ? env == 1 :"),                        # (RX_VK_BC_DISK forces it either way)
     ]
     for src, needle in need:
         if needle not in src:

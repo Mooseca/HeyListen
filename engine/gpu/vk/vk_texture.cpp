@@ -1421,7 +1421,7 @@ uint64_t bcd_encoder() {   // (the shaders that make the blocks, with texcache_p
     return v;
 }
 uint64_t bcd_pool_cap() {
-    // (TEXCACHE) RX_VK_BC_DISK_POOL_MB=<MB> (by default from the machine's RAM: 1024 with 14 GB or more, 512 with 7 GB, else 256):
+    // (TEXCACHE) RX_VK_BC_DISK_POOL_MB=<MB> (by default from the machine's RAM: 1024 with 24 GB or more, 512 with 14 GB, else 256):
     // host memory the BC disk cache's reads ahead may fill before textures take them. Laptop list 2 (15 GB, 10-11 GB free): 1024 served
     // 3502 of 3951 on-disk textures and was never full, 384 served 2732 of 3616, 128 served 718 of 1691. (texcache4 asked the RAM free
     // at the first read, after the game's own load: 512 on that laptop)
@@ -1430,7 +1430,7 @@ uint64_t bcd_pool_cap() {
 #ifdef _WIN32
         MEMORYSTATUSEX ms{};
         ms.dwLength = sizeof ms;
-        if (GlobalMemoryStatusEx(&ms)) def = ms.ullTotalPhys >= (14ull << 30) ? 1024 : ms.ullTotalPhys >= (7ull << 30) ? 512 : 256;
+        if (GlobalMemoryStatusEx(&ms)) def = (int)texcache::pool_mb_for_ram(ms.ullTotalPhys);
 #else
         def = 512;
 #endif
@@ -1441,9 +1441,21 @@ uint64_t bcd_pool_cap() {
     }();
     return v;
 }
-/// Whether the disk cache is on (its thread and scan begun at the first call: the first ASTC upload)
+/// Whether the disk cache is on (its thread and scan begun at the first call): RX_VK_BC_DISK, or the device's class
+/// (texcache_pack.h on_by_default); one log line says the choice and why
 bool bcd_on() {
-    static const bool v = bcdisk::enabled() && bcdisk::start(bcd_encoder(), game_dir_path());
+    static const bool v = [] {
+        const int env = bcdisk::env_choice();
+        const char* why = "RX_VK_BC_DISK";
+        const bool integrated = dev.props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU;
+        const uint64_t vram = device_vram_bytes();
+        const bool on = env >= 0 ? env == 1 : texcache::on_by_default(integrated, astc_ready() && bc_ready(), vram, &why);
+        const bool started = on && bcdisk::start(bcd_encoder(), game_dir_path());
+        logf("vk: BC disk cache %s (%s%s; %s, %llu MB of VRAM)%s", started ? "on" : "off", env >= 0 ? "" : "by default: ", why,
+             integrated ? "integrated GPU" : "discrete GPU", (unsigned long long)(vram >> 20),
+             started ? ": the transcoded textures are kept in the game folder (hookshot_texcache_*), made on this PC from your game, never to share" : "");
+        return started;
+    }();
     return v;
 }
 /// (the disk thread) a pool buffer filled by fill; 1 put, 0 the pool is full, -1 failed
@@ -5931,6 +5943,14 @@ void texture_frame(uint64_t completed) {
             host->perf_info(name, sizeof name, movie);
             bcdisk::set_map(name);
             if (frame_no % 1800 == 0) bcdisk::save_maps();
+        }
+        if (bcd_on()) {   // (TEXCACHE: writes stopped, said once)
+            static bool told;
+            if (!told && bcdisk::store().write_off.load(std::memory_order_relaxed)) {
+                told = true;
+                const char* w = bcdisk::store().write_off_why.load();
+                logf("vk: BC disk cache: no more writes this session (%s); what is on disk is still read", w ? w : "?");
+            }
         }
         if (bcd_on() && frame_no % 600 == 0) {   // (TEXCACHE)
             bcdisk::Store& d = bcdisk::store();

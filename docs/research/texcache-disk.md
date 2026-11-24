@@ -208,6 +208,26 @@ skips the 10 s decodes but stays RGBA8 and is big (a 1365x1365 x90 array with mi
 the background, written for the next visit, and the image made BC when the disk has its blocks: keeps BC (a quarter of RGBA8),
 no GPU burst; needs a CPU BC1/BC7 encoder and a format choice at creation that asks the disk index.
 
+## The default (decided 24 Nov, texcache6)
+
+PC 3050 list 3 (texcache5, matrix96, `E:\OOT\scratch-texcache\3050\matrix96.txt`): fps from play, hyrule-walk off 56.61 / 56.73 /
+57.87, warm 61.24 / 59.64 / 61.05 (+6.3% on the means, every warm above every off); castle-move off 63.56 / 64.61 / 64.21, warm
+65.18 / 66.80 / 64.70 (+2.2%). No lost-fps episode in any warm arm there (gaps between recordings 2.4-2.9 ms warm, 3.0 off): the
+main PC's episodes were the other agents' load. Working set +870 MB (pool 1024 MB, 32 GB machine).
+- Rule (texcache_pack.h on_by_default, tested): on for integrated GPUs that transcode ASTC on the GPU and for discrete cards with
+  less than 10 GB of VRAM; off for 10 GB and more and for the CPU-decode chips. RX_VK_BC_DISK=0/1 forces it. A start line
+  "vk: BC disk cache on|off (by default: <why>; <GPU kind>, <VRAM> MB of VRAM)". No menu row: the options have no place for a
+  developer switch of this kind; the env switch stays.
+- Disk: cap 4096 MB by default (RX_VK_BC_DISK_MB): a rolling window, not a whole playthrough (a 6-zone tour wrote 2 GB cold, 150 s
+  of Hyrule Field 0.75-0.85 GB, so a playthrough's 30-odd zones would be 10 GB or more); the older pack goes when the newer holds
+  half, what was used again copied forward. The game folder by default. Never the disk's last GB (room_to_write, checked before
+  every record). Any write failure (read-only folder, locked file, full disk) stops the writes for the session with one log line;
+  reads go on; a read that fails its hash is transcoded as before; a pack that cannot be read is deleted at the scan.
+- Pool by RAM (pool_mb_for_ram): 1024 MB with 24 GB or more, 512 with 14 GB (the 16 GB PCs), 256 below. Why 512 at 16 GB: on the
+  15 GB laptop 512 served 87% of the on-disk textures (list 3) and 1024 89% (list 2), the turning fps 9.7-9.9 against 11.0 within
+  the 1-2 fps run noise, and the game's working set is already 8.4-11.8 GB there (laptop, 3050): +0.5 GB is not worth 2% more
+  served. The 3050 measured with 1024 (32 GB); a 16 GB 3050 PC with 512 is not measured.
+
 ## Who gets it by default (proposal, not decided)
 
 Proposal: on by default where the GPU's ASTC transcode is expensive relative to the frame, by device class first:
