@@ -100,11 +100,11 @@ def main():
     check(face_names[1:] == list(prompt_faces.FACES) + ["keyboard"], "faces[] is not the Switch, prompt_faces.FACES, then the keyboard")
     per_face = set(re.findall(r'"%sprompts/%s/([A-Za-z.]+)"', src))
     per_face |= set(re.findall(r'prompts/%s/([A-Za-z.]+)"', src))
-    check({"External.bfotf", "textures.bin", "hint.bin"} <= per_face, "prompts.c reads %s under prompts/<face>/" % sorted(per_face))
+    check({"textures.bin", "hint.bin"} <= per_face, "prompts.c reads %s under prompts/<face>/" % sorted(per_face))
     for f in per_face:
         check('"%s"' % f in assets, "prompts.c opens prompts/<face>/%s, which prompt_assets.py never writes" % f)
     top = set(re.findall(r'prompts/([A-Za-z.]+)"', src)) - per_face - {"%s"}
-    for f in ("Common.bntx", "Common.blarc", "ring.bin", "rsizetable.zs"):
+    for f in ("External.bfotf", "Common.bntx", "Common.blarc", "ring.bin", "rsizetable.zs"):   # (the font: one, every face's icons)
         check(f in top or f in src, "prompts.c no longer uses prompts/%s" % f)
         check('"%s"' % f in assets, "prompts.c uses prompts/%s, which prompt_assets.py never writes" % f)
     # the build puts the folder in the game folder, where prompts.c looks (the folder with image.bin, not bin\)

@@ -3104,7 +3104,7 @@
     },
     {
      "path": "host/nvn_native.c",
-     "line": 3008
+     "line": 3010
     }
    ],
    "default": "unset",
@@ -3196,7 +3196,7 @@
     },
     {
      "path": "host/nvn_native.c",
-     "line": 1865
+     "line": 1867
     }
    ],
    "default": "unset",
@@ -3217,7 +3217,7 @@
    "files": [
     {
      "path": "host/nvn_native.c",
-     "line": 2409
+     "line": 2411
     }
    ],
    "default": "unset",
@@ -4828,7 +4828,7 @@
    "files": [
     {
      "path": "host/nvn_native.c",
-     "line": 2191
+     "line": 2193
     }
    ],
    "default": "0",
@@ -5088,7 +5088,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2520
+     "line": 2530
     }
    ],
    "default": "0 (unset)",
@@ -5235,7 +5235,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2528
+     "line": 2538
     },
     {
      "path": "host/nn_vi.c",
@@ -5310,7 +5310,7 @@
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2528
+     "line": 2538
     },
     {
      "path": "host/nn_vi.c",
@@ -5633,7 +5633,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2611
+     "line": 2621
     },
     {
      "path": "host/display.c",
@@ -5872,7 +5872,7 @@
    "files": [
     {
      "path": "host/pad_sdl.c",
-     "line": 140
+     "line": 141
     }
    ],
    "default": "unset",
@@ -5929,7 +5929,7 @@
     },
     {
      "path": "host/pad_sdl.c",
-     "line": 98
+     "line": 99
     },
     {
      "path": "host/posix/display_sdl.c",
@@ -6133,7 +6133,7 @@
    "files": [
     {
      "path": "host/nn_hid.c",
-     "line": 787
+     "line": 809
     }
    ],
    "default": "unset",
@@ -6154,7 +6154,7 @@
    "files": [
     {
      "path": "host/nn_hid.c",
-     "line": 773
+     "line": 795
     }
    ],
    "default": "off (unset)",
@@ -6259,7 +6259,7 @@
    "files": [
     {
      "path": "host/nn_hid.c",
-     "line": 781
+     "line": 803
     }
    ],
    "default": "off (unset)",
@@ -6867,7 +6867,7 @@
    "files": [
     {
      "path": "host/pad_sdl.c",
-     "line": 183
+     "line": 184
     }
    ],
    "default": "off (unset)",
@@ -6959,7 +6959,7 @@
     },
     {
      "path": "host/nn_hid.c",
-     "line": 812
+     "line": 835
     }
    ],
    "default": "unset",
@@ -7265,7 +7265,7 @@
    "files": [
     {
      "path": "host/pad_sdl.c",
-     "line": 452
+     "line": 466
     }
    ],
    "default": "off (unset)",
@@ -7349,7 +7349,7 @@
    "files": [
     {
      "path": "host/nvn_native.c",
-     "line": 2756
+     "line": 2758
     }
    ],
    "default": "off (unset)",
@@ -7391,7 +7391,7 @@
    "files": [
     {
      "path": "host/nvn_native.c",
-     "line": 1205
+     "line": 1207
     }
    ],
    "default": "unset",
@@ -7412,12 +7412,12 @@
    "files": [
     {
      "path": "host/nvn_native.c",
-     "line": 1207
+     "line": 1209
     }
    ],
    "default": "off (unset)",
    "values": "on or off (0, false, off, no and empty are off); the description names `0`",
-   "explanation": "undocumented: host/nvn_native.c:1207 (in `held_init()`) reads it as an on/off switch: `hold_check = getenv(\"HOS_NVN_HOLD_CHECK\") && atoi(getenv(\"HOS_NVN_HOLD_CHECK\")) != 0;`. No comment in the source says what it changes.",
+   "explanation": "undocumented: host/nvn_native.c:1209 (in `held_init()`) reads it as an on/off switch: `hold_check = getenv(\"HOS_NVN_HOLD_CHECK\") && atoi(getenv(\"HOS_NVN_HOLD_CHECK\")) != 0;`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -7433,7 +7433,7 @@
    "files": [
     {
      "path": "host/nvn_native.c",
-     "line": 1208
+     "line": 1210
     }
    ],
    "default": "0",
@@ -7454,7 +7454,7 @@
    "files": [
     {
      "path": "host/nvn_native.c",
-     "line": 1192
+     "line": 1194
     }
    ],
    "default": "off (unset)",
@@ -7500,7 +7500,7 @@
     },
     {
      "path": "host/nvn_native.c",
-     "line": 461
+     "line": 463
     }
    ],
    "default": "off (unset)",
@@ -7521,7 +7521,7 @@
    "files": [
     {
      "path": "host/nvn_native.c",
-     "line": 1785
+     "line": 1787
     }
    ],
    "default": "off (unset)",
@@ -7542,7 +7542,7 @@
    "files": [
     {
      "path": "host/nvn_native.c",
-     "line": 1318
+     "line": 1320
     }
    ],
    "default": "off (unset)",
@@ -7563,7 +7563,7 @@
    "files": [
     {
      "path": "host/nvn_native.c",
-     "line": 1324
+     "line": 1326
     }
    ],
    "default": "off (unset)",
@@ -7584,7 +7584,7 @@
    "files": [
     {
      "path": "host/nvn_native.c",
-     "line": 1952
+     "line": 1954
     }
    ],
    "default": "unset",
@@ -7605,7 +7605,7 @@
    "files": [
     {
      "path": "host/nvn_native.c",
-     "line": 3652
+     "line": 3654
     }
    ],
    "default": "off (unset)",
@@ -7626,12 +7626,12 @@
    "files": [
     {
      "path": "host/nvn_native.c",
-     "line": 1341
+     "line": 1343
     }
    ],
    "default": "off (unset)",
    "values": "on or off (0, false, off, no and empty are off)",
-   "explanation": "undocumented: host/nvn_native.c:1341 reads it as an on/off switch: `if (block < 0) block = getenv(\"HOS_NVN_SYNC_BLOCK\") != NULL;`. No comment in the source says what it changes.",
+   "explanation": "undocumented: host/nvn_native.c:1343 reads it as an on/off switch: `if (block < 0) block = getenv(\"HOS_NVN_SYNC_BLOCK\") != NULL;`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -7647,7 +7647,7 @@
    "files": [
     {
      "path": "host/nvn_native.c",
-     "line": 1122
+     "line": 1124
     }
    ],
    "default": "0",
@@ -7668,7 +7668,7 @@
    "files": [
     {
      "path": "host/nvn_native.c",
-     "line": 2550
+     "line": 2552
     }
    ],
    "default": "unset",
@@ -7689,12 +7689,12 @@
    "files": [
     {
      "path": "host/nvn_native.c",
-     "line": 2555
+     "line": 2557
     }
    ],
    "default": "unset",
    "values": "text",
-   "explanation": "undocumented: host/nvn_native.c:2555 (in `watch_draw()`) reads it as a text value: `const char *only = getenv(\"HOS_NVN_WATCH_DRAW_THREAD\");`. No comment in the source says what it changes.",
+   "explanation": "undocumented: host/nvn_native.c:2557 (in `watch_draw()`) reads it as a text value: `const char *only = getenv(\"HOS_NVN_WATCH_DRAW_THREAD\");`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -7710,7 +7710,7 @@
    "files": [
     {
      "path": "host/nvn_native.c",
-     "line": 2242
+     "line": 2244
     }
    ],
    "default": "0",
@@ -7731,7 +7731,7 @@
    "files": [
     {
      "path": "host/nvn_native.c",
-     "line": 2483
+     "line": 2485
     }
    ],
    "default": "0",
@@ -7815,7 +7815,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2437
+     "line": 2447
     }
    ],
    "default": "unset",
@@ -7836,7 +7836,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2440
+     "line": 2450
     },
     {
      "path": "host/hos_main.c",
@@ -7924,7 +7924,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2521
+     "line": 2531
     },
     {
      "path": "host/nn_applet.c",
@@ -8293,7 +8293,7 @@
    "files": [
     {
      "path": "host/nvn_native.c",
-     "line": 1374
+     "line": 1376
     }
    ],
    "default": "off (unset)",
@@ -8452,7 +8452,7 @@
    "files": [
     {
      "path": "host/nvn_native.c",
-     "line": 396
+     "line": 398
     }
    ],
    "default": "off (unset)",
@@ -8473,7 +8473,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2519
+     "line": 2529
     }
    ],
    "default": "0 (unset)",
@@ -8515,7 +8515,7 @@
    "files": [
     {
      "path": "host/nvn_native.c",
-     "line": 1778
+     "line": 1780
     }
    ],
    "default": "unset",
@@ -8854,7 +8854,7 @@
    "files": [
     {
      "path": "host/nvn_native.c",
-     "line": 1073
+     "line": 1075
     }
    ],
    "default": "unset",
@@ -8875,7 +8875,7 @@
    "files": [
     {
      "path": "host/nvn_native.c",
-     "line": 669
+     "line": 671
     }
    ],
    "default": "unset",
@@ -8896,7 +8896,7 @@
    "files": [
     {
      "path": "host/nvn_native.c",
-     "line": 676
+     "line": 678
     }
    ],
    "default": "unset",
@@ -8967,7 +8967,7 @@
    "files": [
     {
      "path": "host/nvn_native.c",
-     "line": 619
+     "line": 621
     }
    ],
    "default": "off (unset)",
@@ -9894,11 +9894,11 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 450
+     "line": 451
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 485
+     "line": 486
     },
     {
      "path": "host/hos_wide_ui.c",
@@ -10215,7 +10215,7 @@
    "files": [
     {
      "path": "host/nvn_native.c",
-     "line": 1448
+     "line": 1450
     }
    ],
    "default": "off (unset)",
@@ -10282,12 +10282,12 @@
    "files": [
     {
      "path": "nx2/oot_patches.py",
-     "line": 356
+     "line": 403
     }
    ],
    "default": "unset",
    "values": "text",
-   "explanation": "undocumented: nx2/oot_patches.py:356 reads it as a text value: `job_order = os.environ.get(\"OOT_JOB_ORDER\") == \"1\" # (TICK-047, lift time; off: no job order statements)`. No comment in the source says what it changes.",
+   "explanation": "undocumented: nx2/oot_patches.py:403 reads it as a text value: `job_order = os.environ.get(\"OOT_JOB_ORDER\") == \"1\" # (TICK-047, lift time; off: no job order statements)`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -13730,7 +13730,7 @@
     },
     {
      "path": "host/nvn_native.c",
-     "line": 987
+     "line": 989
     }
    ],
    "default": "off (unset)",
@@ -13835,12 +13835,12 @@
    "files": [
     {
      "path": "host/nvn_native.c",
-     "line": 897
+     "line": 899
     }
    ],
    "default": "0",
    "values": "a whole number",
-   "explanation": "undocumented: host/nvn_native.c:897 (in `wts_handler()`) reads it as a number: `if (after == ~0ull) after = GetTickCount64() + (getenv(\"RX_NVN_WATCH_AFTER\") ? (ULONGLONG)atoi(getenv(\"RX_NVN_WATCH_A...`. No comment in the source says what it changes.",
+   "explanation": "undocumented: host/nvn_native.c:899 (in `wts_handler()`) reads it as a number: `if (after == ~0ull) after = GetTickCount64() + (getenv(\"RX_NVN_WATCH_AFTER\") ? (ULONGLONG)atoi(getenv(\"RX_NVN_WATCH_A...`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -13856,7 +13856,7 @@
    "files": [
     {
      "path": "host/nvn_native.c",
-     "line": 899
+     "line": 901
     }
    ],
    "default": "off (unset)",
@@ -13881,7 +13881,7 @@
     },
     {
      "path": "host/nvn_native.c",
-     "line": 806
+     "line": 808
     }
    ],
    "default": "unset",
@@ -13906,7 +13906,7 @@
     },
     {
      "path": "host/nvn_native.c",
-     "line": 941
+     "line": 943
     }
    ],
    "default": "unset",
@@ -18342,7 +18342,7 @@
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 288
+     "line": 289
     }
    ],
    "default": "unset",
@@ -18384,11 +18384,11 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 324
+     "line": 325
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2515
+     "line": 2525
     }
    ],
    "default": "unset",
@@ -19713,15 +19713,15 @@
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 442
+     "line": 443
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 509
+     "line": 510
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 539
+     "line": 540
     }
    ],
    "default": "off (unset)",
@@ -20203,7 +20203,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2509
+     "line": 2519
     }
    ],
    "default": "0 (unset)",
@@ -20299,7 +20299,7 @@
     },
     {
      "path": "host/nvn_native.c",
-     "line": 1375
+     "line": 1377
     }
    ],
    "default": "unset",
@@ -21066,7 +21066,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2511
+     "line": 2521
     }
    ],
    "default": "unset",
@@ -21288,15 +21288,15 @@
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 442
+     "line": 443
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 509
+     "line": 510
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 539
+     "line": 540
     }
    ],
    "default": "off (unset)",
@@ -22025,7 +22025,7 @@
     },
     {
      "path": "host/nvn_native.c",
-     "line": 2642
+     "line": 2644
     }
    ],
    "default": "off (unset)",
@@ -22948,7 +22948,7 @@
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2503
+     "line": 2513
     }
    ],
    "default": "2",
@@ -23032,7 +23032,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2809
+     "line": 2823
     }
    ],
    "default": "unset",
@@ -25382,7 +25382,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2510
+     "line": 2520
     }
    ],
    "default": "0 (unset)",
@@ -25403,7 +25403,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 329
+     "line": 330
     },
     {
      "path": "gpu/vk/vk_replay.cpp",
@@ -25654,7 +25654,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 8874
+     "line": 8875
     }
    ],
    "default": "0 (unset)",
@@ -30311,7 +30311,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2781
+     "line": 2795
     }
    ],
    "default": "unset",
@@ -30479,7 +30479,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2516
+     "line": 2526
     }
    ],
    "default": "0 (unset)",

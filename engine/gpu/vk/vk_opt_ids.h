@@ -38,3 +38,17 @@
    row on Vanilla keeps the game's R11G11B10F and the temporal upscalers, which take only that scene. 47, Longshot's id for it in
    its vk_api.h, so the two agree. */
 #define HL_OPT_HDR_TONEMAP 47
+
+/* The Button prompts row (after Longshot #2366, Gabriel Moisan Matte; host/prompts.c asks, gpu/vk/vk_replay.cpp answers): 0 Auto,
+   else HOS_PROMPT_* + 1, the value the row saves as button_prompts=. 46, Longshot's id for it in its vk_api.h, so the two agree.
+   A new face shows while the game runs where the game has every part of the prompts from the files host/prompts.c serves. */
+#define HL_OPT_PROMPTS 46
+
+/* What a change of the Button prompts row reaches at once, which host/prompts.c pushes to the menu (option_set, whenever it
+   changes) as bits: the textures (the ocarina's notes, the Talk ring's letters, the System page's controller), the layouts (the
+   Talk ring's places, the ocarina hint's spacing), the icons in texts. The row asks for a restart unless all three are there
+   (a mod that replaces one of those files, a build without the prompts, a game not loaded far enough yet). Not Longshot's:
+   there the host gives it to the menu in its own call (MkwVkHost.prompts_live), which a change of vk_api.h would put in this
+   tree's shader stamp. */
+#define HL_OPT_PROMPTS_LIVE 95
+enum { HL_PROMPTS_LIVE_TEXTURES = 1, HL_PROMPTS_LIVE_LAYOUTS = 2, HL_PROMPTS_LIVE_TEXTS = 4, HL_PROMPTS_LIVE_ALL = 7 };
