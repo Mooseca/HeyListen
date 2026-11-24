@@ -1590,8 +1590,10 @@ std::unordered_set<uint64_t> cpu_events;   // (events the CPU has signalled, nvn
 // the CPU makes them, in the CPU's order with the submits' captures, a signal that meets a wait a submission is stopped at with its
 // capture; the replay takes them in that order and applies the event then (consume_signals), never later than the next replay.
 // RX_VK_SIGNAL_CAPTURE=0: off (the signals go the way they did)
+bool order_thread_on();   // (PIPE2: RX_VK_ORDER_THREAD, below submit_q)
+std::mutex& submit_order_mu_ref();
 bool signal_capture_on() {
-    static const bool v = getenv("RX_VK_FRAMES_IN_FLIGHT") && atoi(getenv("RX_VK_FRAMES_IN_FLIGHT")) > 1 &&
+    static const bool v = ((getenv("RX_VK_FRAMES_IN_FLIGHT") && atoi(getenv("RX_VK_FRAMES_IN_FLIGHT")) > 1) || order_thread_on()) &&
                           (!getenv("RX_VK_SIGNAL_CAPTURE") || atoi(getenv("RX_VK_SIGNAL_CAPTURE")) != 0);
     return v;
 }
@@ -3644,8 +3646,12 @@ void seg_early_count(int kind) {
 bool sub_overlap_on() {   // (stream SUB1) RX_VK_SUB_OVERLAP=1: a submission whose last command buffer has segments pending returns without joining them
     static const bool v = [] {
         const char* e = getenv("RX_VK_SUB_OVERLAP");
-        const bool on = e && atoi(e) != 0;
+        const bool asked = e && atoi(e) != 0;
+        // (DECOUPLE) not with the order thread yet: its captures are taken by the submitting threads, and a pending submission's end
+        // is completed by "the replay thread", which the order thread's jobs are not written for (docs/research/decouple-cross-frame.md)
+        const bool on = asked && !order_thread_on();
         if (on) logf("vk: a submission's end waits for its last segments' workers, the next one begins meanwhile (RX_VK_SUB_OVERLAP)");
+        else if (asked) logf("vk: RX_VK_SUB_OVERLAP is left off with RX_VK_ORDER_THREAD (not built together yet)");
         return on;
     }();
     return v;
@@ -5412,7 +5418,12 @@ void resume_queue(uint64_t queue, bool forced) {
             if (cpu_event) {
                 ReplayLock lk;
                 if (rec_cur) finish_recording(burst_open ? burst_value : q.value);   // (its mirrors synced again after)
-                if (!taken) memory_capture_now(q.value, completed());
+                if (!taken) {
+                    // (PIPE2: with the order thread the submitting threads take their captures meanwhile; one capture at a time)
+                    std::unique_lock so(submit_order_mu_ref(), std::defer_lock);
+                    if (order_thread_on()) so.lock();
+                    memory_capture_now(q.value, completed());
+                }
                 st_resume_captures++;
             }
             q.waiting = false;
@@ -5476,6 +5487,16 @@ void drain(int why, uint64_t limit = UINT64_MAX) {   // (limit, stream R3: only 
         for (const auto& [queue, q] : qruns)
             if (q.blocked() && q.oldest() < best && q.oldest() <= limit) best = q.oldest(), bq = queue;
         if (best == UINT64_MAX) break;
+        if (qruns[bq].waiting) {   // (PIPE4: each wait gone past, by who made it go, for the flashes' correlation)
+            static int64_t logged = 0;
+            if (logged++ < 400) {
+                const nvn_p_wait_event w = wait_at(qruns[bq].p);
+                logf("vk: wait gone past (%s, present %lld): submission %llu (queue %#llx) waited for event %#llx %s %u, has %u",
+                     why == 0 ? "a present" : why == 1 ? "a release" : why == 2 ? "a wait for the replay" : "time", (long long)presents_now,
+                     (unsigned long long)qruns[bq].value, (unsigned long long)bq, (unsigned long long)w.gpu,
+                     w.mode == 0 ? "==" : ">=", w.value, event_value_in(ev_values, w.gpu));
+            }
+        }
         resume_queue(bq, qruns[bq].waiting);
     }
     burst_end();
@@ -5575,6 +5596,9 @@ int64_t thread_cpu_100ns() {
     if (!GetThreadTimes(GetCurrentThread(), &c, &e, &k, &u)) return 0;
     return (int64_t)((((uint64_t)k.dwHighDateTime << 32) | k.dwLowDateTime) + (((uint64_t)u.dwHighDateTime << 32) | u.dwLowDateTime));
 }
+bool order_thread_on();
+bool ot_pending();   // (PIPE4: jobs handed over to the order thread and not yet run; below)
+uint64_t ot_progress();   // (PIPE4: the order thread's last finished job; below)
 void sync_watch() {
     SetThreadDescription(GetCurrentThread(), L"mkw_vk order");
     for (;;) {
@@ -5601,6 +5625,25 @@ void sync_watch() {
         }
         tl_ev("watch-");
         const double held = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - blocked_since).count();
+        // (PIPE4) with the order thread, a queue stopped for hold_ms is not let past its wait while submissions handed over are
+        // still to be replayed or a present is held for them (ot_main forces it at its time): the work that sets its event may be one of them (inline it had not been submitted yet). Forced
+        // anyway, the lit passes ran before the lighting work they wait for and the scene came out black for a frame (the dark
+        // frames of the warp tour). RX_VK_ORDER_WATCH_PENDING=1: forced as before
+        static const bool watch_pending = getenv("RX_VK_ORDER_WATCH_PENDING") && atoi(getenv("RX_VK_ORDER_WATCH_PENDING")) != 0;
+        // (pipe4f hung at a load: an order-thread job waited for work of the stopped queue itself, and nothing forced it. Spared
+        // only while the order thread goes on: a job finished within the last 250 ms)
+        static uint64_t last_seq = 0;
+        static auto last_move = std::chrono::steady_clock::now();
+        const auto now_w = std::chrono::steady_clock::now();
+        if (const uint64_t sq = ot_progress(); sq != last_seq) last_seq = sq, last_move = now_w;
+        const bool moving = std::chrono::duration<double, std::milli>(now_w - last_move).count() < 250;
+        if (blocked_n.load() && held > hold_ms() && order_thread_on() && !watch_pending && moving && ot_pending()) {
+            static std::atomic<int64_t> spared{0};
+            if (const int64_t k = ++spared; k <= 8 || k % 1000 == 0)
+                logf("vk: order thread: a queue stopped %.0f ms not let past its wait, submissions handed over are still to be replayed (%lld so far)",
+                     held, (long long)k);
+            continue;
+        }
         if (blocked_n.load() && held > hold_ms()) {
             drain(3);
             update_blocked();
@@ -5672,8 +5715,10 @@ bool wait_recorded(uint64_t f, uint64_t timeout_ns, int* ok) {
 }
 uint64_t fence();
 /// (hookshot) A fence of one queue (nvnQueueFenceSync): the value of that queue's last submission
+uint64_t ot_fence_q(uint64_t queue);   // (PIPE2)
 uint64_t fence_q(uint64_t queue) {
     if (async_on() || !sync_waits_on() || per_queue_fences_off() || !queue) return fence();
+    if (order_thread_on()) return ot_fence_q(queue);   // (PIPE2: the queue's last submission handed over, not yet replayed maybe)
     std::lock_guard lk(sync_order_mu);
     auto it = q_last.find(queue);
     return it != q_last.end() ? it->second : fence();
@@ -5683,8 +5728,10 @@ int wait_inner(uint64_t f, uint64_t timeout_ns);
 uint64_t fence();
 /// (TICK-017) the game's fence waits that block (nvnSyncWait, nvnQueueFinish): how long, how far ahead of the GPU, by path.
 /// RX_VK_FENCE_WAIT_LOG=1: also the first 60 over 5 ms, one by one
+bool ot_wait_for(uint64_t f, uint64_t* timeout_ns);   // (PIPE2)
 int wait_core(uint64_t f, uint64_t timeout_ns) {
     if (completed() >= f) return 1;
+    if (order_thread_on() && !ot_wait_for(f, &timeout_ns)) return 0;   // (PIPE2: its submission handed over, not replayed yet)
     const uint64_t done0 = completed(), latest = fence();
     bool recorded;
     {
@@ -6045,6 +6092,8 @@ bool wait_value_bounded(uint64_t v) {
     (void)completed();   // (RX_VK_POOL_MIRROR: its staged write-backs applied)
     return r == VK_SUCCESS;
 }
+void ot_join_all(int site);   // (PIPE2)
+void ot_join_readback(uint64_t gpu, uint64_t size);
 void invalidate(uint64_t gpu, uint64_t size) {
     static const bool rb_prof = getenv("RX_VK_RB_PROF") != nullptr || getenv("RX_VK_TL") != nullptr || getenv("RX_VK_TL_S") != nullptr;
     RbScope rbs(rb_prof, gpu, size);
@@ -6073,6 +6122,10 @@ void invalidate(uint64_t gpu, uint64_t size) {
     } rb_quiet_post{gpu, size};
     const int rb_cls = size ? rbclass_of(size) : 0;
     const bool rb_late = rb_cls && !rbclass_check(rb_cls) && (rbclass_mode(rb_cls) & 2);
+    // (PIPE2, RX_VK_ORDER_THREAD) a read the ring does not answer: the submissions this thread handed over before it replayed first,
+    // as the submitting thread's own replay had them by now (their write-back registrations are made as they replay): ot_join_readback
+    if (size && !ring_serve && !rb_late && order_thread_on() && !(size == 0x1040 && expo_mode() == 1 && expo_serves(host->gpu_guest(gpu))))
+        ot_join_readback(gpu, size);
     struct RbClassPost {
         int cls;
         uint64_t gpu, size;
@@ -8297,6 +8350,7 @@ struct Job {
     bool has_crop = false;
     nvn_prog prog;
     std::chrono::steady_clock::time_point queued;
+    uint64_t seq = 0;           // (PIPE2: its place among the order thread's jobs)
 };
 std::mutex q_mu;
 std::condition_variable q_cv, q_space, q_idle;
@@ -8441,8 +8495,11 @@ void enqueue(Job&& j) {
     q_cv.notify_one();
 }
 
+void ot_join_all(int site);   // (PIPE2)
+bool ot_behind();
 void wait_queue_empty() {
     if (!async_on()) {
+        if (order_thread_on()) ot_join_all(2);   // (PIPE2: the work handed to the order thread first, as the submitting thread's replay had it)
         // A catch-up (a queue finish, a CPU read back of what the GPU wrote, a pool remapped) used to force every queue
         // stopped at an event wait past it. The work those waits are for is mostly not submitted yet (the waiting thread is the one
         // that submits it), so the stopped submission went on without it and its lit passes read what that work makes before it
@@ -8469,7 +8526,7 @@ void wait_queue_empty() {
 }
 /// (work handed to the replay thread and not yet recorded)
 bool replay_behind() {
-    if (!async_on()) return blocked_n.load() > 0;
+    if (!async_on()) return blocked_n.load() > 0 || (order_thread_on() && ot_behind());
     std::lock_guard lk(q_mu);
     return !q_jobs.empty() || q_busy || blocked_n.load() > 0;
 }
@@ -8494,7 +8551,7 @@ struct RbValueTag {
 RbValueTag rb_value_tags[1024];
 std::atomic<int64_t> st_rb_staged_waits{0}, st_rb_staged_wait_ns{0}, st_rb_staged_late{0};
 bool rb_fif_on() {
-    static const bool v = frames_in_flight() > 1 && !async_on() && sync_waits_on();
+    static const bool v = (frames_in_flight() > 1 || order_thread_on()) && !async_on() && sync_waits_on();
     return v;
 }
 void rb_note_value(uint64_t value) {
@@ -8511,13 +8568,14 @@ struct NotedWait {
     uint64_t gpu = 0;
     uint32_t mode = 0, value = 0;
     bool open = false;
+    uint64_t sub = 0;   // (PIPE2: the submission's value, 0 unknown)
 };
 NotedWait noted_waits[256];
 size_t noted_n = 0;
 std::unordered_map<uint64_t, uint32_t> cpu_signal_value;   // (the events the CPU has signalled, and their last value)
 std::condition_variable signal_cv;
 int64_t st_sig_caps = 0;
-void note_waits(const uint64_t* handles, int n) {
+void note_waits(const uint64_t* handles, int n, uint64_t sub = 0) {
     for (int cb = 0; cb < n; cb++) {
         if (!handles[cb]) continue;
         for (const uint8_t* o = reinterpret_cast<const uint8_t*>(handles[cb]);; o = op_next(o)) {
@@ -8528,7 +8586,7 @@ void note_waits(const uint64_t* handles, int n) {
             const nvn_p_wait_event w = wait_at(o);
             const auto it = cpu_signal_value.find(w.gpu);
             if (it != cpu_signal_value.end() && event_wait_met(it->second, w.mode, w.value)) continue;   // (met: its submit's capture)
-            noted_waits[noted_n++ % 256] = {w.gpu, w.mode, w.value, true};
+            noted_waits[noted_n++ % 256] = {w.gpu, w.mode, w.value, true, sub};
         }
     }
 }
@@ -8540,19 +8598,394 @@ bool signal_meets(uint64_t gpu, uint32_t value) {
     return any;
 }
 /// Whether a submission waits for an event the CPU signals that it has not brought to the value yet: its frame is not all written
-bool cpu_wait_open() {
+bool cpu_wait_open(uint64_t below = UINT64_MAX) {   // (PIPE2, below: only submissions before that value)
     for (const NotedWait& w : noted_waits) {
-        if (!w.open) continue;
+        if (!w.open || (w.sub && w.sub >= below)) continue;
         const auto it = cpu_signal_value.find(w.gpu);
         if (it != cpu_signal_value.end() && !event_wait_met(it->second, w.mode, w.value)) return true;
     }
     return false;
+}
+void texture_released_sync(const nvn_tex* t);   // (PIPE2: the release's body, on the order thread; below)
+void program_released_sync(const nvn_prog* p);
+std::mutex& submit_order_mu_ref() { return submit_order_mu; }
+// ---- (PIPE2, stage 1) RX_VK_ORDER_THREAD=1: the sync-waits replay on an order thread (docs/research/pipe2-order-thread.md) ----
+// The submitting thread (OoT's Presentation Thread above all, and the main thread's held submits it flushes) takes the submission's
+// capture and notes its waits, as with frames in flight, then hands the submission to the order thread, which replays it as submit_q
+// did inline (sync_order_mu, qruns, the bursts: submit_job); the present is a job of the same thread (the frame's stopped work
+// drained, then shown). The game goes on with its next frame meanwhile. What the game asks of the replay is answered once the
+// order thread has reached what it asks about: a fence wait waits for its submission's job (a poll is told "not yet" before that,
+// which is true: nothing of it has reached the GPU), nvnQueueFinish, the catch-ups (wait_queue_empty), the CPU's readbacks the ring
+// does not serve, the texel copies, and the host's event polls (mkwvk_order_join) wait for every job handed over before them;
+// registrations and releases are jobs, in order with the submits. The game's present poll is answered at once (the host's
+// HOS_PRESENT_NOWAIT, on with this switch) and the readback ring serves entries 3 frames old (vk_rbring.cpp, as FIF1's).
+// RX_VK_ORDER_AHEAD=<n> (2): presents handed over and not yet shown before the present call waits; RX_VK_ORDER_POLL_JOIN=1: a
+// poll waits for its submission's job too; RX_VK_ORDER_SIGNAL_MS=<ms> (2000): how long a present waits for the CPU's signal its
+// frame's stopped work waits for (PIPE4: and for no queue stopped before it; the next present forces it); RX_VK_ORDER_PRIO=<0|1|2> (1): the thread's priority. Off by default.
+bool order_thread_on() {
+    // (PIPE2) RX_VK_ORDER_THREAD=1 (off by default): the replay on an order thread, the submitting threads return after the capture
+    static const bool v = getenv("RX_VK_ORDER_THREAD") && atoi(getenv("RX_VK_ORDER_THREAD")) != 0 && sync_waits_on();
+    return v;
+}
+int ot_ahead() {
+    // (PIPE2) RX_VK_ORDER_AHEAD=<n> (2, 1..4): with the order thread, how many presents the game may hand over not yet shown
+    static const int n = std::clamp(getenv("RX_VK_ORDER_AHEAD") ? atoi(getenv("RX_VK_ORDER_AHEAD")) : 2, 1, 4);
+    return n;
+}
+thread_local bool ot_self = false;
+thread_local uint64_t ot_my_seq = 0;   // (the last submission this thread handed over)
+std::mutex ot_mu;
+std::condition_variable ot_cv, ot_done_cv;
+std::deque<Job> ot_jobs;               // (ot_mu)
+uint64_t ot_seq_pushed = 0;            // (ot_mu)
+int ot_presents = 0;                   // (handed over, not yet shown: ot_mu)
+int ot_waiters = 0;                    // (threads in ot_done_cv: ot_mu)
+std::atomic<uint64_t> ot_seq_done{0}, ot_value_done{0};
+std::atomic<bool> ot_holding{false};   // (PIPE4: ot_main holds a present not ready yet; it forces it itself at its time)
+std::unordered_map<uint64_t, uint64_t> ot_q_last;   // (queue -> its last submission handed over: submit_order_mu)
+// (the joins by site, the order thread's idle time and its queue, logged every 600 presents)
+enum { OT_FENCE, OT_POLL, OT_CATCHUP, OT_READBACK, OT_EVENT, OT_PRESENT_SLOT, OT_SITES };
+const char* const kOtSite[OT_SITES] = {"fence waits", "polls told not yet", "catch-ups", "readbacks", "event polls", "present slot"};
+std::atomic<int64_t> ot_join_n[OT_SITES], ot_join_ns[OT_SITES], ot_join_waited[OT_SITES];
+int64_t ot_idle_ns = 0, ot_sig_waits = 0, ot_sig_late = 0, ot_depth_sum = 0, ot_depth_max = 0, ot_jobs_n = 0;   // (the order thread's)
+int64_t ot_now() { return std::chrono::steady_clock::now().time_since_epoch().count(); }
+void ot_note(int site, int64_t ns, bool waited) {
+    ot_join_n[site].fetch_add(1, std::memory_order_relaxed);
+    if (waited) ot_join_waited[site].fetch_add(1, std::memory_order_relaxed), ot_join_ns[site].fetch_add(ns, std::memory_order_relaxed);
+}
+void ot_log() {   // (the order thread, at a present)
+    static int64_t t0 = ot_now(), frames = 0;
+    if (++frames < 600) return;
+    const int64_t now = ot_now();
+    const double f = (double)frames;
+    char line[1024];
+    int n = snprintf(line, sizeof line, "vk: order thread (%lld frames, %.2f ms a frame): idle %.2f ms a frame, %.1f jobs queued on average (%lld at most); "
+                     "the present waited for the CPU's signal %lld times (%lld let go); joins, waited / asked, ms a frame:",
+                     (long long)frames, (now - t0) / 1e6 / f, ot_idle_ns / 1e6 / f, ot_jobs_n ? (double)ot_depth_sum / ot_jobs_n : 0.0,
+                     (long long)ot_depth_max, (long long)ot_sig_waits, (long long)ot_sig_late);
+    for (int k = 0; k < OT_SITES && n < (int)sizeof line - 80; k++)
+        n += snprintf(line + n, sizeof line - n, " %s %lld/%lld %.2f;", kOtSite[k], (long long)ot_join_waited[k].exchange(0),
+                      (long long)ot_join_n[k].exchange(0), ot_join_ns[k].exchange(0) / 1e6 / f);
+    logf("%s", line);
+    frames = 0, t0 = now, ot_idle_ns = ot_sig_waits = ot_sig_late = ot_depth_sum = ot_depth_max = ot_jobs_n = 0;
+}
+// (PIPE4) The present job: the frame's stopped work drained, then shown. Not forced (force false) it is shown only when it is
+// ready - the CPU's signal its frame's stopped work waits for has come and, the stopped queues that can go on gone on, no queue is
+// stopped at a submission before it - and false is returned otherwise: ot_main runs the jobs behind it meanwhile (up to the next
+// present), since the work that sets the events the stopped queues wait for can be one of them. Forced at once before, the lit
+// passes ran before the lighting work they wait for whenever the game was slow to hand the frame's last submissions over (a zone's
+// loading frames): the scene black for a frame, sometimes several (the warp tour's dark frames)
+bool ot_stopped_before(uint64_t value) {   // (sync_order_mu held)
+    for (const auto& [queue, q] : qruns)
+        if (q.blocked() && q.oldest() <= value) return true;
+    return false;
+}
+bool ot_present_run(Job& j, bool force) {
+    perf_parts::Scope perf_entry(perf_parts::t_render);
+    if (!force && signal_capture_on()) {   // (the CPU's signal this frame's stopped work waits for, made by the main thread: FIF's rule)
+        std::lock_guard lk(submit_order_mu);
+        if (cpu_wait_open(j.value)) return false;
+    }
+    std::lock_guard order(sync_order_mu);
+    ReplayPin pin;
+    if (!force) {
+        burst_begin(0);
+        schedule();
+        burst_end();
+        update_blocked();
+        if (ot_stopped_before(j.value)) return false;
+    }
+    {
+        WaitScope wait_scope(WS_DRAIN);
+        drain(0);
+    }
+    update_blocked();
+    present_value = j.value;
+    if (ubo_check_on()) ubo_check_frame();
+    do_present(j.has_tex ? &j.tex : nullptr, j.has_crop ? j.crop : nullptr);
+    ot_log();
+    return true;
+}
+void ot_run(Job& j) {
+    switch (j.kind) {
+    case JOB_SUBMIT: {   // (submit_q's sync-waits replay, as it was inline)
+        perf_parts::Scope perf_entry(perf_parts::t_render);
+        std::unique_lock order(sync_order_mu, std::defer_lock);
+        {
+            WaitScope wait_scope(WS_LOCK_SUBMIT);
+            order.lock();
+        }
+        ReplayPin pin;
+        if (j.queue) {
+            q_last[j.queue] = j.value;
+            value_queue[j.value] = j.queue;
+            while (value_queue.size() > 8192) value_queue.erase(value_queue.begin());
+        }
+        submit_job(j.handles, j.value, j.queue);
+        update_blocked();
+    } break;
+    case JOB_PRESENT: ot_present_run(j, true); break;   // (ot_main defers it: ot_present_run)
+    case JOB_TEXTURE_RELEASED: texture_released_sync(&j.tex); break;
+    case JOB_PROGRAM_RELEASED: program_released_sync(&j.prog); break;
+    case JOB_REGISTER_TEXTURE: register_texture_copy(j.id, j.tex, j.has_view ? &j.view : nullptr); break;
+    case JOB_REGISTER_SAMPLER: register_sampler_copy(j.id, j.samp); break;
+    default: break;
+    }
+}
+void ot_main() {
+    SetThreadDescription(GetCurrentThread(), L"mkw_vk order thread");
+    // (PIPE2) RX_VK_ORDER_PRIO=<0|1|2> (1): the order thread's priority, normal, above normal or highest
+    static const int prio = getenv("RX_VK_ORDER_PRIO") ? atoi(getenv("RX_VK_ORDER_PRIO")) : 1;
+    SetThreadPriority(GetCurrentThread(), prio >= 2 ? THREAD_PRIORITY_HIGHEST : prio == 1 ? THREAD_PRIORITY_ABOVE_NORMAL : THREAD_PRIORITY_NORMAL);
+    ot_self = true;
+    // (PIPE2) RX_VK_ORDER_PIN=1 (default; 0: each replay pins and unpins itself, ReplayPin): the order thread kept on the core the host
+    // keeps for the replay (hos_reserved_cpus) for its whole life, as the old replay thread was: no affinity change at every job
+    static const bool pin_life = !getenv("RX_VK_ORDER_PIN") || atoi(getenv("RX_VK_ORDER_PIN")) != 0;
+    if (pin_life)
+        if (const uint64_t m = replay_pin_mask()) {
+            SetThreadAffinityMask(GetCurrentThread(), (DWORD_PTR)m);
+            replay_pin_depth = 1;   // (the ReplayPins inside its jobs then change nothing)
+        }
+    // (PIPE2) RX_VK_ORDER_SIGNAL_MS=<ms> (2000; 0: no wait): how long the order thread's present waits for the CPU's signal its
+    // frame's stopped work waits for and for the work its stopped queues wait for (PIPE4), running the jobs behind it meanwhile
+    // (PIPE4: 2000. Inline the Presentation Thread cannot present before the main thread has handed the frame over, which comes
+    // after its signal; a present let go after 200 ms, no next present behind it yet, showed the frame without the CPU's writes up
+    // to the signal, darker for a few frames on a zone's first frames)
+    static const int ms = getenv("RX_VK_ORDER_SIGNAL_MS") ? std::max(0, atoi(getenv("RX_VK_ORDER_SIGNAL_MS"))) : 2000;
+    auto finish = [](const Job& j) {
+        bool wake;
+        {
+            std::lock_guard lk(ot_mu);
+            if (j.kind == JOB_PRESENT) ot_presents--;
+            if (j.value && j.value > ot_value_done.load(std::memory_order_relaxed)) ot_value_done.store(j.value, std::memory_order_release);
+            if (j.seq > ot_seq_done.load(std::memory_order_relaxed)) ot_seq_done.store(j.seq, std::memory_order_release);
+            wake = ot_waiters > 0;
+        }
+        if (wake) ot_done_cv.notify_all();
+    };
+    Job held;              // (a present not ready yet: PIPE4)
+    bool holding = false;
+    int64_t held_until = 0;
+    for (;;) {
+        Job j;
+        bool got = false, next_present = false;
+        {
+            std::unique_lock lk(ot_mu);
+            if (!holding) {
+                if (ot_jobs.empty()) {
+                    const int64_t t0 = ot_now();
+                    ot_cv.wait(lk, [] { return !ot_jobs.empty(); });
+                    ot_idle_ns += ot_now() - t0;
+                }
+            } else if (ot_jobs.empty()) {   // (a short wait: the CPU's signal comes by no job)
+                const int64_t t0 = ot_now();
+                ot_cv.wait_for(lk, std::chrono::milliseconds(1), [] { return !ot_jobs.empty(); });
+                ot_idle_ns += ot_now() - t0;
+            }
+            if (!ot_jobs.empty()) {
+                if (holding && ot_jobs.front().kind == JOB_PRESENT) {
+                    // (presents in order: the held one first, forced. Not waited behind: the game's threads join the jobs behind it
+                    // (the event polls, the catch-ups) before the main thread signals, so the held one would wait out its time at
+                    // every frame - pipe4e froze in the Market and in Zora's River)
+                    next_present = true;
+                } else {
+                    ot_depth_sum += (int64_t)ot_jobs.size(), ot_jobs_n++, ot_depth_max = std::max<int64_t>(ot_depth_max, (int64_t)ot_jobs.size());
+                    j = std::move(ot_jobs.front());
+                    ot_jobs.pop_front();
+                    got = true;
+                }
+            }
+        }
+        if (got && j.kind == JOB_PRESENT) {
+            if (ot_present_run(j, ms == 0)) {
+                finish(j);
+            } else {
+                ot_sig_waits++;
+                held = std::move(j), holding = true, held_until = ot_now() + (int64_t)ms * 1000000;
+                ot_holding.store(true, std::memory_order_release);
+            }
+            continue;
+        }
+        if (got) {
+            ot_run(j);
+            finish(j);
+        }
+        if (holding) {
+            const bool force = next_present || ot_now() >= held_until;
+            if (ot_present_run(held, force)) {
+                if (force) {
+                    ot_sig_late++;
+                    static int64_t logged = 0;
+                    if (logged++ < 40)
+                        logf("vk: order thread: the present after %lld forced (%s; value %llu)", (long long)presents_now,
+                             next_present ? "the next present came" : "waited its time", (unsigned long long)held.value);
+                }
+                finish(held);
+                holding = false;
+                ot_holding.store(false, std::memory_order_release);
+            }
+        }
+    }
+}
+uint64_t ot_progress() { return ot_seq_done.load(std::memory_order_acquire); }
+bool ot_pending() {
+    if (ot_holding.load(std::memory_order_acquire)) return true;
+    std::lock_guard lk(ot_mu);
+    return !ot_jobs.empty();
+}
+/// a job to the order thread, in order (the caller holds submit_order_mu for submits and presents: their values in the same order)
+void ot_push(Job&& j) {
+    static std::once_flag once;
+    std::call_once(once, [] {
+        std::thread(ot_main).detach();
+        logf("vk: the replay runs on an order thread, the submitting threads return after the capture (RX_VK_ORDER_THREAD=1; "
+             "%d presents ahead at most)", ot_ahead());
+    });
+    j.queued = std::chrono::steady_clock::now();
+    {
+        std::lock_guard lk(ot_mu);
+        j.seq = ++ot_seq_pushed;
+        if (j.kind == JOB_SUBMIT) ot_my_seq = j.seq;   // (its submits: what it replayed itself inline; registrations never waited)
+        if (j.kind == JOB_PRESENT) ot_presents++;
+        ot_jobs.push_back(std::move(j));
+    }
+    ot_cv.notify_one();
+}
+/// until the order thread has done what pred says; false: timed out
+template <class P>
+bool ot_wait_until(P pred, uint64_t timeout_ns) {
+    std::unique_lock lk(ot_mu);
+    ot_waiters++;
+    bool ok = true;
+    if (timeout_ns >= (1ull << 50)) ot_done_cv.wait(lk, pred);
+    else ok = ot_done_cv.wait_for(lk, std::chrono::nanoseconds((int64_t)timeout_ns), pred);
+    ot_waiters--;
+    return ok;
+}
+bool ot_behind() {
+    uint64_t pushed_seq;
+    {
+        std::lock_guard lk(ot_mu);
+        pushed_seq = ot_seq_pushed;
+    }
+    return ot_seq_done.load(std::memory_order_acquire) < pushed_seq;
+}
+/// every job handed over before this call done (not on the order thread itself)
+void ot_join_all(int site) {
+    if (!order_thread_on() || ot_self) return;
+    uint64_t want;
+    {
+        std::lock_guard lk(ot_mu);
+        want = ot_seq_pushed;
+    }
+    if (ot_seq_done.load(std::memory_order_acquire) >= want) return ot_note(site, 0, false);
+    const int64_t t0 = ot_now();
+    ot_wait_until([want] { return ot_seq_done.load(std::memory_order_acquire) >= want; }, UINT64_MAX);
+    const int64_t d = ot_now() - t0;
+    ot_note(site, d, true);
+    static const bool log_each = getenv("RX_VK_ORDER_LOG") && atoi(getenv("RX_VK_ORDER_LOG")) != 0;
+    static std::atomic<int> logged{0};
+    if (log_each && logged++ < 60) logf("vk: order thread: %s waited %.2f ms for every job handed over", kOtSite[site], d / 1e6);
+}
+/// (PIPE2) a CPU readback the ring does not serve. In the replay inline, the reading thread's own submits had been replayed by now
+/// (on it), while the other threads' were being replayed beside it (OoT's main thread reads while the PT replays the frame before):
+/// so it waits for the submissions this thread handed over (RX_VK_ORDER_RB_JOIN=1, the default); =2: every job handed over (all threads'),
+/// =0: none. RX_VK_ORDER_LOG=1: the first 60 reads that waited, by range
+void ot_join_readback(uint64_t gpu, uint64_t size) {
+    // (PIPE2) RX_VK_ORDER_RB_JOIN=<0|1|2> (1): what a CPU readback waits for with the order thread: nothing, this thread's jobs, all jobs
+    static const int mode = getenv("RX_VK_ORDER_RB_JOIN") ? atoi(getenv("RX_VK_ORDER_RB_JOIN")) : 1;
+    // (PIPE2) RX_VK_ORDER_LOG=1: the order thread's joins one by one (the first 60 readbacks that waited)
+    static const bool log_each = getenv("RX_VK_ORDER_LOG") && atoi(getenv("RX_VK_ORDER_LOG")) != 0;
+    if (ot_self || !mode) return;
+    if (mode == 2) return ot_join_all(OT_READBACK);
+    const uint64_t want = ot_my_seq;
+    if (ot_seq_done.load(std::memory_order_acquire) >= want) return ot_note(OT_READBACK, 0, false);
+    const int64_t t0 = ot_now();
+    ot_wait_until([want] { return ot_seq_done.load(std::memory_order_acquire) >= want; }, UINT64_MAX);
+    const int64_t d = ot_now() - t0;
+    ot_note(OT_READBACK, d, true);
+    static std::atomic<int> logged{0};
+    if (log_each && logged++ < 60) logf("vk: order thread: readback %#llx +%#llx waited %.2f ms for this thread's jobs", (unsigned long long)gpu, (unsigned long long)size, d / 1e6);
+}
+/// a fence wait (nvnSyncWait, nvnQueueFinish's) for value f: false when the game is to be told "not yet" (a poll, or the timeout
+/// ran out while its submission waited for the order thread); *timeout_ns is what is left of the wait
+bool ot_wait_for(uint64_t f, uint64_t* timeout_ns) {
+    if (ot_self || ot_value_done.load(std::memory_order_acquire) >= f) return true;
+    // (PIPE2) RX_VK_ORDER_POLL_JOIN=1: with the order thread, a fence poll waits for its submission's job (default: told not yet)
+    static const bool poll_join = getenv("RX_VK_ORDER_POLL_JOIN") && atoi(getenv("RX_VK_ORDER_POLL_JOIN")) != 0;
+    if (!*timeout_ns && !poll_join) return ot_note(OT_POLL, 0, false), false;
+    const int64_t t0 = ot_now();
+    const bool ok = ot_wait_until([f] { return ot_value_done.load(std::memory_order_acquire) >= f; }, *timeout_ns ? *timeout_ns : UINT64_MAX);
+    const int64_t d = ot_now() - t0;
+    ot_note(OT_FENCE, d, true);
+    if (*timeout_ns && *timeout_ns < (1ull << 50)) *timeout_ns = (uint64_t)d >= *timeout_ns ? 0 : *timeout_ns - (uint64_t)d;
+    return ok;
+}
+uint64_t ot_fence_q(uint64_t queue) {
+    std::lock_guard so(submit_order_mu);
+    const auto it = ot_q_last.find(queue);
+    return it != ot_q_last.end() ? it->second : q_values.load();
+}
+void ot_submit(const uint64_t* handles, int n, uint64_t queue) {
+    static std::once_flag watch;   // (stopped queues after hold_ms: as with the replay inline)
+    std::call_once(watch, [] { std::thread(sync_watch).detach(); });
+    static const bool capture = !getenv("RX_VK_SYNC_CAPTURE") || atoi(getenv("RX_VK_SYNC_CAPTURE")) != 0;
+    Job j{JOB_SUBMIT};
+    j.handles.assign(handles, handles + std::max(n, 0));
+    j.queue = queue;
+    jt_mark(11, 0);
+    lag_bq_enter();   // (RX_VK_LAG_LOG)
+    tl_ev("capture+");
+    {
+        WaitScope wait_scope(WS_CAPTURE_COPY);
+        std::lock_guard so(submit_order_mu);   // (the capture, the noted waits and the value in the CPU's order, the job too)
+        if (capture) memory_capture_submit();
+        j.value = ++q_values;
+        note_waits(handles, n, j.value);
+        rb_note_value(j.value);
+        lag_submit(j.value);
+        if (queue) ot_q_last[queue] = j.value;
+        ot_push(std::move(j));
+    }
+    tl_ev("capture-");
+    jt_mark(12, 0);
+}
+void ot_present(const nvn_tex* t, const int crop[4]) {
+    Job j{JOB_PRESENT};
+    if (t) j.tex = *t, j.has_tex = true;
+    if (crop) std::memcpy(j.crop, crop, sizeof j.crop), j.has_crop = true;
+    {   // (at most RX_VK_ORDER_AHEAD presents handed over and not shown yet)
+        std::unique_lock lk(ot_mu);
+        if (ot_presents >= ot_ahead()) {
+            const int64_t t0 = ot_now();
+            ot_waiters++;
+            ot_done_cv.wait(lk, [] { return ot_presents < ot_ahead(); });
+            ot_waiters--;
+            ot_note(OT_PRESENT_SLOT, ot_now() - t0, true);
+        } else {
+            ot_note(OT_PRESENT_SLOT, 0, false);
+        }
+    }
+    std::lock_guard so(submit_order_mu);
+    j.value = ++q_values;
+    ot_push(std::move(j));
+}
+void ot_release_texture(const nvn_tex* t) {
+    Job j{JOB_TEXTURE_RELEASED};
+    j.tex = *t, j.has_tex = true;
+    ot_push(std::move(j));
+}
+void ot_release_program(const nvn_prog* p) {
+    Job j{JOB_PROGRAM_RELEASED};
+    j.prog = *p;
+    ot_push(std::move(j));
 }
 void submit_q(const uint64_t* handles, int n, uint64_t queue) {
     perf_parts::Scope perf_entry(perf_parts::t_render);   // (the renderer's entry on this thread: the summary's render part)
     tl_ev("submit+", queue, n);
     struct TlSub { ~TlSub() { tl_ev("submit-"); } } tl_sub;
     const int64_t feed_enter = feed_on() ? tl_now() : 0;   // (stream REPLAY2: the game's call reaches the replay)
+    if (order_thread_on()) return ot_submit(handles, n, queue);   // (PIPE2: the capture here, the replay on the order thread)
     if (!async_on()) {
         std::unique_lock order(sync_order_mu, std::defer_lock);
         {
@@ -8720,6 +9153,7 @@ void present(const nvn_tex* t, const int crop[4]) {
     memory_precopy_present();
     memory_cap_present();
     if (rb_fif_on()) rb_clock.fetch_add(1, std::memory_order_release);   // (FIF1: the game's frame count)
+    if (order_thread_on()) return ot_present(t, crop);   // (PIPE2: a job of the order thread)
     if (present_handed_over(t, crop)) return;
     if (!async_on()) {
         tl_ev("present-wait-lock");
@@ -8749,9 +9183,15 @@ void present(const nvn_tex* t, const int crop[4]) {
     if (crop) std::memcpy(j.crop, crop, sizeof j.crop), j.has_crop = true;
     enqueue(std::move(j));
 }
+void ot_release_texture(const nvn_tex* t);   // (PIPE2)
+void ot_release_program(const nvn_prog* p);
 void texture_released_of(const nvn_tex* t) {
     if (!t) return;
     tex_pages_add(t, -1);
+    if (order_thread_on()) return ot_release_texture(t);   // (PIPE2: in order with the submits handed over, the body below on that thread)
+    texture_released_sync(t);
+}
+void texture_released_sync(const nvn_tex* t) {
     if (!async_on()) {
         // (PR 430: after the stopped work that may use it, when it goes on. The lock is held_mu, only while queues are
         // stopped: sync_order_mu, taken on every release, made the thread finalizing textures (OptimizeChangeBank) wait for whole
@@ -8774,6 +9214,10 @@ void texture_released_of(const nvn_tex* t) {
 }
 void program_released_locked(const nvn_prog* p) {
     if (!p) return;
+    if (order_thread_on()) return ot_release_program(p);   // (PIPE2)
+    program_released_sync(p);
+}
+void program_released_sync(const nvn_prog* p) {
     if (!async_on()) {
         if (hold_releases() && sync_waits_on() && blocked_n.load()) {   // (PR 430: as texture releases, on held_mu)
             {
@@ -8801,8 +9245,9 @@ bool register_at_once() {
     static const bool v = getenv("RX_VK_REGISTER_AT_ONCE") != nullptr;
     return v;
 }
+void ot_push(Job&& j);   // (PIPE2)
 void register_texture_queued(int id, const nvn_tex* t, const nvn_view* v) {
-    if (!async_on() || register_at_once()) return register_texture_locked(id, t, v);
+    if ((!async_on() && !order_thread_on()) || register_at_once()) return register_texture_locked(id, t, v);
     if (id < 0 || id >= (1 << 20) || !t) return;
     t = (const nvn_tex*)descriptor_ok(t, sizeof(nvn_tex));
     if (!t) return;
@@ -8810,6 +9255,7 @@ void register_texture_queued(int id, const nvn_tex* t, const nvn_view* v) {
     Job j{JOB_REGISTER_TEXTURE};
     j.id = id, j.tex = *t;
     if (v) j.view = *v, j.has_view = true;
+    if (order_thread_on()) return ot_push(std::move(j));
     enqueue(std::move(j));
 }
 void event_signal_queued(uint64_t gpu, uint32_t value) {
@@ -8836,12 +9282,13 @@ void event_signal_queued(uint64_t gpu, uint32_t value) {
     enqueue(std::move(j));
 }
 void register_sampler_queued(int id, const nvn_samp_par* p) {
-    if (!async_on() || register_at_once()) return register_sampler(id, p);
+    if ((!async_on() && !order_thread_on()) || register_at_once()) return register_sampler(id, p);
     if (id < 0 || id >= (1 << 12) || !p) return;
     p = (const nvn_samp_par*)descriptor_ok(p, sizeof(nvn_samp_par));
     if (!p) return;
     Job j{JOB_REGISTER_SAMPLER};
     j.id = id, j.samp = *p;
+    if (order_thread_on()) return ot_push(std::move(j));
     enqueue(std::move(j));
 }
 uint64_t fence() { return async_on() || sync_waits_on() ? q_values.load() : pushed.load(); }
@@ -9056,6 +9503,7 @@ static int release_may_wait() {
     static const bool hint = !getenv("RX_VK_RELEASE_HINT") || atoi(getenv("RX_VK_RELEASE_HINT")) != 0;
     if (!hint) return 1;
     if (async_on()) return 0;   // (a job queued: nothing waited for here)
+    if (order_thread_on()) return 0;   // (PIPE2: a job of the order thread too)
     if (!sync_order_mu.mu.try_lock()) return 1;
     sync_order_mu.mu.unlock();
     if (!replay_mu.try_lock()) return 1;
@@ -9281,6 +9729,14 @@ int64_t par_now_ns() {
 
 bool replay_tex_storage_in(uint64_t gpu, uint64_t size) { return tex_pages_any(gpu, size); }
 
+/// (PIPE2) the host's event polls (nvnEventGetValue): the jobs handed to the order thread done first; 1: there were some to wait for
+int order_join_ext() {
+    if (!order_thread_on() || !ot_behind()) return 0;
+    ot_join_all(OT_EVENT);
+    return 1;
+}
+int order_behind_ext() { return order_thread_on() && ot_behind() ? 1 : 0; }
+
 /// (heylisten) the GPU's own time so far, ns (the performance summary's per-frame GPU time, perf_report.cpp)
 int64_t gpu_time_ns() { return st_gpu_ns; }
 
@@ -9296,3 +9752,24 @@ int64_t readback_worst_take(char* label, size_t cap) {
 }
 
 } // namespace mkwvk
+
+// (PIPE2) resolved by host/rx_backend.c if present (outside MkwVkRenderer, whose header is in the shader caches' stamp): the host's
+// event polls wait for the order thread's jobs handed over before them (RX_VK_ORDER_THREAD); behind: whether there are any
+extern "C"
+#ifdef _WIN32
+__declspec(dllexport)
+#else
+__attribute__((visibility("default")))
+#endif
+int mkwvk_order_join(void) {
+    return mkwvk::order_join_ext();
+}
+extern "C"
+#ifdef _WIN32
+__declspec(dllexport)
+#else
+__attribute__((visibility("default")))
+#endif
+int mkwvk_order_behind(void) {
+    return mkwvk::order_behind_ext();
+}

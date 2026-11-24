@@ -29,6 +29,10 @@ const rb_ring::Config& config() {
         const char* fk = getenv("RX_VK_FRAMES_IN_FLIGHT");
         if (k.lag && !(getenv("HL_RB_LAG") && *getenv("HL_RB_LAG")) && fk && atoi(fk) > 1)
             k.lag = std::min<unsigned>(rb_ring::kMaxLag, 2u + (unsigned)std::min(atoi(fk), 3) - 1u);
+        // (PIPE2) RX_VK_ORDER_THREAD=1 (off by default; vk_replay.cpp): the replay on an order thread, the submitting threads return
+        // after the capture, a frame behind the game's CPU as frames in flight are: the ring serves at lag 3
+        const char* ot = getenv("RX_VK_ORDER_THREAD");
+        if (k.lag && !(getenv("HL_RB_LAG") && *getenv("HL_RB_LAG")) && ot && atoi(ot) != 0) k.lag = std::max(k.lag, std::min<unsigned>(rb_ring::kMaxLag, 3u));
         return k;
     }();
     return c;
@@ -66,7 +70,7 @@ bool ring_failed = false;
 uint64_t arena_at = 0, arena_total = 0, next_seq = 0;
 
 struct Stats {
-    std::atomic<int64_t> reads{0}, applied{0}, none{0}, waited{0}, late{0};
+    std::atomic<int64_t> reads{0}, applied{0}, none{0}, waited{0}, late{0}, again{0};   // (again: PIPE2, the meter's block handed the last value back)
     std::atomic<int64_t> chk_new{0}, chk_equal{0}, chk_differ{0}, chk_zero{0}, chk_nonzero{0}, chk_notdone{0}, chk_old{0};
     std::atomic<int64_t> age[4] = {};
     std::atomic<int64_t> got[5] = {};   // (serve mode) the age in frames of the entries handed out: 1, 2, 3, 4, more
@@ -343,11 +347,25 @@ void rbring_apply(uint64_t gpu, uint64_t size) {
         const int k = rb_ring::pick(a.ents, a.n, c, config().lag, a.applied);
         stats[cls].reads++;
         if (k < 0) {
-            stats[cls].none++;
-            hash_add(c, cls, rb_ring::hash_read(cls, guest, nullptr, 0));
-            return;
+            // (PIPE2) the exposure meter's block: the game reads and zeroes it, so a read with no new entry finds the game's own
+            // zero and the meter hold (vk_replay.cpp) hands it the last result again. Here the ring hands that last value back
+            // itself, which is the same value by the same rule (the frame count and the entries), so the read is answered without
+            // a hold and the held-read count stays at 0. (Only the meter's block: an R2/R3 range with no new entry reads what the
+            // old path read.)
+            int again = -1;
+            if (size == 0x1040 && a.applied && memory_is_meter(guest))
+                for (unsigned i = 0; i < a.n; i++)
+                    if (a.ents[i].seq == a.applied) { again = (int)i; break; }
+            if (again < 0) {
+                stats[cls].none++;
+                hash_add(c, cls, rb_ring::hash_read(cls, guest, nullptr, 0));
+                return;
+            }
+            stats[cls].again++;
+            e = a.ents[again];
+        } else {
+            e = a.ents[k];
         }
-        e = a.ents[k];
     }
     const uint64_t n = rb_ring::copy_bytes(cls, size);
     if (!rb_ring::intact(e, total, n)) return;   // (the ring went round since: far too old to hand out)
@@ -370,11 +388,13 @@ void rbring_apply(uint64_t gpu, uint64_t size) {
     }
     hash_add(c, cls, rb_ring::hash_read(cls, guest, buf, n));
     if (stats[cls].reads % 3000 == 0)
-        logf("vk: rbring %s: 3000 reads, %lld applied (%lld waited for the GPU, %lld not done in time), %lld nothing new; age in frames of the entries "
+        logf("vk: rbring %s: 3000 reads, %lld applied (%lld waited for the GPU, %lld not done in time), %lld nothing new, %lld handed the last value "
+             "back (the meter's block); age in frames of the entries "
              "applied 1/2/3/4+: %lld/%lld/%lld/%lld (a fixed lag L hands out entries L frames old or older); staged so far %lld ranges, %.1f MB; "
              "ranges taken over again %lld, written bindings of tainted ranges given their write-back %lld",
              cname(cls), (long long)stats[cls].applied.exchange(0), (long long)stats[cls].waited.exchange(0), (long long)stats[cls].late.exchange(0),
-             (long long)stats[cls].none.exchange(0), (long long)stats[cls].got[0].exchange(0), (long long)(stats[cls].got[1].exchange(0) + 0),
+             (long long)stats[cls].none.exchange(0), (long long)stats[cls].again.exchange(0),
+             (long long)stats[cls].got[0].exchange(0), (long long)(stats[cls].got[1].exchange(0) + 0),
              (long long)stats[cls].got[2].exchange(0), (long long)(stats[cls].got[3].exchange(0) + stats[cls].got[4].exchange(0)),
              (long long)st_staged.load(), st_staged_bytes.load() / 1048576.0, (long long)st_retaken.load(), (long long)st_kept_wb.load());
 }
