@@ -116,7 +116,7 @@ def check_wiring():
         "hud_source copies the picture as presented"
     frame = block(fg, "int fsr3fi_frame(")
     assert "in.color = hud.hudless.view, in.color_image = hud.hudless.image;" in frame, "fsr3fi_frame: the HUD-less colour is FSR's colour"
-    assert "in.present = fg.frames[cur].view;" in frame, "fsr3fi_frame: the presented frame is FSR's present"
+    assert "in.present = layered ? hud.hudless.view : fg.frames[cur].view;" in frame,         "fsr3fi_frame: the presented frame is FSR's present (the HUD-less colour with the HUD layer, which lays the HUD itself)"
     assert "hud.ready && hudless_wanted()" in frame, "fsr3fi_frame: only with the picture, only when asked for"
     fi = (ROOT / "gpu/vk/vk_fsr3fi.cpp").read_text(encoding="utf-8")
     gen = block(fi, "bool generate(VkCommandBuffer cmd, const Inputs& in)")

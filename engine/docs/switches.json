@@ -2,7 +2,7 @@
  "schema": 1,
  "generated_by": "engine/scripts/list_switches.py",
  "scope": "C, C++ and headers under engine/ (engine/tests and vendored trees other than a64-kit excluded) and the Python the builder, the lifter and the scripts run: getenv, std::getenv, _wgetenv, the code's own env helpers and table-driven reads, and os.environ.",
- "count": 1454,
+ "count": 1455,
  "switches": [
   {
    "name": "A64_",
@@ -20065,7 +20065,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_framegen.cpp",
-     "line": 561
+     "line": 563
     }
    ],
    "default": "on (unless set to 0, false, off or no)",
@@ -20107,7 +20107,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_framegen.cpp",
-     "line": 243
+     "line": 245
     }
    ],
    "default": "8",
@@ -20421,13 +20421,34 @@
    "files": [
     {
      "path": "gpu/vk/vk_framegen.cpp",
-     "line": 822
+     "line": 831
     }
    ],
    "default": "unset",
    "values": "text",
    "explanation": "RX_VK_FSR_FG_HUDLESS (read once; off by default): frame generation by AMD FSR 3.1 takes the picture from before the HUD.",
    "comment": "RX_VK_FSR_FG_HUDLESS (read once; off by default): frame generation by AMD FSR 3.1 takes the picture from before the HUD.",
+   "documented_in": null,
+   "source": "comment at gpu/vk/vk_framegen.cpp",
+   "documented": true,
+   "set_via": "In `hookshot_env.txt`, or in the environment.",
+   "use": null
+  },
+  {
+   "name": "RX_VK_FSR_FG_HUD_LAYER",
+   "area": "renderer",
+   "group": "Frame generation",
+   "audience": "developer",
+   "files": [
+    {
+     "path": "gpu/vk/vk_framegen.cpp",
+     "line": 841
+    }
+   ],
+   "default": "unset",
+   "values": "text",
+   "explanation": "RX_VK_FSR_FG_HUD_LAYER (read once; off by default): with the HUD-less colour, the HUD is laid over each made frame by how see-through it is (hud.layer), not as the presented frame has it.",
+   "comment": "RX_VK_FSR_FG_HUD_LAYER (read once; off by default): with the HUD-less colour, the HUD is laid over each made frame by how see-through it is (hud.layer), not as the presented frame has it.",
    "documented_in": null,
    "source": "comment at gpu/vk/vk_framegen.cpp",
    "documented": true,
@@ -30341,12 +30362,12 @@
    "files": [
     {
      "path": "gpu/vk/vk_framegen.cpp",
-     "line": 688
+     "line": 690
     }
    ],
    "default": "off (unset)",
    "values": "on or off (0, false, off, no and empty are off)",
-   "explanation": "undocumented: gpu/vk/vk_framegen.cpp:688 (in `framegen_scale()`) reads it as an on/off switch: `static const bool report = getenv(\"RX_VK_UPSCALE_LOG\") != nullptr;`. No comment in the source says what it changes.",
+   "explanation": "undocumented: gpu/vk/vk_framegen.cpp:690 (in `framegen_scale()`) reads it as an on/off switch: `static const bool report = getenv(\"RX_VK_UPSCALE_LOG\") != nullptr;`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",

@@ -8,7 +8,7 @@ every step behind a switch that is off by default.
 
 - [x] Step 1: HUD-less capture at the gameplay upscale dispatch, `RX_VK_FSR_FG_HUDLESS` (code and test done; commit below)
 - [x] Step 2: FSR 3.1 interpolates the HUD-less colour, the presented frame beside it (code, test, run_all done; pictures pending)
-- [ ] Step 3: HUD layer fit and lay-over, `RX_VK_FSR_FG_HUD_LAYER`
+- [x] Step 3: HUD layer fit and lay-over, `RX_VK_FSR_FG_HUD_LAYER` (code, test done; pictures pending)
 - [ ] Step 4: the same pair for the built-in interpolator, `RX_VK_FG_HUDLESS`
 - Not touched on purpose: DLSS-G, FSR 4 (the brief), Native HDR's PQ present (falls back to the presented picture), PsychoV35's
   RGBA16F picture (not copied: another encoding than the frame's).
@@ -41,3 +41,17 @@ every step behind a switch that is off by default.
   #1538): this tree's AMD shaders are AMD's own and are not regenerated. The factor AMD's pass computes grows with the difference, so
   soft HUD edges may be laid partly; the HUD layer of step 3 replaces that lay-over.
 - Test: `engine/tests/test_fsr3fi_hudless_colour.py` (and `test_psychov35_fsr3_fg.py`'s fixture follows `present` and `hudless`).
+
+## Step 3: the HUD layer
+
+- `shaders/fg_hud_layer.comp` (`hud_fit`): per pixel, from this frame's and the frame before's pictures (before the HUD S, as
+  presented D), the game's blend D = B + T * S is fitted (least squares over the channels, decayed 0.9 a frame, started again when
+  T no longer explains the frame, unknown where the HUD just appeared, nothing moved behind it, or a value is over 1).
+  `shaders/fg_hud_composite.comp` (`hud_over`): the made frame's pixel becomes sRGB(B + T * linear(made)), the presented pixel where
+  T is unknown, untouched where there is no HUD. Both headers by `tests/test_fsr3fi_hud_layer.py --write`.
+- `vk_framegen.cpp`: two pairs of before/after pictures (`hud.before[k]`, `hud.after[k]`, k flips each present with a picture),
+  `hud_layer()` after the HUD-less pass, `fsr3fi_frame` gives FSR 3.1 the HUD-less colour as its present too (it lays nothing) and
+  runs the composite over `set.frame[0]` after copying the made frame. +24 bytes a pixel of VRAM (fit and layer RGBA16F, the
+  second pair of pictures).
+- `RX_VK_FSR_FG_HUD_LAYER=1` needs `RX_VK_FSR_FG_HUDLESS=1`; off by default.
+- Test: `engine/tests/test_fsr3fi_hud_layer.py` (the fit and the lay-over as C++, the framegen wiring with spies, the headers).

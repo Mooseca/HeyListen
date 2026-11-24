@@ -140,23 +140,26 @@ void logf(const char*, ...) {}
 uint64_t next_handle = 0x1000;
 template <class T> T handle() { return (T)(uintptr_t)(next_handle += 0x10); }
 int made_images = 0;
-constexpr uint32_t FG_HUD_COMP_SPV[] = {0};
+constexpr uint32_t FG_HUD_COMP_SPV[] = {0}, FG_HUD_LAYER_COMP_SPV[] = {0}, FG_HUD_COMPOSITE_COMP_SPV[] = {0};
+void drop_pipe(Pipe& p) { p = {}; }
+bool fail_layer_pipes = false;   // (the layer's pipelines cannot be made)
 struct { Img frames[2]; VkSampler nearest = VK_NULL_HANDLE; } fg;
 int made_pipes = 0;
 bool make_pipe(Pipe& p, const uint32_t*, size_t, std::initializer_list<VkDescriptorType> types, uint32_t push) {
-    CHECK(types.size() == 4 && push == 16);
+    CHECK((types.size() == 4 && push == 16) || (types.size() == 6 && push == 20) || (types.size() == 3 && push == 8));
+    if (types.size() != 4 && fail_layer_pipes) return false;
     p.pipe = handle<VkPipeline>(), p.layout = handle<VkPipelineLayout>(), p.set = handle<VkDescriptorSetLayout>();
     return ++made_pipes, true;
 }
 // (the HUD-less pass: its pipeline, its bindings, its push constants)
-struct Pass { VkPipeline pipe; std::vector<VkImageView> views; int32_t pc[4]; uint32_t w, h; };
+struct Pass { VkPipeline pipe; std::vector<VkImageView> views; int32_t pc[5]; uint32_t w, h; };
 std::vector<Pass> passes;
 void pass(VkCommandBuffer, const Pipe& p, std::initializer_list<std::pair<VkImageView, VkSampler>> bindings, uint32_t w,
           uint32_t h, const void* push = nullptr, uint32_t push_bytes = 0) {
     Pass r{p.pipe, {}, {}, w, h};
     for (const auto& b : bindings) r.views.push_back(b.first);
-    CHECK(push && push_bytes == sizeof r.pc);
-    std::memcpy(r.pc, push, sizeof r.pc);
+    CHECK(push && push_bytes <= sizeof r.pc && push_bytes >= 8);
+    std::memcpy(r.pc, push, push_bytes);
     passes.push_back(r);
 }
 bool make_img(Img& i, uint32_t, uint32_t, VkFormat, VkImageUsageFlags) {
