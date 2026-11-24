@@ -309,6 +309,8 @@ thread_local int tl_replay_depth = 0;
 std::atomic<bool> sub_pend_flag{false};
 bool sub_pend = false;           // (replay_mu: a submission's end is pending: defer_group is its group)
 uint64_t sub_pend_value = 0;     // (its value: `pushed` moves to it when its end is in the queue)
+std::atomic<uint64_t> sub_pend_value_a{0};   // (DECOUPLE: the same, for the order thread's done marks after its job: ot_main)
+void ot_end_sent(uint64_t v);    // (DECOUPLE: a pending submission's end is in the queue: the order thread's done marks may pass it)
 int64_t sub_pend_t0 = 0;         // (when it was handed off, steady clock ns)
 void sub_complete_now();   // (replay_mu held: the pending submission's group joined, its end sent)
 struct ReplayLock {
@@ -3721,11 +3723,11 @@ bool sub_overlap_on() {   // (stream SUB1) RX_VK_SUB_OVERLAP=1: a submission who
     static const bool v = [] {
         const char* e = getenv("RX_VK_SUB_OVERLAP");
         const bool asked = e && atoi(e) != 0;
-        // (DECOUPLE) not with the order thread yet: its captures are taken by the submitting threads, and a pending submission's end
-        // is completed by "the replay thread", which the order thread's jobs are not written for (docs/research/decouple-cross-frame.md)
-        const bool on = asked && !order_thread_on();
-        if (on) logf("vk: a submission's end waits for its last segments' workers, the next one begins meanwhile (RX_VK_SUB_OVERLAP)");
-        else if (asked) logf("vk: RX_VK_SUB_OVERLAP is left off with RX_VK_ORDER_THREAD (not built together yet)");
+        // (DECOUPLE) with the order thread too: the pending end is sent by whoever puts the group's last segment in the queue, and the
+        // order thread's done marks (ot_value_done, ot_seq_done) stop before the submission until it is (ot_main, submit_seq::DoneHold)
+        const bool on = asked;
+        if (on) logf("vk: a submission's end waits for its last segments' workers, the next one begins meanwhile (RX_VK_SUB_OVERLAP%s)",
+                     order_thread_on() ? ", on the order thread" : "");
         return on;
     }();
     return v;
@@ -3841,6 +3843,7 @@ struct EarlyGroup {
     SubmitPrep tail_prep;
     MemView tail_view;
     uint64_t tail_value = 0;
+    uint64_t sub_value = 0;   // (DECOUPLE: the submission's value, sub_pend_value: the order thread's done marks wait for its end)
     std::atomic<bool> tail_set{false};
     bool tail_sent = false;   // (sub_mu)
     // (stream DECOUPLE, RX_VK_LANES / RX_VK_LANES_CHECK) the render conditions its segments read (its dry pass's list, held from the
@@ -3939,6 +3942,7 @@ void group_tail_send(EarlyGroup& G) {
     vkEndCommandBuffer(r.tail);
     G.tail_prep.cb[G.tail_prep.n++].commandBuffer = r.tail;
     submit_send(G.tail_prep);
+    ot_end_sent(G.sub_value);   // (DECOUPLE: RX_VK_ORDER_THREAD: the waits for its value may go on)
     (tl_replay_depth ? sub_stats.by_replay : sub_stats.by_worker).fetch_add(1, std::memory_order_relaxed);
 }
 /// One segment recorded (a pool worker's, or the replay thread's own last one), as replay_handle's
@@ -4154,6 +4158,7 @@ void defer_join_now(DeferJoinWhy why) {
         sub_pend = false;
         sub_pend_flag.store(false, std::memory_order_release);
         if (pushed.load() < sub_pend_value) pushed = sub_pend_value;
+        ot_end_sent(sub_pend_value);   // (DECOUPLE: joined, its end in the queue)
         sub_stats.joined[why].fetch_add(1, std::memory_order_relaxed);
         sub_stats.window_ns.fetch_add(std::chrono::steady_clock::now().time_since_epoch().count() - sub_pend_t0, std::memory_order_relaxed);
     }
@@ -5303,10 +5308,11 @@ void finish_recording_deferred(uint64_t value) {
     SubmitPrep P;
     submit_recording(r, signal, at, &P);
     sub_pend = true, sub_pend_value = value, sub_pend_flag.store(true, std::memory_order_release);
+    sub_pend_value_a.store(value, std::memory_order_release);
     sub_pend_t0 = std::chrono::steady_clock::now().time_since_epoch().count();
     sub_stats.handoffs.fetch_add(1, std::memory_order_relaxed);
     std::lock_guard sl(G.sub_mu);
-    G.tail_prep = P, G.tail_view = view, G.tail_value = r.value;
+    G.tail_prep = P, G.tail_view = view, G.tail_value = r.value, G.sub_value = value;
     G.tail_set.store(true, std::memory_order_release);
     group_tail_send(G);   // (every segment is in the queue already: sent here)
 }
@@ -5477,6 +5483,7 @@ bool run_submit(const uint64_t* handles, int n, uint64_t value, uint64_t queue, 
     if (!pend_ok) defer_join_now(kJoinLoopEnd);
     else if (burst_open) {   // (the group stays pending past this piece: whatever takes replay_mu or submits completes it first)
         sub_pend = true, sub_pend_value = value, sub_pend_flag.store(true, std::memory_order_release);
+        sub_pend_value_a.store(value, std::memory_order_release);
         sub_pend_t0 = std::chrono::steady_clock::now().time_since_epoch().count();
     }   // (stream JOIN1: a join never outlives the command buffers' loop: the recording's end below needs every segment)
     if (stop) {
@@ -8763,6 +8770,22 @@ uint64_t ot_seq_pushed = 0;            // (ot_mu)
 int ot_presents = 0;                   // (handed over, not yet shown: ot_mu)
 int ot_waiters = 0;                    // (threads in ot_done_cv: ot_mu)
 std::atomic<uint64_t> ot_seq_done{0}, ot_value_done{0};
+submit_seq::DoneHold ot_hold;   // (DECOUPLE, ot_mu: the done marks held while a submission's end is pending, RX_VK_SUB_OVERLAP)
+void ot_publish_locked() {      // (ot_mu)
+    if (ot_hold.pub_value > ot_value_done.load(std::memory_order_relaxed)) ot_value_done.store(ot_hold.pub_value, std::memory_order_release);
+    if (ot_hold.pub_seq > ot_seq_done.load(std::memory_order_relaxed)) ot_seq_done.store(ot_hold.pub_seq, std::memory_order_release);
+}
+void ot_end_sent(uint64_t v) {
+    if (!order_thread_on() || !v) return;
+    bool wake;
+    {
+        std::lock_guard lk(ot_mu);
+        if (!ot_hold.end_sent(v)) return;
+        ot_publish_locked();
+        wake = ot_waiters > 0;
+    }
+    if (wake) ot_done_cv.notify_all();
+}
 std::atomic<bool> ot_holding{false};   // (PIPE4: ot_main holds a present not ready yet; it forces it itself at its time)
 std::unordered_map<uint64_t, uint64_t> ot_q_last;   // (queue -> its last submission handed over: submit_order_mu)
 // (the joins by site, the order thread's idle time and its queue, logged every 600 presents)
@@ -8789,6 +8812,16 @@ void ot_log() {   // (the order thread, at a present)
         n += snprintf(line + n, sizeof line - n, " %s %lld/%lld %.2f;", kOtSite[k], (long long)ot_join_waited[k].exchange(0),
                       (long long)ot_join_n[k].exchange(0), ot_join_ns[k].exchange(0) / 1e6 / f);
     logf("%s", line);
+    if (sub_overlap_on()) {   // (DECOUPLE: the done marks held behind a pending submission's end)
+        int64_t h, r;
+        {
+            std::lock_guard lk(ot_mu);
+            h = ot_hold.holds, r = ot_hold.released_late;
+            ot_hold.holds = ot_hold.released_late = 0;
+        }
+        logf("vk: order thread: %lld submit jobs returned with their end pending (done marks held), %lld released by the end's send or join",
+             (long long)h, (long long)r);
+    }
     frames = 0, t0 = now, ot_idle_ns = ot_sig_waits = ot_sig_late = ot_depth_sum = ot_depth_max = ot_jobs_n = 0;
 }
 // (PIPE4) The present job: the frame's stopped work drained, then shown. Not forced (force false) it is shown only when it is
@@ -8875,12 +8908,14 @@ void ot_main() {
     // to the signal, darker for a few frames on a zone's first frames)
     static const int ms = getenv("RX_VK_ORDER_SIGNAL_MS") ? std::max(0, atoi(getenv("RX_VK_ORDER_SIGNAL_MS"))) : 2000;
     auto finish = [](const Job& j) {
+        // (DECOUPLE, RX_VK_SUB_OVERLAP) a submit that returned with its end pending is done when that end is in the queue (ot_end_sent)
+        const uint64_t pend = j.kind == JOB_SUBMIT && sub_pend_flag.load(std::memory_order_acquire) ? sub_pend_value_a.load(std::memory_order_acquire) : 0;
         bool wake;
         {
             std::lock_guard lk(ot_mu);
             if (j.kind == JOB_PRESENT) ot_presents--;
-            if (j.value && j.value > ot_value_done.load(std::memory_order_relaxed)) ot_value_done.store(j.value, std::memory_order_release);
-            if (j.seq > ot_seq_done.load(std::memory_order_relaxed)) ot_seq_done.store(j.seq, std::memory_order_release);
+            ot_hold.finish(j.seq, j.value, pend);
+            ot_publish_locked();
             wake = ot_waiters > 0;
         }
         if (wake) ot_done_cv.notify_all();

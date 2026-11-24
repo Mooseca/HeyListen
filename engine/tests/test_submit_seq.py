@@ -83,6 +83,28 @@ int main() {
         }
         CHECK(s.pending() == 0 && s.out_of_order() == 0 && s.max_pending() == 2 && s.finished() == 200000);
     }
+    {   // the order thread's done marks: a submission whose end is pending holds them just before it
+        DoneHold h;
+        CHECK(h.finish(1, 10, 0) && h.pub_seq == 1 && h.pub_value == 10);
+        CHECK(!h.finish(2, 11, 11) && h.pub_seq == 1 && h.pub_value == 10 && h.holds == 1);   // job 2 left value 11's end pending
+        CHECK(!h.finish(3, 0, 0) && h.pub_seq == 1);                                          // a registration behind it: held too
+        CHECK(!h.finish(4, 12, 0) && h.pub_value == 10);                                      // a present behind it
+        CHECK(!h.end_sent(9) && h.held_value == 11);                                          // an older end: nothing
+        CHECK(h.end_sent(11) && h.pub_seq == 4 && h.pub_value == 12 && h.held_value == 0);    // its end sent: everything done so far
+        CHECK(h.finish(5, 13, 0) && h.pub_seq == 5 && h.pub_value == 13);
+    }
+    {   // the end sent before the job is finished (a worker put the last segment in the queue first): no hold
+        DoneHold h;
+        h.end_sent(21);
+        CHECK(h.finish(1, 21, 21) && h.pub_seq == 1 && h.pub_value == 21 && h.holds == 0);
+    }
+    {   // a second pending one behind a held one: the marks wait for both
+        DoneHold h;
+        h.finish(1, 30, 30);
+        h.finish(2, 31, 31);
+        CHECK(!h.end_sent(30) && h.pub_seq == 0);
+        CHECK(h.end_sent(31) && h.pub_seq == 2 && h.pub_value == 31);
+    }
     if (!fails) std::printf("PASS the rules\n");
     return fails;
 }
@@ -138,6 +160,17 @@ def main():
          "a segment's gates are not read from its group's list")
     need("conds_rotate();" in function(rp, "void par_conds_reset() {"), "a dry pass does not take a list of its own")
     need("vk: LANES_CHECK: submit tickets taken %lld" in rp and "lane_chk.seq.out_of_order()" in rp, "the check does not log its counters")
+    so = function(rp, "bool sub_overlap_on() {")
+    need("!order_thread_on()" not in so, "RX_VK_SUB_OVERLAP is still left off with the order thread")
+    m = function(rp, "void ot_main() {")
+    need("ot_hold.finish(j.seq, j.value, pend);" in m and "ot_publish_locked();" in m and "ot_value_done.store(" not in m,
+         "the order thread's done marks are not held behind a pending submission's end")
+    need("sub_pend_flag.load(std::memory_order_acquire) ? sub_pend_value_a.load(" in m, "a submit job's pending end is not read after it")
+    ts = function(rp, "void group_tail_send(EarlyGroup& G) {")
+    need(ts.index("submit_send(G.tail_prep);") < ts.index("ot_end_sent(G.sub_value);"), "the end's send does not release the done marks")
+    need("ot_end_sent(sub_pend_value);" in function(rp, "void defer_join_now(DeferJoinWhy why) {"), "a join does not release the done marks")
+    need(rp.count("sub_pend_value_a.store(value, std::memory_order_release);") == 2, "a pending submission's value is not published for the order thread")
+    need("G.sub_value = value;" in function(rp, "void finish_recording_deferred(uint64_t value) {"), "the group does not know its submission's value")
     print("PASS the wiring")
 
 

@@ -79,4 +79,50 @@ private:
     int64_t taken_ = 0, finished_ = 0, dropped_ = 0, out_of_order_ = 0, unknown_ = 0;
 };
 
+/// The order thread's "done" marks with a submission's end pending (RX_VK_SUB_OVERLAP with RX_VK_ORDER_THREAD; section 4.3 item 5).
+/// The order thread finishes its jobs in order and publishes how far it is (the last job's sequence number, the highest value): a
+/// game thread that waits for a value goes on to the GPU's timeline once it is published. A submit job that returns with its
+/// submission's end still pending (sent later by the thread that puts its group's last segment in the queue) is done only when that
+/// end is sent: the marks stop just before it and wait, the jobs behind it finishing meanwhile, until end_sent() reaches its value.
+/// The caller holds one mutex over all of it (ot_mu).
+struct DoneHold {
+    uint64_t pub_seq = 0, pub_value = 0;   // (published: every job up to pub_seq done, values up to pub_value)
+    uint64_t max_seq = 0, max_value = 0;   // (finished, published or held)
+    uint64_t held_value = 0;               // (0: nothing held; else the pending submission's value)
+    uint64_t sent = 0;                     // (the highest pending submission's value whose end is sent)
+    int64_t holds = 0, released_late = 0;
+    /// A job finished in order. pend: its submission's value when it left the end pending, else 0. True: the marks moved
+    bool finish(uint64_t seq, uint64_t value, uint64_t pend) {
+        if (seq > max_seq) max_seq = seq;
+        if (value > max_value) max_value = value;
+        if (pend && pend > sent) {   // (its end not sent yet: done up to the job before it)
+            if (!held_value) {
+                holds++;
+                held_value = pend;
+                if (seq - 1 > pub_seq) pub_seq = seq - 1;
+                return false;
+            }
+            if (pend > held_value) held_value = pend;   // (a later one pending behind the held one: the marks wait for both)
+            return false;
+        }
+        if (held_value) return false;   // (behind a held one)
+        return publish();
+    }
+    /// The end of the submission with this value is in the queue. True: the marks moved
+    bool end_sent(uint64_t v) {
+        if (v > sent) sent = v;
+        if (!held_value || sent < held_value) return false;
+        held_value = 0;
+        released_late++;
+        return publish();
+    }
+
+private:
+    bool publish() {
+        const bool moved = max_seq != pub_seq || max_value != pub_value;
+        pub_seq = max_seq, pub_value = max_value;
+        return moved;
+    }
+};
+
 }   // namespace submit_seq
