@@ -1440,6 +1440,9 @@ void mic_chosen() {
     mic_row_ends();
     mic_tell_host();
 }
+// (HeyListen) the options file's lowend_rule line: the low-end rule was applied once (menu_first_run_lowend), never again: the
+// player's choices stay theirs. Kept by save()
+static bool lowend_marked;
 void save() {
     // (hookshot) the lines that are not the menu's are kept: the controls, pad_ and key_ (host/nn_hid.c)
     // (and every other line the menu does not write, such as discord_app_id=: they were dropped at the next save)
@@ -2423,9 +2426,7 @@ void startup_screen(const StartupView* view) {
     startup_on.store(true, std::memory_order_release);
 }
 
-// (HeyListen) Low-end GPUs: the options file's lowend_rule line (the rule was applied once: never again, the player's choices stay
-// theirs), the Volumetric fog row and the first-start rule (lowend_rule.h)
-static bool lowend_marked;
+// (HeyListen) Low-end GPUs: the Volumetric fog row and the first-start rule (lowend_rule.h)
 static int env_int(const char* name) {   // (-1: unset or empty)
     const char* e = getenv(name);
     return e && *e ? atoi(e) : -1;
