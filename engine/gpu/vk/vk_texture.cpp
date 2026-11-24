@@ -610,6 +610,8 @@ VkPipeline astc_pipe = VK_NULL_HANDLE;
 /// area loads), it loaded 4 times of 4. The textures are then RGBA8 (no BC3), in the system memory an integrated GPU draws from
 /// anyway. Issue 127, an Xbox Ally X (Radeon 890M, driver 26.10.1): the driver reset the GPU while a save loaded, in a burst of
 /// GPU ASTC decodes (491 ms of uploads in one frame); RX_VK_ASTC_CPU=1 fixed it, so the rule now covers every AMD integrated GPU.
+/// But not the Vega-generation APUs (Ryzen 2000 to 5000 U/H/G; astc_cpu_policy::vega_apu): a Ryzen 7 5700U never reset on the GPU
+/// decode and ran 1.3 fps with the CPU one while the camera turned, 14.2 with the GPU one.
 /// (Ported from Longshot a4ead95c, #489)
 /// (HeyListen: Longshot d12ddf69b (#1833) took this rule away once GPU ASTC uploads went in bounded submissions of
 /// RX_VK_ASTC_CHUNK_MPX, upload_astc_gpu. Here they cannot while a parallel replay records the segments (upload_chunk_flush: an
@@ -631,7 +633,8 @@ bool astc_on_cpu() {
         const char* e = getenv("RX_VK_ASTC_CPU");
         const bool v = astc_cpu_wanted(e, dev.props.vendorID, dev.props.deviceID,
                                        dev.props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU);
-        if (v) logf("vk: ASTC decoded on the CPU (RX_VK_ASTC_CPU=0: by the GPU; on by default for AMD's integrated GPUs on Windows)");
+        if (v) logf("vk: ASTC decoded on the CPU (RX_VK_ASTC_CPU=0: by the GPU; on by default for AMD's integrated GPUs on Windows, "
+                  "but the Vega-generation APUs)");
         return v;
     }();
     return on;

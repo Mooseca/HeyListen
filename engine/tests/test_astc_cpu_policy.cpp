@@ -22,6 +22,9 @@ int main() {
     expect(by_default(true, 0x1002, 0x13C0, true), "Windows, Ryzen 9000 graphics (#489)");
     expect(by_default(true, 0x1002, 0x164E, false), "Windows, the Ryzen 7000 id whatever type the driver reports");
     expect(by_default(true, 0x1002, 0x13C0, false), "Windows, the Ryzen 9000 id whatever type the driver reports");
+    expect(!by_default(true, 0x1002, 0x164C, true), "Windows, a Ryzen 7 5700U's Vega graphics: GPU path (CPU decode: 1.3 fps turning)");
+    expect(!by_default(true, 0x1002, 0x1638, true), "Windows, a Ryzen 5000 Cezanne APU's Vega graphics: GPU path");
+    expect(!by_default(true, 0x1002, 0x15D8, true), "Windows, a Ryzen 3000 Picasso APU's Vega graphics: GPU path");
     expect(!by_default(true, 0x1002, 0x747E, false), "Windows, an RX 7800 XT (discrete)");
     expect(!by_default(true, 0x1002, 0x744C, false), "Windows, an RX 7900 XTX (discrete)");
     expect(!by_default(true, 0x1002, 0x15BF, false), "Windows, AMD id of an APU reported as discrete or virtual: GPU path");
