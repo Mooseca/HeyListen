@@ -64,10 +64,55 @@
 Branch `perf/pipe2` from origin/main 4b599eb04 (PIPE1 merged, `RX_VK_TOUCH_FAST` on). Worktree `E:\OOT\HeyListen-wt\pipe2`. Design:
 `pipe1-frame-overlap.md` section 3 (stages 0-3 with their gates). Main PC (RTX 5070); PC 3050 runs are routed by the coordinator.
 
-## State (PIPE4 continues on perf/pipe2; last edit 24 Nov ~08:00)
+## State (PIPE4 stopped 24 Nov 14:35; the order thread goes to DECOUPLE, branch perf/decouple)
 
-PIPE4 (lease name `pipe4`, scratch `E:\OOT\scratch-pipe4`, scripts `build/s5/pipe4/{build,tour}.sh`, launches through
-`E:\OOT\scratch-pipe4\tmp\launch.py`):
+**Handover (read this first).** PIPE4 is stopped by the owner's priority change. Nothing of PIPE4 is running or leased: the last slot
+ticket was cancelled before it was granted, the pipe4g tours never ran, and slot c's own exe and dll are back (`bak-c` matches).
+Branch `perf/pipe2` at the tip below holds everything; not pushed.
+
+*The dark frames (evidence).* They are the lit scene drawn black for one or more frames (sky, HUD and Navi right:
+`E:\OOT\scratch-pipe3\shots\p3t-on\flash_7268_{a,b}.png`), not a late read. On pipe4b, every big flash sits on a present that
+**forced the stopped lit passes past their event waits** (`vk: wait gone past (a present, ...)`, 14 waits a present, events
+`0x100d6c80xx` 19 values short: the lighting work that sets them was still behind the present in the order thread's job queue) and/or
+on a present that **let go of the CPU's signal after 200 ms**: `p4t2-on` flashes 6358/6362/6520/6523 against forced presents
+6357-6363 and 6512-6522; `p4t3-on` flashes 5712-5716 and 5936-5940 against let-go 5715/5939 and forced 5933-5942; the off arm
+(`p4t2-off`, `p4t9-off`) has no wait forced by a present and 0 flashes. Inline the Presentation Thread cannot present before the main
+thread has handed the frame over; with the order thread and `HOS_PRESENT_NOWAIT` the present job is queued before the frame's last
+work and its signal, and when the game is slow (a zone's first frames) the present forced the frame out unfinished.
+
+*Builds* (`build/s5/bin/<name>`; tours = 4-warp tour, `build/s5/pipe4/tour.sh`, runs `build/s5/<tag>`):
+
+| build | engine change on top of the previous | tours (on) | result |
+|---|---|---|---|
+| pipe4a | log of each wait gone past and of a present's let-go (`02cf81c1e`) | p4t1 | instrumentation only |
+| pipe4b | the time watch (`sync_watch`) does not force while jobs are queued (`fbd417c9f`) | p4t2, p4t3 | 4 and 9 flashes (off 0): not the cause |
+| pipe4c | **the present is held until its signal and no stopped queue before it, the jobs behind it run meanwhile, the next present forces it, 200 ms** (`7ed2ea569`) | p4t4, p4t5, p4t6, p4t7 | no dark frame; 3 small flashes in 2 tours that reached the later zones (72-160 cells) at presents let go after 200 ms |
+| pipe4d | + a read as submitted takes the capture's copy of a CPU-stale page (`0550f3d22`) | p4t8, p4t9 | 5 and 1 flashes; reverted (`1bd22639f`) |
+| pipe4e | + the held present waits 2 s and the next present waits behind it (`e42aa06b0`) | p4t10, p4t11 | 0 flashes but **froze**: 6 frames after play (Market), presents stopped 81 s in (Zora's River) |
+| pipe4f | the next present forces the held one again, the 2 s limit kept (`714f7dad7`) | p4t12, p4t13 | p4t12: whole route, **0 flashes, 0 presents forced**, meter 11/12/0/0; p4t13: **hung at the load** (play never began; the watch spared 4,000 forces) |
+| pipe4g | the watch spares only while an order-thread job finished in the last 250 ms (`0c9273591`) | not run | built 14:31, tests 503 passed + the known failures |
+
+Tests: pipe4f 505 passed, 2 failed (`test_nup_paths`, `test_nup_read_name`); pipe4g 503 passed, 4 failed: the two above, `test_renderer_new_handler` (known, local) and `test_switches_documented` (the switch lists were not regenerated for `0c9273591`'s comment; regenerated in the handover commit, `--check` passes).
+
+*Best build to measure:* **pipe4g** for function (it carries pipe4f's present rule and the fix for pipe4f's load hang, not yet run in
+the game); **pipe4c** is the last build with a picture series without hangs (no dark frame; small let-go flashes). For fps, pipe4c
+and pipe4f/g differ only when a present is held (rare in steady play), so pipe4c's numbers stand: main PC gate (cut short) castle
++2.3% (medians 126.6 -> 129.5, every on run above every off run), Kokiri +6.5% (one round), meter 0 held reads on.
+
+*Next, in order, and why:* (1) two tours on pipe4g (on) and one off: pipe4g has never run; the question is whether the load hang is
+gone and the 0 flashes of `p4t12-on` hold. (2) If a hang remains, it is a job of the order thread waiting for a stopped queue's
+work: find which (a dump of the order thread's stack while hung, or log `ot_run`'s job kind and value on entry/exit for the last 50
+jobs) and make that wait force the stopped queue itself (as `wait_queue_empty` does) rather than relying on the watch. (3) The
+2 s present hold: measure how often it is taken (`the present after N forced (waited its time ...)`); if it stalls zone loads,
+bring it down (500 ms) - 200 ms let small flashes through. (4) The late-read class (section 9) did not explain any flash seen here.
+
+*Open risks:* the 2 s held present can turn a slow zone frame into a 2 s hitch; `ot_seq_done` / `ot_value_done` move past a held
+present (jobs behind it finish first), so a join on "every job handed over" can return before that present is shown; pipe4b's
+watch rule (spare while jobs are queued) is what hung pipe4f - pipe4g limits it, untested. The tours on this machine often started
+slowly (play 130-147 s after start under load); `tour.sh` now runs 300 s (`RUNS`, `LIMS`).
+
+PIPE4 log (lease name `pipe4`, scratch `E:\OOT\scratch-pipe4`, scripts `build/s5/pipe4/{build,tour,gate}.sh`, launches through
+`E:\OOT\scratch-pipe4\tmp\launch.py`; tables `E:\OOT\scratch-pipe4\tmp\gate.py`):
 - Step 1 done: origin/main merged (`179d7e41c`; EXPO1, WBL1). PIPE2's meter fix `0bb228966` is kept: EXPO1's take-over covers a
   range the ring does not serve (the zone change), PIPE2's covers a served meter block read with no new entry at lag 3 (the order
   thread) - different paths in `rbring_apply`, no overlap; the rbring line carries both counts.
