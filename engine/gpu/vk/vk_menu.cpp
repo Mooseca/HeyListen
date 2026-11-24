@@ -1442,7 +1442,7 @@ void mic_chosen() {
 }
 // (HeyListen) the options file's lowend_rule line: the low-end rule was applied once (menu_first_run_lowend), never again: the
 // player's choices stay theirs. Kept by save()
-static bool lowend_marked;
+[[maybe_unused]] static bool lowend_marked;   // (unused where a test cuts save() out alone)
 void save() {
     // (hookshot) the lines that are not the menu's are kept: the controls, pad_ and key_ (host/nn_hid.c)
     // (and every other line the menu does not write, such as discord_app_id=: they were dropped at the next save)
