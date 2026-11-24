@@ -224,6 +224,24 @@ and a build shared the machine: the GPU's busy time moved from 10.0 to 17.1 ms a
   `engine/gpu/vk/cap_view.h`, test `engine/tests/test_cap_view.py`. Inert until several submissions' segments record at once.
 - Suite on `09484e740`: 512 passed, 3 failed (the known three; `E:\OOT\scratch-decouple\tests-dec2a.log`).
 
+Series 1 and 2 of check runs with the switch on (main PC, slot a, machine shared; `build/s5/dec1a-*`, `build/s5/dec2a-*`):
+
+| run | build | scene | switches | result |
+|---|---|---|---|---|
+| `dec2a-chk-on` | dec2a | Kokiri | `RX_VK_SUB_OVERLAP=1` and both checks | 15,000 joins, 0 segments differ; 34,001,020 reads of value and epoch, 0 differ; 24,139,193 capture entries read, 0 newer than the worker's submission; 33,144,573 pool sync checks, 0 by a later submission; 2,884,215 list additions, 0 to another list; 0 views deeper than the history; 4,989 hand-offs (ends sent by a worker 3,524, by the replay thread 1,465), mean window 2.836 ms |
+| `dec1a-chk-on-m` | dec1a | Market (`market-mid`) | `RX_VK_SUB_OVERLAP=1`, its check | **never reached play**: the title, then the load screen (5 draws a frame, up to 360 fps) until "skip title: gave up after 120 s" |
+| `dec1a-tour-on` | dec1a | Market (`market`), warp tour | `RX_VK_SUB_OVERLAP=1` | **never reached play**, the same way |
+| `dec1a-tour-off` | dec1a | the same tour | none | play at 68.65 s, the five maps, 0 flashes, the meter's held reads 177 / 503 / 11 / 0 / 0 / 0 |
+| `dec2a-m-on` | dec2a | Market (`market-mid`) | `RX_VK_SUB_OVERLAP=1`, both checks, `RX_VK_CAP_DEPTH=2`, the wait log, a job trace | play at 70.87 s |
+
+**Open defect: with `RX_VK_SUB_OVERLAP=1` the load of a Market save did not finish in 2 runs of 2 on `dec1a`** (Kokiri's did, 2 of 2;
+without the switch the Market's did, 2 of 2), and did finish in the one run on `dec2a` with `RX_VK_CAP_DEPTH=2` and diagnostics on.
+Not explained. One cause was found by reading and removed in `e67d919c8` (build `dec2b`): CRASH3's guessed write-backs kept their
+snapshots in one map that every submission's start cleared, so a pending submission's guessed write-backs were never checked and
+never written once the next one had begun; the snapshots are now the submission's own (`MemSub::guess_snaps`). Whether that was the
+load's cause is not shown: it needs `dec2b` run on a Market save with the switch alone, twice or more (series 3 below), and the
+same on `dec2a` to tell the fix from the capture depth.
+
 ### 4.3 Stage 2 (`RX_VK_LANES`), not built: the recipe, from the code as merged
 
 What stops the spine today, in order, and what each needs (one pending submission at a time is enough for most of the gain: the
