@@ -63,6 +63,7 @@ ARGS = {
     "tests/test_psychov35_default.py": ["--cxx", "{cxx}"],
     "tests/test_psychov35_fsr3.py": ["--cxx", "{cxx}"],
     "tests/test_psychov35_fsr3_fg.py": ["--cxx", "{cxx}"],
+    "tests/test_fsr3fi_hud_capture.py": ["--cxx", "{cxx}", "--headers", "{vulkan_headers}"],
     "tests/test_taau_typed_dispatch.py": ["--cxx", "{cxx}", "--headers", "{vulkan_headers}"],
     "tests/test_replay_copies.py": ["--cxx", "{cxx}"],
     "tests/test_png_publication.py": ["--cxx", "{cxx}"],

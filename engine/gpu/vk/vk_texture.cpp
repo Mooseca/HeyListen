@@ -3514,6 +3514,15 @@ Texture* texture_get(const nvn_tex* t, bool for_sampling, bool need_attach) {
     return texture_touch(tex, for_sampling);
 }
 
+/// (ported from Longshot 597c5a4e0) Whether t, listed at gpu, is still that texture with that image: not destroyed since (t is only
+/// compared until it is found, so a freed one is never read). Replay thread
+bool texture_alive(uint64_t gpu, const Texture* t, VkImage image) {
+    auto [a, b] = by_gpu.equal_range(gpu);
+    for (auto it = a; it != b; ++it)
+        if (it->second == t) return t->image == image;
+    return false;
+}
+
 uint64_t texture_destroy_generation() {
     return destroy_gens.generation();
 }

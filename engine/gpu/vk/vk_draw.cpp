@@ -47,6 +47,8 @@
 #include "perf_report.h"   // (zone_note_program / zone_note_state: the per-zone key recorder, once a key per map)
 #include "dlss_actor.h"
 #include "vk_temporal.h"
+#include "vk_framegen.h"   // (framegen_hud_before: a gameplay upscale's picture, before the game draws its HUD into it)
+#include "vk_fsr3fi.h"     // (frames_wanted)
 #include "vk_fsr3.h"          // (AMD FSR 3.1 in the gameplay upscale's place)
 #include "vk_fsr3_inputs.h"
 #include "vk_dump.h"
@@ -9120,7 +9122,9 @@ static bool typed_upscale(VkCommandBuffer cmd, VkImageView input_view, VkImageVi
 static bool temporal_rejected_network(VkCommandBuffer cmd, uint64_t key, Texture* src, const nvn_tex* in, Texture* dst,
                                       const nvn_tex* out);
 
+thread_local Texture* stub_picture = nullptr;   // (upscale_stub's output, when it is the scene's format: framegen_hud_before)
 bool upscale_stub(VkCommandBuffer cmd, const NvnState& s, uint64_t key) {
+    stub_picture = nullptr;
     static const bool off = getenv("RX_VK_NO_UPSCALE_STUB") != nullptr;
     if (off) return false;
     nvn_tex out{}, in{};
@@ -9165,6 +9169,9 @@ bool upscale_stub(VkCommandBuffer cmd, const NvnState& s, uint64_t key) {
     if (!src || !dst || !src->image || !dst->image || (src->aspect | dst->aspect) != VK_IMAGE_ASPECT_COLOR_BIT || src->bc ||
         dst->bc || src->samples != VK_SAMPLE_COUNT_1_BIT || dst->samples != VK_SAMPLE_COUNT_1_BIT)
         return false;
+    // (the gameplay upscale's picture, for frame generation's HUD-less capture once this returns: the scene's format into the same,
+    // larger. framegen_hud_before takes only the picture's formats; the movies' RGBA8 is not one)
+    if (src->format == dst->format) stub_picture = dst;
     // (hookshot) an upscale network that did not translate here (the Render resolution's fixed shares have one each, and on a
     // GPU without cooperative matrices they are left out): the temporal upscaler is offered it first, as temporal_stand_in
     // offers the networks that did translate. It takes only the scene into the picture; anything else goes on below
@@ -9493,6 +9500,31 @@ bool temporal_stand_in(VkCommandBuffer cmd, const NvnState& s, const Program& p)
     last_dyn_valid = false, last_desc_valid = false, last_vb_valid = false, last_pipeline = VK_NULL_HANDLE;
     vertex_set.on = false, last_ib.on = false;
     return done;
+}
+/// (ported from Longshot 597c5a4e0 (#1464) and ed96031ac (#1691)) The picture a gameplay upscale writes (its output, found as
+/// temporal_stand_in finds it), for frame generation's HUD-less capture (vk_framegen.h framegen_hud_before: copied once the
+/// upscale wrote it, whichever drew it). Null unless AMD FSR 3.1's frame interpolation is asked for, or for any other dispatch.
+/// At 100% render resolution the known gameplay pass writes the picture at the scene's own size: that is the picture too, an
+/// inferred dispatch (a shape, not a key) of the same size is not
+static Texture* upscale_picture(const NvnState& s, const Program& p, uint32_t* level) {
+    if (p.stages.empty() || !fsr3fi::frames_wanted()) return nullptr;
+    const Stage& st = p.stages[0];
+    const bool known = gameplay_network(p.key);
+    if (!known && !(st.info.uses_cooperative_matrix && st.info.texture_descriptors.size() == 1 &&
+                    st.info.image_descriptors.size() == 1))
+        return nullptr;
+    if (st.info.texture_descriptors.empty() || st.info.image_descriptors.empty()) return nullptr;
+    Texture* in = nullptr;
+    const uint32_t in_handle = handle_of(s, st, st.info.texture_descriptors[0], 0);
+    if (in_handle) texture_view_of(in_handle, VK_IMAGE_VIEW_TYPE_2D, ViewUse::Sample, VK_FORMAT_UNDEFINED, &in);
+    const auto& od = st.info.image_descriptors[0];
+    Texture* out = nullptr;
+    const uint32_t out_handle = handle_of(s, st, od, 0);
+    if (out_handle) texture_view_of(out_handle, VK_IMAGE_VIEW_TYPE_2D, ViewUse::Storage, image_format(od.format), &out, level);
+    if (!in || !out || !temporal_colour_pair(in->format, out->format)) return nullptr;
+    const uint32_t width = out->width >> *level;
+    if (width <= in->width && !(known && width == in->width && (out->height >> *level) == in->height)) return nullptr;
+    return out;
 }
 /// (hookshot) The same for an upscale network that did not translate on this GPU (upscale_stub found its input, the largest
 /// texture it samples, and its output, the largest image it writes): the Render resolution row's fixed shares (67%
@@ -11258,7 +11290,11 @@ void dispatch(VkCommandBuffer cmd, NvnState& s, uint32_t x, uint32_t y, uint32_t
                                   cp->stages[0].info.uses_cooperative_matrix, gameplay_network(cp->key)) ||
                                (force_stub && cp->stages[0].info.uses_cooperative_matrix &&
                                 (force_stub >= 2 || !gameplay_network(cp->key))));
-    if ((!cp || cp->failed || slow_network) && upscale_stub(cmd, s, compute_code_key(s))) return void(st_dispatches++);
+    if ((!cp || cp->failed || slow_network) && upscale_stub(cmd, s, compute_code_key(s))) {
+        // (a gameplay upscale's picture, as the dispatch below copies its own: frame generation's HUD-less capture)
+        if (stub_picture && fsr3fi::frames_wanted()) framegen_hud_before(cmd, stub_picture, 0);
+        return void(st_dispatches++);
+    }
     if (slow_network) SKIP_HERE();   // (an earlier pass of the network: the stub is its last pass)
     if (!cp || !cp->ready.load(std::memory_order_acquire) || cp->failed) SKIP_HERE();
     hdr_find_dispatch(s, cp->key);   // (RX_VK_HDR_FIND)
@@ -11487,10 +11523,13 @@ void dispatch(VkCommandBuffer cmd, NvnState& s, uint32_t x, uint32_t y, uint32_t
             logf("%s", line);
         }
     }
-    if (fsr3_stand_in(cmd, s, p)) return void(st_dispatches++);
-    if (temporal_stand_in(cmd, s, p)) return void(st_dispatches++);
-    if (off_stand_in(cmd, s, p)) return void(st_dispatches++);
-    if (taau_stand_in(cmd, s, p)) return void(st_dispatches++);
+    // (a gameplay upscale's picture, copied for frame generation's HUD-less capture once it is written, whoever writes it)
+    uint32_t picture_level = 0;
+    Texture* const picture = upscale_picture(s, p, &picture_level);
+    if (fsr3_stand_in(cmd, s, p)) return framegen_hud_before(cmd, picture, picture_level), void(st_dispatches++);
+    if (temporal_stand_in(cmd, s, p)) return framegen_hud_before(cmd, picture, picture_level), void(st_dispatches++);
+    if (off_stand_in(cmd, s, p)) return framegen_hud_before(cmd, picture, picture_level), void(st_dispatches++);
+    if (taau_stand_in(cmd, s, p)) return framegen_hud_before(cmd, picture, picture_level), void(st_dispatches++);
     const VkPipeline pipe = cpipe();
     if (!pipe) SKIP_HERE();
     dump_ssbos(cmd, p, "before");
@@ -11586,6 +11625,7 @@ void dispatch(VkCommandBuffer cmd, NvnState& s, uint32_t x, uint32_t y, uint32_t
             expo_record(cmd, meter_out.buffer, meter_out.offset, meter_out.guest);
         if (p.key == 0x435a0138b9013040ull || p.key == 0x592079442d7129daull) meter_work_note(p.key, meter_out, true);   // (HL_METER_LOG)
     }
+    framegen_hud_before(cmd, picture, picture_level);   // (the game's own network drew the gameplay upscale)
     if (dump_on() && dump_ssbo_wanted(p.key)) dump_ssbos(cmd, p, "after");
     if (gprof_on()) {
         char label[128];   // (G2: the grid, and "mma" for the game's matrix networks, native or software multiplies)

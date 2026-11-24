@@ -165,6 +165,9 @@ void upload_to_earliest_end(void* h);
 uint32_t texture_epoch();
 /// Changes whenever a texture is destroyed (pointers to textures kept elsewhere go stale)
 uint64_t texture_destroy_generation();
+/// (ported from Longshot 597c5a4e0) Whether t, listed at gpu, is still that texture with that image: not destroyed since (t is only compared
+/// until it is found, so a freed one is never read). Replay thread
+bool texture_alive(uint64_t gpu, const Texture* t, VkImage image);
 /// The texture an NVN texture's storage is (made and uploaded at first use, uploaded again when the CPU wrote its
 /// storage since). null for formats and targets that have no image (buffers, unknown formats).
 Texture* texture_get(const nvn_tex* t, bool for_sampling, bool need_attach = false);
