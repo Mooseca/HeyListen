@@ -1429,11 +1429,6 @@ void thread_prio_init() {
             hk.pinned_off = (uint64_t)proc & reserved;
             hk.pin_compile = [] { SetThreadAffinityMask(GetCurrentThread(), (DWORD_PTR)mask); };
         }
-        hk.self_handle = []() -> void* {
-            HANDLE me = nullptr;
-            return DuplicateHandle(GetCurrentProcess(), GetCurrentThread(), GetCurrentProcess(), &me, 0, FALSE, DUPLICATE_SAME_ACCESS) ? me : nullptr;
-        };
-        hk.set_level = [](void* t, int l) { SetThreadPriority((HANDLE)t, l); };
     }
 #endif
     logf("vk: thread priorities: %s", prio::describe().c_str());

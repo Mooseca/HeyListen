@@ -15,7 +15,6 @@
 #include "vk_jobs.h"
 #include "vk_internal.h"
 #include "vk_draw.h"   // (ub_thread_off)
-#include "thread_prio.h"
 
 namespace mkwvk {
 namespace {
@@ -38,15 +37,6 @@ std::atomic<int> pending{0};
 std::atomic<uint64_t> frame_noted{0};
 std::atomic<uint64_t> last_push_frame{0};
 bool started = false;
-// (RX_VK_THREAD_PRIO) what each worker is running, under mu: a job a frame waits for (jobs_wait) lifts its worker to normal
-// until it ends, since a below-normal thread that a busy core keeps off its turn would hold the frame (priority inversion)
-struct RunningJob {
-    void* handle = nullptr;               // (the worker's own thread, for another thread to lift)
-    const std::atomic<bool>* flag = nullptr;
-    bool lifted = false;
-};
-RunningJob running[64];
-std::atomic<unsigned> worker_slots{0};
 // (hookshot) RX_VK_JOB_DEMAND (on; 0: first in, first out): where the jobs a draw asked for this present go in the queue (past the urgent ones), so that the
 // frame's draws are served in their order and ahead of what no draw has wanted since
 uint64_t demand_frame = 0;
@@ -88,32 +78,19 @@ unsigned storm_workers_wanted() {
 }
 
 void worker(bool extra) {
-    MKWVK_PRIO(prio::Role::Compile, THREAD_PRIORITY_BELOW_NORMAL);
+    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
     SetThreadDescription(GetCurrentThread(), extra ? L"mkw_vk storm worker" : L"mkw_vk worker");
     ub_thread_off();
-    const unsigned slot = worker_slots++ % 64;
-    if (prio::mode() > 0 && prio::hooks().self_handle) {
-        std::lock_guard lk(mu);
-        running[slot].handle = prio::hooks().self_handle();
-    }
     for (;;) {
         std::function<void()> fn;
         {
             std::unique_lock lk(mu);
             work_cv.wait(lk, [extra] { return !queue.empty() && (!extra || boost.load(std::memory_order_relaxed)); });
-            running[slot].flag = queue.front().flag;
             fn = std::move(queue.front().fn);
             queue.pop_front();
             if (demand_pos) demand_pos--;   // (the promoted block's front went)
         }
         run_guarded(fn);
-        bool lifted;
-        {
-            std::lock_guard lk(mu);
-            lifted = running[slot].lifted;
-            running[slot].flag = nullptr, running[slot].lifted = false;
-        }
-        if (lifted) SetThreadPriority(GetCurrentThread(), prio::level(prio::Role::Compile, prio::mode(), THREAD_PRIORITY_BELOW_NORMAL));   // (its job is done: back below the game's threads)
         pending--;
         jobs_notify();
     }
@@ -155,7 +132,7 @@ void jobs_push_serial(std::function<void()> fn, bool first) {
     if (!sstarted) {
         sstarted = true;
         std::thread([] {
-            MKWVK_PRIO(prio::Role::Compile, THREAD_PRIORITY_BELOW_NORMAL);
+            SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
             SetThreadDescription(GetCurrentThread(), L"mkw_vk serial builds");
             ub_thread_off();
             for (;;) {
@@ -203,15 +180,6 @@ bool jobs_wait(const std::atomic<bool>& flag) {
                 jobs_notify();
                 lk.lock();
                 break;
-            }
-    // (a worker below normal is running the job this thread waits for: it runs at normal until it ends. The pseudo handle of the
-    // priority call is no use from here: each worker keeps a handle of its own)
-    if (prio::mode() > 0 && prio::hooks().set_level && !flag.load(std::memory_order_acquire))
-        for (RunningJob& r : running)
-            if (r.flag == &flag && r.handle && !r.lifted) {
-                r.lifted = true;
-                prio::hooks().set_level(r.handle, prio::kNormal);
-                prio::lifted_total()++;
             }
     done_cv.wait(lk, [&] { return flag.load(std::memory_order_acquire); });
     return fresh;   // (the caller that watched its own translation end in its wait can leave its draw out of that frame)

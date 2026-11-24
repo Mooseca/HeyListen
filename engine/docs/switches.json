@@ -19709,7 +19709,7 @@
     },
     {
      "path": "gpu/vk/vk_main.cpp",
-     "line": 1620
+     "line": 1615
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
@@ -21284,7 +21284,7 @@
     },
     {
      "path": "gpu/vk/vk_main.cpp",
-     "line": 1620
+     "line": 1615
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
@@ -21539,7 +21539,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_jobs.cpp",
-     "line": 55
+     "line": 45
     }
    ],
    "default": "on (unless set to 0, false, off or no)",
@@ -21560,7 +21560,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_jobs.cpp",
-     "line": 193
+     "line": 170
     }
    ],
    "default": "on (unless set to 0, false, off or no)",
@@ -24620,7 +24620,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_main.cpp",
-     "line": 1493
+     "line": 1488
     }
    ],
    "default": "unset",
@@ -24725,12 +24725,12 @@
    "files": [
     {
      "path": "gpu/vk/vk_draw.cpp",
-     "line": 10942
+     "line": 10943
     }
    ],
    "default": "unset",
    "values": "text",
-   "explanation": "undocumented: gpu/vk/vk_draw.cpp:10942 reads it as a text value: `if (notes.empty() || (!noted && getenv(\"RX_VK_NO_PREDICT\"))) return;`. No comment in the source says what it changes.",
+   "explanation": "undocumented: gpu/vk/vk_draw.cpp:10943 reads it as a text value: `if (notes.empty() || (!noted && getenv(\"RX_VK_NO_PREDICT\"))) return;`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -26321,7 +26321,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_draw.cpp",
-     "line": 10840
+     "line": 10841
     }
    ],
    "default": "30",
@@ -26413,7 +26413,7 @@
     },
     {
      "path": "gpu/vk/vk_draw.cpp",
-     "line": 10967
+     "line": 10968
     }
    ],
    "default": "the engine's own value",
@@ -26434,7 +26434,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_draw.cpp",
-     "line": 10988
+     "line": 10989
     }
    ],
    "default": "the engine's own value",
@@ -26455,7 +26455,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_draw.cpp",
-     "line": 10987
+     "line": 10988
     }
    ],
    "default": "on (unless set to 0, false, off or no)",
@@ -26497,7 +26497,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_draw.cpp",
-     "line": 10968
+     "line": 10969
     }
    ],
    "default": "the engine's own value",
@@ -26518,7 +26518,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_draw.cpp",
-     "line": 10958
+     "line": 10959
     }
    ],
    "default": "90",
@@ -26539,7 +26539,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_draw.cpp",
-     "line": 10982
+     "line": 10983
     }
    ],
    "default": "60",
@@ -29188,7 +29188,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_jobs.cpp",
-     "line": 82
+     "line": 72
     }
    ],
    "default": "0 (unset)",
@@ -29763,7 +29763,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_draw.cpp",
-     "line": 10992
+     "line": 10993
     }
    ],
    "default": "unset",
@@ -29952,13 +29952,13 @@
    "files": [
     {
      "path": "gpu/vk/thread_prio.h",
-     "line": 43
+     "line": 26
     }
    ],
    "default": "unset",
    "values": "text",
-   "explanation": "Thread roles and their priorities (RX_VK_THREAD_PRIO). Header only; no Windows header needed beyond what the caller's SetThreadPriority / GetCurrentThread come from (vk_internal.h), so that tests/test_thread_prio.py builds it on its own. Compile background shader translation and pipeline builds in play (the jobs workers, the in-play precompile, state list and prediction): below normal, and (Windows) off the logical processors the host keeps for the replay thread (hos_reserved_cpus: one physical core, both its hardware threads). A compile thread on the sibling hardware thread of the replay's core slowed the replay up to 1.7x, and priority does not help there: a lower priority only matters when no processor is free, and the sibling is free.",
-   "comment": "Thread roles and their priorities (RX_VK_THREAD_PRIO). Header only; no Windows header needed beyond what the caller's SetThreadPriority / GetCurrentThread come from (vk_internal.h), so that tests/test_thread_prio.py builds it on its own. Compile background shader translation and pipeline builds in play (the jobs workers, the in-play precompile, state list and prediction): below normal, and (Windows) off the logical processors the host keeps for the replay thread (hos_reserved_cpus: one physical core, both its hardware threads). A compile thread on the sibling hardware thread of the replay's core slowed the replay up to 1.7x, and priority does not help there: a lower priority only matters when no processor is free, and the sibling is free.",
+   "explanation": "Keeps the threads that only compile in the background (RX_VK_THREAD_PRIO) off the replay thread's core. Header only. The host keeps one physical core (both its hardware threads, hos_reserved_cpus) for the replay thread. A compile thread on the sibling hardware thread of that core slows the replay (up to 1.7x, the host's own measure), and a lower priority does not help there: priority only matters when no processor is free, and the sibling is free. PC 3050 (matrix98, build prio1a, Kokiri, cold shader cache, 3 rounds): off 52.3-52.7 fps, pinned 55.0-55.7 (+4.7%); raising the in-play threads from idle to below normal added nothing, so their priorities are left as they were.",
+   "comment": "Keeps the threads that only compile in the background (RX_VK_THREAD_PRIO) off the replay thread's core. Header only. The host keeps one physical core (both its hardware threads, hos_reserved_cpus) for the replay thread. A compile thread on the sibling hardware thread of that core slows the replay (up to 1.7x, the host's own measure), and a lower priority does not help there: priority only matters when no processor is free, and the sibling is free. PC 3050 (matrix98, build prio1a, Kokiri, cold shader cache, 3 rounds): off 52.3-52.7 fps, pinned 55.0-55.7 (+4.7%); raising the in-play threads from idle to below normal added nothing, so their priorities are left as they were.",
    "documented_in": null,
    "source": "comment at gpu/vk/thread_prio.h",
    "documented": true,
@@ -31446,7 +31446,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_jobs.cpp",
-     "line": 126
+     "line": 103
     }
    ],
    "default": "0 (unset)",

@@ -1701,8 +1701,8 @@ void state_list_prepare(void (*progress)(size_t done, size_t total), bool backgr
     std::atomic<size_t> next{0}, made{0}, missing{0};
     const auto worker = [&] {
         ub_thread_off();   // (a background thread: see ub_thread_off; the pipeline state list's builds raced the replay's updates)
-        if (background) MKWVK_PRIO(prio::Role::CompileSoft, THREAD_PRIORITY_IDLE);   // (RX_VK_THREAD_PRIO, thread_prio.h)
-        else SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
+        SetThreadPriority(GetCurrentThread(), background ? THREAD_PRIORITY_IDLE : THREAD_PRIORITY_BELOW_NORMAL);
+        if (background) MKWVK_PIN_BACKGROUND();   // (RX_VK_THREAD_PRIO: off the replay's core, thread_prio.h)
         for (;;) {
             const size_t i = next++;
             if (i >= want.size()) return;
@@ -1745,8 +1745,8 @@ void state_list_prepare(void (*progress)(size_t done, size_t total), bool backgr
     std::atomic<size_t> variants_made{0};
     next = 0;
     const auto variant_worker = [&] {
-        if (background) MKWVK_PRIO(prio::Role::CompileSoft, THREAD_PRIORITY_IDLE);   // (RX_VK_THREAD_PRIO, thread_prio.h)
-        else SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
+        SetThreadPriority(GetCurrentThread(), background ? THREAD_PRIORITY_IDLE : THREAD_PRIORITY_BELOW_NORMAL);
+        if (background) MKWVK_PIN_BACKGROUND();   // (RX_VK_THREAD_PRIO: off the replay's core, thread_prio.h)
         for (;;) {
             const size_t i = next++;
             if (i >= variant_of.size()) return;
@@ -10335,7 +10335,7 @@ bool prepare_run(void (*progress)(size_t done, size_t total), bool background) {
     struct DriverTurn {
         const bool on;
         explicit DriverTurn(bool lift) : on(lift) { if (on) SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL); }
-        ~DriverTurn() { if (on) SetThreadPriority(GetCurrentThread(), prio::level(prio::Role::CompileSoft, prio::mode(), THREAD_PRIORITY_IDLE)); }   // (RX_VK_THREAD_PRIO: below normal both ways, idle at mode 2 or 0)
+        ~DriverTurn() { if (on) SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_IDLE); }
     };
     const std::unordered_set<uint64_t> used_computes = computes_read();
     const bool used_only = warm_used_only(used_computes);
@@ -10404,8 +10404,8 @@ bool prepare_run(void (*progress)(size_t done, size_t total), bool background) {
     const auto worker = [&] {
         ub_thread_off();   // (a background thread: see ub_thread_off)
         // (below normal, and half the CPUs, below: on all of them at High the driver's compiles froze the whole PC)
-        if (background) MKWVK_PRIO(prio::Role::CompileSoft, THREAD_PRIORITY_IDLE);   // (RX_VK_THREAD_PRIO, thread_prio.h)
-        else SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
+        SetThreadPriority(GetCurrentThread(), background ? THREAD_PRIORITY_IDLE : THREAD_PRIORITY_BELOW_NORMAL);
+        if (background) MKWVK_PIN_BACKGROUND();   // (RX_VK_THREAD_PRIO: off the replay's core, thread_prio.h)
         for (;;) {
             if (prepare_stopped()) return;
             const size_t i = next++;
@@ -10545,7 +10545,7 @@ void predict_play_test() {
     if (!e || !*e) return;
     const int after = atoi(e);
     std::thread([after] {
-        MKWVK_PRIO(prio::Role::CompileSoft, THREAD_PRIORITY_IDLE);
+        SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_IDLE);
         Sleep((DWORD)std::max(0, after) * 1000);
         logf("vk: test: the prediction in play starts now (RX_VK_TEST_PREDICT_PLAY)");
         if (prepare_run(nullptr, true) && !prepare_stopped()) predict_run(nullptr, true);   // (as prepare_background's end: the programs are read in first)
@@ -10553,7 +10553,7 @@ void predict_play_test() {
 }
 void prepare_background() {
     std::thread([] {
-        MKWVK_PRIO(prio::Role::CompileSoft, THREAD_PRIORITY_IDLE);
+        SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_IDLE);
         if (!lazy_update.load()) Sleep(20000);   // (past the title screen's own loading; a lazy update has the draws' programs to make now)
         logf("vk: an update%s: the shaders not met yet are translated in play, behind the game", lazy_update.load() ? " (lazy: nothing was made before the game)" : "");
         if (prepare_run(nullptr, true) && lazy_update.load() && !prepare_stopped()) predict_run(nullptr, true);
@@ -10759,7 +10759,8 @@ void precompile_run(void (*progress)(size_t done, size_t total), bool wait) {
     pre->running = total ? nthreads : 0;
     if (!total) precompile_finished(pre);
     const auto worker = [pre, total, wait] {
-        if (!wait) MKWVK_PRIO(prio::Role::Compile, THREAD_PRIORITY_BELOW_NORMAL);   // (RX_VK_THREAD_PRIO: and off the replay's core)
+        if (!wait) SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
+        if (!wait) MKWVK_PIN_BACKGROUND();
         ub_thread_off();   // (a background thread: see ub_thread_off)
         for (;;) {
             if (prepare_stopped() || pre->abandoned.load(std::memory_order_relaxed)) break;
@@ -11014,9 +11015,8 @@ void predict_run(void (*progress)(size_t done, size_t total), bool background, b
         auto& by_program = S.by_program;
         auto& keys = S.keys;
         ub_thread_off();   // (a background thread: see ub_thread_off)
-        if (soft) MKWVK_PRIO(prio::Role::CompileSoft, THREAD_PRIORITY_IDLE);
-        else if (background) MKWVK_PRIO(prio::Role::Compile, THREAD_PRIORITY_BELOW_NORMAL);
-        else SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);   // (as prepare_run's: these are the driver's compiles, see DriverTurn)
+        SetThreadPriority(GetCurrentThread(), soft ? THREAD_PRIORITY_IDLE : THREAD_PRIORITY_BELOW_NORMAL);   // (as prepare_run's: these are the driver's compiles, see DriverTurn)
+        if (background) MKWVK_PIN_BACKGROUND();
         driver_cache_only = !noted;
         const unsigned me = worker_n++ % 32;
         std::atomic<uint64_t>& mine = in_flight[me];
