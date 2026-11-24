@@ -191,3 +191,35 @@ frame in Kokiri and Hyrule (`frame-truth.md`: 3.4 cores at 21.6-24.3 ms frames);
 cores of a 6-core, 12-thread CPU. If the CPU is that full, the summed cost of the preparation (not its place on the chain) becomes
 the limit, and MEMO1's section 5 (the texture resolution kept per thread, the program pick, same-frame duplicates: estimated there at
 0.2-0.5, 0.2-0.4 and 0.1-0.4 ms of the 5070's critical path, none built) is where to look. To settle before stage 2: one PC 3050 run at the default ini with `HOS_THREAD_TIMES=5`.
+
+## 4. Stages as built
+
+### 4.1 Stage 1: the state per submission on today's main (`5054c6330`, build `dec1a`)
+
+`refactor/sub1` (REC1, SUB1 A and B, 22 Nov, never merged) merged by hand over 153 commits of main: 17 conflict hunks (WBL1's lazy
+flush and orphans, EXPO1's ring standing, CRASH3's guessed write-backs, SMALL1's prefix job). Six checks that cut the changed source
+followed (`a1ce2732f`). Suite on `a1ce2732f`: 511 passed, 3 failed (the known three; `E:\OOT\scratch-decouple\tests-a1ce.log`).
+
+Check runs (main PC, slot a, machine shared, 175 s runs, Kokiri; `build/s5/dec1a-chk-*` in the main checkout):
+
+| run | switches | joins | segments that differ from the plan | workers' reads of value and epoch / differ | capture entries read by workers / newer than their submission | pool sync checks / synced by a later submission | list additions / to another list |
+|---|---|---:|---:|---|---|---|---|
+| `dec1a-chk-off` | `RX_VK_REC_OVERLAP_CHECK=1` | 14,400 | 0 | 31,906,614 / 0 | 24,096,551 / 0 | 31,742,976 / 0 | 2,911,351 / 0 |
+| `dec1a-chk-on` | `RX_VK_SUB_OVERLAP=1 RX_VK_SUB_OVERLAP_CHECK=1` | 13,800 | 0 | not counted (*) | not counted (*) | not counted (*) | not counted (*) |
+
+(*) the memory side's counters are read with `RX_VK_REC_OVERLAP_CHECK` only: this run's line reads 0 of 0. The run with both
+switches is in series 2 (`dec2a`). With the switch on: 4,596 submissions handed off with their last segments pending, their ends
+sent by a worker 3,109 times and by the replay thread 1,487, mean window 2.331 ms; no fatal line.
+
+So the merge keeps REC1's proof with every switch off: no command stream changes. Speed is not read from these runs (another game
+and a build shared the machine: the GPU's busy time moved from 10.0 to 17.1 ms a frame between the two runs).
+
+### 4.2 The order thread merged (`a5baf50e9`), `RX_VK_CAP_DEPTH` (`09484e740`), build `dec2a`
+
+- `perf/pipe2` at PIPE4's hand-over tip `f24afbe94` merged: one conflict (`memory_read_as_submitted`: the submission's capture view
+  and PIPE3's stale count). `RX_VK_SUB_OVERLAP` is left off when `RX_VK_ORDER_THREAD` is on (logged): the pending submission's end
+  is completed "on the replay thread" and by the next capture, neither of which is the order thread's job model yet.
+- `RX_VK_CAP_DEPTH=<1..4>` (default 1, as SUB1): the entries a capture replaces are kept that many deep a page; a worker reads the
+  newest one not newer than its submission's limit; the check line counts the views deeper than the history. Rules in
+  `engine/gpu/vk/cap_view.h`, test `engine/tests/test_cap_view.py`. Inert until several submissions' segments record at once.
+- Suite on `09484e740`: 512 passed, 3 failed (the known three; `E:\OOT\scratch-decouple\tests-dec2a.log`).
