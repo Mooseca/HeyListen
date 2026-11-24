@@ -564,6 +564,8 @@ bool framegen_on() {
     return framegen_wanted(opts.framegen, allow) && !dev.offscreen && !fg.failed;
 }
 
+namespace { void hud_release(); }   // (the HUD-less pictures' images let go: below, with the rest of the HUD state)
+
 // (longshot 70d22cf1f) This present gave FSR 3.1 a frame (fsr3fi_frames, right before fsr3fi::generate): its own images were in use, whatever
 // came of it and whichever made frames were shown. framegen_idle takes it, and clears it for the next present: both on the replay
 // thread, framegen_record before framegen_idle in every present
@@ -589,6 +591,7 @@ void framegen_idle(bool recorded) {
     const uint64_t mb = ((uint64_t)fg.w * fg.h * 4 * (2 + 3 * (uint64_t)fg.mult)) >> 20;   // (the RGBA8 frames; lumas and flows are small)
     logf("vk: frame interpolation off: its images (%ux%u, %dx) let go, about %llu MB", fg.w, fg.h, fg.mult, (unsigned long long)mb);
     drop_size();
+    hud_release();
 }
 
 int framegen_engine(int* mult, bool* automatic) {
@@ -835,6 +838,21 @@ bool hudless_wanted() {
         return e && *e && atoi(e) != 0;
     }();
     return on;
+}
+
+/// Frame generation off for a while (framegen_idle, the queues idle): the HUD-less pictures, their copies, the fit and the layer let
+/// go, and the state as it was before the first frame
+void hud_release() {
+    std::lock_guard lk(hud.mu);
+    for (int i = 0; i < 2; i++) drop_img(hud.before[i]), drop_img(hud.after[i]), drop_img(hud.hudless[i]);
+    drop_img(hud.fit), drop_img(hud.layer);
+    for (HudState::Dead& d : hud.dead) drop_img(d.img);
+    hud.dead.clear();
+    drop_pipe(hud.fit_pipe), drop_pipe(hud.over_pipe), drop_pipe(hud.mask);
+    hud.init = hud.layer_failed = false;   // (a pipeline that failed is tried again, the images made again at the next use)
+    hud.fresh = hud.ready = hud.layered = hud.pair = hud.prev = false;
+    hud.format = VK_FORMAT_UNDEFINED, hud.pw = hud.ph = hud.sw = hud.sh = 0, hud.k = hud.hl = 0;
+    hud.picture = VK_NULL_HANDLE, hud.tex = nullptr, hud.gpu = 0;
 }
 
 /// RX_VK_FG_HUDLESS (read once; off by default): the built-in interpolation blends the pictures from before the HUD of two frames

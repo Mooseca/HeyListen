@@ -240,6 +240,15 @@ int main(int argc, char** argv) {
     fail_layer_pipes = false;
     const int pipes = made_pipes;
     CHECK(present_big() && !hud.layered && made_pipes == pipes);
+    // (frame generation off for a while: everything let go, the state as at the start, the next frame made again)
+    CHECK(hud.fit.image && hud.layer.image && hud.before[0].image && hud.hudless[0].image);
+    hud_release();
+    CHECK(!hud.fit.image && !hud.layer.image && !hud.before[0].image && !hud.before[1].image && !hud.after[0].image &&
+          !hud.hudless[0].image && !hud.hudless[1].image && hud.dead.empty() && !hud.fit_pipe.pipe && !hud.fresh && !hud.prev &&
+          !hud.layer_failed && !hud.init && !hud.picture && hud.pw == 0);
+    framegen_hud_before(cmd, &big, 0);
+    passes.clear();
+    CHECK(hud_source(cmd, 0, 3840, 2160, 0, 0, 3840, 2160, false) && hud.layered && passes[1].pc[4] == 0);
     std::puts("layer: ok");
     return 0;
 }
