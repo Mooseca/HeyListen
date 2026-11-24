@@ -114,6 +114,7 @@ bool rbring_test_direct(uint64_t, uint64_t) { return false; }
 // (CRASH3: a bare entry's guessed head, RX_VK_WB_GUESS_CHECKED: in the model a written binding like any other)
 thread_local bool tl_bind_guess = false;
 bool wb_guess_checked_on() { return false; }
+void guess_snap_take(Pool*, uint64_t, uint64_t) {}
 uint64_t mem_rec_value = 0;
 void wb_pages_note(uint64_t, uint64_t, uint64_t) {}   // (WBL1's put-off pages: never reached in the model)
 void rbck_record(VkCommandBuffer, int, const std::map<Pool*, std::vector<VkBufferCopy>>&) {}   // (READB2 CHECK: off)

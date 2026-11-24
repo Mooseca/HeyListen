@@ -1,8 +1,8 @@
 # Copyright (C) 2026 Sacrappy
 
 """Compile and run the checked write-back of a guessed range (gpu/vk/wb_guess.h; no game/GPU) and check that vk_memory.cpp and
-vk_draw.cpp use it: a bare storage entry's head goes through staging and is written, once its submission is done, only where the
-page was not written by the CPU since the mirror's sync (CRASH3: the v0.4.3 module-job destroy-path crashes)."""
+vk_draw.cpp use it: a bare storage entry's head goes through staging and is written, once its submission is done, only the words
+the GPU changed and the CPU did not since the binding (CRASH3: the v0.4.3 module-job destroy-path crashes)."""
 import argparse
 import subprocess
 import tempfile
@@ -17,10 +17,10 @@ def check_source():
                    'getenv("RX_VK_WB_GUESS_CHECKED")',
                    "tl_bind_guess && wb_guess_checked_on()",
                    "std::stable_partition(writebacks.begin(), writebacks.end(), [](const WriteBack& w) { return !w.guess; })",
-                   "kStagedChecked | p->synced_gen",
+                   "if (tl_bind_guess && wb_guess_checked_on()) guess_snap_take(p, off, std::min(off + size, p->hi - p->lo));",
+                   "kStagedChecked | so",
                    "if (check & kStagedChecked) {",
-                   "wb_guess::page_written_since(page_gen(a >> kPageShift), synced)",
-                   "wb_guess::differing_spans(base + a, src, e - a,"):
+                   "wb_guess::gpu_words(base + a, src, snap, known, e - a,"):
         if needle not in mem:
             raise SystemExit("vk_memory.cpp no longer has: " + needle)
     draw = (ROOT / "gpu/vk/vk_draw.cpp").read_text(encoding="utf-8")

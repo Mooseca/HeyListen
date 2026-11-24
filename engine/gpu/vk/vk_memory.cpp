@@ -6955,9 +6955,11 @@ thread_local BindMemo bind_memo[256];
 // table entry can be a stale pointer into memory the game's heap has since given to CPU objects (the programs do not write
 // through it): the copy put the bytes as the mirror's sync had read them back over the CPU's newer writes (heap chunk
 // headers, object fields), and a later free or destroy read the bad pointer. Now such ranges go through staging and are
-// written once the submission is done, only the words that differ from guest memory, only when the page was not written by
-// the CPU since the mirror's sync (its generation) nor since the host's last collection (hos_gpu_write_live): never over a
-// CPU write. RX_VK_WB_GUESS_CHECKED=0: copied whole on the GPU, as before
+// written by the CPU once the submission is done: guest memory is read at the binding (the snapshot, what the mirror's sync
+// took), and only the words the GPU changed (the mirror's differ from the snapshot) that the CPU did not (guest memory still
+// equals it) are written: never over a CPU write. (A first form, left out whenever the CPU had written the page since the
+// mirror's sync, wrote none in a 480 s run: the heap's pages are written all the time.) RX_VK_WB_GUESS_CHECKED=0: copied whole
+// on the GPU, as before
 bool wb_guess_checked_on() {
     static const bool on = [] {
         const char* e = getenv("RX_VK_WB_GUESS_CHECKED");
@@ -6969,6 +6971,16 @@ bool wb_guess_checked_on() {
     return on;
 }
 thread_local bool tl_bind_guess = false;
+// (the guessed ranges' snapshots, this submission's: (pool, offset) -> guest memory's bytes at the first binding, right after the
+// mirror's sync; pools_mu held, emptied with the write-backs)
+std::map<std::pair<Pool*, uint64_t>, std::vector<uint8_t>> guess_snaps;
+void guess_snap_take(Pool* p, uint64_t lo, uint64_t hi) {
+    static uint8_t* const base = host->guest_base ? host->guest_base() : nullptr;
+    if (!base || hi <= lo) return;
+    auto [it, made] = guess_snaps.try_emplace({p, lo});
+    if (!made && it->second.size() >= hi - lo) return;   // (the first binding's: the closest to the sync)
+    it->second.assign(base + p->lo + lo, base + p->lo + hi);
+}
 BufferRef gpu_buffer_bind_guess(uint64_t gpu, uint64_t size) {
     tl_bind_guess = true;
     const BufferRef r = gpu_buffer_bind(gpu, size, true);
@@ -7123,6 +7135,8 @@ BufferRef gpu_buffer_bind(uint64_t gpu, uint64_t size, bool written) {
             wb_pages_note(p->lo + off, p->lo + std::min(off + size, p->hi - p->lo), mem_rec_value);
             return {p->buffer, off, size, 0};
         }
+        // (CRASH3) a guessed range: guest memory as the mirror's sync just took it, for its checked write-back
+        if (tl_bind_guess && wb_guess_checked_on()) guess_snap_take(p, off, std::min(off + size, p->hi - p->lo));
         // (STEP1, HL_RB_LAG) a range the CPU reads back that the readback ring stages: no write-back, the submission's end copies it
         if ((!wb_max || size <= wb_max) && !rbring_stage_bind(guest, size, p->mirror, off))
             writebacks.push_back({p, off, std::min(off + size, p->hi - p->lo), tl_bind_guess && wb_guess_checked_on()});
@@ -7928,6 +7942,7 @@ void memory_begin_submission() {
     mirror_upload = true;
     mirror_synced.clear();
     writebacks.clear();
+    guess_snaps.clear();
     imports_give_back();
     if (tex_capture_on()) publish_tex_spans(texture_frame_no());
     if (!mirror_on()) return;
@@ -8759,8 +8774,9 @@ struct StagedWb {
     VmaAllocation alloc = nullptr;
     void* map = nullptr;
     uint64_t bytes = 0, cap = 0;   // (what it holds, and the buffer's size)
-    // (guest address, offset in the staging buffer, size, checked: kStagedChecked | the mirror's synced_gen, or 0)
+    // (guest address, offset in the staging buffer, size, checked: kStagedChecked | the run's offset in snaps, or 0)
     std::vector<std::array<uint64_t, 4>> runs;
+    std::vector<uint8_t> snaps;   // (CRASH3: a checked run's snapshot, size bytes, then size bytes of 1 known / 0 not)
 };
 std::mutex staged_mu;
 std::deque<StagedWb> staged_wbs;   // (by value; staged_mu)
@@ -8771,31 +8787,29 @@ std::atomic<uint64_t> staged_min{~0ull};
 int64_t st_sw_runs = 0, st_sw_bytes = 0, st_sw_pages_written = 0, st_sw_pages_cpu = 0, st_sw_pages_dead = 0, st_sw_pages_same = 0;
 // (CRASH3: the guessed ranges' checked write-back, by page piece; staged_mu)
 constexpr uint64_t kStagedChecked = 1ull << 63;
-int64_t st_gw_runs = 0, st_gw_same = 0, st_gw_written = 0, st_gw_words = 0, st_gw_gen = 0, st_gw_host_cpu = 0, st_gw_dead = 0;
+int64_t st_gw_runs = 0, st_gw_same = 0, st_gw_written = 0, st_gw_words = 0, st_gw_cpu_words = 0, st_gw_host_cpu = 0, st_gw_dead = 0;
 }  // namespace mkwvk
 namespace mkwvk {
-/// (CRASH3) one page piece [a, e) of a guessed range, src the mirror's bytes after the submission: nothing when the CPU wrote
-/// the page since the mirror's sync (synced: its generation); else the words that differ from guest memory, each span through
-/// the host's checked write (a page written since its last collection is refused there). staged_mu held
-void staged_checked_piece(uint64_t a, uint64_t e, const uint8_t* src, uint32_t synced, uint64_t value, WriteLive write_live,
-                          uint8_t* base) {
-    if (wb_guess::page_written_since(page_gen(a >> kPageShift), synced)) {
-        st_gw_gen++;
-        return;
-    }
+/// (CRASH3) one page piece [a, e) of a guessed range: src the mirror's bytes after the submission, snap and known its snapshot
+/// (guest memory at the binding, as the mirror's sync took it): only the words the GPU changed and the CPU did not, through the
+/// host's checked write (a live pool; on a page written since the host's last collection, the plain write: each word was just
+/// found as the snapshot has it). staged_mu held
+void staged_checked_piece(uint64_t a, uint64_t e, const uint8_t* src, const uint8_t* snap, const uint8_t* known, uint64_t value,
+                          WriteLive write_live, uint8_t* base) {
     if (!base) {
         st_gw_dead++;
         return;
     }
     bool any = false;
-    wb_guess::differing_spans(base + a, src, e - a, [&](uint64_t at, uint64_t n) {
-        const int r = write_live ? write_live(a + at, src + at, n) : (host->gpu_write(a + at, src + at, n) ? 1 : 0);
+    st_gw_cpu_words += (int64_t)wb_guess::gpu_words(base + a, src, snap, known, e - a, [&](uint64_t at, uint64_t n) {
+        int r = write_live ? write_live(a + at, src + at, n) : 2;
+        if (r == 2) st_gw_host_cpu++, r = host->gpu_write(a + at, src + at, n) ? 1 : 0;
         if (r == 1) {
             any = true;
             st_gw_words += (int64_t)((n + 3) / 4);
             trace_gpu(MKWVK_TRACE_WRITEBACK, a + at, n, 0, value);   // (HL_TRACE: where it lands)
         } else {
-            (r == 2 ? st_gw_host_cpu : st_gw_dead)++;
+            st_gw_dead++;
         }
     });
     (any ? st_gw_written : st_gw_same)++;
@@ -8815,7 +8829,8 @@ void mkwvk::memory_staged_apply(uint64_t done) {
                 const uint64_t e = std::min(guest + size, ((a >> 12) + 1) << 12);
                 const uint8_t* src = static_cast<const uint8_t*>(s.map) + off + (a - guest);
                 if (check & kStagedChecked) {   // (CRASH3: a guessed range, never over a CPU write)
-                    staged_checked_piece(a, e, src, (uint32_t)check, s.value, write_live, base);
+                    const uint8_t* snap = s.snaps.data() + (check & ~kStagedChecked) + (a - guest);
+                    staged_checked_piece(a, e, src, snap, snap + size, s.value, write_live, base);
                     a = e;
                     continue;
                 }
@@ -8830,16 +8845,17 @@ void mkwvk::memory_staged_apply(uint64_t done) {
                 (r == 1 ? st_sw_pages_written : r == 2 ? st_sw_pages_cpu : st_sw_pages_dead)++;
                 a = e;
             }
-        s.runs.clear(), s.bytes = 0;
+        s.runs.clear(), s.snaps.clear(), s.bytes = 0;
         staged_free.push_back(std::move(s));
         {   // (CRASH3: the guessed ranges' checked write-back, every 20000 runs staged)
             static int64_t told_at;
             if (st_gw_runs - told_at >= 20000) {
                 told_at = st_gw_runs;
-                logf("vk: guessed write-backs (bare storage entries' heads): %lld runs staged; pieces: %lld written (%lld words), %lld "
-                     "the same as guest memory, %lld left out (the CPU wrote the page since the mirror's sync); spans refused by the "
-                     "host %lld (written since its collection), %lld no live pool", (long long)st_gw_runs, (long long)st_gw_written,
-                     (long long)st_gw_words, (long long)st_gw_same, (long long)st_gw_gen, (long long)st_gw_host_cpu, (long long)st_gw_dead);
+                logf("vk: guessed write-backs (bare storage entries' heads): %lld runs staged; pieces: %lld with words the GPU wrote "
+                     "(%lld words written), %lld with none; %lld words the GPU and the CPU both wrote left to the CPU; %lld spans on a page "
+                     "written since the host's collection; %lld not written (no live pool)", (long long)st_gw_runs,
+                     (long long)st_gw_written, (long long)st_gw_words, (long long)st_gw_same, (long long)st_gw_cpu_words,
+                     (long long)st_gw_host_cpu, (long long)st_gw_dead);
             }
         }
         staged_wbs.pop_front();
@@ -9154,7 +9170,17 @@ void memory_end_submission(VkCommandBuffer cmd) {
                 cut_cpu_words(*p, runs);
                 if (runs.empty() || !p->mirror || p->mstate != Pool::MIRROR_ON) continue;
                 for (const VkBufferCopy& r : runs) {
-                    staged.runs.push_back({p->lo + r.dstOffset, staged.bytes, r.size, kStagedChecked | p->synced_gen});
+                    // (the run's snapshot from its bindings' ones; a byte none of them took is not known: never written)
+                    const uint64_t so = staged.snaps.size();
+                    staged.snaps.resize(so + 2 * r.size, 0);
+                    for (auto it = guess_snaps.lower_bound({p, 0}); it != guess_snaps.end() && it->first.first == p; ++it) {
+                        const uint64_t lo = it->first.second, hi = lo + it->second.size();
+                        const uint64_t x = std::max<uint64_t>(lo, r.dstOffset), y = std::min<uint64_t>(hi, r.dstOffset + r.size);
+                        if (x >= y) continue;
+                        std::memcpy(staged.snaps.data() + so + (x - r.dstOffset), it->second.data() + (x - lo), y - x);
+                        std::memset(staged.snaps.data() + so + r.size + (x - r.dstOffset), 1, y - x);
+                    }
+                    staged.runs.push_back({p->lo + r.dstOffset, staged.bytes, r.size, kStagedChecked | so});
                     staged.bytes += r.size;
                     wb_pages_note(p->lo + r.dstOffset, p->lo + r.dstOffset + r.size, mem_rec_value, false);   // (EvilBoyce)
                     std::lock_guard sk(staged_mu);
@@ -9236,6 +9262,7 @@ void memory_end_submission(VkCommandBuffer cmd) {
         }
         transfer_barrier(cmd);
         writebacks.clear();
+        guess_snaps.clear();
     }
     wbl_no_defer = false;   // (WBL1: the frame's flush, if this was it, is recorded)
     for (Pool* p : wbl_flushing_pools) {
