@@ -432,7 +432,7 @@ cores (the 5070 / 7800X3D: 8 cores, 16 threads).
   uploads 0.1 ms a frame, 0 flashes: **the fix removes the copies**. `dec3c-soot-k` (order thread + overlap + checks): counters 0,
   5,950 submissions handed off, 0 flashes. `dec3c-tour-soot` (order thread + overlap): **19 flashes**, 564 pages from guest memory,
   "the longest submission 86.0 ms ... gaps 22.7 ms (the longest 118.1)". So the tour's flashes are not the sync fault.
-- **The flashes, looked at** (`E:\OOT\scratch-decouple\shots\dec3c-tour-sootlash_<present>_{a,b,c}.png`): two kinds.
+- **The flashes, looked at** (`E:\OOT\scratch-decouple\shots\dec3c-tour-soot\flash_<present>_{a,b,c}.png`): two kinds.
   (1) Presents 2497-2526 (10 flashes, cells 14-49 x 19-27, peak 71-81): mid-play in the Market at the spawn, before the first warp;
   `flash_2509_b` against `flash_2509_a`: the floor under the gate loses its shadow for one frame (lighter), and the frames around it
   alternate darker / brighter on the same cells: the floor's shading flickers from frame to frame. (2) Presents 2880, 2995, 3064,
