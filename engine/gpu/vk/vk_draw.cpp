@@ -3548,6 +3548,38 @@ void desc_counts_unpack(uint64_t packed, size_t* nbuf, size_t* nimg, size_t* nvi
 // (ported from hookshot 53eb0441, pixl27, RX_VK_METER_ZERO) where an exposure program's sums were bound, for its dispatch's reset
 struct MeterOut { VkBuffer buffer = VK_NULL_HANDLE; VkDeviceSize offset = 0, size = 0; uint64_t guest = 0; };
 thread_local MeterOut meter_out;
+}   // namespace
+extern int64_t presents_now;   // (vk_replay.cpp)
+// (EXPO1) HL_METER_LOG=<rows>: the exposure meter's diagnostic rows (default off): the meter programs' work each frame (per program and block
+// bound: the clears and the dispatches recorded, a row when a frame's set differs from the frame before) and, in vk_replay.cpp invalidate,
+// the reads of the blocks with the readback ring's state
+int meter_log_rows() {
+    static const int rows = getenv("HL_METER_LOG") ? atoi(getenv("HL_METER_LOG")) : 0;
+    return rows;
+}
+namespace {
+void meter_work_note(uint64_t key, const MeterOut& m, bool dispatch) {
+    if (meter_log_rows() <= 0) return;
+    static std::mutex mu;
+    static std::map<std::tuple<uint64_t, uint64_t, uint64_t, uint64_t>, std::pair<int, int>> cur;
+    static int64_t frame = -1;
+    static std::string last;
+    static int rows = 0;
+    std::lock_guard lk(mu);
+    if (presents_now != frame) {
+        std::string s;
+        for (const auto& [k, v] : cur) {
+            char b[200];
+            snprintf(b, sizeof b, " %016llx -> %#llx (buffer %#llx+%#llx): %d cleared, %d dispatched;", (unsigned long long)std::get<0>(k),
+                     (unsigned long long)std::get<1>(k), (unsigned long long)std::get<2>(k), (unsigned long long)std::get<3>(k), v.first, v.second);
+            s += b;
+        }
+        if ((s != last || frame % 600 == 0) && rows < meter_log_rows()) rows++, logf("vk: meter work frame %lld:%s", (long long)frame, s.c_str());
+        last = std::move(s), cur.clear(), frame = presents_now;
+    }
+    auto& v = cur[{key, m.guest, (uint64_t)(uintptr_t)m.buffer, (uint64_t)m.offset}];
+    (dispatch ? v.second : v.first)++;
+}
 void build_descriptors(const NvnState& s, const Program& p) {
     const RbWhoProg rbwho_scope(p.key);   // (READB2, RX_VK_RB_WHO: the program whose bindings the writes below belong to)
     if (p.key == 0x435a0138b9013040ull || p.key == 0x592079442d7129daull) meter_out = {};
@@ -11438,6 +11470,7 @@ void dispatch(VkCommandBuffer cmd, NvnState& s, uint32_t x, uint32_t y, uint32_t
             full_barrier(cmd);
             vkCmdFillBuffer(cmd, meter_out.buffer, meter_out.offset, 16, 0);
             full_barrier(cmd);
+            meter_work_note(p.key, meter_out, false);   // (HL_METER_LOG)
             if (st_zeroed.fetch_add(1) % 4000 == 0) logf("vk: exposure sums cleared on the GPU before their programs: %lld so far (RX_VK_METER_ZERO)", (long long)st_zeroed.load());
         }
     }
@@ -11551,6 +11584,7 @@ void dispatch(VkCommandBuffer cmd, NvnState& s, uint32_t x, uint32_t y, uint32_t
         // (EXPO1, HL_EXPO_GPU) the meter's sums into the engine's ring, for the game's CPU (vk_expo.cpp)
         if ((p.key == 0x435a0138b9013040ull || p.key == 0x592079442d7129daull) && meter_out.buffer && meter_out.size >= 16 && !(meter_out.offset & 3))
             expo_record(cmd, meter_out.buffer, meter_out.offset, meter_out.guest);
+        if (p.key == 0x435a0138b9013040ull || p.key == 0x592079442d7129daull) meter_work_note(p.key, meter_out, true);   // (HL_METER_LOG)
     }
     if (dump_on() && dump_ssbo_wanted(p.key)) dump_ssbos(cmd, p, "after");
     if (gprof_on()) {

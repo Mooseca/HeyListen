@@ -5619,7 +5619,12 @@ bool tex_pages_any(uint64_t gpu, uint64_t size) {
     }
     return false;
 }
-void texture_created_of(const nvn_tex* t) { tex_pages_add(t, +1); }
+void texture_created_of(const nvn_tex* t) {
+    tex_pages_add(t, +1);
+    // (WBL1, RX_VK_WB_LAZY) the texture's texels are read from guest memory when it is first used: pages of its storage that a GPU
+    // write put off are written back now, ahead of that read, and not put off again (the guard found the texture upload reading them)
+    if (t && t->gpu && t->gpu < (1ull << 39) && t->L.size) memory_wb_texture(t->gpu, t->L.size);
+}
 uint64_t fence();
 // ---- (stream R2) RX_VK_RB_PROF=1: every CPU read of GPU results (invalidate) timed by phase, and what it waited for, by the
 // thread that read and by range; a line every 300 presents. Phases: 0 the ticket's wait for the replay section in progress
@@ -6025,11 +6030,37 @@ void invalidate(uint64_t gpu, uint64_t size) {
             std::array<uint32_t, 4> w{};
             host->gpu_read(gpu, w.data(), 16);
             std::lock_guard lk(mu);
+            bool held = false;
+            static std::unordered_map<uint64_t, int64_t> in_a_row;   // (EXPO1: reads given the last result one after another, a block)
             if (w[0] | w[1] | w[2] | w[3]) {
                 last[gpu] = w;
+                in_a_row.erase(gpu);
             } else if (auto it = last.find(gpu); it != last.end()) {
                 host->gpu_write(gpu, it->second.data(), 16);
                 st_given++;
+                held = true;
+                // (EXPO1) a block given the last result for long is one whose GPU results no longer reach the game (the exposure frozen):
+                // said once a streak, at 600 reads, and every 20000 after
+                const int64_t k = ++in_a_row[gpu];
+                if (k == 600 || k % 20000 == 0)
+                    logf("vk: exposure sums: block %#llx read zero %lld times in a row, given the last result each time: its GPU results do "
+                         "not reach the game (RX_VK_METER_HOLD; docs/research/expo1-stuck-meter.md)", (unsigned long long)host->gpu_guest(gpu),
+                         (long long)k);
+            }
+            if (const int cap = meter_log_rows(); cap > 0) {   // (EXPO1, HL_METER_LOG: a row when a block's held / fresh state changes, and every 300 reads)
+                struct Seen { bool held = false; int64_t reads = 0; };
+                static std::unordered_map<uint64_t, Seen> seen;
+                static int rows = 0;
+                Seen& s = seen[gpu];
+                if ((s.held != held || s.reads < 3 || s.reads % 300 == 0) && rows < cap) {
+                    rows++;
+                    char ring[1400];
+                    rbring_describe(host->gpu_guest(gpu), size, ring, sizeof ring);
+                    logf("vk: meter read frame %lld %#llx: %08x %08x %08x %08x%s (read %lld of it; ring %s): %s", (long long)rb_frame_now(),
+                         (unsigned long long)host->gpu_guest(gpu), w[0], w[1], w[2], w[3], held ? " zero, HELD" : "", (long long)s.reads,
+                         ring_serve ? "serves" : "does not serve", ring);
+                }
+                s.held = held, s.reads++;
             }
             if (++st_reads % 2000 == 0)
                 logf("vk: exposure sums: 2000 reads, %lld of them given the last result again (RX_VK_METER_HOLD)", (long long)st_given.exchange(0));
@@ -7013,11 +7044,24 @@ void do_present(const nvn_tex* t, const int crop[4]) {
                 vkCmdCopyImageToBuffer(r.cmd, shot_image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, shot_bufs[presents & 1], 1, &c);
             }
         }
+        // (WBL1, RX_VK_WB_LAZY; ProjectReLink, pixl27) this frame's share of the write-backs that were put off: with this recording's
+        // own (a thirtieth of the pages), or RX_VK_WB_LAZY_OWN=1: in a recording of its own after it, below
+        const bool wb_flush = memory_wb_pending();
+        if (wb_flush && !memory_wb_flush_own()) memory_wb_flush_queue();
         memory_end_submission(r.cmd);
         full_barrier(r.cmd);
         submit_recording(r);   // (nothing is stopped at a present: drain)
         if (pushed.load() < value) pushed = value;
         done_max = std::max(done_max, value), signaled = std::max(signaled, value);
+        if (wb_flush && memory_wb_flush_own()) {
+            // (after the recording that signals the present's value, as the frame interpolation's below: the game waits for that value)
+            Recording& w = begin_recording(value + 1);
+            memory_begin_submission();
+            memory_wb_flush_queue();
+            memory_end_submission(w.cmd);
+            full_barrier(w.cmd);
+            submit_recording(w, false);
+        }
         if (fg_after) {
             // (its slot is free again once the next submit's value is reached: that one comes after it)
             Recording& g = begin_recording(value + 1);
