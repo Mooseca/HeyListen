@@ -1,0 +1,92 @@
+# TEXCACHE: a disk cache of the transcoded (BC) textures
+
+## Summary (kept current)
+
+- **perf/bc7c's "78 fps against 112" was not a cost of the disk cache.** It was the tour's average: the off arm spent 123 s of
+  its 615 s on near-empty frames (fewer than 50 draws: warp and load screens) at 289 fps, the cache arms 34-37 s. On the frames
+  that draw a scene (50 draws and more) all four arms ran the same: off 67.3 fps, cold 67.6, cold2 68.4, warm 68.4. Steady
+  state: no loss. Details and log paths under "The 78 against 112 fps of perf/bc7c".
+- The cache is rebuilt on `perf/texcache` with the render thread never touching the disk (reads ahead on a thread of its own
+  into a bounded pool, a miss transcodes as today), bounded writes, copies forward, a pure pack-rule header with unit tests.
+- Default: OFF (`RX_VK_BC_DISK=1` turns it on). Proposed rule for who gets it: see "Who gets it by default" (not decided).
+
+## Texture cost measured before any code (24 Nov)
+
+PC 3050 (RTX 3050), today's PIPE2 runs, `E:\OOT\scratch-decouple\3050\pipe2\{cc,hf,kv,mm}-{A2,B2}\game_log.txt` (110 s each):
+- After "play: began", uploads are 0.51-1.71 ms of 12.1-13.1 ms of GPU a frame (4-13%, the mean of the "vk: GPU time" lines
+  after play), and nearly all of it sits in 2-3 frames a run: "a frame's uploads took" 64-357 ms after play (cc-A2: 167, 73;
+  hf-A2: 237, 189, 66; kv-A2: 357, 269, 64).
+- In those big frames the ASTC transcode on the GPU is the largest part: hf-A2's 237 ms frame has "ASTC on the GPU 4 (225.9 MB,
+  217 ms)": three 1365x1365 x90 terrain arrays 84 + 64 + 34 ms. Summed over each run's "uploads took" lines (before play too):
+  ASTC on the GPU 202-749 ms, CPU uploads 181-227 ms.
+- The same ASTC bytes are transcoded again within a session: "transcodes of bytes transcoded before" 19-1103 a run (hf-A2 1103,
+  mm-A2 845); the memory BC cache is lazy on 8 GB cards' sibling rule and stores nothing there ("BC cache: 0 entries").
+- So on the 3050 a warm disk cache can only take away the 2-3 big upload frames after a zone loads (stutters), not steady fps.
+
+Laptop (Vega 8, main14, camera turning in Hyrule Field, MIR_ref_w1; numbers relayed by the coordinator, log not here):
+- GPU-bound: "vk: GPU time" 65-70 ms a frame with uploads 55-76 ms while turning, 6.3-8.6 textures made a frame.
+- The four biggest upload frames: ASTC on the GPU 611 ms in all, on the CPU 882 ms, the CPU part NOT ASTC (NVN 0x4b, 0x46,
+  0x49, 0x4d, 0x8b unswizzled; too slow for their bytes: page faults suspected, a HL_MEM_COLD=0 run was under way).
+- 1365x1365 x90 terrain arrays: 84-111 ms each on the GPU.
+- So a BC-block cache addresses at most the GPU ASTC share there (about 40% of the big frames' upload time), not the CPU part.
+
+## The 78 against 112 fps of perf/bc7c (the cause)
+
+Runs (main PC, perf/bc7c build, warp tour, Market save): `E:\OOT\HeyListen\build\s5\bc7c-off`, `bc7c-cold`, `bc7c-cold2`,
+`bc7c-warm` (game_log.txt, bench.json). bench.json fps: off 111.7, cold 78.2, cold2 77.2, warm 77.5.
+
+Split of the "vk: N presents, F fps; a frame: D draws" lines after play (each line 120 presents, 120/F seconds):
+
+| arm | all | near-empty frames (< 50 draws) | scene frames (>= 50 draws) |
+|---|---|---|---|
+| off   | 111.8 fps, 615 s | 123 s at 289 fps | 492 s at 67.3 fps |
+| cold  | 76.5 fps, 594 s  | 37 s at 209 fps  | 557 s at 67.6 fps |
+| cold2 | 77.1 fps, 616 s  | 34 s at 227 fps  | 583 s at 68.4 fps |
+| warm  | 77.4 fps, 617 s  | 36 s at 221 fps  | 581 s at 68.4 fps |
+
+- The tour warps every 40 s; the near-empty stretches start at each warp (19, 59, 99 ... 579 s) in every arm. In the off arm they
+  lasted up to 28 s from 219 s on (259-287 s: 28 s, 499-524: 24 s, 579-595: 16 s), in the cache arms 3-7 s. The same 16 maps in
+  the same order in all four ("map:" lines).
+- About 35,500 of the off arm's frames are those 289 fps frames against 33,100 scene frames: that is also why its median present
+  was 3.5 ms against 9-11 ms (the median falls on an empty frame), the other figure the bc7c notes gave.
+- So the gap is the metric (fps averaged over a tour whose load screens are 4 times faster than its scenes), not a per-frame cost of
+  the cache. Why the off arm sat longer on its load screens was not found in its log (no upload or deferral lines there); the main
+  PC is shared and loaded by other agents.
+- What the owner asked to check besides: the cache does not change any texture's format or mips (the blocks are the ones the
+  GPU encoder makes for the same image, BC7 or BC1, same levels; off makes the same BC images), so nothing at draw time differs.
+- On this branch the same split is made from each run and the A/B on the PC 3050 is done in one scene, off against warm (list below).
+
+## What was built (perf/texcache)
+
+- `engine/gpu/vk/texcache_pack.h` (pure): pack format 2 (`HLTXCP`; bc7c's format 1 is not read), records `{magic, size, key,
+  hash}` + blocks, the scan with a torn tail cut, the encoder version (hash of the three shaders + key revision + format), the
+  two-pack index with rotation at half the cap and copies forward (a record of the older pack used again is appended to the
+  current one: bc7c's gap), the read-ahead's runs. Tested by `engine/tests/test_texcache_pack.py` (+ `.cpp`), in run_all.
+- `engine/gpu/vk/vk_bc_disk.h`: one thread does the scan, the reads ahead (normal priority), the writes and the copies forward
+  (background mode: low IO and CPU priority). The render thread: `bcdisk::probe` (index lookup; asks the records after it to be read
+  ahead) and `bcdisk::took` (counting, copy forward, keep the read-ahead a run in front), never a file.
+- `vk_texture.cpp`: the pool of read-ahead blocks in host buffers (`RX_VK_BC_DISK_POOL_MB`, 384), dropped when not taken within
+  `RX_VK_BC_DISK_POOL_FRAMES` (1800); a hit copies the buffer into the image (no staging copy, no decode, no encode); writes only of
+  blocks not on disk, the waiting bytes bounded (`RX_VK_BC_DISK_WRITE_MB`, 256); the encoder hash and the folder worked out once.
+  The memory BC cache keeps its own rules (RX_VK_BC_CACHE_LAZY untouched). Counters every 600 presents: "vk: BC disk cache".
+- Files: `hookshot_texcache_a.pack` / `_b.pack` in the game folder or `RX_VK_BC_DISK_DIR`. Made at runtime from the player's own
+  game: never in the repo, a release or a package (the test checks the release scripts do not name them).
+
+## CPU-decode chips (astc_cpu_policy.h)
+
+`bc_ready()` needs `astc_ready()`, which is false when `astc_on_cpu()`: on those chips no texture is BC at all (the GPU BC encoder
+is not set up), so this cache (BC blocks) does nothing there. Feasible later, not done: (a) cache the CPU decoder's RGBA8 output:
+skips the 10 s decodes but stays RGBA8 and is big (a 1365x1365 x90 array with mips is about 890 MB); (b) BC from a CPU encoder in
+the background, written for the next visit, and the image made BC when the disk has its blocks: keeps BC (a quarter of RGBA8),
+no GPU burst; needs a CPU BC1/BC7 encoder and a format choice at creation that asks the disk index.
+
+## Who gets it by default (proposal, not decided)
+
+To fill once the 3050 and laptop lists come back.
+
+## State
+
+- 2026-11-24 16:57: branch perf/texcache (worktree E:\OOT\HeyListen-wt\texcache) from origin/main 51e533a87; code written, unit
+  test passes, whole suite 511 passed / 3 known failures (`E:\OOT\scratch-texcache\run_all1.out`). Build texcache1 queued
+  (`E:\OOT\scratch-texcache\build.sh texcache1`). Not committed yet. Next: build, a function check on the main PC (cold then warm,
+  counters, pictures against off), then the 3050 list.
