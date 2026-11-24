@@ -7646,6 +7646,7 @@ struct FallbackBuffers {
 // (grown pairs stay: a command buffer recorded before the growth may still read them)
 TLS_OBJECT(fallback_buffers, std::vector<FallbackBuffers>)
 thread_local VkBuffer fallback_draw_records = VK_NULL_HANDLE;   // (the last fallback_record's: its header is the draw's command)
+thread_local bool fallback_draw_indexed = false;   // (LAPTOP1: that draw's program writes a record a vertex: drawn indexed)
 
 uint64_t fallback_buffer_address(VkBuffer buffer) {
     VkBufferDeviceAddressInfo info{VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO};
@@ -7689,7 +7690,9 @@ bool fallback_buffers_of(const Program& p, FallbackBuffers*& out) {
         f.records_address = last.records_address, f.records_bytes = last.records_bytes;
     } else {
         // (the records' header is the vertex stage's indirect draw and the mesh stage's indirect dispatch)
-        if (!create_buffer(records, usage | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT, false, f.records, f.records_mem, &mapped)) return false;
+        // (and the indexed form's index buffer, at its end: MESH_FALLBACK_INDEX_WORDS)
+        if (!create_buffer(records, usage | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, false, f.records,
+                           f.records_mem, &mapped)) return false;
         f.records_address = fallback_buffer_address(f.records);
         f.records_bytes = records;
         if (!f.records_address) {
@@ -7881,7 +7884,15 @@ bool fallback_record(VkCommandBuffer cmd, Program& p, const DrawArgs& d) {
     vkCmdFillBuffer(cmd, f->records, 4, 4, 1);    // (instanceCount)
     vkCmdFillBuffer(cmd, f->records, 8, 16, 0);   // (firstVertex, firstInstance, the allocator, the dispatch's x)
     vkCmdFillBuffer(cmd, f->records, 24, 8, 1);   // (the dispatch's y and z)
+    if (p.fallback_indexed) {   // (LAPTOP1: the indexed form's command, indexCount 0 and instanceCount 1, and its allocator at 0)
+        const VkDeviceSize at = (VkDeviceSize)Shader::Backend::SPIRV::MESH_FALLBACK_INDEXED_DRAW_WORD * 4;
+        static_assert(Shader::Backend::SPIRV::MESH_FALLBACK_INDEX_ALLOC_WORD == Shader::Backend::SPIRV::MESH_FALLBACK_INDEXED_DRAW_WORD + 5);
+        vkCmdFillBuffer(cmd, f->records, at, 4, 0);        // (indexCount)
+        vkCmdFillBuffer(cmd, f->records, at + 4, 4, 1);    // (instanceCount)
+        vkCmdFillBuffer(cmd, f->records, at + 8, 16, 0);   // (firstIndex, vertexOffset, firstInstance, the allocator)
+    }
     fallback_draw_records = f->records;
+    fallback_draw_indexed = p.fallback_indexed;
     if (fb_timed) gprof_end(cmd, "fallback fill (the records' header)");
     full_barrier(cmd);
     if (!bind_descriptors(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, p)) return false;
@@ -8897,7 +8908,15 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
                     vkCmdBindVertexBuffers2(cmd, 0, 1, &b, &off, &size, &stride);
                 }
                 checkpoint_work('F', 0);   // (the count is the records')
-                vkCmdDrawIndirect(cmd, fallback_draw_records, 0, 1, sizeof(VkDrawIndirectCommand));   // (its count: the records taken)
+                if (fallback_draw_indexed) {   // (LAPTOP1: the indices the mesh workgroups took, each a vertex's record)
+                    bind_index(cmd, fallback_draw_records, (VkDeviceSize)Shader::Backend::SPIRV::MESH_FALLBACK_INDEX_FIRST_WORD * 4,
+                               VK_INDEX_TYPE_UINT32);
+                    vkCmdDrawIndexedIndirect(cmd, fallback_draw_records,
+                                             (VkDeviceSize)Shader::Backend::SPIRV::MESH_FALLBACK_INDEXED_DRAW_WORD * 4, 1,
+                                             sizeof(VkDrawIndexedIndirectCommand));
+                } else {
+                    vkCmdDrawIndirect(cmd, fallback_draw_records, 0, 1, sizeof(VkDrawIndirectCommand));   // (its count: the records taken)
+                }
             }
             st_mesh++;
             st_draws++, ps.draws++;
