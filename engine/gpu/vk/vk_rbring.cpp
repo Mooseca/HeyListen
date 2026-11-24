@@ -60,8 +60,6 @@ struct Req {
 
 std::mutex mu;
 std::map<std::pair<uint64_t, uint64_t>, Addr> table;   // (guest, size)
-std::vector<Req> pending;
-uint64_t pending_bytes = 0;
 VkBuffer ring_buffer = VK_NULL_HANDLE;
 uint8_t* ring_map = nullptr;
 bool ring_failed = false;
@@ -203,12 +201,12 @@ void rbring_note_written(uint64_t guest, uint64_t size) {
 }
 
 /// A program's binding for writing in a mirror (pools_mu held): true when the range is staged, so no write-back is made for it
-bool rbring_stage_bind(uint64_t guest, uint64_t size, VkBuffer buffer, VkDeviceSize offset) {
+bool rbring_stage_bind(uint64_t guest, uint64_t size, VkBuffer buffer, VkDeviceSize offset, RbPending& pend) {
     if (!config().lag || !rb_ring::class_of(size) || !buffer) return false;
     std::lock_guard lk(mu);
     const auto it = table.find({guest, size});
     if (it == table.end()) return false;
-    if (!ring_init() || pending_bytes + rb_ring::copy_bytes(it->second.cls, size) > rb_ring::kMaxPending) return false;
+    if (!ring_init() || pend.bytes + rb_ring::copy_bytes(it->second.cls, size) > rb_ring::kMaxPending) return false;
     // (this binding was counted by rbring_note_written just before) (EXPO1) a tainted range keeps its write-backs: its reads take the old
     // path; one whose writes before this went to guest memory is taken over again from this one, served once the GPU is past it (rb_ring.h)
     const bool was = it->second.stageable;
@@ -239,22 +237,23 @@ bool rbring_stage_bind(uint64_t guest, uint64_t size, VkBuffer buffer, VkDeviceS
         if (f != a.stage_frame) a.last_frame_stages = a.in_frame, a.in_frame = 0, a.stage_frame = f;
         a.in_frame++, a.last_buffer = buffer, a.last_offset = offset;
     }
-    for (Req& r : pending)
+    for (RbPending::Req& r : pend.reqs)
         if (r.guest == guest && r.size == size) {   // (written twice in a submission: the last binding's state is what the end copies)
             r.buffer = buffer, r.offset = offset;
             return !config().check;
         }
-    pending.push_back({guest, size, buffer, offset});
-    pending_bytes += rb_ring::copy_bytes(it->second.cls, size);
+    pend.reqs.push_back({guest, size, buffer, offset});
+    pend.bytes += rb_ring::copy_bytes(it->second.cls, size);
     return !config().check;
 }
 
 /// The end of a submission (pools_mu held): what the submission's programs wrote to the staged ranges, copied into the ring
-void rbring_flush(VkCommandBuffer cmd, uint64_t value) {
+void rbring_flush(VkCommandBuffer cmd, uint64_t value, RbPending& pend) {
+    std::vector<RbPending::Req>& pending = pend.reqs;
     if (pending.empty()) return;   // (read without mu: written under pools_mu, as this call is)
     std::lock_guard lk(mu);
     if (pending.empty() || !ring_map) {
-        pending.clear(), pending_bytes = 0;
+        pending.clear(), pend.bytes = 0;
         return;
     }
     const int64_t tag = rb_tag_for(value);
@@ -266,13 +265,13 @@ void rbring_flush(VkCommandBuffer cmd, uint64_t value) {
         vkCmdPipelineBarrier2(cmd, &di);
     };
     barrier(VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT, VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_READ_BIT);
-    std::stable_sort(pending.begin(), pending.end(), [](const Req& a, const Req& b) { return a.buffer < b.buffer; });
+    std::stable_sort(pending.begin(), pending.end(), [](const RbPending::Req& a, const RbPending::Req& b) { return a.buffer < b.buffer; });
     std::vector<VkBufferCopy> regions;
     for (size_t i = 0; i < pending.size();) {
         const VkBuffer buffer = pending[i].buffer;
         regions.clear();
         for (; i < pending.size() && pending[i].buffer == buffer; i++) {
-            const Req& r = pending[i];
+            const RbPending::Req& r = pending[i];
             Addr& a = table[{r.guest, r.size}];
             const uint64_t n = rb_ring::copy_bytes(a.cls, r.size);
             rb_ring::Entry e;
@@ -287,7 +286,7 @@ void rbring_flush(VkCommandBuffer cmd, uint64_t value) {
         vkCmdCopyBuffer(cmd, buffer, ring_buffer, (uint32_t)regions.size(), regions.data());
     }
     barrier(VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_2_HOST_BIT, VK_ACCESS_2_HOST_READ_BIT);
-    pending.clear(), pending_bytes = 0;
+    pending.clear(), pend.bytes = 0;
 }
 
 /// HL_RB_LAG_CHECK=1: a read of a range no program writes (answered with no wait in lag mode) before the check's entry: would the waits have changed it?

@@ -12,6 +12,7 @@
 // with the Switch 2 GOB swizzle); other formats are unswizzled on the CPU straight into the staging memory.
 #pragma once
 
+#include <memory>
 #include <string>
 #include <cstdint>
 #include <unordered_map>
@@ -149,14 +150,18 @@ uint64_t texture_segment();
 /// A parallel replay's segments, in queue order: each one's init command buffer (begun; submitted right before its
 /// uploads). A new image's first layout change (UNDEFINED -> GENERAL, and its clear) that a segment's worker makes goes
 /// to the earliest segment's still being recorded, not to the maker's own uploads: a segment before the maker's that
-/// uses it is submitted first, and found it UNDEFINED (VUID-vkCmdDraw-None-09600 with RX_VK_PARALLEL only)
-void texture_segments_begin(const VkCommandBuffer* init_cmds, size_t n);
-/// This thread records segment `index` of them (-1: none, after it)
-void texture_segment_worker(int index);
+/// uses it is submitted first, and found it UNDEFINED (VUID-vkCmdDraw-None-09600 with RX_VK_PARALLEL only).
+/// (stream REC1) The table is an object of the group of segments, not a global: the group, its jobs and each worker hold it
+/// (SegTableRef), so a later group's table does not replace what workers still recording the last one index
+struct SegTable;
+using SegTableRef = std::shared_ptr<SegTable>;
+SegTableRef texture_segments_begin(const VkCommandBuffer* init_cmds, size_t n);
+/// This thread records segment `index` of that group (a null table, index -1: none, after it)
+void texture_segment_worker(const SegTableRef& table, int index);
 /// Segment `index` recorded: its init command buffer ended (no new image's change goes to it after). 1: something went
 /// to it (submit it before the segment's uploads), 0: nothing, -1: something did and it could not be ended (lost: the
 /// replay stops)
-int texture_segment_end(int index);
+int texture_segment_end(SegTable& table, int index);
 /// (RX_VK_POOL_MIRROR) on a parallel segment's worker, upload_command_buffer() is the earliest open segment's init command buffer
 /// from the begin call to the end call (a mirror made there is filled before any segment that could read it); elsewhere nothing
 void* upload_to_earliest_begin();

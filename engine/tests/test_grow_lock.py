@@ -103,6 +103,9 @@ std::vector<CondRes> par_conds;
 std::atomic<size_t> par_conds_n{0};
 std::shared_mutex ub_grow_mu;
 std::atomic<bool> ub_growing{false};
+std::atomic<bool> ub_group_pending{false};   // (stream SUB1)
+enum RecShared { kRsCondsReset };
+static void rec_shared_note(RecShared) {}
 thread_local int ub_read_depth = 0;
 @PLAIN@
 @ROOM@

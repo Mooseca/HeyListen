@@ -112,15 +112,14 @@ def main():
     assert inv.index("if (ring_serve) rbring_apply(gpu, size);") > inv.index("if (size && !expo_skip && !ring_serve) {"), "the answer comes before the wait's place"
     assert "rbring_check(gpu, size)" in inv, "the check is not called"
     mem = (ROOT / "gpu/vk/vk_memory.cpp").read_text(encoding="utf-8")
-    assert "!rbring_stage_bind(guest, size, p->mirror, off))\n            writebacks.push_back" in mem, "a staged binding still queues its write-back"
-    assert "rbring_flush(cmd, mem_rec_value);" in mem and mem.index("rbring_flush(cmd, mem_rec_value);") < mem.index("if (no_writeback) writebacks.clear();"), \
-        "the staged ranges are not copied before the write-backs"
+    assert "!rbring_stage_bind(guest, size, p->mirror, off, lists().rb))\n            lists().writebacks.push_back" in mem, "a staged binding still queues its write-back"
+    assert "rbring_flush(cmd, rec_value_of(), sub.rb);" in mem and mem.index("rbring_flush(cmd, rec_value_of(), sub.rb);") < mem.index("if (no_writeback) writebacks.clear();"), "the staged ranges are not copied before the write-backs"
     # (EXPO1, docs/research/expo1-stuck-meter.md) a range the ring does not serve keeps its write-backs; one taken over again waits for its settle
     ring = (ROOT / "gpu/vk/vk_rbring.cpp").read_text(encoding="utf-8")
     sb = ring[ring.index("bool rbring_stage_bind("):ring.index("void rbring_flush(")]
     assert "} else if (!rb_ring::stage(it->second)) {" in sb and "st_kept_wb++;\n        return false;" in sb, \
         "a binding of a range the ring does not serve is staged (its write-back left out)"
-    assert sb.index("rb_ring::stage(it->second)") < sb.index("pending.push_back"), "the standing is decided after the binding is queued"
+    assert sb.index("rb_ring::stage(it->second)") < sb.index("pend.reqs.push_back"), "the standing is decided after the binding is queued"
     fl = ring[ring.index("void rbring_flush("):ring.index("bool rbring_quiet(")]
     assert "rb_ring::settle_at(a, value);" in fl, "a range taken over again never gets its settle value"
     sv = ring[ring.index("bool rbring_serves("):ring.index("void rbring_apply(")]
