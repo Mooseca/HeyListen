@@ -93,6 +93,12 @@ PIPE4 (lease name `pipe4`, scratch `E:\OOT\scratch-pipe4`, scripts `build/s5/pip
 - Fix `7ed2ea569` (pipe4c): the present is held, up to `RX_VK_ORDER_SIGNAL_MS` (200), until the signal has come and no queue is
   stopped before it, the order thread running the jobs behind it meanwhile (up to the next present, which forces the held one);
   the time watch does not force while one is held. Tours on / off / on: `p4t4-on`, `p4t4-off`, `p4t5-on` (`s3.log`).
+- `p4t4-on` (pipe4c, slot a 10:28-10:33; the series was cut after it: the owner needed slot a, the lease released at 10:33:35):
+  reached Zora's River; **no dark frame**; 3 presents forced in the whole tour (presents 128, 1440, 3297, each "waited its time"),
+  against 9-10 forced clusters on pipe4b; one small flash at 3633 (72 cells, peak 70: Link and a ground patch darker on Zora's
+  River's first frames, `E:\OOT\scratch-pipe4\shots\p4t4-on\flash_3633_{a,b}.png`) on a loaded machine (39 ms frames, the order thread
+  89.7 jobs queued on average, 417 at most; slot b's game running and taking the focus) - the late-read class (section 9), not the
+  ordering fault. Two more on tours queued: `p4t5-on`, `p4t6-on` (`s4.log`).
 
 Where it stands: the three tasks of the brief are done and measured. (1) The present thread works and is safe, but **the gate that
 keeps the GPU's order takes the present's serial part back into the chain** (Kokiri 0.47-0.51 ms a frame, chain 7.76 against 7.79):
