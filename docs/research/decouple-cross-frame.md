@@ -233,6 +233,13 @@ Series 1 and 2 of check runs with the switch on (main PC, slot a, machine shared
 | `dec1a-tour-on` | dec1a | Market (`market`), warp tour | `RX_VK_SUB_OVERLAP=1` | **never reached play**, the same way |
 | `dec1a-tour-off` | dec1a | the same tour | none | play at 68.65 s, the five maps, 0 flashes, the meter's held reads 177 / 503 / 11 / 0 / 0 / 0 |
 | `dec2a-m-on` | dec2a | Market (`market-mid`) | `RX_VK_SUB_OVERLAP=1`, both checks, `RX_VK_CAP_DEPTH=2`, the wait log, a job trace | play at 70.87 s |
+| `dec2a-m-dj2` | dec2a | Market (`market-mid`) | `RX_VK_DEFER_JOIN=2`, REC1's check | play at 77.68 s; 16,200 joins, 0 segments differ |
+| `dec2a-ot-on` | dec2a | Kokiri | `RX_VK_ORDER_THREAD=1`, the feed log | play at 98.01 s; frame 8.22-8.25 ms = GPU busy 7.45 + idle 0.77-0.79 (replay not ready 0.52-0.54); order thread idle 0.23-0.27, fence join 0.97-0.99 ms a frame |
+| `dec2a-tour-ot` | dec2a | warp tour | `RX_VK_ORDER_THREAD=1` | play at 89.85 s; Market, Hyrule Field, Zora's River, Hyrule Field (the Kakariko warp did not take, as in PIPE4's on tours); **0 flashes, no hang**; 1 present forced ("waited its time", after present 2243), 7 waits gone past; the meter's held reads 11 / 0; the longest frame 5,454 ms |
+
+`dec2a-tour-ot` is the first run in the game of PIPE4's last rule (`pipe4g`: the watch spares a stopped queue only while the order
+thread finished a job in the last 250 ms), here merged under the per-submission state: one tour, no hang at a load, no dark frame.
+One tour is not a verdict (pipe4f had one clean tour before it hung).
 
 **Open defect: with `RX_VK_SUB_OVERLAP=1` the load of a Market save did not finish in 2 runs of 2 on `dec1a`** (Kokiri's did, 2 of 2;
 without the switch the Market's did, 2 of 2), and did finish in the one run on `dec2a` with `RX_VK_CAP_DEPTH=2` and diagnostics on.
