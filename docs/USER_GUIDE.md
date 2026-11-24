@@ -344,6 +344,10 @@ is out, a window offers:
 - **never ask again**: the game starts and stops looking. Turn it back on in the game menu: **Settings**, **Gameplay**,
   **Check for updates**. The choice is `update_check=0` in the game folder's `hookshot_options.ini`.
 
+RecompLauncher offers a newer release itself (its **Update** button, or its automatic updates), and tells what it starts so
+(`RECOMPLAUNCHER=1`): from 0.4.4 neither the setup program nor the game asks you a second time there. Without that (an older
+launcher, or the setup program started by hand):
+
 When RecompLauncher starts the game on Windows, its Play runs `HeyListenBuilder-Setup.exe --play`, which looks for a newer
 release first (the game itself is then told not to ask again) and, when there is one, asks in the same way: play my version, open
 the download page, or stop asking (this release only, or for good). It installs nothing: RecompLauncher is what installs a newer

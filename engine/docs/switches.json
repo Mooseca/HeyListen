@@ -2,7 +2,7 @@
  "schema": 1,
  "generated_by": "engine/scripts/list_switches.py",
  "scope": "C, C++ and headers under engine/ (engine/tests and vendored trees other than a64-kit excluded) and the Python the builder, the lifter and the scripts run: getenv, std::getenv, _wgetenv, the code's own env helpers and table-driven reads, and os.environ.",
- "count": 1459,
+ "count": 1460,
  "switches": [
   {
    "name": "A64_",
@@ -3313,7 +3313,7 @@
     },
     {
      "path": "host/hos_update.c",
-     "line": 301
+     "line": 303
     }
    ],
    "default": "unset",
@@ -3417,7 +3417,7 @@
     },
     {
      "path": "host/hos_update.c",
-     "line": 301
+     "line": 303
     }
    ],
    "default": "unset",
@@ -3891,7 +3891,7 @@
     },
     {
      "path": "host/hos_update.c",
-     "line": 347
+     "line": 349
     }
    ],
    "default": "unset",
@@ -10350,6 +10350,35 @@
    "comment": "(Linux) RADV_FORCE_VRS_CONFIG_FILE dropped before anything loads Vulkan. The Steam Deck's Game Mode sets it for Steam and everything it starts, naming a file it writes the Half Rate Shading rate to (/tmp/radv_vrs.<random>, \"1x1\" when off).",
    "documented_in": null,
    "source": "comment at host/hos_main.c",
+   "documented": true,
+   "set_via": "In the process environment (or in a file named by `HOS_ENV_FILE`); `hookshot_env.txt` refuses this one.",
+   "use": null
+  },
+  {
+   "name": "RECOMPLAUNCHER",
+   "area": "renderer",
+   "group": "Rendering and GPU",
+   "audience": "developer",
+   "files": [
+    {
+     "path": "builder/setup/setup.c",
+     "line": 927
+    },
+    {
+     "path": "host/hos_update.c",
+     "line": 134
+    },
+    {
+     "path": "host/hos_update.c",
+     "line": 352
+    }
+   ],
+   "default": "unset",
+   "values": "text (`1` named)",
+   "explanation": "(RecompLauncher sets RECOMPLAUNCHER=1 for the program its Play starts and offers a newer release itself, with its own Update button: no second question here. Its team's answer of 24 Nov 2026).",
+   "comment": "(RecompLauncher sets RECOMPLAUNCHER=1 for the program its Play starts and offers a newer release itself, with its own Update button: no second question here. Its team's answer of 24 Nov 2026).",
+   "documented_in": null,
+   "source": "comment at builder/setup/setup.c",
    "documented": true,
    "set_via": "In the process environment (or in a file named by `HOS_ENV_FILE`); `hookshot_env.txt` refuses this one.",
    "use": null
@@ -32136,7 +32165,7 @@
     },
     {
      "path": "host/hos_update.c",
-     "line": 301
+     "line": 303
     },
     {
      "path": "scripts/oot_saves.py",

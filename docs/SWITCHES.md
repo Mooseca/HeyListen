@@ -10,7 +10,7 @@ python -I engine/scripts/list_switches.py
 
 and commit both files. A test (`engine/tests/test_switches_documented.py`) fails when a switch read in the source is missing here or the data file is out of date.
 
-1459 switches: 56 players may be told to use, 380 diagnostic, 1023 developer-only; 1245 have a real explanation and 214 are marked `undocumented`.
+1460 switches: 56 players may be told to use, 380 diagnostic, 1024 developer-only; 1246 have a real explanation and 214 are marked `undocumented`.
 
 ## How to set a switch
 
@@ -64,7 +64,7 @@ The entries below say what each one does, its values and default, and when it is
 
 | Area | Switches | Player | Diagnostic | Developer |
 |---|---:|---:|---:|---:|
-| [Renderer](#renderer-upscaling-frame-generation-hdr-v-sync-and-presentation) | 462 | 23 | 14 | 425 |
+| [Renderer](#renderer-upscaling-frame-generation-hdr-v-sync-and-presentation) | 463 | 23 | 14 | 426 |
 | [Shaders and pipelines](#shaders-and-pipelines) | 128 | 6 | 0 | 122 |
 | [Memory and textures](#memory-and-textures) | 200 | 10 | 0 | 190 |
 | [Audio](#audio) | 14 | 5 | 9 | 0 |
@@ -77,7 +77,7 @@ The entries below say what each one does, its values and default, and when it is
 
 ## Renderer: upscaling, frame generation, HDR, V-Sync and presentation
 
-462 switches of the renderer: the upscaler, frame generation, HDR, V-Sync and what reaches the screen.
+463 switches of the renderer: the upscaler, frame generation, HDR, V-Sync and what reaches the screen.
 
 ### Upscaling (DLSS, FSR, TAAU)
 
@@ -1006,6 +1006,16 @@ HOS_FRAME_SLEEP_MS (diagnostic): slower frames, for game speed against frame rat
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
 **Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/nn_video.c:803`.
+
+#### `RECOMPLAUNCHER` - developer
+
+(RecompLauncher sets RECOMPLAUNCHER=1 for the program its Play starts and offers a newer release itself, with its own Update button: no second question here. Its team's answer of 24 Nov 2026).
+
+**Values:** text (`1` named). **Default:** unset.
+
+**When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
+
+**Set it:** In the process environment (or in a file named by `HOS_ENV_FILE`); `hookshot_env.txt` refuses this one. **Read at:** `builder/setup/setup.c:927` and 2 more places.
 
 #### `RX_ADAPTER` - developer
 
