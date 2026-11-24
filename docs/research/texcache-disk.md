@@ -50,8 +50,17 @@ Split of the "vk: N presents, F fps; a frame: D draws" lines after play (each li
 - About 35,500 of the off arm's frames are those 289 fps frames against 33,100 scene frames: that is also why its median present
   was 3.5 ms against 9-11 ms (the median falls on an empty frame), the other figure the bc7c notes gave.
 - So the gap is the metric (fps averaged over a tour whose load screens are 4 times faster than its scenes), not a per-frame cost of
-  the cache. Why the off arm sat longer on its load screens was not found in its log (no upload or deferral lines there); the main
-  PC is shared and loaded by other agents.
+  the cache. From now on this stream reports fps on scene frames only (>= 50 draws) and the time on load screens apart.
+- Were off's longer screens the cache's gain (faster loads)? No: the cold arm, which had no hits at all (an empty folder: it only
+  wrote), has the short screens too. Lengths of the near-empty stretches, one per warp, in seconds:
+  off 3 3 4 1 6 9 28 3 8 13 10 9 24 15 16; cold 5 4 4 2 5 6 4 4 3 4 5 2 3 6; cold2 3 4 3 1 5 3 3 2 3 4 3 2 5 7 7; warm 4 5 4 3 6 7 4 3 3
+  4 4 5 4 6 6. Off's long ones begin at the 7th warp (Market to Kokiri) and stay long to the end: a 5-draw screen at ~300 fps held
+  for up to 28 s before the next "map:" line, i.e. before the game reported the next zone, in that run only. The machine's state that
+  day (shared main PC) is the likely cause; it was not found in the log (no upload, deferral or stall lines in the stretch).
+- Per warp, from the "map:" line to the first scene line and the long frames (> 50 ms) in the 10 s after it
+  (`E:\OOT\scratch-texcache\warps.py`): off 72.7 s in all, 191 long frames, worst 1138 ms; cold2 66.4 s, 226, worst 1036 ms; warm
+  77.3 s, 280, worst 864 ms. perf/bc7c's warm cache did not shorten the zone entries nor their hitches (it read on the render
+  thread, 3 ms a read).
 - What the owner asked to check besides: the cache does not change any texture's format or mips (the blocks are the ones the
   GPU encoder makes for the same image, BC7 or BC1, same levels; off makes the same BC images), so nothing at draw time differs.
 - On this branch the same split is made from each run and the A/B on the PC 3050 is done in one scene, off against warm (list below).
@@ -71,6 +80,51 @@ Split of the "vk: N presents, F fps; a frame: D draws" lines after play (each li
   The memory BC cache keeps its own rules (RX_VK_BC_CACHE_LAZY untouched). Counters every 600 presents: "vk: BC disk cache".
 - Files: `hookshot_texcache_a.pack` / `_b.pack` in the game folder or `RX_VK_BC_DISK_DIR`. Made at runtime from the player's own
   game: never in the repo, a release or a package (the test checks the release scripts do not name them).
+
+## Main PC warp tour, texcache1 (24 Nov 17:12-17:36)
+
+`E:\OOT\scratch-texcache\tour.sh` (Market save, 6 "!cheat" warps every 40 s, 270 s runs, slot a), arms in this order on one cache
+folder `E:\OOT\scratch-texcache\cache`: off1, cold, warm1, off2, warm2; runs `E:\OOT\HeyListen\build\s5\tc-texcache1-<arm>`, split
+by `E:\OOT\scratch-texcache\warps.py`. The main PC was shared (other agents' runs): read the zone numbers as rough.
+- off1 reached play only at 151 s (a new exe's first start): 2 warps, not used.
+- Scene frames (>= 50 draws): off2 61.6 fps (173 s), warm1 61.1 (202 s), warm2 73.5 (185 s), cold 43.5 (185 s; the writer's
+  first run). Steady state, warm against off: within noise (61.1 and 73.5 against 61.6), as the render thread's time in the cache
+  says: 6.0 ms (warm1) and 4.4 ms (warm2) in the whole run, the longest call 0.72 and 0.013 ms.
+- Per warp, map line to scene and frames > 50 ms in the 10 s after, the four warps all arms have (HyruleField, Kakariko,
+  DeathMountainTrail, GoronCity): off2 21.0 s, 41 long frames (7.7 s of them); warm1 17.0 s, 22 (4.7 s); warm2 19.3 s, 45 (11.8
+  s; HyruleField 9.6 s with a 2041 ms frame); cold 38.5 s, 58 (17.5 s). Mixed: no warm win shown on this machine.
+- Why: warm2 found 3600 textures on disk but took 1067 from the pool; the read-ahead (3094 MB read, pool full 2204 times, 2406
+  read and never taken) runs in the cold run's creation order and cannot keep up with a zone whose textures are made within a few
+  frames; the rest were transcoded. And the cache rotated (4096 MB cap, 1946 MB written cold): 548 copies forward and 923
+  rewrites in warm2 (707 MB written in 107 s at background IO priority, 614 not written: backlog full). The scan of 2-3.6 GB took
+  4.5-7.5 s in background mode (no cache meanwhile).
+- texcache2 answers: a new texture whose blocks are on disk is held back (like the upload budget's deferral, its draws left out)
+  while its own record is read first, up to RX_VK_BC_DISK_HOLD_MS (400); stale pool blocks let go for new runs; cap 8192 MB;
+  the scan at normal priority.
+
+## Laptop list 1 (texcache1, Vega 8, Hyrule Field camera turning, 24 Nov)
+
+Runs on the laptop `C:\Users\Yanis\Desktop\OOT\runs\amd-1124\TX1_off1, TX2_cold, TX3_warm, TX4_off2, TX5_warm2`; copies of four
+logs in `E:\OOT\scratch-texcache\laptop1\`. fps read by the laptop's session (turning 60 s window / first still window):
+off 8.1 / 10.2, cold 8.2 / 9.7, warm 10.6 / 11.2, off 8.0 / 10.1, warm 10.4 / 10.0. Turning: +30% warm. No FATAL, device lost.
+- GPU uploads a frame while turning ("vk: GPU time"): off 55-125 ms, warm 12-55 ms.
+- warm2's line: 1685 textures from the disk (1336 MB), 662 found on disk but not yet read ahead (transcoded), 0 not on disk; render
+  thread 11.6 ms in all (the longest call 0.075 ms); read ahead 2093 (1722 MB, 2407 ms on its thread), pool full 310 times, 405
+  blocks (383 MB) in the pool at the end, never taken; the index 382 ms (its thread).
+- The ms of the "a frame's uploads took" lines are the replay thread's CPU time, not GPU time: "ASTC on the GPU" counted the disk
+  hits too in texcache1 (texcache2 gives them their own route, "ASTC from the disk cache"). The 1365x1365 x90 terrain arrays take
+  107-112 ms off, 127-142 ms warm2 there: whether they were hits is not in texcache1's log (texcache2 says, and counts the ASTC
+  uploads the cache cannot take: part of a texture, BC3/resized, not BC).
+- Memory: warm2 working set 9226 MB against 8523 off2, private 11629 against 11120 (the pool's 383 MB and the written blocks'
+  buffers); staging arenas made 99 (2297 ms) against 54 (1310 ms). That may be the "on the CPU" growth (1039-1117 ms off,
+  1363-1473 warm: non-ASTC uploads, which the cache does not touch): memory pressure on a 15 GB machine. Not proven: texcache2 arm
+  with a smaller pool on the laptop.
+- Pool: no record was read twice (2093 read = 1685 taken + 405 left + 3 aged out). It filled with records read ahead in the cold
+  run's creation order that this session wanted later or never, so 662 on-disk textures came before their run reached them.
+  texcache2: a full pool lets go of blocks read ahead more than 5 s ago (RX_VK_BC_DISK_POOL_STALE_MS) for the run a texture asked
+  for; ageing by time (RX_VK_BC_DISK_POOL_MS, 60 s), not presents (1800 presents is 3 minutes at 10 fps).
+- Writer: the cold run wrote 611 MB in 20 s (background mode: low IO priority) and 220 transcodes found the 256 MB backlog full.
+  texcache2: RX_VK_BC_DISK_WRITE_BG=0 writes at normal IO priority (lowest CPU priority), to be tried on the laptop.
 
 ## CPU-decode chips (astc_cpu_policy.h)
 

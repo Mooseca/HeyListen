@@ -191,8 +191,18 @@ inline bool append(Store& s, uint64_t key, const uint8_t* data, uint32_t size) {
     return true;
 }
 
+// (TEXCACHE) RX_VK_BC_DISK_WRITE_BG=0 (1 by default): the BC disk cache's writes at normal IO priority (the thread's CPU priority lowest);
+// 1: Windows' background mode (low IO and CPU priority; the laptop's cold run wrote 611 MB in 20 s and left 220 transcodes unwritten)
+inline bool write_bg() {
+    static const bool v = !getenv("RX_VK_BC_DISK_WRITE_BG") || atoi(getenv("RX_VK_BC_DISK_WRITE_BG")) != 0;
+    return v;
+}
 inline void background(bool on) {
 #ifdef _WIN32
+    if (!write_bg()) {
+        SetThreadPriority(GetCurrentThread(), on ? THREAD_PRIORITY_LOWEST : THREAD_PRIORITY_NORMAL);
+        return;
+    }
     SetThreadPriority(GetCurrentThread(), on ? THREAD_MODE_BACKGROUND_BEGIN : THREAD_MODE_BACKGROUND_END);
 #else
     (void)on;
@@ -201,8 +211,8 @@ inline void background(bool on) {
 
 inline void run(Store* sp) {
     Store& s = *sp;
-    background(true);   // (the scan and the writes at low IO and CPU priority: the game reads its own files meanwhile)
-    scan(s);
+    scan(s);   // (at normal priority: headers only; in background mode it took 7.5 s over 2 GB on the main PC, cache unused meanwhile)
+    background(true);   // (the writes at low IO and CPU priority: the game reads its own files meanwhile)
     bool bg = true;
     for (;;) {
         Store::Job j{};
@@ -280,8 +290,8 @@ inline bool start(uint64_t encoder, const std::filesystem::path& game_dir) {
             dir = std::filesystem::path(std::u8string(v.begin(), v.end()));
         }
         s.encoder = encoder;
-        // (TEXCACHE) RX_VK_BC_DISK_MB=<MB> (4096 by default): the BC disk cache's size, both packs; the older half goes when the newer one is full (what was used again is copied forward first)
-        s.ix.cap = env_mb("RX_VK_BC_DISK_MB", 4096, 64);
+        // (TEXCACHE) RX_VK_BC_DISK_MB=<MB> (8192 by default; a 6-warp tour wrote 2 GB cold): the BC disk cache's size, both packs; the older half goes when the newer one is full (what was used again is copied forward first)
+        s.ix.cap = env_mb("RX_VK_BC_DISK_MB", 8192, 64);
         // (TEXCACHE) RX_VK_BC_DISK_WRITE_MB=<MB> (256 by default): blocks waiting for the BC disk cache's writer at most; transcodes past it are not written
         s.write_cap = env_mb("RX_VK_BC_DISK_WRITE_MB", 256, 16);
         s.path[0] = dir / "hookshot_texcache_a.pack";
@@ -355,6 +365,29 @@ inline bool probe(uint64_t key, uint32_t size) {
         }
         s.wq_cv.notify_one();
     }
+    return true;
+}
+
+/// (render thread, a new texture about to be held back) whether the disk has its blocks; if so its record is read before anything
+/// else, and the run after it asked for
+inline bool want_now(uint64_t key, uint32_t size) {
+    Store& s = store();
+    if (!s.ready.load(std::memory_order_acquire)) return false;
+    uint32_t order, from = 0, count = 0;
+    bool ask;
+    {
+        std::lock_guard lk(s.mu);
+        const texcache::Loc* l = s.ix.find(key);
+        if (!l || l->size != size) return false;
+        order = l->order;
+        ask = s.ap.next(order, ahead_count(), from, count);
+    }
+    {
+        std::lock_guard lk(s.wq_mu);
+        s.aq.push_front({2, 0, nullptr, 0, {}, order, 1});   // (this one first)
+        if (ask) s.aq.push_back({2, 0, nullptr, 0, {}, from, count});
+    }
+    s.wq_cv.notify_one();
     return true;
 }
 
