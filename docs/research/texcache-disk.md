@@ -4,11 +4,20 @@
 
 - **perf/bc7c's "78 fps against 112" was not a cost of the disk cache.** It was the tour's average: the off arm spent 123 s of
   its 615 s on near-empty frames (fewer than 50 draws: warp and load screens) at 289 fps, the cache arms 34-37 s. On the frames
-  that draw a scene (50 draws and more) all four arms ran the same: off 67.3 fps, cold 67.6, cold2 68.4, warm 68.4. Steady
-  state: no loss. Details and log paths under "The 78 against 112 fps of perf/bc7c".
-- The cache is rebuilt on `perf/texcache` with the render thread never touching the disk (reads ahead on a thread of its own
-  into a bounded pool, a miss transcodes as today), bounded writes, copies forward, a pure pack-rule header with unit tests.
-- Default: OFF (`RX_VK_BC_DISK=1` turns it on). Proposed rule for who gets it: see "Who gets it by default" (not decided).
+  that draw a scene (50 draws and more) all four arms ran the same: off 67.3 fps, cold 67.6, cold2 68.4, warm 68.4. The cold arm
+  (no hits) had the short screens too, so off's long ones were that run's machine state, not a cache gain. Steady state: no loss.
+  This stream reports fps on scene frames only, and load-screen time apart.
+- Rebuilt on `perf/texcache`: the render thread never touches the disk (4.4-6.0 ms of render-thread time in a whole warm tour, the
+  longest call under 1 ms), reads ahead on a thread of its own into a bounded pool, a miss transcodes as today; bounded writes,
+  copies forward, pack format 2 with encoder version and per-record hash; writes from the one-layer path too (cards under 8 GB and
+  integrated GPUs: the batched path, the only one bc7c wrote from, is never taken there).
+- Measured gain so far: the laptop (Vega 8), list 1: camera turning 10.4-10.6 fps warm against 8.0-8.2 off or cold (+30%), GPU
+  uploads while turning 12-55 ms a frame against 55-125. The main PC is too loaded to show a zone-entry gain or loss.
+- Tried and turned off: holding a texture back while its blocks are read (left draws out mid-play, flash detector), letting go of
+  stale pool blocks (re-reads).
+- Weak point: the read-ahead follows the cold run's creation order; it served 72% of the on-disk textures on the laptop (slow
+  frames give it time) and 23-30% on the main PC (3600 found, 1067 taken).
+- Default: OFF (`RX_VK_BC_DISK=1` turns it on). Proposed rule below; the 3050's list 2 decides it.
 
 ## Texture cost measured before any code (24 Nov)
 
@@ -107,6 +116,21 @@ by `E:\OOT\scratch-texcache\warps.py`. The main PC was shared (other agents' run
   while its own record is read first, up to RX_VK_BC_DISK_HOLD_MS (400); stale pool blocks let go for new runs; cap 8192 MB;
   the scan at normal priority.
 
+## Main PC warp tour, texcache2, flash detector (24 Nov 18:05-18:23)
+
+Same tour, RX_VK_FLASH=1 RX_VK_SHOT_EVERY=1, slot b, arms off1, hold (RX_VK_BC_DISK_HOLD_MS=400, its default then), nohold (=0),
+off2; runs `E:\OOT\HeyListen\build\s5\tc-texcache2-<arm>`, pictures `E:\OOT\scratch-texcache\shots-tc-texcache2-<arm>`. The main PC
+was loaded (scene frames about 30 fps, a 7.9 s frame in off2): no timing is read from this tour.
+- Flashes: off1 0, off2 0, nohold 0, hold 5 (presents 5385, 5394, 5601, 5605, 6282). flash_5601_a/b/c: in Kakariko, mid-play,
+  frame b has the ground drawn white and the walls behind the gate missing (draws left out by the hold); frames a and c are right.
+  Frame a also shows textures served from the disk cache (2393 in that run) drawn correctly.
+- hold: held back 2446 textures, 1160 came in, 1028 timed out (transcoded after 400 ms); presents with a texture held 1044; the
+  "longest hold" counter (23.4 s) counts until the texture's next lookup, not the time it was missing on screen.
+- The stale pool eviction (5 s) made the read-ahead read 9.8 GB (hold) and 4.3 GB (nohold) for 2393 and 543 textures taken, 8416
+  and 3829 blocks let go: blocks dropped and read again.
+- So texcache3 turns both off by default (RX_VK_BC_DISK_HOLD_MS=0, RX_VK_BC_DISK_POOL_STALE_MS=0); they stay as switches. The hold
+  is not acceptable as it is: it leaves draws out wherever a texture is made again, not only at zone entries.
+
 ## Laptop list 1 (texcache1, Vega 8, Hyrule Field camera turning, 24 Nov)
 
 Runs on the laptop `C:\Users\Yanis\Desktop\OOT\runs\amd-1124\TX1_off1, TX2_cold, TX3_warm, TX4_off2, TX5_warm2`; copies of four
@@ -141,11 +165,23 @@ no GPU burst; needs a CPU BC1/BC7 encoder and a format choice at creation that a
 
 ## Who gets it by default (proposal, not decided)
 
-To fill once the 3050 and laptop lists come back.
+Proposal: on by default where the GPU's ASTC transcode is expensive relative to the frame, by device class first:
+- integrated GPUs that decode ASTC on the GPU (astc_ready() and VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU: the Vega APUs today):
+  measured +30% while turning on the laptop (list 1). On, with a folder size cap.
+- discrete cards with 8 GB or less (bc_layers() == 1, the one-layer path: the RTX 3050 class): on only if the 3050's list 2 shows
+  warm with fewer or shorter post-zone upload frames and scene fps within noise of off. Not decided.
+- everything else (the RTX 5070 class): off. The transcode is about 1 ms of GPU a frame there (bc7c's pass timing); nothing to win.
+- CPU-decode chips (astc_cpu_policy.h): nothing to do, the cache holds BC blocks and those chips make none (see above).
+A runtime measure (GPU ms per MB of the first transcodes) would be finer, but the class rule needs no timestamps, and the two
+classes measured so far differ by device class, not by a few percent.
 
 ## State
 
-- 2026-11-24 16:57: branch perf/texcache (worktree E:\OOT\HeyListen-wt\texcache) from origin/main 51e533a87; code written, unit
-  test passes, whole suite 511 passed / 3 known failures (`E:\OOT\scratch-texcache\run_all1.out`). Build texcache1 queued
-  (`E:\OOT\scratch-texcache\build.sh texcache1`). Not committed yet. Next: build, a function check on the main PC (cold then warm,
-  counters, pictures against off), then the 3050 list.
+- 2026-11-24 18:31: perf/texcache commits c189dafe9 (texcache1), 5d8066c3c (texcache2), a45465f05 (texcache3: hold and stale
+  eviction off by default). Builds build/s5/bin/texcache1, texcache2, texcache3. Whole suite on 5d8066c3c: 510 passed, the 3 known
+  failures and test_switches_documented (regenerated after, passes). Lists for texcache3: `E:\OOT\scratch-texcache\list-3050-2.txt`,
+  `E:\OOT\scratch-texcache\list-laptop-2.txt` (list 1 of the laptop done; the 3050's list 1 dropped). Function check of texcache3
+  (one warm tour arm, flash detector, `E:\OOT\HeyListenuild\s5	c-texcache3-warm`): 878 textures from the disk (739 MB),
+  2506 found on disk, held back 0, flashes 0, no FATAL / device lost / VK_ERROR, render thread 5.2 ms in all. Cache folder for tests: `E:\OOT\scratch-texcache\cache`
+  (2.7-4.2 GB, made by my runs; delete when done).
+- Next: the lists' results; then the default rule in code (device class, above) if the owner agrees.
