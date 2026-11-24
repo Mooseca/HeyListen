@@ -22,7 +22,7 @@ other value that depends on another frame, so that nothing waits and frames can 
 5. **Not built**: the lanes themselves (`RX_VK_LANES`, section 4.3 has the recipe). `RX_VK_SUB_OVERLAP` and `RX_VK_ORDER_THREAD` do
    not work together yet (the first is left off when the second is on).
 
-## State (keep current; last edit 24 Nov 17:32, second session DECOUPLE2)
+## State (keep current; last edit 24 Nov 18:58, second session DECOUPLE2; see 4.6-4.7 for the latest)
 
 - **Second session (from 16:40)**, section 4.4: `b49b55244` the submit sequencer, the render conditions per group,
   `RX_VK_LANES_CHECK=1` (build `dec3a`, suite 513 passed / 3 known failed, `E:\OOT\scratch-decouple\tests-dec3a.log`). **The check
@@ -410,9 +410,45 @@ thread's hand-over ... game-bound"; the order thread idle 0.18 ms a frame. LIFT3
 main 5.5), about 3.5 cores; the replay thread busy 18.3 of 19.55 ms, 10.2 of them in the driver under the queue submits (the
 coordinator's reading of that run). Arithmetic, not a measure: the named threads' 4.8 CPUs at 17.89 ms are 85.9 ms of CPU a frame;
 at the GPU's 11.9 ms (hT's GPU time) that is 7.2 CPUs, at the lanes' 13.4 ms aim 6.4, both above the 6 cores (the unnamed 2.8 CPUs
-come on top if they scale with the frame). **Verdict: the i5-10400F cannot feed the lanes' aim at the default ini**: with about 5
+come on top if they scale with the frame). **Withdrawn (4.7): hT ran with a cold shader cache; the unnamed threads are the shader workers.** The first reading was: the i5-10400F cannot feed the lanes' aim at the default ini: with about 5
 cores for these threads the frame bound by CPU is ~17 ms (85.9 / 5), today's 17.89 within a few percent; one lane (K=1) is the
 most to try there, and its gain is expected small until CPU is shed. Where to shed first: the three unnamed threads at 92-95% (to
 identify: if they spin, 2.8 CPUs), the order thread's 10.2 ms a frame in the driver's queue submits (fewer submissions: stage 4,
 `RX_VK_LANE_BATCH`), the capture copy threads (0.26 CPU), the held-submits thread (0.08). The lanes stand for machines with more
 cores (the 5070 / 7800X3D: 8 cores, 16 threads).
+
+### 4.7 Series 6-7 (dec3b, dec3c), the lanes inert in this game, the order thread's overlap flashes, the gate reopened
+
+- **Series 6** (`dec3b`, `E:\OOT\scratch-decouple\c6-dec3b.log`): `dec3b-ln-k`, `dec3b-ln-h` (order thread, `RX_VK_LANES=1`,
+  both checks): every check counter 0, at most 3 tickets open, 0 flashes, the meter's held reads in Hyrule 971 / 997 / 1000 / 1000.
+  `dec3b-tour-ln`: 0 flashes. **But the lanes did nothing in any of them**: "groups kept pending past the next one's start 0" in
+  all three. Every early group is the last big command buffer of its submission: DEFER_JOIN_CHECK's "joins made by: ... end of
+  the command buffers' loop 1.00" (every other reason 0.00, `build/s5/dec3b-ln-k/game_log.txt`). So no submission has a second big
+  command buffer for the pending group to overlap; the switch and the tour's ini or save are not the reason. The lanes can only work
+  across submissions: the pending group is a submission's end (`RX_VK_SUB_OVERLAP`'s hand-off), and the join to move is the one at
+  the next submission's memory work. `RX_VK_LANES=1` as built is therefore arm O again, and is left out of the PC 3050's list.
+  `dec3b-tour-soot`: 16 flashes.
+- **Series 7** (`dec3c` = the sync fix, `c7-dec3c.log`): `dec3c-so-k` (inline `RX_VK_SUB_OVERLAP=1`): 0 pages from guest memory,
+  uploads 0.1 ms a frame, 0 flashes: **the fix removes the copies**. `dec3c-soot-k` (order thread + overlap + checks): counters 0,
+  5,950 submissions handed off, 0 flashes. `dec3c-tour-soot` (order thread + overlap): **19 flashes**, 564 pages from guest memory,
+  "the longest submission 86.0 ms ... gaps 22.7 ms (the longest 118.1)". So the tour's flashes are not the sync fault.
+- **The flashes, looked at** (`E:\OOT\scratch-decouple\shots\dec3c-tour-sootlash_<present>_{a,b,c}.png`): two kinds.
+  (1) Presents 2497-2526 (10 flashes, cells 14-49 x 19-27, peak 71-81): mid-play in the Market at the spawn, before the first warp;
+  `flash_2509_b` against `flash_2509_a`: the floor under the gate loses its shadow for one frame (lighter), and the frames around it
+  alternate darker / brighter on the same cells: the floor's shading flickers from frame to frame. (2) Presents 2880, 2995, 3064,
+  4140 (whole screen, 873-1208 cells brighter, peak 240-245): `flash_2880_b` is the arrival in Hyrule Field (its title card on
+  screen): the whole scene blown out white, the exposure of another scene: a warp's first frames. Without the overlap the order
+  thread's tours read 0 (`dec2a-tour-ot`, `dec3b-tour-ln`, where the lanes were inert); inline with the overlap before the fix
+  `dec2b-tour-on` read 0 (with every GPU-written page copied again from guest memory, which may have hidden a stale read). The inline
+  tour on `dec3c` is series 8 (`c8-dec3c.log`, `dec3c-tour-so`). Not explained yet; the order thread with the overlap is not sent to
+  the 3050.
+- **The gate is reopened.** hT started with a cold shader cache for its build ("12 graphics pipelines from 5354 notes carried over
+  from another shader translation (5342 notes name no program)", "noted pipelines warmed (in play) ... 5168 left out", where kA1 reads
+  "5309 graphics pipelines ... built in 1586 ms"); its three unnamed threads at 92-99% are the background shader workers, in 16 of
+  its 21 thread-time blocks; a warm session on the main PC shows unnamed threads at 6-28% (the coordinator's reading). hT's 761%,
+  its named threads' times (contended by ~2.8 CPUs of translation) and its 52.7 fps are inflated; the arithmetic of 4.6 does not
+  hold. The gate waits for list-3050-1's warm hT2.
+- **list-3050-1** (`E:\OOT\scratch-decouple\list-3050-1.txt`, build `dec3c`): two prepare starts (0 left out), arms A inline,
+  O order thread, S inline + overlap, Kokiri / Hyrule / Market, 3 passes interleaved, then hT2 warm. Next by its result: the lanes
+  across submissions only if one lane can show a gain (it would be the overlap on the order thread, whose tour flashes first need a
+  cause); else the next lever is the replay thread's ~10 ms a frame in the driver's queue submits, not more lanes.
