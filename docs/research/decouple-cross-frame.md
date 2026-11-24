@@ -223,3 +223,30 @@ and a build shared the machine: the GPU's busy time moved from 10.0 to 17.1 ms a
   newest one not newer than its submission's limit; the check line counts the views deeper than the history. Rules in
   `engine/gpu/vk/cap_view.h`, test `engine/tests/test_cap_view.py`. Inert until several submissions' segments record at once.
 - Suite on `09484e740`: 512 passed, 3 failed (the known three; `E:\OOT\scratch-decouple\tests-dec2a.log`).
+
+### 4.3 Stage 2 (`RX_VK_LANES`), not built: the recipe, from the code as merged
+
+What stops the spine today, in order, and what each needs (one pending submission at a time is enough for most of the gain: the
+spine then waits only when the lanes are a whole submission behind):
+
+1. **`sub_complete_before_submit()` in `submit_recording`** (and `ReplayLock`): the first recording of submission N+1 that goes to
+   the queue completes N (waits for its workers, sends its tail). Needed instead: a **submit sequencer**: every recording takes a
+   ticket in stream order when it is begun (N's segments, N's tail, N+1's first recording, ...); a recording that is ready is sent
+   if every ticket before it is sent, else left for whoever sends the one before (the group's `early_submit_ready` already works
+   this way inside a group). Pure rules in a header with a test, as `completion_tracker.h`.
+2. **`memory_begin_submission` / the next capture's take beside N's workers**: the lists are per submission (SUB1 A), the capture
+   view is `RX_VK_CAP_DEPTH` deep (built), the pool's sync pair is two deep (SUB1 A): enough for one pending submission. The
+   pre-sync of N+1's big command buffer marks pools for N+1 while N's workers still bind: covered by `pool_synced_for`'s pair
+   before; the check's "pool synced by a later submission" must read 0 only for checks that then took the wrong pair (to refine).
+3. **`par_conds`**: one vector, reset at each dry pass. Per group (`EarlyGroup`), a segment's `cond` an index into its group's.
+4. **`ub_prune` and `ub_updates.resize(ub_before)`** beside pending readers: SUB1 A's exclusive lock covers the prune; the resize (a
+   command buffer replayed twice) must join first.
+5. **The order thread's accounting**: a submit job's value is done (`ot_value_done`, fence joins, `pushed`) when its tail is sent, not
+   when `run_submit` returns; the present joins every pending group (it needs the frame whole), so do `wait_queue_empty`, texel
+   reads, releases.
+6. Check mode: `RX_VK_LANES_CHECK=1` runs every group joined (as today) but takes tickets and views as if pending, and counts a
+   ticket sent out of order, a view lost, a pool pair missing; all 0 before the switch is tried in the game.
+
+Gate for the switch: on the PC 3050 at the default ini, order thread idle above 0.5 ms a frame and GPU gaps under 0.5 ms in Kokiri
+and Hyrule (today 0.01-0.06 and 1.75-2.12), fps +8% or more over the order-thread arm; 0 flashes over the warp tour; the meter's
+held reads as off.
