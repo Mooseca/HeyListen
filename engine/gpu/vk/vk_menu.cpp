@@ -995,7 +995,7 @@ Row rows[] = {
      "that offers to update, keep your version or skip that version. Nothing is asked when you are offline, and when the launcher "
      "starts the game it looks for updates itself. Applies after a restart.", nullptr, true, true},
 
-    // Controls (13 rows; Motion opens the 6 TAB_MOTION rows, Controls its page, which shows this tab's Layout preset and Button prompts rows too)
+    // Controls (15 rows; Motion opens the 6 TAB_MOTION rows, Controls its page, which shows this tab's Layout preset and Button prompts rows too)
     // (hookshot) the input rows first, together so they are easy to find; the Controls page shows the same two above its grid
     {TAB_CONTROLS, "Layout preset", &opts.pad_layout, 0, 3, 1, tx_pad_layout,
      "Which face button is which. Binding one yourself on the Controls page makes it Custom.", hn_pad_layout},
@@ -1004,6 +1004,16 @@ Row rows[] = {
      "put each action on.", hn_prompts, true, true},
     {TAB_CONTROLS, "Controller in background", &opts.pad_background, 0, 1, 1, tx_onoff,
      "Whether the controller plays the game while another window has the focus.", hn_background},
+    {TAB_CONTROLS, "Sprint with L3", &opts.sprint, 0, 1, 1, tx_onoff,   // (HL_OPT_SPRINT, vk_opt_ids.h, host/oot_sprint.c; saved as sprint_with_l3)
+     "Off (the default): the left stick's press is the game's own LS. On: while it is pressed Link runs with the game's own fast "
+     "run, the one that follows a roll while A is held, without the roll, until he stops, rolls or targets. Any input bound to the "
+     "game's LS counts, the keyboard's too. The game no longer gets that press as LS, except one that begins in a conversation or "
+     "a cutscene, which still hides the text box. A is untouched: tapping it still rolls. Ported from Longshot (llun, kendowashere).",
+     nullptr, false, true},
+    {TAB_CONTROLS, "Touchpad opens menu", &opts.touchpad_menu, 0, 1, 1, tx_onoff,   // (issue 120; saved as touchpad_opens_menu)
+     "On (the default): clicking the DualSense or DualShock 4 touchpad opens and closes this menu. Off: the click does nothing, "
+     "so it cannot open the menu by accident. The menu still opens with Insert or F1, Home, Select and Start together, and the "
+     "Open menu control of the Controls page.", nullptr, false, true},
     {TAB_CONTROLS, "Mouse camera", &opts.mouse_native, 0, 1, 1, tx_mousecam, "How the captured mouse turns the camera.",
      hn_mousecam, false, true},
     {TAB_CONTROLS, "Mouse sensitivity", &opts.mouse_sens, 10, 500, 10, tx_sens,
@@ -1044,7 +1054,7 @@ Row rows[] = {
      "buttons."},
     {TAB_CONTROLS, "Menu shortcut", &opts.menu_shortcut, 0, 2, 1, tx_menu_shortcut,
      "Which keyboard shortcut opens and closes this menu. Choose one key to leave the other free for an overlay. "
-     "On a controller, Home, the touchpad click (DualSense, DualShock 4) or Select and Start together always open it.",
+     "On a controller, Home, Select and Start together or, unless Touchpad opens menu is off, the touchpad click (DualSense, DualShock 4) open it.",
      nullptr, false, true},
     // Debug: the tools' switch, the tools themselves below it while they are on (cheat: menu_tick does what they do), then the
     // developer's rows
@@ -2785,7 +2795,7 @@ void menu_tick() {
     if (host && host->binding)   // (A and B as bound now: the Controls page or the Layout preset can change them)
         menu_keys::confirm_back(host->binding(HOS_BIND_PAD, HOS_SW_A, 0), host->binding(HOS_BIND_PAD, HOS_SW_B, 0), &pad_confirm,
                                 &pad_back);
-    if (pad(HOS_PAD_GUIDE) || pad(HOS_PAD_TOUCHPAD) || chord_now) press[0] = true;   // (Home, the touchpad's click, Select and Start)
+    if (pad(HOS_PAD_GUIDE) || (opts.touchpad_menu && pad(HOS_PAD_TOUCHPAD)) || chord_now) press[0] = true;   // (Home, the touchpad's click unless "Touchpad opens menu" is off, Select and Start)
     {   // holding an arrow or the D-pad repeats it: after 0.35 s, 12 a second, then 30 a second after 1.5 s held
         static int64_t held_since[5], next_repeat[5];
         const int pads[5] = {0, HOS_PAD_UP, HOS_PAD_DOWN, HOS_PAD_LEFT, HOS_PAD_RIGHT};

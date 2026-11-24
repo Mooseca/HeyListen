@@ -38,3 +38,7 @@
    row on Vanilla keeps the game's R11G11B10F and the temporal upscalers, which take only that scene. 47, Longshot's id for it in
    its vk_api.h, so the two agree. */
 #define HL_OPT_HDR_TONEMAP 47
+
+/* The Controls tab's Sprint with L3 row (host/nn_hid.c asks at each read of the controllers, host/oot_sprint.c acts;
+   gpu/vk/vk_replay.cpp answers 0 or 1). 97 is Longshot's id for its Sprint row (HOS_OPT_SPRINT in its vk_api.h); free here. */
+#define HL_OPT_SPRINT 97
