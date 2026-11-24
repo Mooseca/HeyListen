@@ -111,8 +111,16 @@ PIPE4 (lease name `pipe4`, scratch `E:\OOT\scratch-pipe4`, scripts `build/s5/pip
   stale by a CPU write the capture's copy is now taken (the write came after the submission); a page whose newest stamp is a GPU
   write-back still reads guest memory (a GPU stamp generation per page and region, kept with the order thread only).
   `RX_VK_ORDER_READ_CAPTURE=0`: as before. Texture storage (`memory_as_submitted`) is unchanged.
-- Queued (`s6.sh`, `s6.log`): build pipe4d with the tests, tours `p4t8-on`, `p4t9-on`, `p4t9-off`, then the fps gate on pipe4d
-  (`build/s5/pipe4/gate.sh pipe4d p4g`, one speed lease, slot c; table `python -I E:/OOT/scratch-pipe4/tmp/gate.py p4g`).
+- pipe4d (tests: the 3 known failures plus `test_capture_read_mapped.py`, whose stubs lack the new names): tours `p4t8-on` 5
+  flashes (Market 1466/1467/1468/1479, Zora's River 3206), `p4t9-on` 1 (1676; the game ended in the Market), `p4t9-off` 0 (all five
+  maps). The late-read change served 9,588 and 1 pages and the flashes stayed: **reverted** (`1bd22639f`).
+- What the remaining flashes have: no wait forced (no `wait gone past` line in `p4t6-on` / `p4t8-on`), but a present let go after
+  200 ms without the CPU's signal (`p4t8-on`: forced 1483 and 3210, right after the flashes): the frame shown without the main
+  thread's writes up to its signal. Fix `e42aa06b0` (pipe4e): the held present waits up to 2 s (`RX_VK_ORDER_SIGNAL_MS`, was 200)
+  and the next present waits behind it instead of forcing it - the Presentation Thread held at `RX_VK_ORDER_AHEAD`, as inline.
+- Queued: the fps gate on pipe4c (= the engine code before `e42aa06b0`; `s7.sh`, `s7.log`, `build/s5/pipe4/gate.sh pipe4c p4g`,
+  table `python -I E:/OOT/scratch-pipe4/tmp/gate.py p4g`), then `s8.sh` (`s8.log`): build pipe4e with the tests, tours
+  `p4t10-on`, `p4t11-on`.
 
 Where it stands: the three tasks of the brief are done and measured. (1) The present thread works and is safe, but **the gate that
 keeps the GPU's order takes the present's serial part back into the chain** (Kokiri 0.47-0.51 ms a frame, chain 7.76 against 7.79):
