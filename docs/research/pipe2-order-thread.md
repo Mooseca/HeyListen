@@ -129,6 +129,12 @@ PIPE4 (lease name `pipe4`, scratch `E:\OOT\scratch-pipe4`, scripts `build/s5/pip
   With the next present waiting behind the held one, the jobs behind it never ran while the game's threads joined them before the
   main thread's signal. Fix `714f7dad7` (pipe4f): the next present forces the held one again (as pipe4c); a held present with
   nothing behind it waits up to 2 s. Build and tours `p4t12-on`, `p4t13-on` queued (`s9.sh`, `s9.log`).
+- pipe4f (tests 505 passed, 2 failed: only `test_nup_paths`, `test_nup_read_name`): `p4t12-on` ran its whole 223 s after play,
+  Market, Field, Zora's River, Field, **0 flashes, 0 presents forced**, meter windows 11 / 12 / 0 / 0. `p4t13-on` **hung at the load**
+  (presents stopped 121 s after start, play never began) with 4,000 forces spared by the watch: an order-thread job waited for the
+  stopped queue's own work and the watch, seeing jobs queued, never forced it (pipe4e's freezes may be the same). Fix `0c9273591`
+  (pipe4g): the watch spares only while an order-thread job has finished within the last 250 ms. Build and tours `p4t14-on`,
+  `p4t15-on` queued (`s10.sh`, `s10.log`).
 
 Where it stands: the three tasks of the brief are done and measured. (1) The present thread works and is safe, but **the gate that
 keeps the GPU's order takes the present's serial part back into the chain** (Kokiri 0.47-0.51 ms a frame, chain 7.76 against 7.79):
