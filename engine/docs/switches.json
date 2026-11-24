@@ -5088,7 +5088,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2520
+     "line": 2530
     }
    ],
    "default": "0 (unset)",
@@ -5235,7 +5235,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2528
+     "line": 2538
     },
     {
      "path": "host/nn_vi.c",
@@ -5310,7 +5310,7 @@
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2528
+     "line": 2538
     },
     {
      "path": "host/nn_vi.c",
@@ -5633,7 +5633,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2611
+     "line": 2621
     },
     {
      "path": "host/display.c",
@@ -6133,7 +6133,7 @@
    "files": [
     {
      "path": "host/nn_hid.c",
-     "line": 787
+     "line": 788
     }
    ],
    "default": "unset",
@@ -6154,7 +6154,7 @@
    "files": [
     {
      "path": "host/nn_hid.c",
-     "line": 773
+     "line": 774
     }
    ],
    "default": "off (unset)",
@@ -6175,7 +6175,7 @@
    "files": [
     {
      "path": "host/nn_hid.c",
-     "line": 279
+     "line": 280
     }
    ],
    "default": "unset",
@@ -6196,7 +6196,7 @@
    "files": [
     {
      "path": "host/nn_hid.c",
-     "line": 282
+     "line": 283
     }
    ],
    "default": "unset",
@@ -6217,7 +6217,7 @@
    "files": [
     {
      "path": "host/nn_hid.c",
-     "line": 296
+     "line": 297
     }
    ],
    "default": "unset",
@@ -6238,7 +6238,7 @@
    "files": [
     {
      "path": "host/nn_hid.c",
-     "line": 286
+     "line": 287
     }
    ],
    "default": "unset",
@@ -6259,7 +6259,7 @@
    "files": [
     {
      "path": "host/nn_hid.c",
-     "line": 781
+     "line": 782
     }
    ],
    "default": "off (unset)",
@@ -6888,7 +6888,7 @@
    "files": [
     {
      "path": "host/nn_hid.c",
-     "line": 133
+     "line": 134
     }
    ],
    "default": "unset",
@@ -6913,7 +6913,7 @@
     },
     {
      "path": "host/nn_hid.c",
-     "line": 153
+     "line": 154
     }
    ],
    "default": "off (unset)",
@@ -6934,7 +6934,7 @@
    "files": [
     {
      "path": "host/nn_hid.c",
-     "line": 134
+     "line": 135
     }
    ],
    "default": "unset",
@@ -6959,7 +6959,7 @@
     },
     {
      "path": "host/nn_hid.c",
-     "line": 812
+     "line": 813
     }
    ],
    "default": "unset",
@@ -6980,11 +6980,11 @@
    "files": [
     {
      "path": "host/nn_hid.c",
-     "line": 79
+     "line": 80
     },
     {
      "path": "host/nn_hid.c",
-     "line": 164
+     "line": 165
     }
    ],
    "default": "off (unset)",
@@ -7815,7 +7815,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2437
+     "line": 2447
     }
    ],
    "default": "unset",
@@ -7836,7 +7836,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2440
+     "line": 2450
     },
     {
      "path": "host/hos_main.c",
@@ -7924,7 +7924,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2521
+     "line": 2531
     },
     {
      "path": "host/nn_applet.c",
@@ -8473,7 +8473,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2519
+     "line": 2529
     }
    ],
    "default": "0 (unset)",
@@ -10282,12 +10282,12 @@
    "files": [
     {
      "path": "nx2/oot_patches.py",
-     "line": 356
+     "line": 408
     }
    ],
    "default": "unset",
    "values": "text",
-   "explanation": "undocumented: nx2/oot_patches.py:356 reads it as a text value: `job_order = os.environ.get(\"OOT_JOB_ORDER\") == \"1\" # (TICK-047, lift time; off: no job order statements)`. No comment in the source says what it changes.",
+   "explanation": "undocumented: nx2/oot_patches.py:408 reads it as a text value: `job_order = os.environ.get(\"OOT_JOB_ORDER\") == \"1\" # (TICK-047, lift time; off: no job order statements)`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -18388,7 +18388,7 @@
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2515
+     "line": 2525
     }
    ],
    "default": "unset",
@@ -20203,7 +20203,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2509
+     "line": 2519
     }
    ],
    "default": "0 (unset)",
@@ -21066,7 +21066,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2511
+     "line": 2521
     }
    ],
    "default": "unset",
@@ -22948,7 +22948,7 @@
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2503
+     "line": 2513
     }
    ],
    "default": "2",
@@ -23032,7 +23032,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2809
+     "line": 2819
     }
    ],
    "default": "unset",
@@ -25382,7 +25382,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2510
+     "line": 2520
     }
    ],
    "default": "0 (unset)",
@@ -25654,7 +25654,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 8874
+     "line": 8875
     }
    ],
    "default": "0 (unset)",
@@ -30311,7 +30311,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2781
+     "line": 2791
     }
    ],
    "default": "unset",
@@ -30479,7 +30479,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2516
+     "line": 2526
     }
    ],
    "default": "0 (unset)",

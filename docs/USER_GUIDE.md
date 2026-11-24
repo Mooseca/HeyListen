@@ -45,7 +45,7 @@ start prepares again. The builder keeps its build files in `%LOCALAPPDATA%\HeyLi
 Press **Play**, or use the *HeyListen* shortcut on the desktop or in the Start menu. The game folder's `HeyListen.exe` starts it too
 (the game itself is `bin\HeyListen.exe`, which is what Task Manager shows). **Insert** opens the in-game menu
 (graphics, controls, frame rate, cheats); on a controller, press Home, the touchpad click (DualSense, DualShock 4) or
-Select and Start together. The same press closes it. If none of those suits your pad, bind your own on the Controls page:
+Select and Start together (the touchpad click can be turned off in **Controls → Touchpad opens menu**). The same press closes it. If none of those suits your pad, bind your own on the Controls page:
 the **Open menu** row takes one gamepad button, or two pressed together (L3 + R3, Share + Options). It is not set by default, and
 the ways above keep working. A combination held does not reach the game. When a controller is opened the game's log
 (`hookshot_log.txt`) says what it is and which buttons open the menu. Frame generation is off by default.
