@@ -700,6 +700,7 @@ std::unique_ptr<Translation> translate(Env& env, bool graphics, bool one_exit = 
     auto t = std::make_unique<Translation>();
     Shader::Optimization::g_fold_code_key = env.code_key();   // (the fold's selection, ir_opt/pseudo_fold.h, and its count)
     Shader::Optimization::g_fold_seen = Shader::Optimization::g_fold_taken = 0;
+    Shader::Optimization::g_fold_trace.clear();
     // (NVN2 task / mesh programs get one exit: their counts are set there, as Eden's pipeline cache does)
     Shader::Maxwell::Flow::CFG cfg{env, t->flow_blocks,
                                    env.StartAddress() + (graphics ? static_cast<u32>(sizeof(Shader::ProgramHeader)) : 0u),
@@ -707,6 +708,9 @@ std::unique_ptr<Translation> translate(Env& env, bool graphics, bool one_exit = 
     t->program = Shader::Maxwell::TranslateProgram(t->insts, t->blocks, env, cfg, host_info());
     {   // (RX_VK_FOLD_PSEUDO_LOG=1: what the fold took of each stage's flagged instructions, for the bisection and the count)
         static const bool log_fold = getenv("RX_VK_FOLD_PSEUDO_LOG") != nullptr;
+        static const bool trace_fold = getenv("RX_VK_FOLD_PSEUDO_TRACE") != nullptr;
+        if (trace_fold && !Shader::Optimization::g_fold_trace.empty())
+            logf("vk: foldtrace %016llx %s", (unsigned long long)env.code_key(), Shader::Optimization::g_fold_trace.c_str());
         if (log_fold && Shader::Optimization::g_fold_seen)
             logf("vk: fold: code %016llx took %u of %u flagged instructions", (unsigned long long)env.code_key(),
                  Shader::Optimization::g_fold_taken, Shader::Optimization::g_fold_seen);

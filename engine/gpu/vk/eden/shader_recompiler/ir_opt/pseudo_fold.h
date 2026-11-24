@@ -108,5 +108,7 @@ private:
 inline thread_local std::uint64_t g_fold_code_key{0};
 inline thread_local std::uint32_t g_fold_seen{0};
 inline thread_local std::uint32_t g_fold_taken{0};
+/// (temporary, RX_VK_FOLD_PSEUDO_TRACE=1) one text line per taken extract: opcode, immediates, result, flags
+inline thread_local std::string g_fold_trace;
 
 } // namespace Shader::Optimization

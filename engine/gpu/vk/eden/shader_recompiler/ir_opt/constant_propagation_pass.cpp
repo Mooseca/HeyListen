@@ -5,6 +5,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <algorithm>
+#include <cstdio>
+#include <string>
 #include <functional>
 #include <tuple>
 #include <type_traits>
@@ -110,6 +112,21 @@ bool FoldWhenAllImmediatesWithFlags(IR::Inst& inst, Func&& func) {
     if (inst.HasAssociatedPseudoOperation()) {
         static const FoldSelect select{getenv("RX_VK_FOLD_PSEUDO_ONLY"), getenv("RX_VK_FOLD_PSEUDO_SKIP"),
                                        getenv("RX_VK_FOLD_PSEUDO_RANGE")};
+        // (temporary bisection) RX_VK_FOLD_PSEUDO_OPS=<and,or,xor,ue,se>: only those opcodes fold
+        static const std::string ops{getenv("RX_VK_FOLD_PSEUDO_OPS") ? getenv("RX_VK_FOLD_PSEUDO_OPS") : ""};
+        if (!ops.empty()) {
+            const char* name{};
+            switch (inst.GetOpcode()) {
+            case IR::Opcode::BitwiseAnd32: name = "and"; break;
+            case IR::Opcode::BitwiseOr32: name = "or"; break;
+            case IR::Opcode::BitwiseXor32: name = "xor"; break;
+            case IR::Opcode::BitFieldUExtract: name = "ue"; break;
+            default: name = "se"; break;
+            }
+            if (ops.find(name) == std::string::npos) {
+                return false;
+            }
+        }
         if (!select.Allows(g_fold_code_key, g_fold_seen++)) {
             return false;
         }
@@ -118,6 +135,21 @@ bool FoldWhenAllImmediatesWithFlags(IR::Inst& inst, Func&& func) {
     using Indices = std::make_index_sequence<LambdaTraits<decltype(func)>::NUM_ARGS>;
     const IR::Value result{EvalImmediates(inst, func, Indices{})};
     const u32 bits{result.U32()};
+    {
+        static const bool trace{getenv("RX_VK_FOLD_PSEUDO_TRACE") != nullptr};
+        if (trace && inst.HasAssociatedPseudoOperation()) {
+            char line[160];
+            std::snprintf(line, sizeof line, "%d:", static_cast<int>(inst.GetOpcode()));
+            g_fold_trace += line;
+            for (size_t i = 0; i < inst.NumArgs(); ++i) {
+                std::snprintf(line, sizeof line, "%x,", inst.Arg(i).U32());
+                g_fold_trace += line;
+            }
+            std::snprintf(line, sizeof line, "=%x z%d s%d|", bits, inst.GetAssociatedPseudoOperation(IR::Opcode::GetZeroFromOp) ? 1 : 0,
+                          inst.GetAssociatedPseudoOperation(IR::Opcode::GetSignFromOp) ? 1 : 0);
+            g_fold_trace += line;
+        }
+    }
     if (IR::Inst* const zero{inst.GetAssociatedPseudoOperation(IR::Opcode::GetZeroFromOp)}) {
         zero->ReplaceUsesWith(IR::Value{ZeroFlagOf(bits)});
     }

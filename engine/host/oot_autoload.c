@@ -214,7 +214,7 @@ void hos_oot_autoload_input(void) {
         active = 0;
         return;
     }
-    if (now - start_ms >= kGiveUpMs) {
+    if (now - start_ms >= (getenv("HL_SKIP_GIVEUP_S") ? (unsigned)atoi(getenv("HL_SKIP_GIVEUP_S")) * 1000u : (unsigned)kGiveUpMs)) {   /* (temporary, bisection) */
         hos_log("skip title: gave up after %.0f s", kGiveUpMs / 1000.0);
         active = 0;
         return;
