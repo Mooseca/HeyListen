@@ -6,21 +6,31 @@ Branch `perf/decouple` from main `c79bee6f6`, worktree `E:\OOT\HeyListen-wt\deco
 other value that depends on another frame, so that nothing waits and frames can be worked on in parallel. Targets: +30% on the RTX
 3050 / i5-10400F (about +20% reached), 120+ fps on the RTX 5070 / 7800X3D, no stutters.
 
-## State (keep current; last edit 24 Nov 14:45)
+## State (keep current; last edit 24 Nov 15:00)
 
 - Done: the reading (the brief's list; `direct-emission.md` sections 1-7 and 12 whole, 8-11 and 13-15 by their headings only;
-  `recording-state.md` of `refactor/sub1`, which the brief did not list and which is the prior work on per-recording state); the map
-  (section 1) from the PC 3050's logs of 23-24 Nov and this stream's series; the design (section 2).
-- Running: series 1b on the main PC (`E:\OOT\scratch-decouple\m1b.sh`, slot a, build `pipe4f`, runs `build/s5/dc1-*` in the main
-  checkout; the machine is shared, so its frame times are not the 5070's own). List `matrix80` on the PC 3050 (build `pipe4f`, logs
-  `C:\OOT\pc3050s-out\dc80\`, copy of the output in `E:\OOT\scratch-decouple\matrix80.txt`): the N block is in, the D block follows.
-- Known bad: `pipe4f`'s order thread froze the game on the PC 3050 in the Market (`NmB`: 8.5 fps, p50 36.8 ms, max 632 ms, no
-  order-thread line after play). The 3050's order-thread numbers below are `pipe2e`'s of 23 Nov, which ran.
-- Nothing built, no code changed yet. A trial merge of `refactor/sub1` into this branch was made and aborted: 17 conflict hunks in
-  four source files, three tests, the generated switch lists.
-- Next: (1) report the design; (2) stage 1 = `refactor/sub1` merged onto this branch (per-submission state, `RX_VK_SUB_OVERLAP`
-  off), built as `dec1a`, the check run (`RX_VK_REC_OVERLAP_CHECK=1`: every count 0), then a PC 3050 list on the default ini;
-  (3) the D block of `matrix80` into table 1.2.
+  `recording-state.md` of `refactor/sub1` and `memo1-replay-reuse.md` of `perf/memo1`, which the brief did not list); the map
+  (section 1); the design (section 2), reported to the coordinator at 14:45; the owner's question on reuse and direct emission
+  (section 3).
+- Stage 1, in progress: `refactor/sub1` merged (`5054c6330`: 17 conflict hunks resolved by hand, listed in the commit), the six
+  checks that cut the changed source updated (`a1ce2732f`). Build `dec1a` = the engine code of `5054c6330`, started 14:52 under the
+  build lease (`E:/OOT/scratch-decouple/build.sh dec1a`, log `build-dec1a.log`, `mkg-dec1a.log`). The suite run before the test
+  fixes: 505 passed, 9 failed (the 3 known and those six); the six pass one by one now; **the whole suite is to be run again**.
+- Next, exact: (1) `python -I E:/OOT/scratch-pipe4/tmp/launch.py E:/OOT/scratch-decouple/c1-dec1a.sh` (slot lease priority 1:
+  warm-up, `RX_VK_REC_OVERLAP_CHECK=1` with the switches off, `RX_VK_SUB_OVERLAP=1` with its check in Kokiri and the Market, the
+  warp tour with `RX_VK_FLASH=1` on and off; log `c1-dec1a.log`, runs `build/s5/dec1a-*` in the main checkout). Pass = every
+  "per submission (SUB1)" count 0, 0 segments differ, 0 flashes, the meter's held reads as off. (2) `dec1a` to the PC 3050
+  (`C:/OOT/builds/dec1a/`), list `matrix81`: default ini, Market / Kokiri / Hyrule, A plain against B `RX_VK_SUB_OVERLAP=1`, 3
+  passes interleaved; and two `pipe4f` runs with `HOS_THREAD_TIMES=5` (section 3.3). (3) `perf/pipe2` (tip `f24afbe94`, handed over
+  by PIPE4 at 14:35 with its State) merged into this branch: a trial merge (`git merge-tree`) conflicts in `vk_memory.cpp` and the
+  generated lists only. (4) Stage 2 (`RX_VK_LANES`), starting with the capture view K deep: with the order thread the captures of
+  two or three later submissions exist while one is replayed, and SUB1's view keeps one older entry a page (`cap_prev`).
+- Measurement series of this stream: `m1.sh` (cut: 110 s runs did not reach play on the loaded machine), `m1b.sh` (175 s runs;
+  `dc1-m-off`, `dc1-m-on`, `dc1-k-off` done, the rest cut at 14:42 to free the slot for the queue). `matrix80` on the PC 3050: 12
+  counter runs in (`E:\OOT\scratch-decouple\matrix80.txt`), the two `RX_VK_RB_PROF` runs not read yet.
+- Known bad: `pipe4f`'s order thread froze the game on the PC 3050 in the Market at the native ini (`NmB`: 8.5 fps, p50 36.8 ms,
+  max 632 ms); its five other order-thread runs there were normal. PIPE4's `pipe4g` (never run) is the candidate.
+- Nothing of this stream holds a lease except the build above; slot a's exe and dll were put back (`bak-a`).
 
 ## 1. The dependency map
 
