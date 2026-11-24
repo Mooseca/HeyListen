@@ -3750,7 +3750,7 @@ void build_descriptors(const NvnState& s, const Program& p) {
                 // overwrote the CPU's own data beside it)
                 if (b && bare && d.is_written && d.cbuf_offset != 0x880) {
                     const uint64_t head = std::min<uint64_t>(n, (addr - base) + 0x40);
-                    (void)gpu_buffer_bind(base, (head + 3) & ~3ull, true);
+                    (void)gpu_buffer_bind_guess(base, (head + 3) & ~3ull);   // (CRASH3: staged and checked, never over a CPU write)
                 }
                 {   // (CRASH3, HL_TRACE_WB=1: the write-back watch's origins) each storage binding marked written, of 16 KB or
                     // less, once per guest range and program: which program, stage and descriptor, the table entry, bare or sized

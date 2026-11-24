@@ -233,6 +233,9 @@ BufferRef gpu_buffer(uint64_t gpu, uint64_t size, int use = kGpuBufferRead);   /
 /// A range as a binding of the replay sees it: the pool's VRAM mirror when it has one (vk_memory.cpp), else the
 /// imported pool. written: the GPU may write it (copied back to guest memory at the submission's end).
 BufferRef gpu_buffer_bind(uint64_t gpu, uint64_t size, bool written);
+/// (CRASH3) a written binding whose range is a guess (a bare storage entry's head, vk_draw.cpp): its write-back staged and
+/// checked, never over a CPU write (vk_memory.cpp wb_guess_checked_on, RX_VK_WB_GUESS_CHECKED)
+BufferRef gpu_buffer_bind_guess(uint64_t gpu, uint64_t size);
 BufferRef stream_copy(const void* src, uint64_t n);   // vk_draw.cpp: bytes in the recording's stream, as a binding
 /// Changes when a read binding remembered earlier must be looked up again (a pool left, a mirror was made, a new submission)
 uint64_t gpu_bind_stamp();
