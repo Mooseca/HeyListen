@@ -24,6 +24,7 @@
    any other state (an attack, an item, swimming, climbing, a cutscene) or ZL held ends it at once. */
 #include "hos.h"
 #include <stdint.h>
+#include <string.h>
 
 #define BIT_LS (1ull << 4)   /* (host/nn_hid.c's B_LS and B_ZL) */
 #define BIT_ZL (1ull << 8)
@@ -80,14 +81,16 @@ static int event_running(void) {
     return m && G64(m + 0x68);
 }
 
+static int32_t state_id;   /* (the last one state_kind read, for the log) */
 static int state_kind(Ctx *c, uint64_t link) {
     uint64_t p = recomp_load64(c, link + 0x18);
     if (p) p = recomp_load64(c, p + 0x270);
     if (p) p = recomp_load64(c, p + 0x188);
     if (p) p = recomp_load64(c, p + 0x1c0);
-    if (!p) return STOP;
+    if (!p) return state_id = -1, STOP;
     int32_t id = (int32_t)recomp_load32(c, p + 0x28);
     if (id == 0x11a) id = (int32_t)recomp_load32(c, p + 0x4c);
+    state_id = id;
     for (size_t i = 0; i < sizeof states / sizeof *states; i++)
         if (states[i].id == id) return states[i].kind;
     return STOP;
@@ -135,6 +138,19 @@ void hos_sprint_link(Ctx *c) {
     STORE(polls, 0);
     const int on = LOAD(held) && LOAD(latched) && !LOAD(zl_held) && state_kind(c, c->x[19]) != STOP;
     STORE(active, on);
+    /* a line a few times a second while the row is on, for a test run: Link's update count, the dash, his state and where he is
+       (the actor's position, floats at +796: the debug tools' Mark position reads the same) */
+    static unsigned updates;
+    if (++updates % 15 == 0) {
+        const uint64_t actor = recomp_load64(c, c->x[19] + 0x18);
+        float pos[3];
+        for (int i = 0; i < 3; i++) {
+            const uint32_t bits = (uint32_t)recomp_load32(c, actor + 796 + 4 * i);
+            memcpy(&pos[i], &bits, 4);
+        }
+        hos_log("sprint: update %u dash %d held %d state %d position %.2f %.2f %.2f", updates, on, LOAD(held), (int)state_id,
+                (double)pos[0], (double)pos[1], (double)pos[2]);
+    }
     if (on) c->x[10] |= DASH_INPUT;
 }
 

@@ -56,6 +56,7 @@ HOS_H = r'''#pragma once
 #include "a64.h"
 #define G64(a) (*(uint64_t *)GP(a))
 #define G32(a) (*(uint32_t *)GP(a))
+void hos_log(const char *fmt, ...);
 '''
 
 # Link's two places, as the lift writes them (the movement update's loads at 0x804ce798, the stance update's at 0x80c27f3c)
@@ -89,6 +90,8 @@ FIXTURE = r'''#include "hos.h"
 #include <stdlib.h>
 #define CHECK(x) do { if (!(x)) { fprintf(stderr, "FAIL:%d %s\n", __LINE__, #x); exit(1); } } while (0)
 unsigned char mem[0x200000];
+static int logs;
+void hos_log(const char *fmt, ...) { (void)fmt; logs++; }
 #define LS (1ull << 4)
 #define ZL (1ull << 8)
 #define A (1ull << 0)
@@ -242,6 +245,7 @@ int main(void) {
     got = frame(LS, 0, 0, &f, &s);
     CHECK((got & LS) && !(f & DASH) && !(s & DASH));
     puts("PASS: the row turned off ends the sprint and gives LS back");
+    CHECK(logs >= 3);   /* (the test run's line, every 15th update of Link while the row is on) */
     return 0;
 }
 '''
