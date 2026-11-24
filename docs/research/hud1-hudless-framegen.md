@@ -6,12 +6,22 @@ every step behind a switch that is off by default.
 
 ## State
 
-- [x] Step 1: HUD-less capture at the gameplay upscale dispatch, `RX_VK_FSR_FG_HUDLESS` (code and test done; commit below)
-- [x] Step 2: FSR 3.1 interpolates the HUD-less colour, the presented frame beside it (code, test, run_all done; pictures pending)
-- [x] Step 3: HUD layer fit and lay-over, `RX_VK_FSR_FG_HUD_LAYER` (code, test done; pictures pending)
-- [x] Step 4: the same pair for the built-in interpolator, `RX_VK_FG_HUDLESS` (code, test done; pictures pending)
+Summary (2026-11-24): all four steps done, committed, each behind a switch that is off by default; pictures taken in the game
+(Hyrule Field save, camera turned with the right stick, `RX_VK_SHOTS` + `RX_VK_SHOT_MADE=all`, FSR 3.1 2x, then built-in 3x).
+Mean of |made frame - its set's game frame| over HUD rectangles (hearts / item box): switches off 29.7 / 18.3 (the HUD doubled and
+smeared in the made frame), `RX_VK_FSR_FG_HUDLESS=1` 11.0 / 4.9, plus `RX_VK_FSR_FG_HUD_LAYER=1` 2.6 / 2.9, built-in 3x with
+`RX_VK_FG_HUDLESS=1` 6.2 / 2.6 (8 to 11 sets each: a rough number, the pictures are the evidence; they stay on this PC, outside
+the repo). Step 1 alone (capture, no consumer) leaves the pictures as main's (hearts 15.2 vs 14.5, 602 of 600 presents captured).
+Not measured: a 3x baseline (that run never reached play), fps (no fps rounds in this phase), PQ / PsychoV35 pictures, AMD / Intel.
+
+- [x] Step 1: HUD-less capture at the gameplay upscale dispatch, `RX_VK_FSR_FG_HUDLESS`
+- [x] Step 2: FSR 3.1 interpolates the HUD-less colour, the presented frame beside it
+- [x] Step 3: HUD layer fit and lay-over, `RX_VK_FSR_FG_HUD_LAYER`
+- [x] Step 4: the same pair for the built-in interpolator, `RX_VK_FG_HUDLESS`
 - Not touched on purpose: DLSS-G, FSR 4 (the brief), Native HDR's PQ present (falls back to the presented picture), PsychoV35's
   RGBA16F picture (not copied: another encoding than the frame's).
+- Open: the built binary (hud1x) predates the commit that lets the HUD images go when frame generation idles (tested, not run
+  in the game); Longshot's patched AMD passes (alpha mark, overlay factor 1) are not ported; HDR / PQ not covered.
 
 ## Step 1: the capture
 
