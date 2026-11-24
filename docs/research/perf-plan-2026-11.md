@@ -79,3 +79,21 @@ The owner's order (22 Nov, evening): keep going until fps rises by **30% or more
 | SPEC1 shader specialisation on constant-buffer values | NO-GO (perf/spec1 ea923c53e) | the costly programs (d8e59341, 739acd67, d905f52b) have no branch on cbuf words, only constant math; the foldable ones (43ec86f3, 918adef1 mesh/task) cost ~0.1 ms. Hand-specialised 43ec86f3: 0.103-0.109 -> 0.092 ms (-0.012 ms a frame), 1a7482c0 unchanged. A real implementation is ~7 days for 0.1-0.5% of GPU time, plus variant compiles (stutters) and correctness risk. Notes in the branch |
 | ASYNC1 async compute | CLOSED | 3050 stamps: of 2.5-2.9 ms of compute a frame, 0.02-0.08 ms runs beside graphics; every compute run depends on the graphics before it. Only a cross-frame overlap (PIPE1 frame-overlap refactor) could use the second queue |
 | PASS1 pass map on the 3050 | map done; LOAD_CLEAR and SHADOW_SHIFT on the 3050 A/B (pictures = off); VRS slows the 5070 2x (cause open) | owner's go 23 Nov for VRS, quality options and load/store; 3050: 18-21 ms a frame at 100%, 12.6-15 at 50%: ~6 ms scale with resolution; 1a7482c0 ~1 ms is the VRS candidate | per pass and dispatch: what it draws (intermediate captures), ms at 100% and 50%, bound type. Then VRS 2x2 on low-frequency passes (VK_KHR_fragment_shading_rate), quality options (12288² shadow map, grass, volumetric fog), load/store ops, barrier cuts and merging the 1x1x1 (0.2 ms) and 47-per-frame dispatches |
+
+## 24 November
+
+| Item | State | Note |
+|---|---|---|
+| CUM1 main (b6d20c1ae) against integ4b on the 3050 | measured | default settings + vsync off (render Auto): castle +4.8%, Market +5.8%, Kokiri +4.2%, Hyrule +2.5%; 1440p native: +2.0%, +3.2%, +4.4%, +3.7% (median of 3, fps from play + 10 s; every new run above every old one). p99 unchanged; frames over 50 ms in Hyrule at native stay 53-61 for three runs: the gains are on the mean, not on the stutters |
+| CUM2 same builds, DLSS fixed 67% at 1440p | measured | castle +1%, Market +8%, Kokiri +3%, Hyrule +6% |
+| Sum against v0.4.3 at Market on the 3050 | not measured as one | integ4 +12.6% (earlier), main over integ4b +3 to +8%, order thread +5% (unmerged): about +23% if they add up. Target +30% |
+| PIPE4 order thread to shippable | running | perf/pipe2 merged with main; wait and present let-go logging for the 2 dark frames |
+| GPUOV2 barriers with no hazard (RX_VK_BARRIER_HAZARD, off) | done on the 5070, 3050 run routed | =3 folds 78 of 142 game barriers a frame and leaves out 17 of 145 pass starts at Kokiri; barrier time 0.37 -> 0.25 ms; fps unchanged on the 5070 (not GPU-bound); pictures and meter clean. Owner's rule 24 Nov: work-reducing changes without fps gain are kept if they produce no bug, so it merges after the 3050 run |
+| FIX1 fold of bit-field extracts | merged 88eee8a9c | three wrong constant folds fixed, test over 3 M immediates. Does NOT cure #97: the owner still sees black leaves at Kakariko with it; cause search resumed from his save |
+| FIX1 CPU ASTC decode on AMD integrated GPUs (#127) | merged 5e0d70a19 | default on Windows for every AMD integrated GPU; RX_VK_ASTC_CPU=0 opts out; no AMD hardware here |
+| LIFTSPLIT one writer in the lifted C's folder | merged f7c71c18b + 5a5662a5b | OS lock on gen.lock, count check, edits that miss name their place. The first merge broke the gates step under python -I; fixed with a test |
+| FG1 frame generation study | done, docs/fg1 | three generators exist already (own 2x-8x, FSR 3.1 2x, DLSS-G on RTX 40/50); the gap is the HUD inside the interpolated picture |
+| HUD1 HUD-less frame generation | running | port of Longshot's chain, 4 steps, all off by default |
+| FG3050 what frame generation gives on the 3050 | running on the 3050 | off / FSR 3.1 2x / own 3x, Market and Hyrule |
+| CRASH2 module-job crash family | running | Crater runs with child Link are invalid (he burns); adult save to come |
+| LOCK1 lock-on triangles (#89) | running | |
