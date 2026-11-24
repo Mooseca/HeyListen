@@ -107,6 +107,52 @@ barriers, fills its records header, dispatches the task and mesh stages as compu
 of every attachment in GENERAL layout). The laptop's N2 (nomesh notes, docked): RX_VK_NO_MESH_FALLBACK=1 drops passes 193 -> 113
 and barriers 438 -> 185 a frame and 5.5 ms of GPU time. List 3 measures that bound at the low-end set.
 
+## List 3: what is left once the picture is light (texcache5, 24 Nov 22:20-22:45)
+
+Logs `E:\OOT\scratch-laptop1\L3\<arm>\game_log.txt`, summary `L3\pilot-summary.txt`. LS = HOS_HANDHELD=1 + fog off +
+HOS_RES_SCALE=0.3333 + RX_VK_WAIT_OWN=0 RX_VK_MIRROR=1. texcache5 ran clean in all 8 runs (its first game runs; the map list is
+read: 208-639 textures from it).
+
+| arm | fps still | fps turning | GPU ms |
+|---|---|---|---|
+| S0, S1 (LS) | 16.4-18.4, 17.9-18.4 | 15.2, 15.8 | 45.1, 44.9 |
+| SB, SB2 (RX_VK_BARRIER_HAZARD=3) | 19.2-19.5, 15.4-18.4 | 15.9, 15.7 | 43.3, 46.0 |
+| SN (RX_VK_NO_MESH_FALLBACK=1: grass, tree leaves and a HUD counter NOT drawn) | 25.1-25.5 | 20.7 | 32.2 |
+| SP (RX_VK_PARALLEL=0) | 18.1-18.8 | 16.9 | 45.9 |
+| SU (RX_VK_UPLOAD_BUDGET_MS=12) | 18.6-19.6 | 16.2 | 45.4 |
+
+- The no-mesh fallback costs ~13 ms of GPU a frame at the low-end set (45 -> 32 ms), a third of the frame. Without it the laptop
+  would be at 25 still / 21 turning. SN's picture (`L3\SN\still.png`) has no grass, bare tree trunks and no stick count in the HUD:
+  a bound, not an option.
+- Barrier elision and the upload budget are inside the noise (~0.6 fps); PARALLEL=0 +1 fps turning, to confirm (list 4).
+- Where the 13 ms goes: in the pass maps the fallback's barriers are cheap spans (7-10 us, ~250 a frame) and its compute
+  dispatches had no span: they are most of the 11-12 ms of "holes inside buffers". So the cost is the translated task and mesh
+  programs' own work and what they write, not the pass splits. f5f2bd64b names them (spans "fallback task/mesh stage prog <key>").
+
+### The fallback writes each vertex about three times
+
+`emit_spirv_mesh.cpp` MeshFallbackEpilogue writes one record per primitive CORNER, each holding every vertex line of that vertex
+(d8e59341: 25 lines, 100 bytes): a 128-vertex, ~126-triangle meshlet writes 378 records, then the generated vertex stage reads
+378 vertices with no reuse. 7d11e1655 adds an indexed form (RX_VK_FALLBACK_INDEXED=1, off by default; for triangles with no
+per-primitive lines): a record a vertex (max_vertices of them: the stage buffer has no vertex count) and three 32-bit indices a
+primitive, at the end of the records buffer, drawn with vkCmdDrawIndexedIndirect. Expected: about a third of the record writes
+and vertex invocations for full meshlets. Moves the shader stamp (the laptop prepares its shaders again once).
+
+## Lists 4-5: the parallel replay off (texcache5)
+
+`L4\`, `L5\` (summaries `pilot-summary.txt`). RX_VK_PARALLEL=0 at the low-end set, 3 interleaved rounds (L5): turning 17.4 / 17.2
+/ 17.8 against 16.2 / 16.0 / 16.4 (+1.3 fps, no overlap), at rest 18.4-19.0 against 18.3-19.7 (about 0.5-1 fps slower). In the
+blocks (L5 Sc/Pc) the GPU uploads fall from 4-8 to 1.6-3 ms a frame turning while the GPU time rises 1-2 ms: GPU + uploads ~54
+against ~51 ms. Not made a rule: a lead (uploads serial, recording parallel) for later.
+LF (RX_VK_LOG_FALLBACK=1): about 49 fallback draws a frame, ~40 mesh workgroups each, every workgroup asked was run.
+
+## lowend1 on the main PC (24-25 Nov 23:15-23:58)
+
+Build `build/s5/bin/lowend1` = perf/lowend 7d11e1655. Slot a, logs `build/s5/l1-v0`, `l1-vf`, `l1-vl`; shots
+`E:\OOT\scratch-laptop1\shots\v0\vk_012600.png` (defaults: haze in the distance, picture right), `shots\vf\vk_015000.png`
+(RX_VK_FOG=0: no haze, nothing black or undefined). l1-vl: "low-end GPU ..., HL_LOWEND=1: the Minimum preset ... for this run only
+(nothing saved)". The Deku Tree / graveyard fog pictures and the compute-path check were cut by the slot lease's end (40 min).
+
 ## Levers
 
 (filled as measured)
