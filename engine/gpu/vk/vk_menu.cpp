@@ -56,6 +56,7 @@
 #include "menu_rows.h"   // (which dependent rows show: row_shown)
 #include "menu_restart.h"
 #include "present_mode.h"
+#include "lowend_rule.h"   // (the Volumetric fog row and the first-start rule for low-end GPUs)
 #ifndef HOOKSHOT_VERSION   // (nx2/build.py gives it to this file: nx2/version.py)
 #define HOOKSHOT_VERSION "unknown"
 #endif
@@ -943,6 +944,9 @@ Row rows[] = {
      "Sharpens the picture as it goes to the window, with any filter. Too much shows halos around edges.", hn_sharpness},
     {TAB_GRAPHICS, "Handheld profile", &opts.handheld, 0, 1, 1, tx_onoff,
      "Runs the game as if the console were undocked. Applies after a restart.", hn_handheld, true},
+    {TAB_GRAPHICS, "Volumetric fog", &opts.fog, 0, 1, 1, tx_onoff,
+     "The haze in the distance and the mist of the forests. Off is lighter on weak GPUs (about 15% of the frame on integrated "
+     "graphics) and shows the distance crisper. Applies after a restart.", nullptr, true},
     {TAB_GRAPHICS, "Ultrawide", &opts.ultrawide, 0, 1, 1, tx_ultrawide,
      "The camera's shape on a screen wider or narrower than 16:9 (4:3, 16:10). Applies after a restart.", hn_ultrawide, true},
     {TAB_GRAPHICS, "HUD layout", &opts.hud_layout, 0, 1, 1, tx_hud_layout,
@@ -1450,7 +1454,7 @@ void save() {
             const char* eq = strchr(line, '=');
             if (!eq || eq == line) continue;
             const std::string key(line, (size_t)(eq - line));
-            bool mine = key == "microphone_device" || key == "options_version";
+            bool mine = key == "microphone_device" || key == "options_version" || key == "lowend_rule";
             for (const Row& r : rows)
                 if (!mine && r.value && key == ini_key(r)) mine = true;
             if (!mine) others += line, others += others.back() == '\n' ? "" : "\n";
@@ -1472,6 +1476,7 @@ void save() {
         // (2: game_speed below 2 was only ever the old default, see menu_init; 3: the mouse's buttons are bindings, see
         // host/nn_hid.c binds_load)
         put("options_version=3\n");
+        if (lowend_marked) put("lowend_rule=1\n");   // (menu_first_run_lowend)
         out += others;
         if (!can_bind()) out += kept;
         for (int i = 0; i < HOS_KEY_N && can_bind(); i++) {   // (the keys-only controls, HOS_KEY_*, have no pad_ line)
@@ -2418,6 +2423,42 @@ void startup_screen(const StartupView* view) {
     startup_on.store(true, std::memory_order_release);
 }
 
+// (HeyListen) Low-end GPUs: the options file's lowend_rule line (the rule was applied once: never again, the player's choices stay
+// theirs), the Volumetric fog row and the first-start rule (lowend_rule.h)
+static bool lowend_marked;
+static int env_int(const char* name) {   // (-1: unset or empty)
+    const char* e = getenv(name);
+    return e && *e ? atoi(e) : -1;
+}
+bool fog_runs() {
+    static const bool on = [] {
+        const bool v = lowend_rule::fog_on(env_int("RX_VK_FOG"), opts.fog);
+        logf("vk: volumetric fog %s%s", v ? "on" : "off", env_int("RX_VK_FOG") >= 0 ? " (RX_VK_FOG)" : " (the Volumetric fog row)");
+        return v;
+    }();
+    return on;
+}
+void menu_first_run_lowend(bool integrated, bool mesh_shader) {
+    const bool gpu = lowend_rule::lowend_gpu(integrated, mesh_shader);
+    const lowend_rule::Apply a = lowend_rule::first_start(env_int("HL_LOWEND"), lowend_marked, gpu);
+    if (a == lowend_rule::NONE) {
+        if (gpu) logf("vk: low-end GPU (integrated, no mesh shaders): %s",
+                      lowend_marked ? "the low-end preset was applied once (lowend_rule=1 in the options file): the rows stay as set"
+                                    : "the rows stay as set (HL_LOWEND=0)");
+        return;
+    }
+    apply_preset(1);
+    opts.preset = 1;
+    opts.fog = 0;
+    if (a == lowend_rule::APPLY_AND_SAVE) {
+        lowend_marked = true;
+        save();
+    }
+    logf("vk: low-end GPU (integrated, no mesh shaders)%s: the Minimum preset (Render resolution 50%%, the handheld profile from "
+         "the next start) and Volumetric fog off%s; the Insert menu changes them back",
+         a == lowend_rule::APPLY_THIS_RUN ? ", HL_LOWEND=1" : "",
+         a == lowend_rule::APPLY_AND_SAVE ? ", saved to the options file" : ", for this run only (nothing saved)");
+}
 static bool dlss_model_saved;   // (hookshot_options.ini has a dlss_model line)
 void menu_first_run_model(uint32_t vendor_id, uint32_t device_id) {
     if (dlss_model_saved || vendor_id != 0x10de) return;   // (only NVIDIA GPUs run DLSS; a saved value is never changed)
@@ -2463,6 +2504,7 @@ void menu_init() {
             has_resolution |= !strcmp(line, "resolution");
             v2 |= !strcmp(line, "options_version");
             if (!strcmp(line, "dynamic_resolution")) old_dynres = atoi(eq + 1);
+            if (!strcmp(line, "lowend_rule")) lowend_marked = true;   // (menu_first_run_lowend: applied once, never again)
             if (!strcmp(line, "vsync")) saved_vsync = atoi(eq + 1);
             if (!strcmp(line, "vsync_mode")) has_vsync_mode = true;
             if (!strcmp(line, "microphone_device")) {   // (hookshot: the microphone, by its name)

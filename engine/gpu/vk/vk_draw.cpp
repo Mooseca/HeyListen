@@ -77,6 +77,7 @@
 #include "precompile_save.h"   // (the pipeline cache written before the title after a long precompile)
 #include "prepare_work.h"   // (what a program of the seed costs a preparation: its progress bar)
 #include "mesh_conv.h"   // (RX_VK_MESH_CONV: the indirect mesh draws' ring slots and the batch at the game's barriers)
+#include "lowend_rule.h"   // (the Volumetric fog row: the fog's programs)
 #include "vk_work.h"   // (after the others: counts the commands that do GPU work, for full_barrier)
 
 namespace mkwvk {
@@ -11342,6 +11343,11 @@ void dispatch(VkCommandBuffer cmd, NvnState& s, uint32_t x, uint32_t y, uint32_t
                 q = *e ? e + 1 : e;
             }
         }
+    }
+    if (lowend_rule::fog_program(cp->key) && !fog_runs()) {   // (the Volumetric fog row Off, or RX_VK_FOG=0: lowend_rule.h)
+        static std::atomic<int> told{0};
+        if (!told++) logf("vk: volumetric fog off (the Volumetric fog row, RX_VK_FOG): its three programs' dispatches left out");
+        return;
     }
     dclock.key = cp->key;
     texture_watch_prog(cp->key);
