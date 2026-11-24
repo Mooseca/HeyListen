@@ -236,6 +236,18 @@ inline void background(bool on) {
 inline void run(Store* sp) {
     Store& s = *sp;
     scan(s);   // (at normal priority: headers only; in background mode it took 7.5 s over 2 GB on the main PC, cache unused meanwhile)
+    {   // (a run that starts inside a map (a save loaded there) entered it before the scan ended: its list is read now. texcache4
+        // read nothing from the list in such runs: the laptop's list 3, "0 read from the map's list" with 547-601 keys listed)
+        bool first;
+        {
+            std::lock_guard lk(s.mu);
+            first = s.mr_map >= 0;
+        }
+        if (first) {
+            std::lock_guard lk(s.wq_mu);
+            s.aq.push_front({4, 0, nullptr, 0, {}, 0, 0});
+        }
+    }
     background(true);   // (the writes at low IO and CPU priority: the game reads its own files meanwhile)
     bool bg = true;
     for (;;) {

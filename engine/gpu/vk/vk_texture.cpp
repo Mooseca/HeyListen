@@ -1421,21 +1421,22 @@ uint64_t bcd_encoder() {   // (the shaders that make the blocks, with texcache_p
     return v;
 }
 uint64_t bcd_pool_cap() {
-    // (TEXCACHE) RX_VK_BC_DISK_POOL_MB=<MB> (by default from the RAM free at start: 1024 with 8 GB free or more, 512 with 4 GB, else
-    // 256): host memory the BC disk cache's reads ahead may fill before textures take them. Laptop list 2 (10-11 GB free): 1024 served
-    // 3502 of 3951 on-disk textures and was never full, 384 served 2732 of 3616, 128 served 718 of 1691
+    // (TEXCACHE) RX_VK_BC_DISK_POOL_MB=<MB> (by default from the machine's RAM: 1024 with 14 GB or more, 512 with 7 GB, else 256):
+    // host memory the BC disk cache's reads ahead may fill before textures take them. Laptop list 2 (15 GB, 10-11 GB free): 1024 served
+    // 3502 of 3951 on-disk textures and was never full, 384 served 2732 of 3616, 128 served 718 of 1691. (texcache4 asked the RAM free
+    // at the first read, after the game's own load: 512 on that laptop)
     static const uint64_t v = [] {
         int def = 256;
 #ifdef _WIN32
         MEMORYSTATUSEX ms{};
         ms.dwLength = sizeof ms;
-        if (GlobalMemoryStatusEx(&ms)) def = ms.ullAvailPhys >= (8ull << 30) ? 1024 : ms.ullAvailPhys >= (4ull << 30) ? 512 : 256;
+        if (GlobalMemoryStatusEx(&ms)) def = ms.ullTotalPhys >= (14ull << 30) ? 1024 : ms.ullTotalPhys >= (7ull << 30) ? 512 : 256;
 #else
         def = 512;
 #endif
         const uint64_t mb = bcdisk::env_mb("RX_VK_BC_DISK_POOL_MB", def, 16);
         logf("vk: BC disk cache: read-ahead pool %llu MB%s", (unsigned long long)(mb >> 20),
-             getenv("RX_VK_BC_DISK_POOL_MB") ? " (RX_VK_BC_DISK_POOL_MB)" : " (from the RAM free at start)");
+             getenv("RX_VK_BC_DISK_POOL_MB") ? " (RX_VK_BC_DISK_POOL_MB)" : " (from the machine's RAM)");
         return mb;
     }();
     return v;
