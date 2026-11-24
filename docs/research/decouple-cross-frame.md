@@ -22,13 +22,23 @@ other value that depends on another frame, so that nothing waits and frames can 
 5. **Not built**: the lanes themselves (`RX_VK_LANES`, section 4.3 has the recipe). `RX_VK_SUB_OVERLAP` and `RX_VK_ORDER_THREAD` do
    not work together yet (the first is left off when the second is on).
 
-## State (keep current; last edit 24 Nov 16:55, second session DECOUPLE2)
+## State (keep current; last edit 24 Nov 17:32, second session DECOUPLE2)
 
-- **Second session (from 16:40)**: stage 2's first pieces committed in `b49b55244` (section 4.4): the submit sequencer
-  (`engine/gpu/vk/submit_seq.h`, `tests/test_submit_seq.py`), the render conditions per group, `RX_VK_LANES_CHECK=1`. Build `dec3a`
-  (= `b49b55244`) started 16:47 with the whole suite (`E:\OOT\scratch-decouple\build-dec3a.log`, `tests-dec3a.log`); its check series
-  `c4.sh` (two warm-ups, the check in Kokiri and Hyrule, the warp tour with it) not run yet. `matrix81` not readable at 16:36 or 16:47
-  (no `C:\OOT\pc3050s-out\matrix81.txt` on the 3050). `RX_VK_LANES` itself is read and logged only.
+- **Second session (from 16:40)**, section 4.4: `b49b55244` the submit sequencer, the render conditions per group,
+  `RX_VK_LANES_CHECK=1` (build `dec3a`, suite 513 passed / 3 known failed, `E:\OOT\scratch-decouple\tests-dec3a.log`). **The check
+  reads 0 in the game** (series 4, `E:\OOT\scratch-decouple\c4-dec3a.log`, runs `build/s5/dec3a-*`, 17:03-17:22): `dec3a-lc-k`
+  194,279 tickets taken / 166,347 sent / 27,932 dropped, `dec3a-lc-h` 109,459 / 97,737 / 11,722, `dec3a-tour-lc` 100,484 / 83,990 /
+  16,494 (Market, Hyrule Field, Kakariko, Zora's River, Hyrule Field); in all three 0 out of order, 0 unknown, at most 2 open,
+  0 lists all held, 0 capture views lost, 0 pool sync pairs lost; 0 flashes, 0 fatal lines.
+- `7f12b5ae8` step 3a: `RX_VK_SUB_OVERLAP` with `RX_VK_ORDER_THREAD`, the order thread's done marks held behind a pending end
+  (`submit_seq::DoneHold`). `ac7d78a3a` `RX_VK_LANES=1`: one pending group records beside the next big command buffer's pre-sync
+  and dry pass, joined at its end (section 4.5). Both off by default; their tests pass (`test_submit_seq.py`, `test_defer_join.py`
+  and the early-path tests); not yet run in the game.
+- Build `dec3b` (= `ac7d78a3a`, both) queued 17:25 for the build lease (behind another request), with the suite; `chain-dec3b.sh`
+  runs check series 5 (`c5.sh`: two warm-ups; on the order thread `RX_VK_LANES=1` in Kokiri and Hyrule with the checks,
+  `RX_VK_SUB_OVERLAP=1` in Kokiri with the checks, the warp tour with each; a RAM wait before each run) once the build is done.
+  Logs: `build-dec3b.log`, `c5-dec3b.log`.
+- `matrix81` (the CPU gate) not run on the 3050 at 17:22 (next in its queue after matrix61 part 2, per the coordinator).
 - Branch `perf/decouple`, nothing pushed. First session's code tip `b4f558d20`; suite on it: 512 passed, 3
   failed, the known three (`E:\OOT\scratch-decouple\tests-tip.log`). Switch lists regenerated.
 - Builds in `E:\OOT\HeyListen\build\s5\bin`: `dec1a` (= `5054c6330`: main + `refactor/sub1`), `dec2a` (= `09484e740`: + `perf/pipe2`
@@ -340,3 +350,26 @@ held reads as off.
   `RX_VK_CAP_DEPTH`), **pool sync pairs lost** (new: `st_sub_pool_lost`, a pool synced twice past the checking submission). The
   bold ones must read 0 in Kokiri, Hyrule and the warp tour before `RX_VK_LANES` is tried. With both checks off nothing changes
   but one pointer's indirection on the conditions' list.
+
+### 4.5 Step 3a and the lanes for one group (`7f12b5ae8`, `ac7d78a3a`, build `dec3b`)
+
+- **`RX_VK_SUB_OVERLAP` on the order thread.** A pending submission's end needs nobody's join: whoever puts its group's last
+  segment in the queue sends it (`group_tail_send`). What the order thread lacked is its accounting: `ot_main`'s `finish()`
+  published a submit job as done (`ot_value_done`, `ot_seq_done`, which the game's fence waits and `ot_join_all` read) when
+  `run_submit` returned, before its end was sent. `submit_seq::DoneHold` (pure rules, tested) now keeps the marks just before such a
+  job, the jobs behind it finishing meanwhile, until `ot_end_sent(value)`: the end's send or the join (`defer_join_now`). An end
+  sent before the job's `finish()` runs is remembered (`sent`), so it holds nothing. The restriction in `sub_overlap_on()` is gone;
+  the order thread's log adds "N submit jobs returned with their end pending (done marks held), M released".
+- **`RX_VK_LANES=1`** (one group). The join that a big command buffer's start made of the pending group (`kJoinEarlyStart`, JOIN1's
+  rule) is moved to the end of its dry pass: the older group (`lane_prev`, never a submission's end: that is still joined at the
+  next submission's memory work) records beside the pre-sync, the segments' set-up and the dry pass, and is joined
+  (`lane_prev_join`) before anything of the new group goes to the queue. With the early GPU path, `r` (the work before the command
+  buffer, sent before the dry pass otherwise) waits too: it goes at the dry pass's end in `rd`'s place, every segment held until
+  then (`dry_uploaded`). Any join made meanwhile joins the older group first. Its join leaves `par_active` on under the new group's
+  segments (`lane_next`). `RX_VK_DEFER_JOIN` is 2 by default under the switch. Log every 240 big command buffers: groups kept, joined
+  at the dry pass's end (and how many had recorded everything by then), joined by another join, the join's mean time.
+- What runs beside the older group's workers now and did not before: `memory_sync_mirrors_before_segments` (a pool synced by the
+  new pre-sync reads as synced after the older workers' segments: they sync it again in their own upload, redundant, not wrong),
+  `texture_rb_refresh_now` and `memory_rb_segments_begin` (one global `rb_segs`: an older worker's refresh after it does not find
+  its segment; the meter's held reads are the check), `texture_segments_begin` (per group since REC1), the conditions' list (per
+  group, 4.4). Not proven: the check runs of series 5 are the proof.
