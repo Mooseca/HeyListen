@@ -113,4 +113,19 @@ and barriers 438 -> 185 a frame and 5.5 ms of GPU time. List 3 measures that bou
 
 ## Levers that need more than a night
 
-(filled as found)
+1. **Batch the no-mesh fallback's draws in a pass** (the biggest structural item). Today each fallback mesh draw ends the pass,
+   4 full barriers, its compute, then the pass again: ~49 splits a frame here, 28 of them one-draw shadow passes. Recording the
+   pass's draws into a secondary command buffer while their compute goes before the pass (one records pair per draw of the batch,
+   from a ring) would make one pass of each run. Bound: the whole fallback is 5.5 ms of 59.6 docked (N2, nomesh notes); list 3's SN
+   arm gives the bound at the low-end set. Estimate 2-3 days (the parallel replay's segments, the records memory: a pair is up to
+   ~23 MB, so a ring must be sized by what the draws output, not the worst case).
+2. **Attachments in GENERAL layout everywhere** (`vk_draw.cpp` begin_pass: every colour and depth attachment GENERAL, LOAD/STORE;
+   colour images MUTABLE_FORMAT + STORAGE). On AMD that likely keeps DCC/HTILE compression off for most targets, which costs
+   bandwidth on a shared-memory APU. Not measured; needs per-image layout tracking. Estimate a week; risky for every GPU.
+3. **The GPU's empty gaps between buffers** (9-16 ms a frame): the GPU waits for the next recording. With the wait (WAIT_OWN=1) the
+   CPU and GPU take turns; the mirror instead lowers them to ~9 ms. Overlap beyond that is the DECOUPLE stream's order thread / lanes.
+4. **Upload bursts while turning** (GPU uploads 5-16 ms a frame, the CPU unswizzle of the game's BC textures): an unswizzle of BC
+   into a buffer then a copy on the GPU (TEXCACHE's lead (a)); the small BC1/BC4 uploads that take 30-300 ms for a few hundred KB
+   are stalls, cause not found (not paging: T0/T1 of the nomesh notes).
+5. **Grass / foliage density**: the one-draw grass passes cost ~0.7 ms each even at 512x288; no density or distance control is
+   known (GPU11: only the task shaders' "draw everything" bit).

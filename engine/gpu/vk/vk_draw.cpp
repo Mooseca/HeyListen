@@ -7876,11 +7876,13 @@ bool fallback_record(VkCommandBuffer cmd, Program& p, const DrawArgs& d) {
     // the payload buffer: the mesh dispatch reads only the map entries and payloads its task wrote. Fills that do not overlap:
     // two over the same bytes have no order between them without a barrier)
     static_assert(Shader::Backend::SPIRV::MESH_FALLBACK_DISPATCH_WORD == 5 && Shader::Backend::SPIRV::MESH_FALLBACK_HEADER_WORDS == 8);
+    const bool fb_timed = gprof_on() && gprof_begin(cmd);   // (LAPTOP1, RX_VK_PASS_TIMING: the fallback's fills, then each stage, a span each)
     vkCmdFillBuffer(cmd, f->records, 0, 4, 0);    // (vertexCount)
     vkCmdFillBuffer(cmd, f->records, 4, 4, 1);    // (instanceCount)
     vkCmdFillBuffer(cmd, f->records, 8, 16, 0);   // (firstVertex, firstInstance, the allocator, the dispatch's x)
     vkCmdFillBuffer(cmd, f->records, 24, 8, 1);   // (the dispatch's y and z)
     fallback_draw_records = f->records;
+    if (fb_timed) gprof_end(cmd, "fallback fill (the records' header)");
     full_barrier(cmd);
     if (!bind_descriptors(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, p)) return false;
     push_constants(cmd, p, nullptr);
@@ -7893,6 +7895,16 @@ bool fallback_record(VkCommandBuffer cmd, Program& p, const DrawArgs& d) {
     const bool indirect{d.indirect && mesh_conv_buf != VK_NULL_HANDLE};
     auto send = [&](size_t stage, bool mesh_stage) {
         if (stage >= p.fallback_compute.size() || !p.fallback_compute[stage]) return false;
+        // (LAPTOP1, RX_VK_PASS_TIMING: each stage of a fallback draw, by its program, so the map names what the no-mesh path costs)
+        struct StageSpan {
+            VkCommandBuffer c; bool on; uint64_t key; bool mesh;
+            ~StageSpan() {
+                if (!on) return;
+                char label[96];
+                snprintf(label, sizeof label, "fallback %s stage prog %016llx", mesh ? "mesh" : "task", (unsigned long long)key);
+                gprof_end(c, label);
+            }
+        } span{cmd, gprof_on() && gprof_begin(cmd), p.key, mesh_stage};
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, p.fallback_compute[stage]);
         if (mesh_stage && p.fallback_task) {
             // (the mesh workgroups the task's started threads counted into the records' header, each its slot in the map:
