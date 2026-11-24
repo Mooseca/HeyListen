@@ -455,3 +455,33 @@ cores (the 5070 / 7800X3D: 8 cores, 16 threads).
   O order thread, S inline + overlap, Kokiri / Hyrule / Market, 3 passes interleaved, then hT2 warm. Next by its result: the lanes
   across submissions only if one lane can show a gain (it would be the overlap on the order thread, whose tour flashes first need a
   cause); else the next lever is the replay thread's ~10 ms a frame in the driver's queue submits, not more lanes.
+
+### 4.8 matrix82 (PC 3050, dec3c, warm cache): the order thread gains, the inline overlap loses, a load hang 2 in 10
+
+`E:\OOT\scratch-decouple\3050\matrix82.txt`; run logs of kO1, kO2, mO2, mO3 in `E:\OOT\scratch-decouple\3050\dc82\` (the coordinator's
+reading of the fps; 1440p default ini, vsync off): Kokiri A 59.4 / 58.8 / 58.8, O 64.4 / 64.6 (kO1: hang), S 55.4 / 55.1 / 54.9;
+Hyrule A 56.4 / 57.5 / 56.7, O 63.0 / 61.3 / 62.0, S 55.5 / 56.0 / 56.2; Market A 51.5 / 50.4 / 51.7, O 53.3 / 54.3 (mO3: hang),
+S 50.0 / 50.5 / 50.0. The order thread +9.6% Kokiri, +9% Hyrule, +5% Market on its good runs; hT2 (warm, 60.9 fps): "the PT waited
+13.46 ms a frame for the main thread's hand-over ... game-bound", order thread 75% of a core: **with the order thread the 3050 is
+game-bound and has CPU left; the first gate verdict (4.6) was the cold cache's.**
+
+- **`RX_VK_SUB_OVERLAP` inline stays off.** With the sync fix it no longer halves the fps but still loses 2-6%: kS1's replay time a
+  frame draw 24.09 ms against 14.16, descriptors 12.69 against 5.75, the join 2.56 against 0.57 (coordinator's reading of
+  matrix82): the pending group's workers record beside the next submission's serial recording and contend for the same locks and
+  caches, for a window (the next submission's memory work joins) too short to keep the GPU busier. Its use is as the hand-off of the
+  lanes across submissions, which is days of work (below).
+- **The load hang with the order thread** (kO1, mO3; no FATAL): the presents stop 4.3 s (kO1, present 6205) and 2.9 s (mO3, present
+  7122) after "play: began" (`present_trace.csv`); the order thread's 600-frame line stops (its last one is before play in both);
+  the game's threads go on (vcores lines, OptimizeChangeBanc's recordings in kO1 growing to 400,000 with their live copies 21.8 ->
+  50.8 MB: command memory never given back, its fences never reached). kO1 alone shows "ran without a core after 2000 ms ...
+  OptimizeChangeBanc ... held 2000 ms at ntdll" (consequence, not cause: mO3 has none). Nothing in the logs says which wait. Built:
+  the order thread's stall watch (`563bd7db9`, build `dec3d`): every thread's innermost renderer wait site in a table, logged with
+  the order thread's job when its done mark stops for 3 s or no present comes for 5 s. Loop of starts on the main PC: `loop.sh`
+  (`E:\OOT\scratch-decouple\loop-dec3d.log`), 12 starts, Kokiri and Market alternately.
+- **The tour flashes** belong to the order thread **with** the overlap only: the order thread alone read 0 flashes over two tours
+  (`dec2a-tour-ot`, `dec3b-tour-ln`), the inline overlap 0 (`dec3c-tour-so`). With the overlap off for good, they do not stand in the
+  way of the order thread by default; their cause is left for the lanes' work.
+- **After the next release** (estimates, not started): the lanes across submissions (skip the join in `submit_memory_work`, a
+  per-page synced generation instead of `gen_end`, the capture view K deep in play, the order thread's overlap flashes, check runs
+  and 3050 rounds): 3-5 days. Stage 4, fewer submissions a frame (`RX_VK_LANE_BATCH`, the replay thread's ~10 ms a frame in the
+  driver's queue submits on the 3050): 1-2 days to a first measure.
