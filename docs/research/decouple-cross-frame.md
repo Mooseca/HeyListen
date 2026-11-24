@@ -500,7 +500,7 @@ game-bound and has CPU left; the first gate verdict (4.6) was the cold cache's.*
 
 ### 4.9 The load hang named: the held present sent the timeline back, a late fix waited for good (`cc753074e`, build `dec3e`)
 
-**Caught** on the PC 3050 (`E:\OOT\scratch-decoupleÅ0\matrix97.txt`, dec3d, 20 starts of the order thread, 90 s): 5 froze
+**Caught** on the PC 3050 (`E:\OOT\scratch-decouple\3050\matrix97.txt`, dec3d, 20 starts of the order thread, 90 s): 5 froze
 (o2, o8, o12, o14 Market, o11 Kokiri: present traces of 40-42 s against 81-82 s), 40 watch lines. In four of them the order thread
 sits in "a late fix (TICK-060)" on a submit job (o2: job value 51598, its done value 51597, 3.1 to 33 s), with a game thread
 (ModuleSystemWorker, SceneLowPriority) in a late fix too; in o11 the order thread is in "present drain" on the present it holds
