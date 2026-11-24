@@ -1,7 +1,38 @@
 <!-- Copyright (C) 2026 Sacrappy -->
 # PIPE2: the stages' slack and the replay on an order thread (23 Nov 2026 -)
 
-## Summary (this session, end of the gate series; 23 Nov 23:05)
+## Summary (PIPE3, 24 Nov)
+
+1. **The present is off the order thread's chain** (`RX_VK_ORDER_PRESENT_THREAD`, on with `RX_VK_ORDER_THREAD`; section 8): a
+   present thread of its own takes the present's job, the order thread hands it over as it reaches it and goes on, and a submit
+   handed over after a present waits for that present to finish before it replays (`ot_present_join`), so the GPU's order cannot
+   change. **It does not shorten the frame.** In Kokiri the gate that preserves the order costs 0.47-0.51 ms a frame in 587 of 600
+   frames - the present's own serial part (0.44 ms of recording) - and the order thread's chain is 7.76 ms against 7.79 with the
+   present in the chain (section 10): the next frame's submits reach the order thread before the present is done, so there is
+   nothing to overlap. In the castle 0.33-0.43 ms a frame; in the game-bound Market 0.39 ms in 194 of 600 frames, where the order
+   thread has 1.9 ms of idle and the present thread's 0.46 ms a present does fit out of the way.
+2. **The Kotiri numbers are in one usable lease** (02:33-02:54): off 105.1 / 118.5 / 112.1, on with the present in the chain
+   128.1 / 92.6, on with the present thread 128.1 / 115.2 / 119.9 fps (medians 112.1 / 110.4 / 119.9, +7.0% for the present thread).
+   The frame the order thread's chain is: 8.28-8.48 off, 7.79-7.86 (chain) and 7.76 (present thread) on, against 7.10-7.20 of GPU:
+   the present thread's win is inside the rounds' spread and its chain is the same as the present-in-chain arm's.
+   **The castle series is not usable**: the machine was not fit during its lease (39-115 frames over 50 ms in every run, loads
+   48-109 s against PIPE2's 40.4, the off arm as bad as the on arms).
+3. **The Market's extra frames over 25 ms are the game's own loaders** (section 10a, one run each arm with `HL_STALL_WATCH=50`):
+   `ARes_Loading_0..3` (15-47 ms of user CPU in a gap), `GeneralFormatAsync_`, `BaseProcCreateAndDeleteThread` at 96-100% of a
+   458 ms window, the main thread asleep 301 ms of it; the order thread and the present thread idle in every dump. In this round
+   the on arm had 4 frames over 25 ms against the off arm's 5 (and a better p50, 9.02 against 9.49): PIPE2's "the order thread
+   adds stutters" is not reproduced.
+4. **The flashes are not fixed.** The tour (01:48-01:56): 0 flashes off, **2 on** (presents 7268 and 7432, whole-screen dark
+   differences, peak 225; PIPE2's were small ground patches), the meter 12 / 352 / 1171 / 2000 (the last window frozen, both arms).
+   The counters say where the reads that can do it are (section 9): 45,568 texture pages read with no copy of their own
+   submission's capture, 15,837 re-upload pages still read from guest memory, 357,929 first-upload pages by design (issue 66) - all
+   reads that take the frame after the submission's under the order thread. A re-upload now takes the newest copy up to its submit
+   (76,138 pages over the tour) and the flashes stayed. What a fix needs is PIPE1's stage 2 (a view per submission): the shadow
+   keeps one copy per page, so a page written after the submit and re-taken since has no as-of-submit copy to read. The replay's
+   other reads are counted too: 192,000 of 5.5 M in Kokiri and 5,632 of 140,000 in the Market took guest memory for a page written
+   after its capture's copy.
+
+## Summary (PIPE2, end of the gate series; 23 Nov 23:05)
 
 1. **The gate does not pass.** One clean speed lease, `pipe2e` (`0bb228966`), 3 interleaved rounds a scene, fps from play + 10 s:
    **castle-move +6.2%** (median 127.6 -> 135.5; rounds +0.6 / +7.0 / +4.9), **kokiri-idle +4.7%** (121.2 -> 126.9; +6.7 / +3.1 / +4.5)
@@ -31,9 +62,42 @@
 Branch `perf/pipe2` from origin/main 4b599eb04 (PIPE1 merged, `RX_VK_TOUCH_FAST` on). Worktree `E:\OOT\HeyListen-wt\pipe2`. Design:
 `pipe1-frame-overlap.md` section 3 (stages 0-3 with their gates). Main PC (RTX 5070); PC 3050 runs are routed by the coordinator.
 
-## State (PIPE2 continues; last edit 24 Nov ~00:10)
+## State (PIPE3 continues on perf/pipe2; last edit 24 Nov ~04:00)
 
-Where it stands: **the gate is measured and does not pass** (the Summary; section 5 for the fps, section 6 for the tour, section 7 for the
+Where it stands: the three tasks of the brief are done and measured. (1) The present thread works and is safe, but **the gate that
+keeps the GPU's order takes the present's serial part back into the chain** (Kokiri 0.47-0.51 ms a frame, chain 7.76 against 7.79):
+it does not shorten the frame. (2) The Market's extra frames over 25 ms are the game's own loaders, not the order thread (one run
+each arm, section 10a). (3) The flashes are **not** fixed: 2 on the on arm, 0 off; the reads that can be them are counted now
+(section 9) and what a fix needs is stage 2's view per submission. Committed on `perf/pipe2`: `f109058c2` (the present thread),
+`e5cb7eca6` (the read counters and the re-upload rule); the notes and `docs/SWITCHES.md` follow. Nothing of this stream is running
+or leased now (`machine.sh status`: another stream's lease). Builds: `build/s5/bin/pipe3b` (the measured one; the notes' counters'
+split of the own-capture-empty case is in the tree, not in `pipe3b`). Scripts: `build/s5/pipe3/{build,func,tour}.sh`,
+`E:/OOT/scratch-pipe3/tmp/{s1,smoke,tour1}.sh`, `tab.py` (the series' table), `launch.py`.
+
+PIPE3 (this session, lease name `pipe3`, worktree `E:\OOT\HeyListen-wt\pipe2`, branch `perf/pipe2`): (1) the present out of the
+order thread's chain (`RX_VK_ORDER_PRESENT_THREAD`, default 1 with `RX_VK_ORDER_THREAD`; section 8); (2) the check of the reads
+that run a frame late (section 9): `memory_as_submitted` (texture storage) and `memory_read_as_submitted` (the replay's other
+reads) count the pages whose capture copy is older than a write since the submission, and a re-upload takes the page's newest copy
+up to its submission's own instead of guest memory (the order thread only).
+
+Built `pipe3b` (01:12, 744 s, tests 502 passed / the 3 known failures, the switches doc regenerated after). Smoke (slot b, 01:18):
+Kokiri and the Market, order thread on, 0 flashes, no hang. The present thread's lines: the Market (game-bound windows) 0.71-1.12
+ms a present (the CPU's signal wait 0.38-0.76, which is `submit_order_mu` against the PT's captures; recorded and shown 0.29-0.32),
+the order thread waiting for a present's blit 60-94 times, 0.07-0.11 ms a frame. In the title/menu windows (2.8 ms frames) the gate
+costs more (0.14-0.30 ms a frame): the next frame's submits do reach the order thread before the present is done there.
+The late-read counters, first numbers: `replay reads ... of them N took guest memory for a page written after its capture's copy`
+192,000 of 5.5 M reads in Kokiri (3.5%), 5,632 of 140,000 in the Market (4%); `texture read outside its submission's capture`
+fires with the submission's own capture 0 (a capture that took no pages) and a later capture's copy in the shadow, i.e. the game
+wrote the texture's storage after the submit - the console's GPU reads those bytes, so which way a flash goes is not settled by the
+count alone (section 9, the tour's correlation is what settles it).
+
+Next (for the coordinator, in order): the fixes the measurements point at — (a) the present's serial part is still the chain in the
+replay-bound scenes, so the only way past it is the present's blit on a queue of its own with the semaphores that keep the next
+frame's draws off the presented image (section 10, the last paragraph); (b) the flashes need stage 2's view per submission (section
+9); (c) the meter's first reads after a zone change (PIPE2 section 6); (d) a valid PROF_FINE pair on the on arm; (e) a castle
+series on a machine that is quiet (PIPE3's was not, section 10).
+
+Where PIPE2 left it: **the gate is measured and does not pass** (the Summary; section 5 for the fps, section 6 for the tour, section 7 for the
 knobs). The gate series ran on `pipe2e` (`0bb228966`) in one clean speed lease (22:19-22:57); the tour in slot a at 23:22-23:29; the
 Kokiri knobs in one clean speed lease at 23:40-00:02. Nothing of this stream is running or leased now; the machine is on another
 stream's build. Gate table: `python -I E:/OOT/scratch-pipe2/tmp/gate.py "p2g-*"` and `"p2c-*"`; shots
@@ -338,5 +402,133 @@ knob: the order thread's chain is set by its jobs' serial part (the frame's last
 scheduling or its workers' wake. That is where the 0.3 ms Kokiri needs would have to come from: the present out of the chain (a
 present thread of its own, FIF's, which contended for `sync_order_mu` when FIF tried it on the PT's side) or a shorter tail before the
 present.
+
+## PIPE3: the present out of the order thread's chain (24 Nov)
+
+### 8. The design
+
+`RX_VK_ORDER_PRESENT_THREAD` (default 1 with `RX_VK_ORDER_THREAD`; =0 the PIPE2 arm, bit for bit): the present's job is run by a
+thread of its own (`mkw_vk present thread`).
+
+- The order thread hands the present over as it reaches it in its queue (so every submission handed over before it is replayed:
+  the present's `drain` and its recording see the whole frame) and goes on with the next job.
+- What a GPU submission's order needs is kept by `ot_present_join()`: any job that may put work on the queue (a submit, a release,
+  an event signal) waits, before it starts, until no present handed over before it is unfinished. The registrations (table copies)
+  do not wait: they are what the present runs beside. So nothing of the next frame reaches the GPU before the picture the present
+  shows; the present's own `sync_order_mu` section (drain, `do_present`) is never contended by a submit in the usual frame - the
+  next frame's submissions arrive a frame later (the PT waits 7 ms for the main thread's hand-over), when the present is long done.
+  That is the difference from FIF's present thread, which held `sync_order_mu` against the PT's next inline submit.
+- What the present thread does: the CPU's signal wait (FIF's rule, `RX_VK_ORDER_SIGNAL_MS`), then `sync_order_mu`: `drain(0)`,
+  `update_blocked`, `present_value`, `ubo_check_frame`, `do_present` - exactly the body the order thread ran. The thread is at
+  ABOVE_NORMAL (`RX_VK_ORDER_PRESENT_PRIO`) and not pinned to the replay's core (the order thread is).
+- The present's globals (`rec_value_now`, `ub_first_of_recording`, `present_value`, `do_present`'s statics) are written by the present
+  thread and by the order thread's recordings, never at the same time: the gate makes any GPU-submitting job wait for the present,
+  and a registration does not record. The replay's other globals stay the order thread's alone.
+- One line a 600 presents: `vk: the present's thread (600 presents, X ms a present): the CPU's signal A ms, waiting for the order
+  thread's frame B, draining C, recorded and shown D; the order thread waited for a present's blit N times, M ms a frame`.
+
+### 9. The flashes: the reads that run a frame late
+
+The order thread's replay runs a frame or more after the submits it replays. Every read the replay makes through a capture is as of
+that submission; the reads that fall back to guest memory are not, and a page the game wrote for the *next* frame gives the frame a
+picture from the frame after it. Two paths, both counted now:
+
+- `memory_as_submitted` (a texture's storage, on a first upload or a re-upload): a page whose newest copy in the shadow is older or
+  newer than the submission's own capture was read from guest memory. With the order thread a re-upload now takes the newest copy
+  *up to* its submission's own (a page written before that submit would have been in that capture; so that copy is the page as of
+  the submit) and counts what it served (`st_earlier_used`); a page whose copy is a *later* capture's (the game wrote it after the
+  submit and a capture took it since) is still read from guest memory - no copy of it as of the submit is kept - and is logged with
+  its page and the two capture numbers (`vk: texture read outside its submission's capture`).
+- `memory_read_as_submitted` (the replay's other reads: uniforms, bindings, draws' operands): a page whose capture entry was taken
+  before a write since is skipped and guest memory read; the reads that did so are counted and logged with the existing
+  `replay reads of guest memory as submitted` line.
+
+Measurement: section 10.
+
+### 10a. The Market and its extra frames over 25 ms (one run each arm, `HL_STALL_WATCH=50`, 03:46-03:48)
+
+A speed lease at last (03:46, one round each arm, the stall watch on: 18 dumps off, 23 on):
+
+| arm | fps | p50 (ms) | >25 ms | >50 ms | frame / GPU (ms) | PT waits / main waits | order thread | present thread | the gate |
+|---|---:|---:|---:|---:|---|---|---|---|---|
+| off | 101.4 | 9.49 | 5 | 2 | 9.81 / 7.20 | 1.19 / 0.52 | - | - | - |
+| on | 107.7 | 9.02 | 4 | 3 | 9.34 / 7.20 | 8.51 / 0.00 | 9.34, idle 1.92 | 0.46 ms (signal 0.01, lock 0.01, recorded and shown 1.01) | 194 waits, 0.39 ms a frame |
+
+**The extra frames over 25 ms are the game's own loaders, the same threads in both arms.** Every stall dump names them: the
+`ARes_Loading_0..3` threads take 45-135 Mcycles inside the gap (15-47 ms of user CPU each), `GeneralFormatAsync_`,
+`BaseProcCreateAndDeleteThread` and `game::cull::Module` run at 96-100% of a 458 ms window, and `sead::MainThread` sleeps 301 ms
+of it (the game waiting on its own load). The order thread and the present thread are idle in those dumps (`host:mkw_vk_order_thread`
+12.9 Mcycles, at ntdll: asleep; the present thread 1.1 Mcycles). The off arm's dumps name the same `ARes_Loading_0` (103 Mcycles).
+**In this round the on arm has 4 frames over 25 ms against the off arm's 5** and a better p50 (9.02 against 9.49): PIPE2's
+"the order thread adds stutters" (13/156/81 against 8/126/35) is not reproduced here - those rounds were hitched on both sides
+(section 5). The dumps: `E:\OOT\scratch-pipe3\stall-{off,on}` (`python -I tools/bench/jobtrace.py <dump>`, e.g. stall_07.jt: 458 ms
+window, 240,763 records).
+
+The present thread in the Market: 0.46 ms a present (1.01 ms of recording in the last five windows), the gate 0.39 ms a frame in
+194 of 600 frames - the game-bound scene's frames are 9.3 ms, so both fit inside the order thread's 1.9 ms of idle.
+
+### 10. The measurements (pipe3b)
+
+Build `pipe3b` (01:12, 744 s; tests 502 passed, the 3 known environmental failures). Arms: `-` (off), `RX_VK_ORDER_THREAD=1
+RX_VK_ORDER_PRESENT_THREAD=0` (the PIPE2 chain), `RX_VK_ORDER_THREAD=1` (the present thread). `build/s5/ab_env.sh` (slot c, one
+warm-up, interleaved rounds), fps from `play: began` + 10 s; the counters are the medians of the last five 600-present windows
+(`python -I E:/OOT/scratch-pipe3/tmp/tab.py env-p3c 0 1 2`).
+
+**The castle series cannot be used.** Nine runs, 01:24-01:47, one speed lease: every run had 39-215 frames over 25 ms and 39-115
+over 50 ms (PIPE2's clean castle runs: 0-18 over 50 ms), the loads took 48-109 s against PIPE2's 40.4 s, and one run spent its
+window in the load (play at 109 s, 5.8 fps). The machine was not fit (no other game or compiler: runguard passed every run); the
+desktop's own load (Discord, Opera, Spotify, qBittorrent) is the likely cause. The numbers, for the record:
+
+| arm | fps (rounds) | median | p50 (ms) | steady frame / GPU (ms) | present thread | the gate |
+|---|---|---:|---|---|---|---|
+| off | 82.5, 65.7, 120.7 | 82.5 | 9.06, 7.86, 6.72 | 10.63/6.20, 9.87/7.20, 6.30/5.10 | - | - |
+| on, present in the chain | 116.7, 133.6 | 125.1 | 6.17, 7.53 | 6.08/4.60, 8.12/7.60 | - | - |
+| on, present thread | 22.1, 128.5, 92.1 | 92.1 | 6.82, 6.44, 6.63 | 4.16/5.80, 6.67/5.00, 7.13/5.50 | 0.38-0.51 ms a present (signal 0.01-0.25, lock 0.00-0.53, recorded and shown 0.25-0.41) | 508-583 waits, 0.33-0.43 ms a frame |
+
+What they do say: the present thread's own line is 0.4-0.5 ms a present (of which 0.25-0.41 is the recording), and the order
+thread waits for a present's blit 508-583 times over 600 frames, 0.33-0.43 ms a frame - i.e. **in the castle the gate takes back
+most of what the present's removal from the chain gives**: the next frame's submits do reach the order thread before the present
+is done (the camera walk's frames are 6.5-7 ms and the present is 0.4 ms, but the PT hands frame N+1 over while N is presented).
+
+The Kokiri and Market series and the tour follow (the machine's queue: another stream's 45-minute speed lease was granted at 01:59).
+
+**Kokiri series (02:33-02:54, one speed lease, 2.5 rounds of 3)** — the same arms, same build. The machine was better than for the
+castle (frames over 50 ms: off 2/6/15, the PIPE2 clean range) but one arm-1 run was lost to a load (play at 109 s, and `env-p3k-1-2`
+has no play at all):
+
+| arm | fps (rounds) | median | vs off | frame (ms) of the last five windows | GPU | frame - GPU | ot idle | present thread | the gate |
+|---|---|---:|---:|---|---:|---:|---:|---|---|
+| off | 105.1, 118.5, 112.1 | 112.1 | - | 8.28, 8.29, 8.48 | 7.10-7.20 | 1.08-1.28 | - | - | - |
+| on, present in the chain | 128.1, 92.6 | 110.4 | -1.5% | 7.79, 7.86 | 7.10 | 0.69-0.76 | 0.05, 0.10 | - | - |
+| on, present thread | 128.1, 115.2, 119.9 | 119.9 | +7.0% | 7.76, 8.98, 8.13 | 7.10 | 0.66, 1.88, 1.03 | 0.05, 1.27, 0.46 | 0.53-0.55 ms (signal 0.08-0.09, lock 0.00, recorded and shown 0.41-0.44) | 587-589 waits, 0.47-0.51 ms a frame |
+
+**The present thread does not shorten the frame.** Arm 2's order thread is no longer the bound in 2 of 3 rounds (idle 0.46-1.27 ms:
+the game's own loop is), and in the round where it still is the chain is 7.76 ms against arm 1's 7.79: the gate puts the present's
+serial part (0.44 ms of recording) back into the chain, 0.47-0.51 ms a frame of waiting in 587 of 600 frames. That is exactly the
+0.5 ms arm 1's present costs the chain; the difference between the arms' fps is the hitches (arm 2's 115.2/119.9 rounds carry 23/33
+frames over 50 ms). Against the gate the present thread buys only what the present does *outside* `sync_order_mu` - the CPU's
+signal wait (0.08 ms) and whatever `present_image` waits for - and nothing of the frame's chain.
+
+Why the next frame's submits are there so early: the order thread's queue holds the frame's registrations (64-72 jobs) and the PT,
+free of the replay, hands frame N+1's submits over while N is presented; the present's 0.4-0.5 ms is then the only thing between
+the two frames' submissions, and `ot_present_join` preserves that with a wait rather than letting the next frame's work onto the
+queue first. A design that does not wait would have to put the present's blit on a queue of its own (with the semaphores that keep
+the next frame's draws off the presented image), which is the second-queue design PIPE1 left out.
+
+**The tour (01:48-01:56, slot a, `build/s5/pipe3/tour.sh pipe3b`)**: the off arm 0 flashes (4 maps reached, the meter 13 / 1981),
+the on arm **2 flashes** (5 maps): presents 7268 (`686 of 2304 cells, peak 225, cells 11,0-63,35`) and 7432 (`1606 of 2304, peak 225,
+0,0-63,35`) - both whole-screen dark differences, not the small ground patches of PIPE2's tour; the meter 12 / 352 / 1171 / **2000**
+(the last window frozen, as the off arm's was: the zone-change rule, unchanged). So the flashes are not fixed by the re-upload
+change.
+
+What the counters say about them: the on arm's tour had 45,568 texture pages read with *no copy of their own submission's capture*
+(`own` 0), 76,138 re-upload pages served from an *earlier* copy (the new rule), 15,837 re-upload pages still read from guest memory,
+and 357,929 first-upload pages read from guest memory by design (issue 66). The flashes are whole-screen: a 2368x2368 texture's
+storage rewritten for the next frame and read a frame late fits that (one texture's re-upload covers the screen), and the reads
+that take guest memory (either kind) are the only ones that can do it. **Not settled**: the counter that says "a later capture had
+taken the page" was written before I noticed `own == 0` makes it trivially true; it is split now (own empty / a real later copy),
+and the next tour will say which of the two classes carries the flash. A fix for either needs the per-submission view PIPE1's stage
+2 describes: the shadow keeps one copy per page, so a page written after the submit and re-taken since has no as-of-submit copy to
+read.
 
 ## Dead ends
