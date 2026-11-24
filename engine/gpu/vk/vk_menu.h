@@ -124,7 +124,8 @@ bool hdr_forced();
 void psychov35_bank(float* out);
 bool resolution_auto();       // (the game's dynamic resolution: Resolution Auto)
 bool fog_runs();              // (the Volumetric fog row, RX_VK_FOG over it: lowend_rule.h; fixed at the first ask)
-void menu_first_run_lowend(bool integrated, bool mesh_shader);   // (the Minimum preset and the fog off on a low-end GPU: lowend_rule.h)
+void menu_first_run_lowend(uint32_t vendor_id, bool integrated, bool mesh_shader);
+bool lowend_mirror_not_wait();   // (lowend_rule.h mirror_not_wait for this device: set by menu_first_run_lowend)   // (the Minimum preset and the fog off on a low-end GPU: lowend_rule.h)
 int resolution_scale();       // (the fixed path's scale in 1/10000: the Resolution row's, as a twelfth of the output)
 void menu_option_set(int id, int value);   // (from the game's side: 7 the mouse's sensitivity, the - and = keys)
 int menu_heart_protection();

@@ -38,6 +38,11 @@ int main() {
     expect(first_start(1, false, false) == APPLY_THIS_RUN, "HL_LOWEND=1 on any GPU: this run only");
     expect(first_start(1, true, true) == APPLY_THIS_RUN, "HL_LOWEND=1 after it was applied: this run only, nothing saved");
 
+    expect(mirror_not_wait(0x1002, true, false), "AMD integrated without mesh shaders (a Vega 8): the mirror, no wait");
+    expect(!mirror_not_wait(0x8086, true, false), "Intel integrated without mesh shaders: not measured, as before");
+    expect(!mirror_not_wait(0x1002, true, true), "AMD integrated with mesh shaders (780M): as before");
+    expect(!mirror_not_wait(0x1002, false, false), "AMD discrete: as before");
+    expect(kResolution == 6 && kHandheld == 1 && kFog == 0, "the rule's rows: 33%, handheld, fog off");
     if (failures) return 1;
     std::printf("lowend_rule: all checks passed\n");
     return 0;

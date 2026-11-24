@@ -25,9 +25,19 @@ def check_source():
                                 'lowend_rule::first_start(env_int("HL_LOWEND"), lowend_marked, gpu)',
                                 'if (!strcmp(line, "lowend_rule")) lowend_marked = true;',
                                 'key == "lowend_rule";', 'if (lowend_marked) put("lowend_rule=1\\n");',
-                                "apply_preset(1);\n    opts.preset = 1;\n    opts.fog = 0;"])
+                                "opts.resolution = ur::snap(upscaler(), lowend_rule::kResolution);",
+                                "opts.handheld = lowend_rule::kHandheld;\n    opts.fog = lowend_rule::kFog;",
+                                "static void ini_put_only(", "{\"volumetric_fog\", opts.fog}, {\"lowend_rule\", 1}});",
+                                "lowend_mirror = lowend_rule::mirror_not_wait(vendor_id, integrated, mesh_shader);"])
+    src = (ROOT / "gpu/vk/vk_menu.cpp").read_text(encoding="utf-8")
+    body = src[src.index("void menu_first_run_lowend("):]
+    body = body[:body.index("\n}\n")]
+    if "apply_preset" in body or "save();" in body:
+        raise SystemExit("the low-end rule must write its own rows only (no preset, no whole save)")
+    need("gpu/vk/vk_memory.cpp", ["discrete || lowend_mirror_not_wait();"])
+    need("gpu/vk/vk_replay.cpp", ["!lowend_mirror_not_wait());   // (LAPTOP1: the mirror in its place there)"])
     src = (ROOT / "gpu/vk/vk_main.cpp").read_text(encoding="utf-8")
-    at = src.find("menu_first_run_lowend(dev.props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU, dev.mesh_shader);")
+    at = src.find("menu_first_run_lowend(dev.props.vendorID, dev.props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU, dev.mesh_shader);")
     mesh = src.find("dev.mesh_shader = dev.mesh_shader && mesh.meshShader && mesh.taskShader;")
     if at < 0 or mesh < 0 or at < mesh:
         raise SystemExit("vk_main.cpp: the low-end rule must be asked after the mesh shaders are known")

@@ -772,7 +772,7 @@ bool create_device() {
     dev.mesh_fallback = !dev.mesh_shader && f12.bufferDeviceAddress && !getenv("RX_VK_NO_MESH_FALLBACK");
     if (dev.mesh_fallback) logf("vk: no mesh shaders: task and mesh programs run as compute shaders (issue 640 fallback)");
     // (HeyListen) an integrated GPU without mesh shaders: the Minimum preset and the fog off, once (lowend_rule.h; HL_LOWEND)
-    menu_first_run_lowend(dev.props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU, dev.mesh_shader);
+    menu_first_run_lowend(dev.props.vendorID, dev.props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU, dev.mesh_shader);
     // (hookshot, issue 996 and HeyListen issue 57; Hookshot d1d6caa7) a GPU with mesh shaders whose draws with a task stage run as
     // compute: the default on AMD's Windows driver for RDNA 2 (Navi 21 to 23, mesh_mode.h's device list; the RX 6700 XT drew the Market
     // dog as a flat pale silhouette), RX_VK_TASK_MESH_FALLBACK=0/1 decides over it, and Native (RX_VK_MESH_SHADERS=native) turns the

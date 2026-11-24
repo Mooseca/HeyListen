@@ -2439,26 +2439,60 @@ bool fog_runs() {
     }();
     return on;
 }
-void menu_first_run_lowend(bool integrated, bool mesh_shader) {
+static bool lowend_mirror;
+bool lowend_mirror_not_wait() { return lowend_mirror; }
+/// The options file's lines for these keys set to these values, every other line kept as it is (in its place); the keys not
+/// there yet added at the end. Written whole or not at all, as save() does
+static void ini_put_only(const std::vector<std::pair<std::string, int>>& keys) {
+    std::string out;
+    std::vector<bool> done(keys.size());
+    if (FILE* f = fopen(ini_path().c_str(), "r")) {
+        char line[1024];
+        while (fgets(line, sizeof line, f)) {
+            const char* eq = strchr(line, '=');
+            bool replaced = false;
+            for (size_t i = 0; eq && i < keys.size(); i++)
+                if (!done[i] && (size_t)(eq - line) == keys[i].first.size() && !strncmp(line, keys[i].first.c_str(), keys[i].first.size())) {
+                    out += keys[i].first + "=" + std::to_string(keys[i].second) + "\n";
+                    done[i] = replaced = true;
+                }
+            if (!replaced) {
+                out += line;
+                if (!out.empty() && out.back() != '\n') out += "\n";
+            }
+        }
+        fclose(f);
+    }
+    for (size_t i = 0; i < keys.size(); i++)
+        if (!done[i]) out += keys[i].first + "=" + std::to_string(keys[i].second) + "\n";
+    hos_atomic_write(ini_path().c_str(), out.data(), out.size());
+}
+void menu_first_run_lowend(uint32_t vendor_id, bool integrated, bool mesh_shader) {
     const bool gpu = lowend_rule::lowend_gpu(integrated, mesh_shader);
+    lowend_mirror = lowend_rule::mirror_not_wait(vendor_id, integrated, mesh_shader);
     const lowend_rule::Apply a = lowend_rule::first_start(env_int("HL_LOWEND"), lowend_marked, gpu);
     if (a == lowend_rule::NONE) {
         if (gpu) logf("vk: low-end GPU (integrated, no mesh shaders): %s",
-                      lowend_marked ? "the low-end preset was applied once (lowend_rule=1 in the options file): the rows stay as set"
+                      lowend_marked ? "the low-end settings were applied once (lowend_rule=1 in the options file): the rows stay as set"
                                     : "the rows stay as set (HL_LOWEND=0)");
         return;
     }
-    apply_preset(1);
-    opts.preset = 1;
-    opts.fog = 0;
+    // (only the three rows, as the player would set them; the Quality preset row and every other row stay as they are)
+    opts.resolution = ur::snap(upscaler(), lowend_rule::kResolution);
+    opts.handheld = lowend_rule::kHandheld;
+    opts.fog = lowend_rule::kFog;
     if (a == lowend_rule::APPLY_AND_SAVE) {
         lowend_marked = true;
-        save();
+        Row* res = nullptr;
+        for (Row& r : rows)
+            if (r.value == &opts.resolution) res = &r;
+        ini_put_only({{res ? ini_key(*res) : "resolution", opts.resolution}, {"handheld_profile", opts.handheld},
+                      {"volumetric_fog", opts.fog}, {"lowend_rule", 1}});
     }
-    logf("vk: low-end GPU (integrated, no mesh shaders)%s: the Minimum preset (Render resolution 50%%, the handheld profile from "
-         "the next start) and Volumetric fog off%s; the Insert menu changes them back",
-         a == lowend_rule::APPLY_THIS_RUN ? ", HL_LOWEND=1" : "",
-         a == lowend_rule::APPLY_AND_SAVE ? ", saved to the options file" : ", for this run only (nothing saved)");
+    logf("vk: low-end GPU (integrated, no mesh shaders)%s: Render resolution %d%%, Volumetric fog off, the handheld profile (from "
+         "the next start: the game asks for it before the GPU is known)%s; nothing else changed, the Insert menu changes them back",
+         a == lowend_rule::APPLY_THIS_RUN ? ", HL_LOWEND=1" : "", ur::percent(opts.resolution),
+         a == lowend_rule::APPLY_AND_SAVE ? "; saved to the options file (those rows only)" : "; for this run only (nothing saved)");
 }
 static bool dlss_model_saved;   // (hookshot_options.ini has a dlss_model line)
 void menu_first_run_model(uint32_t vendor_id, uint32_t device_id) {

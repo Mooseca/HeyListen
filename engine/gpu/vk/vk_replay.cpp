@@ -7106,7 +7106,8 @@ void do_present(const nvn_tex* t, const int crop[4]) {
             // (24 Nov: the default is 1 again. On a Ryzen 7 5700U's graphics 3, 2 and 0 flicker the HUD while the camera turns, 1 does not)
             static const int own = [] {
                 const int m = wait_own::mode(getenv("RX_VK_WAIT_OWN"), getenv("RX_VK_WAIT_GPU") != nullptr,
-                                             dev.props.vendorID == 0x1002 && dev.props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU);
+                                             dev.props.vendorID == 0x1002 && dev.props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU &&
+                                                 !lowend_mirror_not_wait());   // (LAPTOP1: the mirror in its place there)
                 if (m && !getenv("RX_VK_WAIT_OWN"))
                     logf("vk: an AMD integrated GPU: each present waits for the GPU's work of its own frame (RX_VK_WAIT_OWN=2: of the frame before, =3: of the frame before, its own when textures were uploaded, =0: not)");
                 else if (m)
