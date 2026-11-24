@@ -19,9 +19,16 @@ recording's edges, and whether consecutive tiny dispatches can be merged. Nothin
       (GAME_BARRIER_NARROW, BARRIER_TRUST) and the duplicate-barrier dedupe inside segments moved nothing.
 - [x] prototype in the engine, off by default: `RX_VK_BARRIER_AUDIT`, `RX_VK_BARRIER_HAZARD=<mask>`, `RX_VK_REC_END_DROP=<mask>`
       (vk_texture.cpp/h, vk_work.h, vk_draw.cpp, vk_replay.cpp).
-- [ ] build under the `gpuov` lease (mkg.ps1 -Owner gpuov) - first build passed, 0 failed.
-- [ ] main-PC measurement (`build/s5/gpuov/main_ab.sh`, 3 interleaved rounds, castle-move + kokiri-idle, PASS_TIMING=2).
-- [ ] pictures (`RX_VK_SHOTS`) of the arms against the baseline's own noise floor.
+- [x] build under the `gpuov` lease: `build/s5/bin/gpuov2` (07:45, tree = e7eda5c32). The first series (`gpuov`, 05:33) predates
+      the last source edits (05:51-05:53) and is not used for numbers.
+- [x] main-PC measurement DONE (results in "The current build"); no more speed leases on the main PC: the 3050 runs come next.
+      (was: main-PC measurement, 3 interleaved rounds, base / HAZARD=1 / HAZARD=3, kokiri-idle then castle-move, PASS_TIMING=2 +
+      AUDIT in every run (`build/s5/gpuov/main_ab.sh`, chained by `E:\OOT\scratch-gpuov\chain.sh`, outputs `v3k.out`, `v3c.out`).
+      A first try (v2k) lost most runs to runguard rc 11 (another agent's compiler on the machine): main_ab.sh now waits and
+      retries a run on rc 11. The main PC is not GPU-bound here (kokiri 6.9 ms GPU, 94 fps): fps there moves with noise.)
+- [x] `build/s5/gpuov/pc3050.sh` rewritten: settings (r100 = HOS_DYNRES=0, auto) x scenes (castle-move, kokiri-idle, hyrule-walk,
+      market-spin), arms on the command line, 3 rounds, a report per cell. Not yet run on the 3050.
+- [x] pictures against the baseline's own noise floor: inside it (see above).
 - [ ] tests + SWITCHES.md regenerated.
 
 ## The GPU frame on the 3050, by kind (RX_VK_PASS_TIMING=2 maps)
@@ -133,6 +140,25 @@ not comparable run to run; the fps spread covers the difference. 2 rounds, not 3
 The arms differ by less than the same arm does between two of its own runs on a walking scene; the one bad kokiri pair is a
 transition frame. Not an identity proof: a shooting run per arm of the same scene is what `main_ab.sh` does, and the
 baseline-vs-baseline pair is what makes the number readable.
+
+### The current build (`build/s5/bin/gpuov2`, tree e7eda5c32), 3 interleaved rounds, main PC
+
+Outputs `E:\OOT\scratch-gpuov\v3k.out` (kokiri-idle), `v3c.out` (castle-move); runs `build/s5/v3k-*`, `v3c-*`. Kinds are the recordings'
+(`vk:     m barrier ... ms ... spans`; the report's earlier "barrier" column was the upload buffers'), ms a frame, mean of 3 runs:
+
+| scene | arm | m barrier ms (spans) | all GPU ms | fps mean |
+|---|---|---|---|---|
+| kokiri-idle | base | 0.372 (191.8) | 7.26 | 98.29 |
+| kokiri-idle | HAZARD=1 | 0.274 (152.9) | 7.15 | 100.55 |
+| kokiri-idle | HAZARD=3 | 0.253 (143.5) | 7.11 | 97.66 |
+| castle-move | base | 0.364 (194.3) | 8.47 (8.75, 8.81, 7.86) | 109.15 |
+| castle-move | HAZARD=1 | 0.293 (155.9) | 8.56 (8.92, 8.91, 7.84) | 108.87 |
+| castle-move | HAZARD=3 | 0.262 (148.2) | 8.41 (8.66, 7.83, 8.74) | 109.20 |
+
+Audit, HAZARD=3, per frame: kokiri game's 141.6 checked / 78.0 folded, pass starts 144.9 checked / 44.6 hits / 17.1 left out;
+castle game's folded 71.9, pass starts 146.3 / 41.6 / 12.0 left out. Pass, dispatch and write-back ms do not move.
+Pictures (pngdiff.py, mean |a-b| of 255): kokiri base-vs-base 8.53, base-vs-HAZARD=3 8.31 and 8.79; castle base-vs-base 26.31,
+base-vs-HAZARD=3 17.47: inside the floor. No FATAL / device lost; every `exposure sums` line: `2000 reads, 0 of them given the last result again`.
 
 ## What that says, per question
 
