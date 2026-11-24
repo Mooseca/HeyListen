@@ -945,8 +945,8 @@ Row rows[] = {
     {TAB_GRAPHICS, "Handheld profile", &opts.handheld, 0, 1, 1, tx_onoff,
      "Runs the game as if the console were undocked. Applies after a restart.", hn_handheld, true},
     {TAB_GRAPHICS, "Volumetric fog", &opts.fog, 0, 1, 1, tx_onoff,
-     "The haze in the distance and the mist of the forests. Off is lighter on weak GPUs (about 15% of the frame on integrated "
-     "graphics) and shows the distance crisper. Applies after a restart.", nullptr, true},
+     "The haze in the distance and the mist of the forests. Off is lighter on the GPU (about an eighth of the frame on integrated "
+     "graphics, a few percent on a graphics card) and shows the distance crisper. Applies after a restart.", nullptr, true},
     {TAB_GRAPHICS, "Ultrawide", &opts.ultrawide, 0, 1, 1, tx_ultrawide,
      "The camera's shape on a screen wider or narrower than 16:9 (4:3, 16:10). Applies after a restart.", hn_ultrawide, true},
     {TAB_GRAPHICS, "HUD layout", &opts.hud_layout, 0, 1, 1, tx_hud_layout,

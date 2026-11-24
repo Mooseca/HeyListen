@@ -32,8 +32,9 @@ int main() {
                                                           !ur::dlss_mode_name(kNative));
 
     // the game's own: Auto, 100, 75, 67, 50, as before
-    CHECK("game: Right", ur::step(GAME, 0, 1) == 1 && ur::step(GAME, 1, 1) == 2 && ur::step(GAME, 3, 1) == 4 && ur::step(GAME, 4, 1) == 0);
-    CHECK("game: Left", ur::step(GAME, 0, -1) == 4 && ur::step(GAME, 1, -1) == 0 && ur::step(GAME, 4, -1) == 3);
+    CHECK("game: Right", ur::step(GAME, 0, 1) == 1 && ur::step(GAME, 1, 1) == 2 && ur::step(GAME, 3, 1) == 4 && ur::step(GAME, 4, 1) == 6 &&
+                            ur::step(GAME, 6, 1) == 0);
+    CHECK("game: Left", ur::step(GAME, 0, -1) == 6 && ur::step(GAME, 1, -1) == 0 && ur::step(GAME, 4, -1) == 3 && ur::step(GAME, 6, -1) == 4);
     // DLSS: Auto, DLAA (native), Quality 67, Balanced 58, Performance 50, Ultra Performance 33
     CHECK("dlss: Right", ur::step(DLSS, 0, 1) == kNative && ur::step(DLSS, kNative, 1) == 3 && ur::step(DLSS, 3, 1) == 5 &&
                              ur::step(DLSS, 5, 1) == 4 && ur::step(DLSS, 4, 1) == 6 && ur::step(DLSS, 6, 1) == 0);
@@ -50,7 +51,7 @@ int main() {
     // another upscaler: the nearest step (the larger on a tie), Auto stays Auto; the native choice is never a nearest step
     CHECK("snap to DLSS", ur::snap(DLSS, 0) == 0 && ur::snap(DLSS, 1) == 3 && ur::snap(DLSS, 2) == 3 && ur::snap(DLSS, 3) == 3 &&
                               ur::snap(DLSS, 4) == 4);
-    CHECK("snap to the game's", ur::snap(GAME, 5) == 4 && ur::snap(GAME, 6) == 4 && ur::snap(GAME, 3) == 3 && ur::snap(GAME, 1) == 1);
+    CHECK("snap to the game's", ur::snap(GAME, 5) == 4 && ur::snap(GAME, 6) == 6 && ur::snap(GAME, 3) == 3 && ur::snap(GAME, 1) == 1);
     CHECK("a value past the row snaps to Auto", ur::snap(GAME, 9) == 0 && ur::snap(DLSS, -3) == 0);
     CHECK("native is DLSS's and FSR 4's step", ur::snap(DLSS, kNative) == kNative && ur::snap(ur::FSR4, kNative) == kNative &&
                                                     ur::snap(DLAA, kNative) == kNative && ur::snap(ur::FSR4_AA, kNative) == kNative);
@@ -141,7 +142,7 @@ int main() {
         int shown = saved;
         for (int up : {ur::GAME, ur::FSR3, ur::DLAA, ur::FSR4, ur::FSR4_AA, ur::DLSS, ur::GAME, ur::FSR3}) shown = ur::snap(up, saved);   // (the row never writes back)
         CHECK("back on an Upscaler with the step, the choice is whole", shown == saved);
-        CHECK("a step from the shown value", ur::step(ur::GAME, ur::snap(ur::GAME, saved), 1) == 0 && ur::step(ur::GAME, ur::snap(ur::GAME, saved), -1) == 3);
+        CHECK("a step from the shown value", ur::step(ur::GAME, ur::snap(ur::GAME, saved), 1) == 6 && ur::step(ur::GAME, ur::snap(ur::GAME, saved), -1) == 3);
         // (the native choice through the Upscalers: the game's own draws 100%, DLSS and FSR 4 draw it as DLAA / Native AA, and it
         // comes back)
         CHECK("the native choice goes round the Upscalers whole", ur::snap(ur::GAME, kNative) == 1 && ur::snap(ur::FSR3, kNative) == 3 &&
