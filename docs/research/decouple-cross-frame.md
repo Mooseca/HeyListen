@@ -22,9 +22,14 @@ other value that depends on another frame, so that nothing waits and frames can 
 5. **Not built**: the lanes themselves (`RX_VK_LANES`, section 4.3 has the recipe). `RX_VK_SUB_OVERLAP` and `RX_VK_ORDER_THREAD` do
    not work together yet (the first is left off when the second is on).
 
-## State (keep current; last edit 24 Nov 16:40)
+## State (keep current; last edit 24 Nov 16:55, second session DECOUPLE2)
 
-- Branch `perf/decouple`, nothing pushed. Code tip `b4f558d20` (the commits after it are notes). Suite on the tip: 512 passed, 3
+- **Second session (from 16:40)**: stage 2's first pieces committed in `b49b55244` (section 4.4): the submit sequencer
+  (`engine/gpu/vk/submit_seq.h`, `tests/test_submit_seq.py`), the render conditions per group, `RX_VK_LANES_CHECK=1`. Build `dec3a`
+  (= `b49b55244`) started 16:47 with the whole suite (`E:\OOT\scratch-decouple\build-dec3a.log`, `tests-dec3a.log`); its check series
+  `c4.sh` (two warm-ups, the check in Kokiri and Hyrule, the warp tour with it) not run yet. `matrix81` not readable at 16:36 or 16:47
+  (no `C:\OOT\pc3050s-out\matrix81.txt` on the 3050). `RX_VK_LANES` itself is read and logged only.
+- Branch `perf/decouple`, nothing pushed. First session's code tip `b4f558d20`; suite on it: 512 passed, 3
   failed, the known three (`E:\OOT\scratch-decouple\tests-tip.log`). Switch lists regenerated.
 - Builds in `E:\OOT\HeyListen\build\s5\bin`: `dec1a` (= `5054c6330`: main + `refactor/sub1`), `dec2a` (= `09484e740`: + `perf/pipe2`
   + `RX_VK_CAP_DEPTH`), `dec2b` (= `e67d919c8`: + the snapshots per submission; the tip's code). On the PC 3050: `C:\OOT\builds\dec1a`
@@ -277,6 +282,11 @@ One real gap was found by reading while looking for a cause and removed in `e67d
 kept their snapshots in one map that every submission's start cleared; a pending submission's guessed write-backs would not be
 checked or written once the next one had begun. With SUB1 B as built the pending end is always sent before the next submission's
 start, so this was not live; it would be with the lanes. The snapshots are now the submission's own (`MemSub::guess_snaps`).
+**Correction to `e67d919c8`'s commit message** (it cannot be amended: later commits sit on it): it calls the gap the "suspected cause
+of the Market save's load never reaching play with the switch on" and says the map was cleared "while the pending one's workers
+still added to it". Neither holds: as built, the pending submission's end is sent before the next one's start, so the gap was not
+live with `RX_VK_SUB_OVERLAP=1`, and a run with no switch failed its load the same way (`dec2b-warm`). The commit removes a gap the
+lanes would open; it is not shown to be, and is not expected to be, the cause of the load failures.
 
 ### 4.3 Stage 2 (`RX_VK_LANES`), not built: the recipe, from the code as merged
 
@@ -304,3 +314,29 @@ spine then waits only when the lanes are a whole submission behind):
 Gate for the switch: on the PC 3050 at the default ini, order thread idle above 0.5 ms a frame and GPU gaps under 0.5 ms in Kokiri
 and Hyrule (today 0.01-0.06 and 1.75-2.12), fps +8% or more over the order-thread arm; 0 flashes over the warp tour; the meter's
 held reads as off.
+
+### 4.4 Stage 2's first pieces (`b49b55244`, build `dec3a`): the sequencer, the conditions per group, the check
+
+- **The submit sequencer** (`engine/gpu/vk/submit_seq.h`, pure rules; `tests/test_submit_seq.py` with no game and no GPU). A unit
+  of the stream takes a ticket when the spine begins it: a plain recording (`begin_recording`), or a big command buffer's group
+  (taken in `replay_handle_early` after `r` is sent and before `rd` is begun; without `RX_VK_EARLY_GPU`, at the same place).
+  A unit is finished where it takes its place in the queue: a recording in `submit_send` under `present_mu` (batched or not), a
+  group in `group_lane_close` once every segment it uses is sent (`early_submit_ready`, before the submission's end, whose
+  recording's ticket follows the group's), or at the end of `early_join`. `rd`, when it goes inside the group (`sub_after_rd`),
+  drops its own ticket; a group recorded whole drops its ticket (or finishes it when its small-prefix job was sent). A recording
+  made ready while an earlier unit is open is left ready (`Sequencer::ready`) for whoever finishes the one before (`ready_head`):
+  the lanes' rule. Not covered: the segments of the multi-segment path (`kJoinMultiSeg`), the early pre-sync's recording and the
+  upload chunk flush (`replay_flush_upload`), which have no tickets.
+- **The render conditions per group**: `par_conds` / `par_conds_n` now name the writer's list (`conds_w`, one of a ring of
+  `1 + 4`); a group holds the list its dry pass writes from its creation to its join (`group_conds_hold` / `_release`), its workers
+  read it through `tl_conds` (`conds_r()`: the render condition's read and `gate_segment_begin`). With `RX_VK_LANES` or its check a
+  dry pass's reset (`par_conds_reset`) takes the next list no group holds; with both off the writer's list is always the first, as
+  before. Tests updated in the same commit: `test_grow_lock.py` (the fixture names the writer's list as the source does, the read is
+  checked through `conds_r()`), `test_seg_early.py`, `test_early_gpu.py` (the group's ticket is finished before the submission's end).
+- **`RX_VK_LANES_CHECK=1`**: every group joined as today; the tickets taken and finished as above, the lists rotated, and the
+  memory side's per-submission counters on (`rec_check_on()`; the capture history kept as with `RX_VK_SUB_OVERLAP`). Every 600 joins
+  the log's `vk: LANES_CHECK:` line gives tickets taken / sent / dropped, **sent out of order**, **unknown** (finished twice or never
+  taken), the most open at once, lists rotated, **a dry pass that found every list held**, **capture views lost** (deeper than
+  `RX_VK_CAP_DEPTH`), **pool sync pairs lost** (new: `st_sub_pool_lost`, a pool synced twice past the checking submission). The
+  bold ones must read 0 in Kokiri, Hyrule and the warp tour before `RX_VK_LANES` is tried. With both checks off nothing changes
+  but one pointer's indirection on the conditions' list.
