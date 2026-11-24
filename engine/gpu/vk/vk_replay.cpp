@@ -5325,6 +5325,7 @@ int64_t thread_cpu_100ns() {
 }
 bool order_thread_on();
 bool ot_pending();   // (PIPE4: jobs handed over to the order thread and not yet run; below)
+uint64_t ot_progress();   // (PIPE4: the order thread's last finished job; below)
 void sync_watch() {
     SetThreadDescription(GetCurrentThread(), L"mkw_vk order");
     for (;;) {
@@ -5356,7 +5357,14 @@ void sync_watch() {
         // anyway, the lit passes ran before the lighting work they wait for and the scene came out black for a frame (the dark
         // frames of the warp tour). RX_VK_ORDER_WATCH_PENDING=1: forced as before
         static const bool watch_pending = getenv("RX_VK_ORDER_WATCH_PENDING") && atoi(getenv("RX_VK_ORDER_WATCH_PENDING")) != 0;
-        if (blocked_n.load() && held > hold_ms() && order_thread_on() && !watch_pending && ot_pending()) {
+        // (pipe4f hung at a load: an order-thread job waited for work of the stopped queue itself, and nothing forced it. Spared
+        // only while the order thread goes on: a job finished within the last 250 ms)
+        static uint64_t last_seq = 0;
+        static auto last_move = std::chrono::steady_clock::now();
+        const auto now_w = std::chrono::steady_clock::now();
+        if (const uint64_t sq = ot_progress(); sq != last_seq) last_seq = sq, last_move = now_w;
+        const bool moving = std::chrono::duration<double, std::milli>(now_w - last_move).count() < 250;
+        if (blocked_n.load() && held > hold_ms() && order_thread_on() && !watch_pending && moving && ot_pending()) {
             static std::atomic<int64_t> spared{0};
             if (const int64_t k = ++spared; k <= 8 || k % 1000 == 0)
                 logf("vk: order thread: a queue stopped %.0f ms not let past its wait, submissions handed over are still to be replayed (%lld so far)",
@@ -8525,6 +8533,7 @@ void ot_main() {
         }
     }
 }
+uint64_t ot_progress() { return ot_seq_done.load(std::memory_order_acquire); }
 bool ot_pending() {
     if (ot_holding.load(std::memory_order_acquire)) return true;
     std::lock_guard lk(ot_mu);
