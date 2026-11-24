@@ -6249,6 +6249,11 @@ uint64_t next_dirty_page(uint64_t page, uint64_t end, uint32_t synced) {
 }
 
 bool wbl_sync_flush(Pool& p, const std::vector<uint64_t>& offs);   // (WBL1: with the write-back's diff, below)
+}   // namespace
+bool wb_shadow_sync_on();   // (issue 89: the write-back's diff, below)
+void shadow_sync_copies(Pool& p, const std::map<VkBuffer, std::vector<VkBufferCopy>>& cap_runs, const std::vector<VkBufferCopy>& live,
+                        const std::map<VkBuffer, std::vector<VkBufferCopy>>& late_runs);
+namespace {
 
 /// The pages of the pool the CPU wrote since its mirror's sync, copied in (the upload command buffer)
 int64_t mirror_sync(Pool& p) {
@@ -6497,6 +6502,7 @@ int64_t mirror_sync(Pool& p) {
         PoolSync& ps = sync_by_pool[p.lo];
         ps.bytes += b_all, ps.same += b_same, ps.skipped += b_skip, ps.size = p.hi - p.lo;
     }
+    if (p.shadow && wb_shadow_sync_on()) shadow_sync_copies(p, cap_runs, runs, late_runs);   // (issue 89: the shadow takes what the mirror takes)
     const VkDeviceAddress maddr = scatter_on() && (!cap_runs.empty() || !runs.empty()) ? buffer_address(p.mirror) : 0;
     for (const auto& [buf, rs] : cap_runs) {
         if (maddr && scatter_add(buffer_address(buf), maddr, rs)) {
@@ -8678,6 +8684,7 @@ bool mirror_make(Pool& pool) {
         p->mirror_id = ++diff_mirror_ids;   // (TICK-048: the diff's hashes of another mirror do not hold for this one)
         if (!p->mirror_id) p->mirror_id = ++diff_mirror_ids;
         pools_gen.fetch_add(1, std::memory_order_relaxed);   // (the binding's buffer changes: guest memory, then this mirror)
+        if (p->shadow && wb_shadow_sync_on()) std::fill(p->shadow_known.begin(), p->shadow_known.end(), 0ull);   // (issue 89: a new mirror)
         p->fill_value = rec_value_of();   // (RX_VK_NO_HOST_IMPORT: its import may go once this recording is done)
         p->synced_gen = gen_now;
         pool_sync_note(*p, rec_epoch(), texture_segment());
@@ -8801,6 +8808,7 @@ void shadows_forget_written() {
         for (auto& [lo, pool] : imported)
             if (pool.shadow) std::fill(pool.shadow_known.begin(), pool.shadow_known.end(), 0ull);
     if (pages.empty() || !shadow_bytes) return;
+    const bool sync_keeps = wb_shadow_sync_on();
     std::sort(pages.begin(), pages.end());
     Pool* p = nullptr;
     for (uint32_t pg : pages) {
@@ -8814,6 +8822,7 @@ void shadows_forget_written() {
             if (!p) continue;
         }
         if (!p->shadow) continue;
+        if (sync_keeps && p->mirror && p->mstate == Pool::MIRROR_ON) continue;   // (issue 89: its syncs keep the shadow: shadow_sync_copies)
         const uint64_t i = (a - p->lo) >> kPageShift;
         p->shadow_known[i >> 6] &= ~(1ull << (i & 63));
     }
@@ -8863,6 +8872,61 @@ void shadow_written(const uint32_t* pages, int64_t n) {
         return;
     }
     shadow_written_pages.insert(shadow_written_pages.end(), pages, pages + n);
+}
+// (issue 89, RX_VK_WB_SHADOW_SYNC, on by default; =0 off) The write-back's diff writes back the words of a written run in which the
+// mirror differs from the shadow, and the shadow is to hold what the mirror held before the GPU wrote. A page the CPU wrote was made
+// unknown to the shadow (shadows_forget_written) and read again from guest memory by the write-back, on the GPU, after the
+// submission's work: the CPU's stores made after the mirror's sync (the game's threads run a frame ahead of the replay) were then
+// in the shadow and not in the mirror, so they differed, and the mirror's older words went back over them. The lock-on ring's
+// pointers (issue 89): f_812f0fc0 stores an element's fields into a 16 KB pool a compute program updates in place; elements 1..3
+// went back to the game's 0x6f fill and only one or two of the four pointers were drawn. Now a mirror sync copies the pages it
+// copies into the mirror into the shadow too, from the same sources, and a mirrored pool's pages are not made unknown by the CPU's
+// writes: the shadow is the mirror as the GPU found it, and only the GPU's own words differ. (A page the sync takes live from guest
+// memory is read twice, by the mirror's copy and the shadow's, a few microseconds apart in the same command buffer.)
+bool wb_shadow_sync_on() {
+    static const bool on = wb_diff_on() && (!getenv("RX_VK_WB_SHADOW_SYNC") || atoi(getenv("RX_VK_WB_SHADOW_SYNC")) != 0);
+    return on;
+}
+// (pools_mu held; a mirror sync of p, its copies into the mirror as the three lists say, pool offsets as destinations) The same copies
+// into p's shadow, in the upload command buffer; the pages they cover whole are known to the shadow, a page partly covered keeps
+// what it was (known: the shadow had the mirror's other words; unknown: the write-back reads it whole as before). Live pages of a
+// pool not imported now (no guest memory buffer) are made unknown instead
+void shadow_sync_copies(Pool& p, const std::map<VkBuffer, std::vector<VkBufferCopy>>& cap_runs, const std::vector<VkBufferCopy>& live,
+                        const std::map<VkBuffer, std::vector<VkBufferCopy>>& late_runs) {
+    if (!p.shadow || p.shadow_known.empty()) return;
+    VkCommandBuffer up = VK_NULL_HANDLE;
+    static thread_local std::vector<std::pair<uint64_t, uint64_t>> cover;   // (pool offset, bytes)
+    cover.clear();
+    auto copy = [&](VkBuffer src, const std::vector<VkBufferCopy>& rs) {
+        if (rs.empty()) return;
+        if (!up) up = upload_command_buffer();
+        vkCmdCopyBuffer(up, src, p.shadow, (uint32_t)rs.size(), rs.data());
+        for (const VkBufferCopy& r : rs) cover.push_back({r.dstOffset, r.size});
+    };
+    for (const auto& [buf, rs] : cap_runs) copy(buf, rs);
+    for (const auto& [buf, rs] : late_runs) copy(buf, rs);
+    if (p.memory && p.buffer)
+        copy(p.buffer, live);
+    else
+        for (const VkBufferCopy& r : live) shadow_forget(p, r.dstOffset, r.size);
+    if (cover.empty()) return;
+    std::sort(cover.begin(), cover.end());
+    const uint64_t pool_n = p.hi - p.lo;
+    // (the pages covered whole by the union of the copies)
+    uint64_t run_lo = cover[0].first, run_hi = cover[0].first + cover[0].second;
+    auto mark = [&](uint64_t lo, uint64_t hi) {
+        for (uint64_t pg = (lo + 4095) >> kPageShift; pg < ((hi >> kPageShift) + (hi == pool_n && (hi & 4095) ? 1 : 0)); pg++)
+            if ((pg >> 6) < p.shadow_known.size()) p.shadow_known[pg >> 6] |= 1ull << (pg & 63);
+    };
+    for (size_t k = 1; k < cover.size(); k++) {
+        if (cover[k].first <= run_hi) {
+            run_hi = std::max(run_hi, cover[k].first + cover[k].second);
+            continue;
+        }
+        mark(run_lo, run_hi);
+        run_lo = cover[k].first, run_hi = cover[k].first + cover[k].second;
+    }
+    mark(run_lo, run_hi);
 }
 // A run of a pool (offsets, in whole words) as the pass's chunks, in order: the words before its first 16-byte vector, the
 // vectors 64 KB at most at a time, the words after the last; emit(offset, bytes, vectors). (tests/test_wb_diff_split.py)

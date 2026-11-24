@@ -955,25 +955,54 @@ static DWORD WINAPI thread_times_thread(void *p) {
    the frame's critical path (scripts/crit.py) */
 /* HOS_WATCH=<file> (diagnostic): when <file> exists (up to 4 guest addresses in hex), CPU data breakpoints on them on
    every guest thread: 4 s on reads and writes, then 4 s on writes; <file>.out gets, by address and the host place of
-   the access, how many; then <file> is renamed <file>.done and the next one may come. */
+   the access, how many; then <file> is renamed <file>.done and the next one may come.
+   HOS_WATCH_STACK=1: an access is told apart by its host place and its first three callers too, which the line then
+   lists after the place (";module+offset" each): who called the store, when the store is in a shared helper.
+   HOS_WATCH_SECONDS=<n>: each phase n seconds (4); HOS_WATCH_PHASES=w: the write phase only; HOS_WATCH_ALL_THREADS=1: the
+   breakpoints on every thread of the process (the renderer's write-backs, the host's threads), not only the guest's. */
 static uint64_t watch_keys[8192];
+static uint64_t watch_callers[8192][3];
 static volatile LONG watch_counts[8192];
 static volatile LONG watch_phase;
+static int watch_stack;
 static LONG CALLBACK watch_handler(EXCEPTION_POINTERS *e) {
     if (e->ExceptionRecord->ExceptionCode != EXCEPTION_SINGLE_STEP) return EXCEPTION_CONTINUE_SEARCH;
     const DWORD64 hit = e->ContextRecord->Dr6 & 15;
     if (!hit) return EXCEPTION_CONTINUE_SEARCH;
     int idx = 0;
     while (!(hit >> idx & 1)) idx++;
+    uint64_t callers[3] = {0, 0, 0};
+    if (watch_stack) {   /* (the trap is reported after the store: the context is the place just past it) */
+        CONTEXT ctx = *e->ContextRecord;
+        for (int d = 0; d < 3; d++) {
+            DWORD64 image = 0;
+            PRUNTIME_FUNCTION f = RtlLookupFunctionEntry(ctx.Rip, &image, NULL);
+            if (!f) break;
+            void *hd;
+            DWORD64 frame;
+            RtlVirtualUnwind(UNW_FLAG_NHANDLER, image, ctx.Rip, f, &ctx, &hd, &frame, NULL);
+            if (!ctx.Rip) break;
+            callers[d] = ctx.Rip;
+        }
+    }
     const uint64_t key = ((uint64_t)(watch_phase & 1) << 62) | ((uint64_t)idx << 58) | (uint64_t)e->ExceptionRecord->ExceptionAddress;
-    for (uint32_t i = (uint32_t)((key >> 2) * 2654435761u) & 8191, n = 0; n < 8192; n++, i = (i + 1) & 8191) {
+    const uint64_t mix = key ^ callers[0] * 31 ^ callers[1] * 961 ^ callers[2] * 29791;
+    for (uint32_t i = (uint32_t)((mix >> 2) * 2654435761u) & 8191, n = 0; n < 8192; n++, i = (i + 1) & 8191) {
         uint64_t k = __atomic_load_n(&watch_keys[i], __ATOMIC_RELAXED);
         if (!k) {
             uint64_t expect = 0;
-            if (__atomic_compare_exchange_n(&watch_keys[i], &expect, key, 0, __ATOMIC_RELAXED, __ATOMIC_RELAXED)) k = key;
-            else k = expect;
+            if (__atomic_compare_exchange_n(&watch_keys[i], &expect, key, 0, __ATOMIC_RELAXED, __ATOMIC_RELAXED)) {
+                k = key;
+                for (int d = 0; d < 3; d++) __atomic_store_n(&watch_callers[i][d], callers[d], __ATOMIC_RELAXED);
+            } else
+                k = expect;
         }
-        if (k == key) { InterlockedIncrement(&watch_counts[i]); break; }
+        if (k == key && (!watch_stack || (__atomic_load_n(&watch_callers[i][0], __ATOMIC_RELAXED) == callers[0] &&
+                                          __atomic_load_n(&watch_callers[i][1], __ATOMIC_RELAXED) == callers[1] &&
+                                          __atomic_load_n(&watch_callers[i][2], __ATOMIC_RELAXED) == callers[2]))) {
+            InterlockedIncrement(&watch_counts[i]);
+            break;
+        }
     }
     e->ContextRecord->Dr6 = 0;
     return EXCEPTION_CONTINUE_EXECUTION;
@@ -981,7 +1010,24 @@ static LONG CALLBACK watch_handler(EXCEPTION_POINTERS *e) {
 static void watch_arm(const uint64_t *addr, int n, int rw) {
     static HANDLE gh[1024];
     static const char *gn[1024];
-    const int ng = hos_thread_handles(gh, gn, 1024);
+    /* (HOS_WATCH_ALL_THREADS=1: every thread of the process, the renderer's and the host's too, not only the guest's) */
+    static int all = -1;
+    if (all < 0) all = getenv("HOS_WATCH_ALL_THREADS") && atoi(getenv("HOS_WATCH_ALL_THREADS")) > 0;
+    int ng = 0;
+    if (all) {
+        HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+        THREADENTRY32 te;
+        te.dwSize = sizeof te;
+        if (snap != INVALID_HANDLE_VALUE && Thread32First(snap, &te))
+            do {
+                if (te.th32OwnerProcessID != GetCurrentProcessId() || ng >= 1024) continue;
+                HANDLE h = OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT | THREAD_SET_CONTEXT | THREAD_QUERY_INFORMATION, FALSE,
+                                      te.th32ThreadID);
+                if (h) gh[ng++] = h;
+            } while (Thread32Next(snap, &te));
+        if (snap != INVALID_HANDLE_VALUE) CloseHandle(snap);
+    } else
+        ng = hos_thread_handles(gh, gn, 1024);
     for (int i = 0; i < ng; i++) {
         if (GetThreadId(gh[i]) == GetCurrentThreadId()) continue;
         if (SuspendThread(gh[i]) == (DWORD)-1) continue;
@@ -1001,6 +1047,8 @@ static void watch_arm(const uint64_t *addr, int n, int rw) {
         }
         ResumeThread(gh[i]);
     }
+    if (all)
+        for (int i = 0; i < ng; i++) CloseHandle(gh[i]);
 }
 static DWORD WINAPI watch_thread(void *p) {
     const char *path = (const char *)p;
@@ -1017,14 +1065,21 @@ static DWORD WINAPI watch_thread(void *p) {
         memset(watch_keys, 0, sizeof watch_keys);
         memset((void *)watch_counts, 0, sizeof watch_counts);
         for (int k = 0; k < n; k++) hos_log("watch: %llx holds %08x", (unsigned long long)addr[k], *(uint32_t *)GP(addr[k]));
-        for (int ph = 0; ph < 2; ph++) {
+        memset(watch_callers, 0, sizeof watch_callers);
+        /* (HOS_WATCH_SECONDS=<n>: each phase n seconds instead of 4) */
+        const char *ws = getenv("HOS_WATCH_SECONDS");
+        const int secs = ws && atoi(ws) > 0 ? atoi(ws) : 4;
+        /* (HOS_WATCH_PHASES=w, or any value starting with w: the write phase only, from the start) */
+        const char *wp = getenv("HOS_WATCH_PHASES");
+        for (int ph = wp && wp[0] == 'w' ? 1 : 0; ph < 2; ph++) {
             watch_phase = ph;
-            for (int t = 0; t < 4; t++) {   /* (threads that started since) */
+            for (int t = 0; t < secs; t++) {   /* (threads that started since) */
                 watch_arm(addr, n, ph ? 1 : 3);
                 Sleep(1000);
             }
         }
         watch_arm(addr, 0, 0);
+        for (int k = 0; k < n; k++) hos_log("watch: %llx holds %08x at the end", (unsigned long long)addr[k], *(uint32_t *)GP(addr[k]));
         char out[MAX_PATH], done[MAX_PATH];
         snprintf(out, sizeof out, "%s.out", path);
         snprintf(done, sizeof done, "%s.done", path);
@@ -1038,8 +1093,18 @@ static DWORD WINAPI watch_thread(void *p) {
                     GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (LPCSTR)rip, &m);
                     if (m) GetModuleFileNameA(m, full, sizeof full);
                     const char *name = strrchr(full, 92) ? strrchr(full, 92) + 1 : full;
-                    fprintf(f, "%llx %s %s+%llx %ld\n", (unsigned long long)addr[(k >> 58) & 3], k >> 62 & 1 ? "w" : "rw", name,
+                    fprintf(f, "%llx %s %s+%llx %ld", (unsigned long long)addr[(k >> 58) & 3], k >> 62 & 1 ? "w" : "rw", name,
                             (unsigned long long)(rip - (uint64_t)m), watch_counts[i]);
+                    for (int d = 0; d < 3 && watch_callers[i][d]; d++) {   /* (HOS_WATCH_STACK) */
+                        HMODULE cm = NULL;
+                        GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                                           (LPCSTR)watch_callers[i][d], &cm);
+                        char cfull[MAX_PATH] = "?";
+                        if (cm) GetModuleFileNameA(cm, cfull, sizeof cfull);
+                        const char *cname = strrchr(cfull, 92) ? strrchr(cfull, 92) + 1 : cfull;
+                        fprintf(f, "%s;%s+%llx", d ? "" : " callers", cname, (unsigned long long)(watch_callers[i][d] - (uint64_t)cm));
+                    }
+                    fputc('\n', f);
                 }
             fclose(f);
         }
@@ -1156,6 +1221,8 @@ void hos_prof_start(void) {
     const char *all = getenv("HOS_SAMPLE_ALL");
     if (all && *all) CreateThread(NULL, 0, sample_all_thread, (void *)all, 0, NULL);
     const char *watch = getenv("HOS_WATCH");
+    /* (HOS_WATCH_STACK=1: each access told apart by its first three callers too, listed after its place) */
+    watch_stack = getenv("HOS_WATCH_STACK") && atoi(getenv("HOS_WATCH_STACK")) > 0;
     if (watch && *watch) CreateThread(NULL, 0, watch_thread, (void *)watch, 0, NULL);
 }
 #endif   /* (linux) host/posix/prof.c */
