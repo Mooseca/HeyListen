@@ -242,7 +242,7 @@ classes measured so far differ by device class, not by a few percent.
 
 ## State
 
-- 2026-11-25 00:55: texcache6 (commit 68366a529): the cache on by default for integrated GPUs that transcode ASTC and discrete cards
+- 2026-11-25 00:52: texcache6 (commit 68366a529): the cache on by default for integrated GPUs that transcode ASTC and discrete cards
   under 10 GB; 4096 MB rolling cap, the disk's last GB never written, writes off for the session on any write error; pool by RAM.
   Build build/s5/bin/texcache6 (-Block -Lift -Pgo), suite under the build lease: 510 passed, the 3 known failures and
   test_crash_record (passes alone, `tests-texcache6.log` in my scratch: a flake under the parallel run's load).
