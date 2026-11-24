@@ -1693,13 +1693,13 @@ thread_local CondList* tl_conds = nullptr;     // (a segment's worker: its group
 inline CondList& conds_r() { return tl_conds ? *tl_conds : *conds_w; }
 #define par_conds (conds_w->v)
 #define par_conds_n (conds_w->n)
-/// (stream DECOUPLE) RX_VK_LANES=<K>: up to K submissions' groups of segments pending while the spine goes on (not built yet: read,
-/// logged, and only the check's parts below follow it). RX_VK_LANES_CHECK=1: every group joined as today, but the submit sequencer's
+/// (stream DECOUPLE) RX_VK_LANES=<K>: a group of segments left pending while the spine goes on (built for one group, any K: lane_prev). RX_VK_LANES_CHECK=1: every group joined as today, but the submit sequencer's
 /// tickets taken and the render conditions' lists rotated as if groups were pending, with the counters logged (all must read 0)
 unsigned lanes_k() {
     static const unsigned v = [] {
         const unsigned k = submit_seq::parse_lanes(getenv("RX_VK_LANES"));
-        if (k) logf("vk: RX_VK_LANES=%u read; the lanes are not built yet: every group is joined as before", k);
+        if (k) logf("vk: RX_VK_LANES=%u: a pending group goes on recording beside the next big command buffer's pre-sync and dry pass "
+                    "(one group: the end of a submission is still joined at the next one's memory work)", k);
         return k;
     }();
     return v;
@@ -3735,7 +3735,7 @@ bool sub_overlap_on() {   // (stream SUB1) RX_VK_SUB_OVERLAP=1: a submission who
 int defer_join_mode() {
     static const int v = [] {
         const char* e = getenv("RX_VK_DEFER_JOIN");
-        const int m = e ? std::clamp(atoi(e), 0, 2) : (sub_overlap_on() ? 2 : 0);
+        const int m = e ? std::clamp(atoi(e), 0, 2) : (sub_overlap_on() || lanes_k() ? 2 : 0);   // (DECOUPLE: the lanes keep groups pending)
         if (m) logf("vk: the join of a big command buffer's segments deferred (RX_VK_DEFER_JOIN=%d): a diagnosis, not for play", m);
         return m;
     }();
@@ -3864,6 +3864,14 @@ void group_lane_close(EarlyGroup& G) {
     if (G.lane_ticket && G.used && G.next_sub >= G.used) lane_finish(G.lane_ticket), G.lane_ticket = 0;
 }
 std::shared_ptr<EarlyGroup> defer_group;   // (replay_mu: the group whose join is pending; null: none)
+// (stream DECOUPLE, RX_VK_LANES) the group that was pending when the next big command buffer began: it goes on recording beside that
+// one's pre-sync and dry pass, and is joined at the dry pass's end, before anything of the next one goes to the queue (or by any
+// join made meanwhile: defer_join_now). lane_next: the group whose segments are out meanwhile (its par_active is kept). replay_mu
+std::shared_ptr<EarlyGroup> lane_prev;
+EarlyGroup* lane_next = nullptr;
+struct LaneStats {   // (replay_mu; logged with the early path's counters)
+    int64_t kept = 0, joined_end = 0, joined_other = 0, wait_ns = 0, none_done = 0;
+} lane_stats;
 enum DeferWhat { kDeferBegin, kDeferSerialRecord, kDeferDry, kDeferFinish, kDeferOther, kDeferWhats };
 // (stream REC1) what made the pending join be made: the places defer_join_now is called from
 enum DeferJoinWhy { kJoinEarlyStart, kJoinSerialPath, kJoinPresyncKick, kJoinMultiSeg, kJoinOcc, kJoinLoopEnd, kJoinSubPend, kJoinWhys };
@@ -3874,11 +3882,11 @@ struct DeferStats {   // (RX_VK_DEFER_JOIN_CHECK, replay_mu)
 } defer_stats;
 /// (stream REC1) a step that changes recording state the pending segments read, run while a join is pending: counted
 void rec_shared_note(RecShared what) {
-    if (defer_group && defer_check_on()) defer_stats.shared[what]++;
+    if ((defer_group || lane_prev) && defer_check_on()) defer_stats.shared[what]++;
 }
 /// A step of the replay thread that runs while a join is pending (RX_VK_DEFER_JOIN_CHECK counts them)
 void defer_check_beside(DeferWhat what) {
-    if (defer_group && defer_check_on()) defer_stats.beside[what]++;
+    if ((defer_group || lane_prev) && defer_check_on()) defer_stats.beside[what]++;
 }
 void early_submit_job(EarlyGroup& G, EarlyJob* j) {   // (a segment, in the queue's order: the caller's)
     if (j->inits < 0) G.init_lost = true;   // (its init command buffer could not be ended: the replay stops, at the join)
@@ -4052,7 +4060,7 @@ void early_join(EarlyGroup& G) {
         replay_fatal("a parallel replay segment's init command buffer could not be ended: new images lost their first layout "
                      "change, and the work after it may use them");
     tl_ev("early-", used);
-    par_active = false;
+    if (lane_next == nullptr || lane_next == &G) par_active = false;   // (DECOUPLE: not under the next group's segments, RX_VK_LANES)
     es_seg_ms += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - G.t_seg0).count();
     es_join_ms += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_join0).count();
     if (wall_fine_on()) rwall.seg_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - G.t_seg0).count(), rwall.big++;
@@ -4141,12 +4149,21 @@ void early_join(EarlyGroup& G) {
              "%.1f), segments after it %.2f ms (%.1f of them), slowest %.2f ms, the replay thread recorded %.2f ms and waited %.2f ms, "
              "the join itself %.2f ms; %lld recorded whole (no boundary reached)", es_dry_ms / 240, es_early_n / 240, es_seg_ms / 240,
              es_segs_n / 240, es_slow_ms / 240, es_self_ms / 240, es_wait_ms / 240, es_join_ms / 240, (long long)es_whole_n);
+        if (lanes_k()) {   // (DECOUPLE, RX_VK_LANES)
+            logf("vk: lanes (RX_VK_LANES=%u): groups kept pending past the next one's start %lld, joined at its dry pass's end %lld (all recorded by "
+                 "then %lld), by another join %lld; the join at the dry pass's end %.3f ms on average",
+                 lanes_k(), (long long)lane_stats.kept, (long long)lane_stats.joined_end, (long long)lane_stats.none_done,
+                 (long long)lane_stats.joined_other, lane_stats.joined_end + lane_stats.joined_other ? lane_stats.wait_ns / 1e6 / (double)(lane_stats.joined_end + lane_stats.joined_other) : 0.0);
+            lane_stats = LaneStats{};
+        }
         es_dry_ms = es_seg_ms = es_segs_n = es_slow_ms = es_wait_ms = es_self_ms = es_early_n = es_join_ms = 0;
         par_stats_log();
     }
 }
 /// The pending join made now (a no-op when none is pending)
+void lane_prev_join(bool at_end);
 void defer_join_now(DeferJoinWhy why) {
+    if (lane_prev) lane_prev_join(false);   // (DECOUPLE: the older group first, in the queue's order)
     if (!defer_group) return;
     if (defer_check_on()) defer_stats.why[why]++;
     const std::shared_ptr<EarlyGroup> g = std::move(defer_group);
@@ -4163,6 +4180,20 @@ void defer_join_now(DeferJoinWhy why) {
         sub_stats.window_ns.fetch_add(std::chrono::steady_clock::now().time_since_epoch().count() - sub_pend_t0, std::memory_order_relaxed);
     }
 }
+/// (DECOUPLE, RX_VK_LANES) the older pending group joined: its segments and nothing after them in the queue
+void lane_prev_join(bool at_end) {
+    if (!lane_prev) return;
+    const std::shared_ptr<EarlyGroup> g = std::move(lane_prev);
+    lane_prev = nullptr;
+    size_t done = 0;
+    for (size_t k = 0; k < g->used; k++) done += g->jobs[k]->done.load(std::memory_order_acquire) ? 1 : 0;
+    if (done == g->used) lane_stats.none_done++;   // (everything recorded already: the join only sends)
+    const int64_t t0 = std::chrono::steady_clock::now().time_since_epoch().count();
+    early_join(*g);
+    lane_stats.wait_ns += std::chrono::steady_clock::now().time_since_epoch().count() - t0;
+    (at_end ? lane_stats.joined_end : lane_stats.joined_other)++;
+    lane_next = nullptr;
+}
 void sub_complete_now() {
     if (sub_pend) defer_join_now(kJoinSubPend);
     else sub_pend_flag.store(false, std::memory_order_release);
@@ -4178,7 +4209,15 @@ const uint8_t* replay_handle_early(VkCommandBuffer& cmd, const uint8_t* h, bool 
                                    bool self_help, mkwvk::segment_plan::Profile& profile, int64_t* total_out, bool* cut,
                                    std::vector<PendingSmall> pre) {
     NvnState& state = *cur_state;
-    defer_join_now(kJoinEarlyStart);   // (stream JOIN1: the pre-sync and the segments' tables are not shared with segments still recording)
+    // (stream JOIN1: the pre-sync and the segments' tables are not shared with segments still recording.) (DECOUPLE, RX_VK_LANES: they are
+    // now, for one group: the pending one, not the end of a submission, goes on beside this one's pre-sync and dry pass, joined at its end)
+    if (lanes_k() && defer_group && !sub_pend && !lane_prev && defer_group->egpu) {
+        lane_prev = std::move(defer_group);
+        defer_group = nullptr;
+        lane_stats.kept++;
+    } else {
+        defer_join_now(kJoinEarlyStart);
+    }
     presync_kick_at = 0;   // (the pre-sync is made here, before the dry pass)
     occ_stop_at = nullptr;
     EarlyWall early_wall;
@@ -4250,7 +4289,11 @@ const uint8_t* replay_handle_early(VkCommandBuffer& cmd, const uint8_t* h, bool 
     G.egpu = egpu;
     std::atomic<bool>& dry_uploaded = G.dry_uploaded;
     Recording* rd = nullptr;
-    if (egpu) {
+    if (lane_prev && early) lane_next = &G;   // (DECOUPLE: its par_active is kept when the older group is joined)
+    if (egpu && lane_prev) {   // (DECOUPLE, RX_VK_LANES: r waits for the older group: it goes at the dry pass's end, in rd's place, and holds every segment till then)
+        G.lane_ticket = lane_take();
+        dry_uploaded.store(true, std::memory_order_release);
+    } else if (egpu) {
         submit_recording(r, false);   // (what came before, its uploads with the pre-sync: ahead of every segment in the queue)
         for (auto& jp : jobs) ts_recseq[jp->r->slot] = rec_seq;   // (RX_VK_TL: shown with r, the recording they follow)
         G.lane_ticket = lane_take();   // (stream DECOUPLE: the group's place, after r and before rd, which follows it unless it goes inside it)
@@ -4324,6 +4367,7 @@ const uint8_t* replay_handle_early(VkCommandBuffer& cmd, const uint8_t* h, bool 
     suspend_ok = false;
     rmode = Mode::Serial;
     seg_early_hook = nullptr;
+    if (lane_prev) lane_prev_join(true);   // (DECOUPLE, RX_VK_LANES: the older group's segments to the queue now, before this one's)
     early_wall.mark(5);
     ub_growing.store(false, std::memory_order_release);   // (nothing is appended from here on)
     const uint8_t* const occ_stop = suspend_at ? nullptr : occ_stop_at;
@@ -4377,7 +4421,12 @@ const uint8_t* replay_handle_early(VkCommandBuffer& cmd, const uint8_t* h, bool 
     *cut = true;
     EarlyJob* last = jobs[open].get();
     last->g.end = stop;
-    if (egpu) {   // (rd, the dry pass's uploads, ahead of every segment not submitted yet; those submitted before it never saw them)
+    if (egpu && !rd) {   // (DECOUPLE, RX_VK_LANES: r held for the older group, which is in the queue now: r, then the held segments)
+        std::lock_guard sl(G.sub_mu);
+        submit_recording(r, false);
+        G.sub_after_rd = true;
+        early_submit_ready(G);
+    } else if (egpu) {   // (rd, the dry pass's uploads, ahead of every segment not submitted yet; those submitted before it never saw them)
         std::lock_guard sl(G.sub_mu);
         lane_finish(rd->lane_ticket, false), rd->lane_ticket = 0;   // (stream DECOUPLE: rd goes inside the group, its place kept by sub_after_rd)
         submit_recording(*rd, false);

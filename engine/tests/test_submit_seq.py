@@ -148,8 +148,21 @@ def main():
     need("G.lane_ticket && G.used && G.next_sub >= G.used" in function(rp, "void group_lane_close(EarlyGroup& G) {"),
          "the group's ticket is finished before every segment it uses is in the queue")
     e = function(rp, "const uint8_t* replay_handle_early(")
-    need(e.index("submit_recording(r, false);") < e.index("G.lane_ticket = lane_take();") < e.index("rd = &begin_recording(rec_cur_value);"),
+    eg = e[e.index("} else if (egpu) {"):]
+    need(eg.index("submit_recording(r, false);") < eg.index("G.lane_ticket = lane_take();") < eg.index("rd = &begin_recording(rec_cur_value);"),
          "the group's ticket is not taken between r and rd")
+    # (RX_VK_LANES: one group pending past the next one's start, joined at that one's dry pass's end, r held for it)
+    need("if (lanes_k() && defer_group && !sub_pend && !lane_prev && defer_group->egpu) {" in e and "defer_join_now(kJoinEarlyStart);" in e,
+         "the pending group is not kept past the next big command buffer's start under RX_VK_LANES only")
+    lane_r = e[e.index("if (egpu && lane_prev) {"):e.index("} else if (egpu) {")]
+    need("submit_recording(" not in lane_r and "dry_uploaded.store(true" in lane_r, "r is sent, or a segment let go, before the older group is in the queue")
+    need(e.index("replay(none, state, h);") < e.index("if (lane_prev) lane_prev_join(true);") < e.index("if (used < 2 + P || !early) {"),
+         "the older group is not joined at the dry pass's end, before anything of this one goes")
+    held = e[e.index("if (egpu && !rd) {"):e.index("} else if (egpu) {   // (rd")]
+    need(held.index("submit_recording(r, false);") < held.index("G.sub_after_rd = true;") < held.index("early_submit_ready(G);"), "r does not go ahead of the held segments")
+    need("if (lane_prev) lane_prev_join(false);" in function(rp, "void defer_join_now(DeferJoinWhy why) {"), "a join leaves the older group pending")
+    need("if (lane_next == nullptr || lane_next == &G) par_active = false;" in function(rp, "void early_join(EarlyGroup& G) {"),
+         "the older group's join turns par_active off under the next group's segments")
     need(e.index("lane_finish(rd->lane_ticket, false), rd->lane_ticket = 0;") < e.index("submit_recording(*rd, false);"),
          "rd, sent inside the group, keeps a ticket of its own")
     need("group_conds_hold(G);" in e and "group_conds_release(G);" in e, "a group does not hold its render conditions' list")

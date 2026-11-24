@@ -36,7 +36,7 @@ def need(cond, why):
 def main():
     rp = (ROOT / "gpu/vk/vk_replay.cpp").read_text(encoding="utf-8")
     m = function(rp, "int defer_join_mode() {")
-    need('getenv("RX_VK_DEFER_JOIN")' in m and "std::clamp(atoi(e), 0, 2) : (sub_overlap_on() ? 2 : 0);" in m, "RX_VK_DEFER_JOIN is not off when unset")
+    need('getenv("RX_VK_DEFER_JOIN")' in m and "std::clamp(atoi(e), 0, 2) : (sub_overlap_on() || lanes_k() ? 2 : 0);" in m, "RX_VK_DEFER_JOIN is not off when unset (on only under RX_VK_SUB_OVERLAP or RX_VK_LANES)")
     need("std::shared_ptr<EarlyGroup> defer_group;" in rp, "the pending group is not on the heap")
     e = function(rp, "const uint8_t* replay_handle_early(")
     need(e.index("defer_join_now(") < e.index("memory_sync_mirrors_before_segments();"), "the pre-sync is made beside pending segments")
