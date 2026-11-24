@@ -22,24 +22,19 @@ other value that depends on another frame, so that nothing waits and frames can 
 5. **Not built**: the lanes themselves (`RX_VK_LANES`, section 4.3 has the recipe). `RX_VK_SUB_OVERLAP` and `RX_VK_ORDER_THREAD` do
    not work together yet (the first is left off when the second is on).
 
-## State (keep current; last edit 24 Nov 22:15, third session DECOUPLE3; see 4.8-4.9 for the latest)
+## State (keep current; last edit 24 Nov 23:35, third session DECOUPLE3; see 4.8-4.9 for the latest)
 
-- **Third session (DECOUPLE3, from 21:25)**: the order thread's load hang (4.8). Build `dec3d` (= `1bf55240d`, the stall watch)
-  queued 21:27 (`E:\OOT\scratch-decouple\build-dec3d.sh`, log `build-dec3d.log`; DECOUPLE2's request had been cancelled in the
-  queue). Ready to run once it exists: `loop3.sh` (as `loop.sh`, plus `AFF=<hex mask>`: the run under that CPU affinity through
-  `aff.py`, children inherit it; `FFF0` = 6 cores of the 7800X3D including the last one, which the host reserves for the replay, as
-  a 6-core PC; `EXTRA=` more ENV; a `hang-<tag>.txt` with the watch lines and the last 60 log lines per start that logged one) and
-  `list-3050-2.txt` (20 order-thread starts on the 3050 with the watch). DECOUPLE3 was stopped at 22:15, while the build ran:
-  the suite under the build lease, 513 passed / 3 known failed (`E:\OOT\scratch-decouple\tests-dec3d.log`); `build-dec3d.sh`
-  runs mkg on to the end and releases its lease by itself (`build rc=` and `DONE` in `build-dec3d.log`). **Next**: when `build
-  rc=0`, send `list-3050-2.txt` to the 3050, and launch `BINNAME=dec3d N=12 AFF=FFF0 TAG=ld3` with `loop3.sh` (a one-line
-  wrapper, through `launch.py`); a `STOP-loop3` file in the scratch folder stops it between starts. Read `hang-*.txt`.
-  Code read so far, no cause proven: in kO1 and mO3 every renderer line stops with the presents, and a guest thread is held
-  ~2 s on a virtual core at that moment (kO1: OptimizeChangeBanc "held 2000 ms at ntdll"; mO3: a vcores wait of 1975 ms).
-  Unbounded waits a game thread or the order thread can reach: `wait_value` (`vkWaitSemaphores` UINT64_MAX; the readback path
-  in `invalidate` when the value is not recorded yet), `ot_wait_until` (fence waits with no timeout, catch-ups, event polls).
-  Lock order seen: sync_order_mu -> replay_mu -> submit_order_mu (resume_queue's capture on the order thread);
-  `rx_nvn_event_signal` and `rx_nvn_texture_created` keep their virtual core while they take renderer locks.
+- **Third session (DECOUPLE3, from 21:25; resumed 23:10)**: the order thread's load hang **found and fixed** (section 4.9):
+  the held present's signal sent the timeline back, and a late fix then waited for good. Fix `cc753074e` (timeline_order.h,
+  tests/test_timeline_order.py: fails before). Build `dec3e` (= `cc753074e` + notes) launched 23:31 (`build-dec3e.sh`, log
+  `build-dec3e.log`, suite first under the lease). `list-3050-3.txt` written: A 20 order-thread starts on dec3e (0 freezes
+  expected), B the on/off fps arms (Kokiri, Hyrule, Market, 3 rounds), C optional: dec3d with `RX_VK_LATE_DEFER=0` (the cycle from
+  the other side). Main PC: dec3d's loop of 12 (`AFF=FFF0`, `loop-dec3d-ld3.log`, the coordinator's) caught nothing in 8 starts
+  that reached play; matrix97 on the 3050 caught 5 in 20. **Next**: suite and build of dec3e (`build rc=0`, `DONE`), tell the
+  coordinator "list ready: dec3e"; on the main PC a loop of 40 starts on dec3e (`BINNAME=dec3e N=40 AFF=FFF0 TAG=ok`, `loop3.sh`)
+  for function (no fps); read `matrix98` (list 3) when it comes; then the default-on proposal as one last commit (section 4.9).
+  Scratch: `aff.py` (a run under a CPU affinity: `FFF0` = 6 of the 7800X3D's cores with the replay's reserved one), `loop3.sh`
+  (as `loop.sh`, plus `AFF=`, `EXTRA=`, `hang-<tag>.txt` per start with a watch line, `STOP-loop3` file to stop).
 
 - **Second session (from 16:40)**, section 4.4: `b49b55244` the submit sequencer, the render conditions per group,
   `RX_VK_LANES_CHECK=1` (build `dec3a`, suite 513 passed / 3 known failed, `E:\OOT\scratch-decouple\tests-dec3a.log`). **The check
@@ -502,3 +497,44 @@ game-bound and has CPU left; the first gate verdict (4.6) was the cold cache's.*
   per-page synced generation instead of `gen_end`, the capture view K deep in play, the order thread's overlap flashes, check runs
   and 3050 rounds): 3-5 days. Stage 4, fewer submissions a frame (`RX_VK_LANE_BATCH`, the replay thread's ~10 ms a frame in the
   driver's queue submits on the 3050): 1-2 days to a first measure.
+
+### 4.9 The load hang named: the held present sent the timeline back, a late fix waited for good (`cc753074e`, build `dec3e`)
+
+**Caught** on the PC 3050 (`E:\OOT\scratch-decoupleÅ0\matrix97.txt`, dec3d, 20 starts of the order thread, 90 s): 5 froze
+(o2, o8, o12, o14 Market, o11 Kokiri: present traces of 40-42 s against 81-82 s), 40 watch lines. In four of them the order thread
+sits in "a late fix (TICK-060)" on a submit job (o2: job value 51598, its done value 51597, 3.1 to 33 s), with a game thread
+(ModuleSystemWorker, SceneLowPriority) in a late fix too; in o11 the order thread is in "present drain" on the present it holds
+(holding 1, 33 s) while two game threads have been in a late fix 2 s longer: the flushes under the queue's lock wait 2 s each for
+the same fix (late_fix_flush_locked, no wait site of its own). Stopped queues 2-4 in all five. No "timed out" line: the late fix's
+waits loop without one.
+
+**The cycle.** (1) The order thread holds a present (value P) until the CPU's signal its frame's stopped work waits for has come
+(PIPE4), and runs the jobs behind it meanwhile, as it must (their work may set the events the stopped queues wait for). Their
+values are above P; their recordings' ends signalled the timeline up to them (finish_recording: done_max, below the oldest stopped
+submission only). (2) The present, recorded later, signalled P itself (do_present: `submit_recording(r)`, its own value whatever
+was sent): a timeline signal below the current value, which a timeline must never get; the driver took it and the timeline went
+back to P. `tl_signal_sent` is a maximum and kept the higher value. (3) A capture taken next whose late pages are written back by
+one of the jobs behind P (late value L, P < L <= the highest sent) passed the deferral rule (RX_VK_LATE_DEFER: L at or below a
+signal already sent) and became a late fix. (4) Every recording is then held behind the fix until L is reached
+(submit_send: late_hold), and the timeline moves on only when a recording's end signals above the old highest value
+(`at > signaled`), which only those held recordings would do. The fix waits for L, L waits for the held recordings, the held
+recordings wait for the fix: for good. Inline (no order thread) presents are recorded in value order and it cannot happen; this is
+why only the order thread froze, at loads, where presents are held (300 holds in 600 frames in kO1's lines).
+The ~2 s stalls of kO1/mO3 (OptimizeChangeBanc "held 2000 ms") are the same thing before it locks: late_fix_flush_locked's 8 x
+250 ms wait under the queue's lock.
+
+**The fix** (`timeline_order.h`, `cc753074e`): the order thread notes the present's value (`ot_held_present`) from the moment it
+takes the present job until the present is recorded; a recording's end signals below it as it does below a stopped submission
+(`timeline_order::signal_at`), so the present's own signal still rises and the jobs behind it are reached by the next recording's
+signal after it. The present never signals at or below the last signal (`signal_moves`; a line if it would: must read 0), and a
+signal below one sent is said ("the timeline went back": must read 0). A capture's late value behind the held present is not
+waited for (nothing reaches it before the present: the take goes on at once as a wait that ran out would, the cap does not learn
+from it; "captures' late pages behind a present the order thread holds" counts them). Safety net, logged, in addition: a late
+fix's wait applies the fix as it is after 2 s ("a late fix's value ... not reached in 2 s"). Tests: `test_timeline_order.py`
+(fails before on the wiring; its sequence goes back without the held present's bound), `test_capture_wait_adapt.py` and
+`test_capture_slot_ownership.py` updated for the new text.
+
+**What it costs.** While a present is held (loads), the values behind it reach the timeline only once it is recorded: a fence wait
+for them goes by the recordings' timeline (wait_recorded, as most do: "path recorded 300"); a wait that needs the timeline waits
+for the present (at most RX_VK_ORDER_SIGNAL_MS, 2 s, as the held present itself). A take whose late pages are behind it keeps the
+submit's copy of them, as a cut wait does (a possible one-frame exposure step during a load). Not measured yet: list-3050-3.
