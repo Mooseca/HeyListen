@@ -152,17 +152,21 @@ def test_edits_find_their_text_in_parts():
 def test_gen_lock():
     with tempfile.TemporaryDirectory(prefix="hookshot-lift-split-") as d:
         gen = os.path.join(d, "sa", "gen")
+        code = ("import sys; sys.path.insert(0, %r); import genlock\n"
+                "with genlock.hold(%r, 'second'): pass\n" % (str(ROOT / "nx2"), gen))
         with genlock.hold(gen, "first"):
             check("the lock file is there", os.path.exists(genlock.lock_path(gen)))
-            code = ("import sys; sys.path.insert(0, %r); import genlock\n"
-                    "with genlock.hold(%r, 'second'): pass\n" % (str(ROOT / "nx2"), gen))
             r = subprocess.run([sys.executable, "-B", "-c", code], capture_output=True, text=True)
-            check("a second writer is refused, naming the holder",
-                  r.returncode != 0 and "held by process %d" % os.getpid() in r.stderr + r.stdout)
-        check("the lock is given back", not os.path.exists(genlock.lock_path(gen)))
-        Path(genlock.lock_path(gen)).write_text("999999999 lift.py since 00:00:00")   # (a process that is gone)
-        with genlock.hold(gen, "third"):
-            check("a dead holder's lock is taken over", genlock.read_holder(genlock.lock_path(gen))[0] == os.getpid())
+            out = r.stderr + r.stdout
+            check("a second live writer is refused, told to wait, not to stop anything",
+                  r.returncode != 0 and "wait for it to end" in out and "stop" not in out.lower().replace("stopped", ""))
+        r = subprocess.run([sys.executable, "-B", "-c", code], capture_output=True, text=True)
+        check("the lock is given back", r.returncode == 0)
+        # (a file a dead process left, with a pid in it that is alive: mine, here, and that of a stranger)
+        for pid in (os.getpid(), os.getppid(), 4):
+            Path(genlock.lock_path(gen)).write_text("%d lift.py since 00:00:00" % pid)
+            r = subprocess.run([sys.executable, "-B", "-c", code], capture_output=True, text=True)
+            check("a stale lock file naming live pid %d is taken over silently" % pid, r.returncode == 0 and not r.stderr)
 
 
 def main():
