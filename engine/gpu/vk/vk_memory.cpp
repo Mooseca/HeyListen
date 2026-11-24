@@ -993,6 +993,10 @@ inline uint32_t page_gen(uint64_t p) {
     return std::max(c ? load_u32(c[p % kChunkPages]) : 0u, load_u32(region_full[p / kRegionPages]));
 }
 uint32_t gen_now = 1;
+// (DECOUPLE) the newest generation taken for the CPU's writes (a collection, a capture's take, the lazy write-back's flush stamps): a
+// submission ended after its handoff (RX_VK_SUB_OVERLAP) is current as of gen_now, its own GPU writes stamped meanwhile included,
+// unless one of these came between (see end_submission_impl)
+uint32_t gen_cpu_last = 0;
 uint64_t pages_collected = 0;
 // (ported from Longshot 95475b67, #1083) memory_collect_written takes every page's write mark, then marks the pages in the captured
 // ranges again for the next capture. A submit's capture made on the game's thread in between (capture_make's scan) found those
@@ -1043,6 +1047,7 @@ void memory_collect_written() {
         n = host->collect_written(&pages);
         if (n > 0) {
             const uint32_t g = ++gen_now;
+            gen_cpu_last = g;
             // (the captured ranges once a call: a lock, a pool-list refresh and three searches for every dirty page cost the
             // replay thousands of lock cycles a submit, the cost that retired gpu_pages' lock below)
             const auto& owned = capture_ranges_merged();
@@ -4146,6 +4151,7 @@ bool take_capture(std::unique_ptr<Capture> c, uint64_t value, uint64_t completed
     const bool split = stamp_split_on() && copy_helper_count() > 0 && c->pages.size() >= 1024;
     if (!c->pages.empty()) {
         g = ++gen_now;
+        gen_cpu_last = g;
         if (!split) {
             const auto ts0 = std::chrono::steady_clock::now();
             for (uint32_t p : c->pages) stamp_page(p, g);
@@ -8868,7 +8874,7 @@ void memory_wb_flush_queue() {
             for (uint64_t page = (p->lo + lo) >> kPageShift; page < (p->lo + hi + 4095) >> kPageShift; page++) {
                 const CapEntry e = cap_entry(page);
                 if (!e.gen || e.gen != page_gen(page)) continue;
-                if (!g) g = ++gen_now;
+                if (!g) g = ++gen_now, gen_cpu_last = g;
                 stamp_page(page, g);
             }
         }
@@ -9624,7 +9630,11 @@ void end_submission_impl(VkCommandBuffer cmd, MemSub& sub) {
     wbl_orphans_record(cmd);   // (WBL1: pools whose mirror was given back above held pages put off)
     // (what this submission synced is current as of now: the GPU's own writes, stamped while it was recorded, are
     // in the mirror and written back; CPU writes collected at the next submission get a newer generation)
-    for (Pool* p : sub.synced) p->synced_gen = sub.gen_end ? sub.gen_end : gen_now;
+    // (DECOUPLE: a submission ended after its handoff is current as of gen_now too when no CPU write was taken since the handoff: the
+    // pages its own segments' GPU writes stamped after it are in the mirror. With gen_end alone the next submission's syncs copied them
+    // all again from guest memory: 10.4 MB a submission instead of 0.13, PC 3050 Kokiri 58 -> 30 fps, matrix81 kA/kB)
+    const uint32_t end_gen = sub.gen_end && gen_cpu_last > sub.gen_end ? sub.gen_end : gen_now;
+    for (Pool* p : sub.synced) p->synced_gen = end_gen;
     sub.synced.clear();
     if (&sub == sub_cur.get()) mirror_upload = false;   // (a submission that ends after the next began leaves its recording state)
 }

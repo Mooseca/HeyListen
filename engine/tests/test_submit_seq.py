@@ -184,6 +184,12 @@ def main():
     need("ot_end_sent(sub_pend_value);" in function(rp, "void defer_join_now(DeferJoinWhy why) {"), "a join does not release the done marks")
     need(rp.count("sub_pend_value_a.store(value, std::memory_order_release);") == 2, "a pending submission's value is not published for the order thread")
     need("G.sub_value = value;" in function(rp, "void finish_recording_deferred(uint64_t value) {"), "the group does not know its submission's value")
+    mem = (ROOT / "gpu/vk/vk_memory.cpp").read_text(encoding="utf-8")
+    need("const uint32_t end_gen = sub.gen_end && gen_cpu_last > sub.gen_end ? sub.gen_end : gen_now;" in mem
+         and "for (Pool* p : sub.synced) p->synced_gen = end_gen;" in mem,
+         "a submission ended after its handoff leaves its own GPU writes to be synced again (RX_VK_SUB_OVERLAP: 10 MB a submission)")
+    need(mem.count("gen_cpu_last = g;") == 2 and "if (!g) g = ++gen_now, gen_cpu_last = g;" in mem,
+         "a generation taken for the CPU's writes is not noted (collection, capture's take, lazy flush)")
     print("PASS the wiring")
 
 
