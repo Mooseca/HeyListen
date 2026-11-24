@@ -102,8 +102,17 @@ PIPE4 (lease name `pipe4`, scratch `E:\OOT\scratch-pipe4`, scripts `build/s5/pip
 - `p4t5-on` (slot a 10:37-10:42, cut after it again for the owner's second window, released 10:42:51): 0 flashes, 1 present forced,
   but the game ended before the fourth warp (Market, Field, Kakariko only; as `p4t1-on`, cause not found, rc 0). The order thread's
   backlog on these tours (20-125 jobs on average, up to 891) is the same on pipe3b's `p3t-on` (22-176, up to 1336): not this fix's.
-- Queued (`s5.sh`, `s5.log`): `p4t6-on`, `p4t7-on` in slot b (the owner holds slot a), then the fps gate on pipe4c
-  (`build/s5/pipe4/gate.sh pipe4c p4g`, one speed lease, slot c; table `python -I E:/OOT/scratch-pipe4/tmp/gate.py p4g`).
+- `p4t6-on`, `p4t7-on` (pipe4c, slot b 11:20-11:29): the game reached play 143 s after its start (a loaded machine), so a 200 s
+  run ended before the warps (Market only / Market and Kakariko); tours now run 300 s (`RUNS`, `LIMS` in `tour.sh`). `p4t6-on` had
+  one flash with no forced present: 1669, 160 cells, peak 84, the Market gate's shade and ground darker for a frame
+  (`shots\p4t6-on\flash_1669_{a,b}.png`) - the late-read class.
+- Fix for that class `0550f3d22` (pipe4d): with the order thread, `memory_collect_written` at the replay stamps pages the game wrote
+  after the submit, so a read as submitted found the capture entry stale and took guest memory (the next frame's). For a page made
+  stale by a CPU write the capture's copy is now taken (the write came after the submission); a page whose newest stamp is a GPU
+  write-back still reads guest memory (a GPU stamp generation per page and region, kept with the order thread only).
+  `RX_VK_ORDER_READ_CAPTURE=0`: as before. Texture storage (`memory_as_submitted`) is unchanged.
+- Queued (`s6.sh`, `s6.log`): build pipe4d with the tests, tours `p4t8-on`, `p4t9-on`, `p4t9-off`, then the fps gate on pipe4d
+  (`build/s5/pipe4/gate.sh pipe4d p4g`, one speed lease, slot c; table `python -I E:/OOT/scratch-pipe4/tmp/gate.py p4g`).
 
 Where it stands: the three tasks of the brief are done and measured. (1) The present thread works and is safe, but **the gate that
 keeps the GPU's order takes the present's serial part back into the chain** (Kokiri 0.47-0.51 ms a frame, chain 7.76 against 7.79):
