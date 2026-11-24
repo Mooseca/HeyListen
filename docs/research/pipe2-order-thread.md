@@ -24,13 +24,14 @@
    adds stutters" is not reproduced.
 4. **The flashes are not fixed.** The tour (01:48-01:56): 0 flashes off, **2 on** (presents 7268 and 7432, whole-screen dark
    differences, peak 225; PIPE2's were small ground patches), the meter 12 / 352 / 1171 / 2000 (the last window frozen, both arms).
-   The counters say where the reads that can do it are (section 9): 45,568 texture pages read with no copy of their own
-   submission's capture, 15,837 re-upload pages still read from guest memory, 357,929 first-upload pages by design (issue 66) - all
-   reads that take the frame after the submission's under the order thread. A re-upload now takes the newest copy up to its submit
-   (76,138 pages over the tour) and the flashes stayed. What a fix needs is PIPE1's stage 2 (a view per submission): the shadow
-   keeps one copy per page, so a page written after the submit and re-taken since has no as-of-submit copy to read. The replay's
-   other reads are counted too: 192,000 of 5.5 M in Kokiri and 5,632 of 140,000 in the Market took guest memory for a page written
-   after its capture's copy.
+   The counters say where the reads that can do it are (section 9): 45,568 texture pages whose shadow copy was not their
+   submission's own (the split into "no capture of its own" and "a later capture's copy" was added after `pipe3b` was built, so the
+   tour's number is the two together), 15,837 re-upload pages still read from guest memory, 357,929 first-upload pages by design
+   (issue 66) - all reads that take the frame after the submission's under the order thread. A re-upload now takes the newest copy
+   up to its submit (76,138 pages over the tour) and the flashes stayed. What a fix needs is PIPE1's stage 2 (a view per
+   submission): the shadow keeps one copy per page, so a page written after the submit and re-taken since has no as-of-submit copy
+   to read. The replay's other reads are counted too: 192,000 of 5.5 M in Kokiri and 5,632 of 140,000 in the Market took guest
+   memory for a page written after its capture's copy.
 
 ## Summary (PIPE2, end of the gate series; 23 Nov 23:05)
 
@@ -521,14 +522,14 @@ the on arm **2 flashes** (5 maps): presents 7268 (`686 of 2304 cells, peak 225, 
 (the last window frozen, as the off arm's was: the zone-change rule, unchanged). So the flashes are not fixed by the re-upload
 change.
 
-What the counters say about them: the on arm's tour had 45,568 texture pages read with *no copy of their own submission's capture*
-(`own` 0), 76,138 re-upload pages served from an *earlier* copy (the new rule), 15,837 re-upload pages still read from guest memory,
-and 357,929 first-upload pages read from guest memory by design (issue 66). The flashes are whole-screen: a 2368x2368 texture's
-storage rewritten for the next frame and read a frame late fits that (one texture's re-upload covers the screen), and the reads
-that take guest memory (either kind) are the only ones that can do it. **Not settled**: the counter that says "a later capture had
-taken the page" was written before I noticed `own == 0` makes it trivially true; it is split now (own empty / a real later copy),
-and the next tour will say which of the two classes carries the flash. A fix for either needs the per-submission view PIPE1's stage
-2 describes: the shadow keeps one copy per page, so a page written after the submit and re-taken since has no as-of-submit copy to
-read.
+What the counters say about them: the on arm's tour had 45,568 texture pages whose shadow copy was not their submission's own (the
+counter did not yet split "no capture of its own" from "a later capture's copy": that split is in the tree after `pipe3b`), 76,138
+re-upload pages served from an *earlier* copy (the new rule), 15,837 re-upload pages still read from guest memory, and 357,929
+first-upload pages read from guest memory by design (issue 66). The flashes are whole-screen (686 and 1606 of 2304 cells), which fits
+one big texture read a frame late (the tour's log has 2368x2368 storage re-uploaded), and the reads that take guest memory (either
+kind) are the only ones that can do it. **Not settled**: the counter that says "a later capture had taken the
+page" was written before I noticed `own == 0` makes it trivially true; it is split now (own empty / a real later copy), and the next
+tour will say which of the two classes carries the flash. A fix for either needs the per-submission view PIPE1's stage 2 describes:
+the shadow keeps one copy per page, so a page written after the submit and re-taken since has no as-of-submit copy to read.
 
 ## Dead ends
