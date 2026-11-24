@@ -41,6 +41,7 @@
 #include "import_reach.h"
 #include "sparse_queue.h"    // (Linux, issue 14: the pools' sparse binds, udmabuf's limit)
 #include "capture_merge.h"    // (TICK-043: the capture copied ahead)
+#include "cap_view.h"         // (DECOUPLE: the capture view of a submission, several captures deep, RX_VK_CAP_DEPTH)
 #include "mirror_inherit.h"   // (TICK-036 / #1127: what a new mirror takes from the retired pools' mirrors)
 #include "msync_diff.h"       // (TICK-048: the mirror syncs' diff)
 #include "wb_pool_eager.h"
@@ -155,6 +156,7 @@ std::atomic<int64_t> st_rec_value_diff{0}, st_rec_epoch_diff{0}, st_rec_reads{0}
 thread_local uint32_t tl_cap_limit = 0;
 thread_local MemSub* tl_sub = nullptr;
 std::atomic<uint32_t> cap_latest{0};   // (the newest capture kept: what memory_view() gives a group, and what a worker with a lower limit is behind)
+std::atomic<int64_t> st_sub_cap_lost{0};   // (DECOUPLE: a worker's view deeper than the history kept, cap_view.h)
 std::atomic<int64_t> st_sub_cap_reads{0}, st_sub_cap_newer{0}, st_sub_pool_checks{0}, st_sub_pool_newer{0}, st_sub_list_adds{0}, st_sub_list_other{0};
 bool rec_check_on() {
     static const bool v = getenv("RX_VK_REC_OVERLAP_CHECK") && atoi(getenv("RX_VK_REC_OVERLAP_CHECK")) != 0;
@@ -1257,14 +1259,22 @@ inline bool cap_entry_late(uint64_t page) {
 // where a recording may begin beside the workers of the one before (RX_VK_SUB_OVERLAP) or the check runs; a worker whose limit (the newest
 // capture its group saw at its begin, tl_cap_limit) is below the entry reads the previous one, or guest memory where there is none.
 // A page taken by two captures past a worker's limit has lost its entry: Stage B joins a submission before the capture after the next
+// (DECOUPLE, RX_VK_CAP_DEPTH=<1..4>, default 1: as SUB1) the replaced entries are kept that many deep, newest first (cap_view.h): with the
+// segments of several submissions recording at once a page may be taken by more than one capture past a worker's limit
 bool cap_prev_on();
-std::vector<std::unique_ptr<CapEntry[]>> cap_prev;
+unsigned cap_depth() {
+    static const unsigned v = cap_view::parse_depth(getenv("RX_VK_CAP_DEPTH"));
+    return v;
+}
+std::vector<std::unique_ptr<cap_view::Entry[]>> cap_prev;   // (cap_depth() entries a page)
 inline void cap_prev_chunk(uint64_t c) {
     if (c >= cap_prev.size()) cap_prev.resize(c + 1);
-    if (!cap_prev[c]) {
-        cap_prev[c].reset(new CapEntry[kCapChunkPages]);
-        std::memset(cap_prev[c].get(), 0, kCapChunkPages * sizeof(CapEntry));
-    }
+    if (!cap_prev[c]) cap_prev[c].reset(new cap_view::Entry[kCapChunkPages * cap_depth()]());
+}
+/// The page's entry is about to be replaced: it joins the page's history (cap_prev_chunk(page / kCapChunkPages) made)
+inline void cap_prev_push(uint64_t page) {
+    const CapEntry was = cap_table[page / kCapChunkPages][page % kCapChunkPages];
+    cap_view::push(&cap_prev[page / kCapChunkPages][(page % kCapChunkPages) * cap_depth()], cap_depth(), cap_view::Entry{was.gen, was.slot});
 }
 inline void cap_entry_set(uint64_t page, CapEntry e) {
     const uint64_t c = page / kCapChunkPages;
@@ -1275,16 +1285,9 @@ inline void cap_entry_set(uint64_t page, CapEntry e) {
     }
     if (cap_prev_on()) {
         cap_prev_chunk(c);
-        cap_prev[c][page % kCapChunkPages] = cap_table[c][page % kCapChunkPages];
+        cap_prev_push(page);
     }
     cap_table[c][page % kCapChunkPages] = e;
-}
-inline CapEntry cap_entry_prev(uint64_t page) {
-    const uint64_t c = page / kCapChunkPages;
-    if (c >= cap_prev.size() || !cap_prev[c]) return {0, 0};
-    CapEntry e = cap_prev[c][page % kCapChunkPages];
-    e.slot &= ~kCapLateBit;
-    return e;
 }
 /// The page's entry as the submission the calling thread records saw it: the newest, or (a worker whose limit is below it) the one before
 /// it, or none. *old: the entry is the one before, whose validity is not the page's current generation's (it was valid when it was replaced)
@@ -1295,9 +1298,12 @@ inline CapEntry cap_entry_view(uint64_t page, bool* old) {
     if (rec_check_on()) st_sub_cap_reads.fetch_add(1, std::memory_order_relaxed);
     if (!tl_cap_limit || e.gen <= tl_cap_limit) return e;
     if (rec_check_on()) st_sub_cap_newer.fetch_add(1, std::memory_order_relaxed);
-    const CapEntry p = cap_entry_prev(page);
-    if (p.gen && p.gen <= tl_cap_limit) return *old = true, p;
-    return {0, 0};
+    const uint64_t c = page / kCapChunkPages;
+    if (c >= cap_prev.size() || !cap_prev[c]) return {0, 0};
+    bool lost = false;
+    const cap_view::Entry p = cap_view::pick(cap_view::Entry{e.gen, e.slot}, &cap_prev[c][(page % kCapChunkPages) * cap_depth()], cap_depth(), tl_cap_limit, old, &lost);
+    if (lost && rec_check_on()) st_sub_cap_lost.fetch_add(1, std::memory_order_relaxed);
+    return {p.gen, p.slot & ~kCapLateBit};
 }
 // (each kept capture's copy on the GPU, by its generation)
 struct CapHash { std::vector<uint64_t> h; std::vector<uint8_t> ok; };   // (TICK-060: a kept capture's slot hashes, see Capture)
@@ -3666,7 +3672,7 @@ void memory_recording_thread_end() {
 }
 MemSubCheck memory_sub_check() {
     MemSubCheck c;
-    c.cap_reads = st_sub_cap_reads.load(), c.cap_newer = st_sub_cap_newer.load();
+    c.cap_reads = st_sub_cap_reads.load(), c.cap_newer = st_sub_cap_newer.load(), c.cap_lost = st_sub_cap_lost.load();
     c.pool_checks = st_sub_pool_checks.load(), c.pool_newer = st_sub_pool_newer.load();
     c.list_adds = st_sub_list_adds.load(), c.list_other = st_sub_list_other.load();
     return c;
@@ -3964,7 +3970,7 @@ void stamp_split_chunk(void* ctx, int64_t i0, int64_t i1) {
         } else {
             const size_t j = (size_t)i - w.n;
             const uint64_t page = w.copied[j];
-            if (cap_prev_on()) cap_prev[page / kCapChunkPages][page % kCapChunkPages] = cap_table[page / kCapChunkPages][page % kCapChunkPages];
+            if (cap_prev_on()) cap_prev_push(page);
             cap_table[page / kCapChunkPages][page % kCapChunkPages] = CapEntry{w.g, w.slots[j] | (w.late[w.slots[j]] ? kCapLateBit : 0u)};
         }
     }

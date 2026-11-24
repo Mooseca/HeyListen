@@ -3987,9 +3987,10 @@ void early_join(EarlyGroup& G) {
                  "value %lld, epoch %lld", (long long)rd, (long long)vd, (long long)ed);
             const MemSubCheck sc = memory_sub_check();   // (stream SUB1)
             logf("vk: DEFER_JOIN_CHECK: per submission (SUB1): capture entries read by segment workers %lld, of them newer than the worker's submission %lld; "
-                 "pool sync checks %lld, of them a pool synced by a later submission %lld; list additions %lld, to a list that is not the current one %lld",
+                 "pool sync checks %lld, of them a pool synced by a later submission %lld; list additions %lld, to a list that is not the current one %lld; "
+                 "views deeper than the capture history kept (RX_VK_CAP_DEPTH) %lld",
                  (long long)sc.cap_reads, (long long)sc.cap_newer, (long long)sc.pool_checks, (long long)sc.pool_newer, (long long)sc.list_adds,
-                 (long long)sc.list_other);
+                 (long long)sc.list_other, (long long)sc.cap_lost);
             if (sub_overlap_on()) {
                 const int64_t h = sub_stats.handoffs.load();
                 logf("vk: SUB_OVERLAP_CHECK: %lld submissions handed off with their last segments pending; their ends sent by a worker %lld, by the replay thread %lld; "
