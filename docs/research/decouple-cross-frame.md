@@ -179,5 +179,5 @@ was found where it pays alone.
 Nothing in the stages. One risk it points at, not measured yet: lanes add no CPU. On 16 Nov the 3050's threads ran 74-83 ms of CPU a
 frame in Kokiri and Hyrule (`frame-truth.md`: 3.4 cores at 21.6-24.3 ms frames); at the 12.8-13.3 ms the lanes aim at that is 5.6-6.5
 cores of a 6-core, 12-thread CPU. If the CPU is that full, the summed cost of the preparation (not its place on the chain) becomes
-the limit, and MEMO1's section 5 (the texture resolution kept per thread, the program pick, same-frame duplicates: 0.5-1.3 ms summed
-gains each) is where to look. To settle before stage 2: one PC 3050 run at the default ini with `HOS_THREAD_TIMES=5`.
+the limit, and MEMO1's section 5 (the texture resolution kept per thread, the program pick, same-frame duplicates: estimated there at
+0.2-0.5, 0.2-0.4 and 0.1-0.4 ms of the 5070's critical path, none built) is where to look. To settle before stage 2: one PC 3050 run at the default ini with `HOS_THREAD_TIMES=5`.
