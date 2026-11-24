@@ -281,6 +281,7 @@ void memory_recording_check(int64_t* reads, int64_t* value_diff, int64_t* epoch_
 /// (stream SUB1, RX_VK_REC_OVERLAP_CHECK) reads and uses by workers of what a later submission replaced: all 0 with no recording beside another
 struct MemSubCheck {
     int64_t cap_lost = 0;   // (DECOUPLE: views deeper than the capture history kept, RX_VK_CAP_DEPTH)
+    int64_t pool_lost = 0;  // (DECOUPLE: pool sync checks whose submission's pair fell out: synced twice since)
     int64_t cap_reads = 0, cap_newer = 0, pool_checks = 0, pool_newer = 0, list_adds = 0, list_other = 0;
 };
 MemSubCheck memory_sub_check();

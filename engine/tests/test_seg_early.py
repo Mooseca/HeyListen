@@ -56,7 +56,7 @@ def main():
     i = rep.index("par_conds.push_back(cr);")
     need("UbGrowGuard ug;" in rep[i - 200:i] and "par_conds.size() == par_conds.capacity()" in rep[i - 200:i],
          "the dry pass moves par_conds' buffer unguarded")
-    i = rep.index("if (cond_at < par_conds_n.load(std::memory_order_acquire)) {")
+    i = rep.index("if (cond_at < cl.n.load(std::memory_order_acquire)) {")   # (DECOUPLE: the worker's group's list, conds_r())
     need("UbReadGuard ug;" in rep[i - 200:i], "a worker reads a render condition unguarded")
     i = rep.index("par_points.push_back({p + h.size, s, ub_end(), par_conds.size(), dry_work});")
     need("if (seg_early_hook) seg_early_hook->on_point(par_points.back());" in rep[i:i + 300], "the hook is not called after a point")

@@ -54,6 +54,7 @@
 #include "segment_plan.h"   // (TICK-050: the parallel replay's segment count)
 #include "completion_tracker.h"   // (stream ORDER2: the recordings' completion tracked off the order thread)
 #include "feed_stats.h"           // (stream ORDER3: why the GPU sat idle between recordings)
+#include "submit_seq.h"           // (stream DECOUPLE: the lanes' submit sequencer, RX_VK_LANES / RX_VK_LANES_CHECK)
 #include "vk_jobs.h"
 #include "storm_hold.h"
 #include "vk_shader.h"
@@ -353,6 +354,7 @@ struct Recording {
     mkwvk::completion::Slot comp;   // (stream ORDER2, RX_VK_COMPLETION_THREAD: the submit numbers; see comp_submit)
     bool comp_tracked = false;      // (its last submit was handed to the completion thread: its fence is waited for and reset there)
     uint64_t chk_seq = 0;           // (RX_VK_COMPLETION_CHECK: the recordings' timeline value its submit signals, 0: none known)
+    uint64_t lane_ticket = 0;       // (stream DECOUPLE, RX_VK_LANES / RX_VK_LANES_CHECK: its submit sequencer ticket, taken when begun; 0: none)
 };
 // (24: the event waits cut a frame's command buffers into pieces, each with recordings of its own, and with 16 the
 // replay waited ~1.5 ms a frame for a slot the GPU still had)
@@ -1311,6 +1313,8 @@ void gpu_time_segment_submitted(const Recording& r) {
     ts_seq_submitted++;
 }
 
+uint64_t lane_take();                            // (stream DECOUPLE: the submit sequencer's, below)
+void lane_finish(uint64_t t, bool sent = true);
 /// The next recording slot, begun, for the submission that will signal value
 Recording& begin_recording(uint64_t value) {
     Recording& r = recordings[recording_index];
@@ -1335,6 +1339,7 @@ Recording& begin_recording(uint64_t value) {
     gpu_time_begin(r);
     gprof_begin_recording(r.slot, r.cmd, r.upload);
     r.value = value;
+    r.lane_ticket = lane_take();   // (stream DECOUPLE: its place in the stream, the spine's order)
     const uint64_t done = completed();
     memory_recording_value(value, done);
     {   // (longshot 7daafa7a, #1553; RX_VK_WRITE_HISTORY) loads submit for many seconds between presents: the writes the GPU has finished are published every 32 recordings too
@@ -1453,6 +1458,7 @@ void submit_send(SubmitPrep& P) {
     si.pSignalSemaphoreInfos = nsig ? signals : nullptr;
     if (batch_tl == VK_NULL_HANDLE) late_fix_wait_unlocked();   // (TICK-060: nothing can be held without the batch semaphore)
     std::lock_guard lk(dev.present_mu);   // (one queue: submits and presents take turns)
+    lane_finish(r.lane_ticket), r.lane_ticket = 0;   // (stream DECOUPLE: its place in the queue is taken here)
     // (TICK-060, RX_VK_LATE_DEFER) a late fix pending: held with the batched ones until its value is reached (the fix thread
     // sends them then); one already reached is applied here
     bool late_hold = false;
@@ -1667,10 +1673,75 @@ struct CondRes {
     uint64_t gate, at;
     uint8_t on;
 };
-std::vector<CondRes> par_conds;            // (the render conditions' results, in stream order: the dry pass's)
-// (HeyListen) how many of par_conds are written, for the workers' reads: the dry pass appends while early segments read
-// (RX_VK_SEG_EARLY), and a worker reads this count, never the vector's own size, which an append changes as it reads
-std::atomic<size_t> par_conds_n{0};
+// (the render conditions' results, in stream order: the dry pass's; v below). (HeyListen) n: how many of v are written, for the
+// workers' reads: the dry pass appends while early segments read (RX_VK_SEG_EARLY), and a worker reads this count, never the
+// vector's own size, which an append changes as it reads
+struct CondList {
+    std::vector<CondRes> v;
+    std::atomic<size_t> n{0};
+};
+// (stream DECOUPLE, RX_VK_LANES / RX_VK_LANES_CHECK: the render conditions per group) a big command buffer's group reads the list
+// its dry pass wrote (EarlyGroup::conds, set into tl_conds by its workers); a dry pass that begins while a group still holds the
+// writer's list takes the next free one of the ring. With both switches off the writer's list is always the first: as before
+constexpr int kCondLists = 1 + (int)submit_seq::kMaxLanes;
+CondList cond_lists[kCondLists];
+std::atomic<int> cond_list_held[kCondLists];   // (the groups holding each list, from their creation to their join)
+CondList* conds_w = &cond_lists[0];            // (the dry pass's: the replay thread's)
+thread_local CondList* tl_conds = nullptr;     // (a segment's worker: its group's list; null: the writer's)
+inline CondList& conds_r() { return tl_conds ? *tl_conds : *conds_w; }
+#define par_conds (conds_w->v)
+#define par_conds_n (conds_w->n)
+/// (stream DECOUPLE) RX_VK_LANES=<K>: up to K submissions' groups of segments pending while the spine goes on (not built yet: read,
+/// logged, and only the check's parts below follow it). RX_VK_LANES_CHECK=1: every group joined as today, but the submit sequencer's
+/// tickets taken and the render conditions' lists rotated as if groups were pending, with the counters logged (all must read 0)
+unsigned lanes_k() {
+    static const unsigned v = [] {
+        const unsigned k = submit_seq::parse_lanes(getenv("RX_VK_LANES"));
+        if (k) logf("vk: RX_VK_LANES=%u read; the lanes are not built yet: every group is joined as before", k);
+        return k;
+    }();
+    return v;
+}
+bool lanes_check_on() {
+    static const bool v = [] {
+        const bool on = getenv("RX_VK_LANES_CHECK") && atoi(getenv("RX_VK_LANES_CHECK")) != 0;
+        if (on) logf("vk: the lanes' check is on (RX_VK_LANES_CHECK): submit tickets and per-group condition lists as if pending");
+        return on;
+    }();
+    return v;
+}
+bool lanes_seq_on() { return lanes_k() != 0 || lanes_check_on(); }
+struct LaneCheck {   // (RX_VK_LANES / RX_VK_LANES_CHECK: the sequencer and the check's counters; seq under mu)
+    std::mutex mu;
+    submit_seq::Sequencer seq;
+    std::atomic<int64_t> cond_rotations{0}, cond_held{0}, groups{0}, groups_dropped{0}, ready_left{0};
+} lane_chk;
+uint64_t lane_take() {
+    if (!lanes_seq_on()) return 0;
+    std::lock_guard lk(lane_chk.mu);
+    return lane_chk.seq.take();
+}
+/// The unit's ticket finished (sent: counted out of order when one before it is open) or dropped; 0: none taken
+void lane_finish(uint64_t t, bool sent) {
+    if (!t) return;
+    std::lock_guard lk(lane_chk.mu);
+    if (sent) lane_chk.seq.finish(t);
+    else lane_chk.seq.drop(t);
+}
+/// A dry pass's list: with the lanes or their check, the next one of the ring that no group holds (a group pending keeps its own)
+void conds_rotate() {
+    if (!lanes_seq_on()) return;
+    const int at = (int)(conds_w - cond_lists);
+    for (int i = 1; i <= kCondLists; i++) {
+        const int k = (at + i) % kCondLists;
+        if (cond_list_held[k].load(std::memory_order_acquire) == 0) {
+            conds_w = &cond_lists[k];
+            lane_chk.cond_rotations.fetch_add(1, std::memory_order_relaxed);
+            return;
+        }
+    }
+    lane_chk.cond_held.fetch_add(1, std::memory_order_relaxed);   // (every list held: the check's "list lost"; this one is cleared under its readers)
+}
 // (HeyListen) RX_VK_GROW_LOCK_PLAIN=1: the dry pass's appends while segments are out as before: every render condition's
 // result takes ub_grow_mu, and an append waits for the lock among the workers' reads (UbGrowGuard). Off (the default): a
 // condition's result takes it only when it moves par_conds' buffer (par_conds_reset reserves room: never in play), and a
@@ -1683,6 +1754,7 @@ bool grow_lock_plain() {
 constexpr size_t kCondRoom = 8192;
 void par_conds_reset() {
     rec_shared_note(kRsCondsReset);
+    conds_rotate();   // (RX_VK_LANES / RX_VK_LANES_CHECK: a list of its own for each group; off: the same one)
     par_conds.clear();
     if (par_conds.capacity() < kCondRoom) par_conds.reserve(kCondRoom);
     par_conds_n.store(0, std::memory_order_release);
@@ -2831,8 +2903,9 @@ void replay(VkCommandBuffer& cmd, NvnState& s, const uint8_t* p, const uint8_t* 
         case NOP_RENDER_COND: {   // (read on the CPU for now; VK_EXT_conditional_rendering later)
             if (worker) {   // (as the dry pass found it, with the reports before it written and none after)
                 UbReadGuard ug;   // (TICK-056: par_conds may grow meanwhile, RX_VK_SEG_EARLY)
-                if (cond_at < par_conds_n.load(std::memory_order_acquire)) {
-                    const CondRes& c = par_conds[cond_at];
+                CondList& cl = conds_r();   // (DECOUPLE: its group's list)
+                if (cond_at < cl.n.load(std::memory_order_acquire)) {
+                    const CondRes& c = cl.v[cond_at];
                     s.render_enabled = c.on != 0;
                     gate_cur = c.gate;
                 } else {
@@ -3407,14 +3480,15 @@ void gate_segment_begin(VkCommandBuffer cmd, const Segment& g) {
     uint64_t lo = UINT64_MAX, hi = 0;
     {
         UbReadGuard ug;
-        const size_t n = par_conds_n.load(std::memory_order_acquire);
+        const CondList& cl = conds_r();   // (DECOUPLE: the segment's group's list)
+        const size_t n = cl.n.load(std::memory_order_acquire);
         const auto take = [&](uint64_t gate) {
             if (!gate || gate - 1 >= g.serial) return;   // (a proxy of this segment: no copy before it can hold it; drawn)
             lo = std::min(lo, gate - 1), hi = std::max(hi, gate);
         };
-        if (g.cond > 0 && g.cond - 1 < n) gate_cur = par_conds[g.cond - 1].gate;
+        if (g.cond > 0 && g.cond - 1 < n) gate_cur = cl.v[g.cond - 1].gate;
         take(gate_cur);
-        for (size_t i = g.cond; i < n && par_conds[i].at < g.serial_end; i++) take(par_conds[i].gate);
+        for (size_t i = g.cond; i < n && cl.v[i].at < g.serial_end; i++) take(cl.v[i].gate);
     }
     if (hi > lo) occ_gate_segment(cmd, lo, hi);
 }
@@ -3672,7 +3746,8 @@ bool defer_check_on() {
         const char* e = getenv("RX_VK_DEFER_JOIN_CHECK");
         const char* e2 = getenv("RX_VK_REC_OVERLAP_CHECK");   // (stream REC1: the same check, named for the overlap)
         const char* e3 = getenv("RX_VK_SUB_OVERLAP_CHECK");   // (stream SUB1: the same check, and the submission overlap's counters)
-        const bool on = (e && atoi(e) != 0) || (e2 && atoi(e2) != 0) || (e3 && atoi(e3) != 0);
+        const char* e4 = getenv("RX_VK_LANES_CHECK");         // (stream DECOUPLE: the same check, and the lanes' counters)
+        const bool on = (e && atoi(e) != 0) || (e2 && atoi(e2) != 0) || (e3 && atoi(e3) != 0) || (e4 && atoi(e4) != 0);
         if (on) logf("vk: the recording-overlap check is on (RX_VK_DEFER_JOIN_CHECK / RX_VK_REC_OVERLAP_CHECK)");
         return on;
     }();
@@ -3768,7 +3843,23 @@ struct EarlyGroup {
     uint64_t tail_value = 0;
     std::atomic<bool> tail_set{false};
     bool tail_sent = false;   // (sub_mu)
+    // (stream DECOUPLE, RX_VK_LANES / RX_VK_LANES_CHECK) the render conditions its segments read (its dry pass's list, held from the
+    // group's creation to its join: group_conds_hold), and its submit sequencer ticket (finished when its last segment is in the queue; sub_mu)
+    CondList* conds = nullptr;
+    uint64_t lane_ticket = 0;
 };
+void group_conds_hold(EarlyGroup& G) {
+    G.conds = conds_w;
+    if (lanes_seq_on()) cond_list_held[G.conds - cond_lists].fetch_add(1, std::memory_order_acq_rel);
+}
+void group_conds_release(EarlyGroup& G) {
+    if (G.conds && lanes_seq_on()) cond_list_held[G.conds - cond_lists].fetch_sub(1, std::memory_order_acq_rel);
+    G.conds = nullptr;
+}
+/// (sub_mu held) the group's ticket finished once every segment it uses is in the queue
+void group_lane_close(EarlyGroup& G) {
+    if (G.lane_ticket && G.used && G.next_sub >= G.used) lane_finish(G.lane_ticket), G.lane_ticket = 0;
+}
 std::shared_ptr<EarlyGroup> defer_group;   // (replay_mu: the group whose join is pending; null: none)
 enum DeferWhat { kDeferBegin, kDeferSerialRecord, kDeferDry, kDeferFinish, kDeferOther, kDeferWhats };
 // (stream REC1) what made the pending join be made: the places defer_join_now is called from
@@ -3818,6 +3909,7 @@ void early_submit_ready(EarlyGroup& G) {
         if (!G.sub_after_rd && G.dry_uploaded.load(std::memory_order_acquire)) return;
         early_submit_job(G, G.jobs[G.next_sub++].get());
     }
+    group_lane_close(G);   // (stream DECOUPLE: before the submission's end, whose recording's ticket follows the group's)
     group_tail_send(G);   // (stream SUB1: the submission's end goes right behind the group's last segment, from the thread that sent it)
 }
 /// (stream SUB1, RX_VK_SUB_OVERLAP; G.sub_mu held) The end of the submission this group is the last of, once every segment is in the queue: its write-backs
@@ -3858,6 +3950,8 @@ void early_record_job(EarlyGroup& G, EarlyJob* j) {
     texture_set_segment(j->order);
     texture_segment_worker(G.seg_table, j->index);
     memory_recording_thread(j->r->value, G.view);   // (stream REC1)
+    CondList* const conds_before = tl_conds;
+    tl_conds = G.conds;   // (stream DECOUPLE: its group's render conditions)
     texture_begin_recording(j->r->upload, j->r->value);
     draw_begin_recording(j->r->slot, j->r->cmd, j->r->value);
     VkCommandBuffer c = j->r->cmd;
@@ -3877,6 +3971,7 @@ void early_record_job(EarlyGroup& G, EarlyJob* j) {
     j->inits = texture_segment_end(*G.seg_table, j->index);
     texture_segment_worker(nullptr, -1);
     memory_recording_thread_end();
+    tl_conds = conds_before;
     gpu_time_end(*j->r, j->uploads);   // (as replay_handle's)
     host_read_barrier(c);
     vkEndCommandBuffer(j->r->upload);
@@ -3944,6 +4039,11 @@ void early_join(EarlyGroup& G) {
         std::lock_guard sl(G.sub_mu);
         early_submit_ready(G);
     }
+    if (G.lane_ticket) {   // (stream DECOUPLE: every segment is in the queue: sent in order above, or one by one without RX_VK_EARLY_GPU)
+        std::lock_guard sl(G.sub_mu);
+        lane_finish(G.lane_ticket), G.lane_ticket = 0;
+    }
+    group_conds_release(G);
     if (G.init_lost)
         replay_fatal("a parallel replay segment's init command buffer could not be ended: new images lost their first layout "
                      "change, and the work after it may use them");
@@ -3991,6 +4091,19 @@ void early_join(EarlyGroup& G) {
                  "views deeper than the capture history kept (RX_VK_CAP_DEPTH) %lld",
                  (long long)sc.cap_reads, (long long)sc.cap_newer, (long long)sc.pool_checks, (long long)sc.pool_newer, (long long)sc.list_adds,
                  (long long)sc.list_other, (long long)sc.cap_lost);
+            if (lanes_seq_on()) {   // (stream DECOUPLE, RX_VK_LANES_CHECK: every count but the first three and the rotations must read 0)
+                int64_t tk, fi, dr, oo, un;
+                uint64_t mp;
+                {
+                    std::lock_guard lk(lane_chk.mu);
+                    tk = lane_chk.seq.taken(), fi = lane_chk.seq.finished(), dr = lane_chk.seq.dropped(), oo = lane_chk.seq.out_of_order();
+                    un = lane_chk.seq.unknown(), mp = lane_chk.seq.max_pending();
+                }
+                logf("vk: LANES_CHECK: submit tickets taken %lld, sent %lld, dropped %lld; sent out of order %lld, unknown %lld; most open at once %llu; "
+                     "condition lists rotated %lld, a dry pass found every list held %lld; capture views lost %lld; pool sync pairs lost %lld",
+                     (long long)tk, (long long)fi, (long long)dr, (long long)oo, (long long)un, (unsigned long long)mp,
+                     (long long)lane_chk.cond_rotations.load(), (long long)lane_chk.cond_held.load(), (long long)sc.cap_lost, (long long)sc.pool_lost);
+            }
             if (sub_overlap_on()) {
                 const int64_t h = sub_stats.handoffs.load();
                 logf("vk: SUB_OVERLAP_CHECK: %lld submissions handed off with their last segments pending; their ends sent by a worker %lld, by the replay thread %lld; "
@@ -4090,6 +4203,7 @@ const uint8_t* replay_handle_early(VkCommandBuffer& cmd, const uint8_t* h, bool 
     EarlyGroup& G = *group;
     G.first = P;
     G.view = memory_view();
+    group_conds_hold(G);   // (stream DECOUPLE: the list this dry pass writes, its segments' own)
     std::vector<std::unique_ptr<EarlyJob>>& jobs = G.jobs;
     for (int k = 0; k < nplan + (int)P; k++) {
         auto j = std::make_unique<EarlyJob>();
@@ -4134,11 +4248,14 @@ const uint8_t* replay_handle_early(VkCommandBuffer& cmd, const uint8_t* h, bool 
     if (egpu) {
         submit_recording(r, false);   // (what came before, its uploads with the pre-sync: ahead of every segment in the queue)
         for (auto& jp : jobs) ts_recseq[jp->r->slot] = rec_seq;   // (RX_VK_TL: shown with r, the recording they follow)
+        G.lane_ticket = lane_take();   // (stream DECOUPLE: the group's place, after r and before rd, which follows it unless it goes inside it)
         rd = &begin_recording(rec_cur_value);
         full_barrier(rd->cmd);
         rec_cur = rd;
         cmd = rd->cmd;   // (no boundary reached: the whole command buffer is recorded into rd, below)
         texture_upload_watch(&dry_uploaded);
+    } else {
+        G.lane_ticket = lane_take();   // (stream DECOUPLE: after r, which is sent at the dry pass's end, ahead of the segments)
     }
     const auto now_ns = [] { return (int64_t)std::chrono::steady_clock::now().time_since_epoch().count(); };
     (void)now_ns;
@@ -4226,6 +4343,7 @@ const uint8_t* replay_handle_early(VkCommandBuffer& cmd, const uint8_t* h, bool 
                 {
                     std::lock_guard sl(G.sub_mu);
                     while (G.next_sub < P) early_submit_job(G, jobs[G.next_sub++].get());
+                    lane_finish(G.lane_ticket), G.lane_ticket = 0;   // (stream DECOUPLE: the group's one job is in the queue)
                 }
                 {
                     std::unique_lock lk(par_pool.mu);
@@ -4238,6 +4356,8 @@ const uint8_t* replay_handle_early(VkCommandBuffer& cmd, const uint8_t* h, bool 
             for (PendingSmall& e : jobs[0]->pre) record_segment(cmd, e.g);
         }
         es_whole_n++;
+        lane_finish(G.lane_ticket, false), G.lane_ticket = 0;   // (stream DECOUPLE: nothing of the group goes on its own; its prefix, if any, finished it above)
+        group_conds_release(G);   // (this thread's whole recording reads the writer's list, the same)
         Segment whole = jobs[P]->g;
         whole.end = stop;
         whole.serial_end = UINT64_MAX;
@@ -4254,6 +4374,7 @@ const uint8_t* replay_handle_early(VkCommandBuffer& cmd, const uint8_t* h, bool 
     last->g.end = stop;
     if (egpu) {   // (rd, the dry pass's uploads, ahead of every segment not submitted yet; those submitted before it never saw them)
         std::lock_guard sl(G.sub_mu);
+        lane_finish(rd->lane_ticket, false), rd->lane_ticket = 0;   // (stream DECOUPLE: rd goes inside the group, its place kept by sub_after_rd)
         submit_recording(*rd, false);
         G.sub_after_rd = true;
         early_submit_ready(G);

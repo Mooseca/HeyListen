@@ -161,9 +161,11 @@ thread_local uint32_t tl_cap_limit = 0;
 thread_local MemSub* tl_sub = nullptr;
 std::atomic<uint32_t> cap_latest{0};   // (the newest capture kept: what memory_view() gives a group, and what a worker with a lower limit is behind)
 std::atomic<int64_t> st_sub_cap_lost{0};   // (DECOUPLE: a worker's view deeper than the history kept, cap_view.h)
+std::atomic<int64_t> st_sub_pool_lost{0};   // (DECOUPLE: a pool synced twice past a worker's submission: its pair fell out)
 std::atomic<int64_t> st_sub_cap_reads{0}, st_sub_cap_newer{0}, st_sub_pool_checks{0}, st_sub_pool_newer{0}, st_sub_list_adds{0}, st_sub_list_other{0};
-bool rec_check_on() {
-    static const bool v = getenv("RX_VK_REC_OVERLAP_CHECK") && atoi(getenv("RX_VK_REC_OVERLAP_CHECK")) != 0;
+bool rec_check_on() {   // (DECOUPLE: RX_VK_LANES_CHECK=1 counts the same)
+    static const bool v = (getenv("RX_VK_REC_OVERLAP_CHECK") && atoi(getenv("RX_VK_REC_OVERLAP_CHECK")) != 0) ||
+                          (getenv("RX_VK_LANES_CHECK") && atoi(getenv("RX_VK_LANES_CHECK")) != 0);
     return v;
 }
 bool cap_prev_on() {   // (stream SUB1: the capture table keeps the entry each capture replaced; see cap_entry_view)
@@ -3676,7 +3678,7 @@ void memory_recording_thread_end() {
 }
 MemSubCheck memory_sub_check() {
     MemSubCheck c;
-    c.cap_reads = st_sub_cap_reads.load(), c.cap_newer = st_sub_cap_newer.load(), c.cap_lost = st_sub_cap_lost.load();
+    c.cap_reads = st_sub_cap_reads.load(), c.cap_newer = st_sub_cap_newer.load(), c.cap_lost = st_sub_cap_lost.load(); c.pool_lost = st_sub_pool_lost.load();
     c.pool_checks = st_sub_pool_checks.load(), c.pool_newer = st_sub_pool_newer.load();
     c.list_adds = st_sub_list_adds.load(), c.list_other = st_sub_list_other.load();
     return c;
@@ -4931,6 +4933,7 @@ inline bool pool_synced_for(const Pool& p, uint64_t epoch, uint64_t seg) {
     if (rec_check_on() && tl_rec_set) {
         st_sub_pool_checks.fetch_add(1, std::memory_order_relaxed);
         if (p.synced_epoch > epoch) st_sub_pool_newer.fetch_add(1, std::memory_order_relaxed);
+        if (p.synced_epoch > epoch && p.prev_epoch > epoch) st_sub_pool_lost.fetch_add(1, std::memory_order_relaxed);   // (DECOUPLE: two pairs are kept)
     }
     if (p.synced_epoch == epoch) return p.sync_seg <= seg;
     return p.synced_epoch > epoch && p.prev_epoch == epoch && p.prev_seg <= seg;
