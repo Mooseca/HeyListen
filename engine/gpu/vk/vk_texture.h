@@ -232,6 +232,28 @@ void dispatch_barrier(VkCommandBuffer cmd, const char* why);
 bool game_order();
 /// Full barriers recorded and left out (RX_VK_BARRIER_DEDUPE_OFF=1: none), since the start
 void barrier_stats(int64_t* made, int64_t* left_out);
+// ---- (GPUPOV) the barriers that separate no hazard: RX_VK_BARRIER_AUDIT=1 counts them, RX_VK_BARRIER_HAZARD=<mask> leaves the
+// proveably unneeded ones out (off by default: see the notes in vk_texture.cpp). A Texture* names a target written since the
+// command buffer's last recorded full barrier. ----
+struct Texture;
+bool hazard_audit_on();
+/// Work that writes memory and is not named (a copy, a clear, a fill or update, a query's results; vk_work.h's macros call it)
+void hazard_note_xfer(VkCommandBuffer cmd);
+/// The same, for a dispatch or a draw whose program stores to a storage buffer or image
+void hazard_note_unknown(VkCommandBuffer cmd);
+/// A pass began into these targets (color[0..n), depth): written from here on
+void hazard_note_pass(VkCommandBuffer cmd, const Texture* const* color, int n, const Texture* depth);
+/// Whether the barrier before this pass (and the draw it is about to record, which samples tex[0..ns)) may be left out
+bool hazard_pass_barrier_elidable(VkCommandBuffer cmd, const Texture* const* color, int n, const Texture* depth,
+                                  const Texture* const* tex, size_t ns, const char* why);
+/// A draw of a pass whose start barrier was left out samples an image written before it: true, and the pass must end here
+bool hazard_draw_reads_unordered(VkCommandBuffer cmd, const Texture* const* tex, size_t ns);
+/// The game's own barrier: left out (folded) when the next barrier of the command buffer decides instead, no work in between
+bool hazard_fold_game_barrier(VkCommandBuffer cmd);
+/// The audit's counts (RX_VK_BARRIER_AUDIT=1): kind 0 the game's, 1 pass starts, 2 dispatches, 3 others; what 0 checks, 1 named
+/// windows, 2 unknown windows, 3 read-after-write hits, 4 elided; folded: the game's barriers left out, kept: two in a row
+void hazard_stats(int64_t out[4][5], int64_t* folded, int64_t* kept);
+int hazard_mode();
 /// (hookshot) Set around a draw's sampled-texture lookups (vk_draw.cpp): a new ASTC texture there may wait for a later frame
 /// once this frame's uploads passed their budget (texture_touch). Never for compute: a dispatch may bake what it reads once
 extern thread_local bool upload_defer_ok;

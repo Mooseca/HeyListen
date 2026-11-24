@@ -2838,7 +2838,12 @@ void replay(VkCommandBuffer& cmd, NvnState& s, const uint8_t* p, const uint8_t* 
                 const int32_t bits = payload<int32_t>(a, avail);   // (TICK-057: ORDER_FRAGMENTS(_TILED) and INVALIDATE_TEXTURE only)
                 if (game_barrier_narrow_on() && (bits & 0x6) && !(bits & ~0x16)) game_fragment_barrier(cmd);
                 else {
-                    full_barrier(cmd, "barrier (the game's nvnCommandBufferBarrier)");
+                    // (GPUPOV, RX_VK_BARRIER_HAZARD=1, off by default) the barrier the game asks for here is left out when what
+                    // it would order is named (no dispatch, copy or storage-writing draw since the last recorded barrier):
+                    // the next barrier of this command buffer (a pass start, a dispatch's, the recording's end) is recorded
+                    // with no work in between and orders the same. end_pass closed the pass above, and mesh_conv's batch has a
+                    // barrier of its own (vk_draw.cpp), so nothing this barrier would order is recorded in between
+                    if (!hazard_fold_game_barrier(cmd)) full_barrier(cmd, "barrier (the game's nvnCommandBufferBarrier)");
                     mesh_conv_at_barrier(cmd, p + h.size, end);   // (RX_VK_MESH_CONV=2)
                 }
             }
@@ -6620,6 +6625,24 @@ void log_frame_stats() {
             }
             logf("vk: a frame: the game's barriers by their NVN flags:%s", fl.c_str());
             st_barrier_flags.clear();
+        }
+        if (hazard_audit_on() || hazard_mode() != 0) {   // (GPUPOV) the barriers that separate no hazard, and the ones left out
+            static int64_t l[4][5], lf, lk;
+            int64_t c[4][5];
+            int64_t folded = 0, kept = 0;
+            hazard_stats(c, &folded, &kept);
+            static const char* const who[4] = {"the game's", "pass starts", "dispatches", "others"};
+            if (c[0][0] != l[0][0] || c[1][0] != l[1][0] || c[2][0] != l[2][0] || c[3][0] != l[3][0] || folded != lf)
+                logf("vk: a frame: barriers with no hazard (RX_VK_BARRIER_AUDIT, RX_VK_BARRIER_HAZARD=%d): the game's folded %.1f "
+                     "(%.1f of them two in a row)", hazard_mode(), (folded - lf) / 120.0, (kept - lk) / 120.0);
+            for (int k = 0; k < 4; k++) {
+                if (c[k][0] == l[k][0]) continue;
+                logf("vk: a frame:   %s: %.1f checked, %.1f named windows (no dispatch, copy or storage write since), %.1f unknown "
+                     "windows, %.1f read-after-write hits, %.1f left out", who[k], (c[k][0] - l[k][0]) / 120.0,
+                     (c[k][1] - l[k][1]) / 120.0, (c[k][2] - l[k][2]) / 120.0, (c[k][3] - l[k][3]) / 120.0, (c[k][4] - l[k][4]) / 120.0);
+                for (int j = 0; j < 5; j++) l[k][j] = c[k][j];
+            }
+            lf = folded, lk = kept;
         }
         {   // (longshot 9027e7374, RX_VK_MESH_CONV: the indirect mesh draws' arguments, vk_draw.cpp mesh_indirect_convert and mesh_conv_batch)
             int64_t mc[7];
