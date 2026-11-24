@@ -1438,9 +1438,10 @@ int bcd_sink(uint64_t key, uint32_t size, const std::function<bool(uint8_t*)>& f
     {
         std::lock_guard lk(bcd_mu);
         if (bcd_pool.count(key)) return 1;
-        // (TEXCACHE) RX_VK_BC_DISK_POOL_STALE_MS=<ms> (5000 by default): a full pool lets go of blocks read ahead longer ago than this,
-        // oldest first, for a run a texture just asked for (the laptop: 310 times full with 405 blocks never taken)
-        static const uint64_t stale = getenv("RX_VK_BC_DISK_POOL_STALE_MS") ? (uint64_t)std::max(0, atoi(getenv("RX_VK_BC_DISK_POOL_STALE_MS"))) : 5000;
+        // (TEXCACHE) RX_VK_BC_DISK_POOL_STALE_MS=<ms> (0 by default: never): a full pool lets go of blocks read ahead longer ago than
+        // this, oldest first, for a run a texture just asked for. Off: at 5000 on the main PC's tour the pool let go of 3829-8416 blocks
+        // that later runs read again (4.3-9.8 GB read for 543-2393 taken, against 3.1 GB for 1067 without it)
+        static const uint64_t stale = getenv("RX_VK_BC_DISK_POOL_STALE_MS") ? (uint64_t)std::max(0, atoi(getenv("RX_VK_BC_DISK_POOL_STALE_MS"))) : 0;
         while (bcd_pool_bytes + size > bcd_pool_cap() && stale) {
             auto old = bcd_pool.end();
             for (auto it = bcd_pool.begin(); it != bcd_pool.end(); ++it)
@@ -4022,12 +4023,12 @@ bool bcd_key_of(const Texture& tex, uint64_t& key, uint64_t& size) {
     size = bcc_size(tex, pieces);
     return true;
 }
-// (TEXCACHE) RX_VK_BC_DISK_HOLD_MS=<ms> (400 by default; 0: never): a new ASTC texture whose blocks the disk cache has, and not
-// yet read, is held back like the upload budget's deferral (its draws left out) while its record is read before any other, up to
-// this long; then it is transcoded. A zone's textures are made faster than a read-ahead can follow (main PC: 3600 found on
-// disk, 1067 taken from it, the rest transcoded)
+// (TEXCACHE) RX_VK_BC_DISK_HOLD_MS=<ms> (0 by default: never; an experiment): a new ASTC texture whose blocks the disk cache has,
+// and not yet read, is held back like the upload budget's deferral (its draws left out) while its record is read before any other,
+// up to this long; then it is transcoded. Off: at 400 ms on the main PC's tour it left draws out in 1044 presents, mid-play too (the
+// flash detector caught Kakariko's ground and walls missing, flash_5601), and 1028 of 2446 holds timed out and were transcoded anyway
 bool bcd_hold(Texture& tex) {
-    static const int64_t hold_ns = (int64_t)((getenv("RX_VK_BC_DISK_HOLD_MS") ? atof(getenv("RX_VK_BC_DISK_HOLD_MS")) : 400.0) * 1e6);
+    static const int64_t hold_ns = (int64_t)((getenv("RX_VK_BC_DISK_HOLD_MS") ? atof(getenv("RX_VK_BC_DISK_HOLD_MS")) : 0.0) * 1e6);
     if (!hold_ns || !bcd_on()) return false;
     if (!tex.bcd_keyed) {
         tex.bcd_keyed = true;

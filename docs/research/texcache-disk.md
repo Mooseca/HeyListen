@@ -90,6 +90,11 @@ by `E:\OOT\scratch-texcache\warps.py`. The main PC was shared (other agents' run
 - Scene frames (>= 50 draws): off2 61.6 fps (173 s), warm1 61.1 (202 s), warm2 73.5 (185 s), cold 43.5 (185 s; the writer's
   first run). Steady state, warm against off: within noise (61.1 and 73.5 against 61.6), as the render thread's time in the cache
   says: 6.0 ms (warm1) and 4.4 ms (warm2) in the whole run, the longest call 0.72 and 0.013 ms.
+- warm2 is the outlier, and not by the cache: scene fps per zone (off2 / warm1 / warm2 / cold) Kakariko 50.1 / 49.2 / 84.0 / 28.8,
+  DeathMountainTrail 73.2 / 75.6 / 105.1 / 36.7, GoronCity 79.5 / 55.5 / 78.1 / 76.2, HyruleField 61.4 / 54.7 / 39.9 / 35.9, and
+  warm2 spent 12 s of scene in HyruleField (the slowest zone) against 37 s in the others. The same zone varies by up to 40% between
+  runs of the same build: the shared main PC's load. No fps gain or loss is claimed from the main PC; only the render-thread
+  counters (4.4-6.0 ms in a whole run) say there is no steady-state cost.
 - Per warp, map line to scene and frames > 50 ms in the 10 s after, the four warps all arms have (HyruleField, Kakariko,
   DeathMountainTrail, GoronCity): off2 21.0 s, 41 long frames (7.7 s of them); warm1 17.0 s, 22 (4.7 s); warm2 19.3 s, 45 (11.8
   s; HyruleField 9.6 s with a 2041 ms frame); cold 38.5 s, 58 (17.5 s). Mixed: no warm win shown on this machine.
