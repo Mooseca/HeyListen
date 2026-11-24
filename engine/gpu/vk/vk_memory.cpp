@@ -2054,6 +2054,11 @@ inline bool submitted_known(uint64_t page, uint32_t pgen, uint64_t view) {
 bool late_fix_slot_pending(uint32_t gen, uint32_t slot, uint64_t* value);   // (TICK-060, below)
 bool guarded_copy(void* dst, const void* src, size_t n);   // (below)
 std::atomic<int64_t> st_late_def_full{0}, st_late_reads{0}, st_late_syncs{0};   // (TICK-060)
+// (PIPE3) reads that took guest memory for a page whose capture entry was taken before a write since (the capture's copy is not
+// what the submission was given): with the order thread the game has written the next frame's bytes by the time the replay reads,
+// so this is the read outside the submission's capture view. Counted per read, published in batches of 256 (it is on the
+// replay's hot path).
+std::atomic<int64_t> st_read_late{0};
 
 bool memory_read_as_submitted(uint64_t gpu, void* dst, uint64_t n) {
     if (cap_only_gpu()) cap_excl_note(gpu, n, "a replay read as submitted");
@@ -2072,9 +2077,11 @@ bool memory_read_as_submitted(uint64_t gpu, void* dst, uint64_t n) {
         std::lock_guard lk(pools_mu);
         bool late_read = false;
         auto overlay = [&](const uint64_t guest, uint8_t* const dst, const uint64_t n) {   // (the capture's pages over [guest, guest + n) of guest memory, into dst)
+        bool stale = false;
         for (uint64_t page = guest >> kPageShift; page < (guest + n + 4095) >> kPageShift; page++) {
             const CapEntry e = cap_entry(page);
-            if (!e.gen || e.gen != page_gen(page)) continue;
+            if (!e.gen) continue;
+            if (e.gen != page_gen(page)) { stale = true; continue; }
             auto b = cap_bufs.find(e.gen);
             if (b == cap_bufs.end() || !b->second.map) continue;
             const uint64_t a = std::max(page << kPageShift, guest), z = std::min((page + 1) << kPageShift, guest + n);
@@ -2108,6 +2115,10 @@ bool memory_read_as_submitted(uint64_t gpu, void* dst, uint64_t n) {
             std::memcpy((uint8_t*)dst + (a - guest), (const uint8_t*)b->second.map + (uint64_t)e.slot * 4096 + (a - (page << kPageShift)), z - a);
             from++;
         }
+        if (stale) {   // (PIPE3: a page of it was written after the copy the read took: guest memory as it is now)
+            static thread_local int64_t tl = 0;
+            if (++tl >= 256) st_read_late.fetch_add(tl, std::memory_order_relaxed), tl = 0;
+        }
         };
         // (longshot 7daafa7a, #1553, d87dd600; RX_VK_READ_MAPPED=0: as before) A read of a virtual GPU address (1 TB and up: a
         // sparse mapping) across a page boundary takes the page after the first from wherever that page maps, not from the
@@ -2135,8 +2146,9 @@ bool memory_read_as_submitted(uint64_t gpu, void* dst, uint64_t n) {
     }
     pages_from += from;
     if (++reads % 20000 == 0)
-        logf("vk: replay reads of guest memory as submitted: %lld (%lld pages from the captures)",
-             (long long)reads.load(), (long long)pages_from.load());
+        logf("vk: replay reads of guest memory as submitted: %lld (%lld pages from the captures); of them %lld took guest memory for a "
+             "page written after its capture's copy (at least: counted in batches)",
+             (long long)reads.load(), (long long)pages_from.load(), (long long)st_read_late.load());
     return true;
 }
 
@@ -2177,6 +2189,20 @@ bool overlay_off() {
 std::atomic<int64_t> st_overlaid{0}, st_differed{0};   // (pages read from the shadow; of them, ones guest memory had changed)
 std::atomic<int64_t> st_first_live{0};   // (pages a first upload read from guest memory: their copy was an older capture's)
 std::atomic<int64_t> st_again_live{0};   // (the same for re-uploads, RX_VK_REUPLOAD_OWN)
+// (PIPE3) with the order thread the replay runs a frame or more after its submission: a page the game wrote after that submit
+// and a later capture took is in the shadow as the *next* frame's bytes, and a read of it here takes them (guest memory holds
+// them too). Counted and logged: it is a read of the replay outside its submission's capture view, one frame of picture.
+std::atomic<int64_t> st_after_submit{0};   // (pages read from guest memory whose shadow copy is a later capture's than a non-empty own one)
+std::atomic<int64_t> st_no_own{0};         // (pages read from guest memory where the submission's capture took no page of its own)
+std::atomic<int64_t> st_earlier_used{0};   // (re-upload pages served from an earlier capture's copy: the page as of the submit)
+/// (PIPE3) the replay on an order thread (RX_VK_ORDER_THREAD): its reads run a frame or more after the submission they belong to
+bool ot_late_reads() {
+    static const bool v = [] {
+        const char* e = getenv("RX_VK_ORDER_THREAD");
+        return e && atoi(e) != 0;
+    }();
+    return v;
+}
 
 // ---- (issue 66) a texture's first upload: only the copies its own submission's capture took ----
 // OoT reuses a texture's storage for a new one (the Market's lightmaps, BC6H/BC7 atlases, and its ASTC materials, streamed in
@@ -2227,6 +2253,11 @@ const uint8_t* memory_as_submitted(uint64_t guest, const uint8_t* live, uint64_t
     if (!n || !shadow_n.load(std::memory_order_relaxed) || overlay_off()) return live;
     const bool own_only = first ? first_upload_own_on() : again && reupload_own_on();
     const uint64_t own = shadow_seq_own.load(std::memory_order_relaxed);
+    // (PIPE3) a re-upload with the order thread: the page's newest copy up to the submission's own is the page as it was at the
+    // submit (a write before that submit would have been copied by its capture), and it is taken rather than guest memory, which
+    // by now holds the frame after the submission's. What no copy up to it holds (the game wrote the page after the submit and a
+    // later capture took it, or none ever did) is still read from guest memory and counted: that needs a view per submission.
+    static const bool earlier_on = ot_late_reads();
     std::lock_guard lk(shadow_mu);
     bool any = false;
     for (uint64_t r = guest >> 21; r <= (guest + n - 1) >> 21; r++) {
@@ -2235,9 +2266,30 @@ const uint8_t* memory_as_submitted(uint64_t guest, const uint8_t* live, uint64_t
         for (uint64_t p = p0; p < p1; p++) {
             auto it = shadow.find((uint32_t)p);
             if (it == shadow.end()) continue;
-            if (own_only && (!own || it->second.seq != own)) {   // (an earlier capture's copy: guest memory stands)
-                (first ? st_first_live : st_again_live).fetch_add(1, std::memory_order_relaxed);
-                continue;
+            if (own_only && it->second.seq != own) {
+                if (earlier_on && again && own && it->second.seq && it->second.seq < own) {
+                    st_earlier_used.fetch_add(1, std::memory_order_relaxed);   // (the page as of the submit: taken below)
+                } else {
+                    if (earlier_on) {
+                        if (!own) {   // (the submission's capture took no page: no copy of it is that submission's)
+                            const int64_t n = st_no_own.fetch_add(1, std::memory_order_relaxed) + 1;
+                            if (n <= 8 || n % 1024 == 0)
+                                logf("vk: texture read with no capture of its own submission (%lld so far, texture frame %llu): page %#llx, the "
+                                     "shadow's copy %llu (the game wrote it after the submit, or long before it)",
+                                     (long long)n, (unsigned long long)texture_frame_no(), (unsigned long long)(p << 12),
+                                     (unsigned long long)it->second.seq);
+                        } else if (it->second.seq > own) {   // (a later capture's copy: the page was written after the submit)
+                            const int64_t n = st_after_submit.fetch_add(1, std::memory_order_relaxed) + 1;
+                            if (n <= 12 || n % 64 == 0)
+                                logf("vk: texture read outside its submission's capture (%lld so far, texture frame %llu): page %#llx, the "
+                                     "submission's own capture %llu, the copy %llu (the game wrote it after the submit)",
+                                     (long long)n, (unsigned long long)texture_frame_no(), (unsigned long long)(p << 12),
+                                     (unsigned long long)own, (unsigned long long)it->second.seq);
+                        }
+                    }
+                    (first ? st_first_live : st_again_live).fetch_add(1, std::memory_order_relaxed);
+                    continue;
+                }
             }
             if (!any) {
                 any = true;
@@ -2253,10 +2305,11 @@ const uint8_t* memory_as_submitted(uint64_t guest, const uint8_t* live, uint64_t
     if (any && served.fetch_add(1) % 2000 == 0)
         logf("vk: texture storage read as submitted (%lld times; %lld pages from the copies, %lld of them rewritten in "
              "guest memory since their submit; %zu pages kept, %zu spans, %llu MB; %lld pages of first uploads read from guest "
-             "memory over an earlier capture's copy, %lld of re-uploads)", (long long)served.load(),
-             (long long)st_overlaid.load(), (long long)st_differed.load(), shadow.size(), tex_spans.size(),
-             (unsigned long long)(tex_merged_bytes >> 20), (long long)st_first_live.load(),
-             (long long)st_again_live.load());
+             "memory over an earlier capture's copy, %lld of re-uploads; %lld of the reads took a page a later capture had "
+             "taken (own capture not empty), %lld had no page of their own submission's capture, %lld of re-uploads took an earlier copy)",
+             (long long)served.load(), (long long)st_overlaid.load(), (long long)st_differed.load(), shadow.size(), tex_spans.size(),
+             (unsigned long long)(tex_merged_bytes >> 20), (long long)st_first_live.load(), (long long)st_again_live.load(),
+             (long long)st_after_submit.load(), (long long)st_no_own.load(), (long long)st_earlier_used.load());
     return any ? scratch.data() : live;
 }
 

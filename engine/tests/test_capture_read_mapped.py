@@ -79,6 +79,7 @@ static std::map<uint32_t, CapBuf> cap_bufs = {{1, {capture, nullptr}}};
 struct PageX { uint8_t full; };
 static PageX* pagex(uint64_t, bool) { return nullptr; }
 static std::atomic<int64_t> st_gran_made_full{0}, st_late_reads{0};
+static std::atomic<int64_t> st_read_late{0};   // (PIPE3: the reads that took guest memory for a page written after its copy)
 static bool late_fix_slot_pending(uint32_t, uint32_t, uint64_t*) { return false; }
 static void vk_timeline_wait_sent(uint64_t) {}
 static void memory_late_fix_apply(uint64_t) {}
