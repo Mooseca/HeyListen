@@ -1,0 +1,121 @@
+<!-- Copyright (C) 2026 Sacrappy -->
+# DECOUPLE: what frame N+1 needs of frame N, and how to stop waiting for it (24 Nov 2026 -)
+
+Branch `perf/decouple` from main `c79bee6f6`, worktree `E:\OOT\HeyListen-wt\decouple`, scratch `E:\OOT\scratch-decouple`. Lease name
+`decouple` (priority 1 since the coordinator's message of 24 Nov). The owner's request: decouple the exposure computation and every
+other value that depends on another frame, so that nothing waits and frames can be worked on in parallel. Targets: +30% on the RTX
+3050 / i5-10400F (about +20% reached), 120+ fps on the RTX 5070 / 7800X3D, no stutters.
+
+## State (keep current; last edit 24 Nov 14:45)
+
+- Done: the reading (the brief's list; `direct-emission.md` sections 1-7 and 12 whole, 8-11 and 13-15 by their headings only;
+  `recording-state.md` of `refactor/sub1`, which the brief did not list and which is the prior work on per-recording state); the map
+  (section 1) from the PC 3050's logs of 23-24 Nov and this stream's series; the design (section 2).
+- Running: series 1b on the main PC (`E:\OOT\scratch-decouple\m1b.sh`, slot a, build `pipe4f`, runs `build/s5/dc1-*` in the main
+  checkout; the machine is shared, so its frame times are not the 5070's own). List `matrix80` on the PC 3050 (build `pipe4f`, logs
+  `C:\OOT\pc3050s-out\dc80\`, copy of the output in `E:\OOT\scratch-decouple\matrix80.txt`): the N block is in, the D block follows.
+- Known bad: `pipe4f`'s order thread froze the game on the PC 3050 in the Market (`NmB`: 8.5 fps, p50 36.8 ms, max 632 ms, no
+  order-thread line after play). The 3050's order-thread numbers below are `pipe2e`'s of 23 Nov, which ran.
+- Nothing built, no code changed yet. A trial merge of `refactor/sub1` into this branch was made and aborted: 17 conflict hunks in
+  four source files, three tests, the generated switch lists.
+- Next: (1) report the design; (2) stage 1 = `refactor/sub1` merged onto this branch (per-submission state, `RX_VK_SUB_OVERLAP`
+  off), built as `dec1a`, the check run (`RX_VK_REC_OVERLAP_CHECK=1`: every count 0), then a PC 3050 list on the default ini;
+  (3) the D block of `matrix80` into table 1.2.
+
+## 1. The dependency map
+
+Sources (every number below is read from one of these): the PC 3050's logs of its order-thread A/B of 23 Nov, default ini, build
+`pipe2e` (`C:\OOT\pc3050s-out\pipe2\{mm,hf,kv,cc}-{A,B}2\game_log.txt`, copies in `E:\OOT\scratch-decouple\3050\pipe2\`; A = inline
+replay, B = `RX_VK_ORDER_THREAD=1`); `matrix80` (PC 3050, 1440p native ini, build `pipe4f`, `RX_VK_WAIT_LOG=1 RX_VK_FEED_LOG=1`);
+PIPE1's profiled run on the PC 3050 (`E:\OOT\scratch-pipe1\3050\pipe1\prof-A\game_log.txt`, Market 1080p, `RX_VK_PROF_FINE`);
+PIPE4's gate runs on the main PC under a speed lease (`build/s5/p4g-*`, 1440p native); this stream's `build/s5/dc1-m-off` (main PC,
+slot, machine shared).
+
+### 1.1 Each dependency: producer, consumer, the latency it tolerates, what it forces today, what it costs
+
+| # | Value (frame N -> N+1) | Producer | Consumer | Tolerated latency | Wait or order forced today | Cost measured |
+|---|---|---|---|---|---|---|
+| D1 | Exposure sums (R1), 0x40 result slots (R2), 0x2000 pair (R3) | GPU programs of frame N | module jobs `f_80357060`, `f_80354060`, `f_8034f440` | the console reads them one frame late, after a fence poll; the ring hands them 2 frames late (3 with the order thread): 0 pulses, pictures right (`readback-ring.md`, `frames-in-flight.md`) | none: the readback ring (`HL_RB_LAG`, on) | 0 waited for the GPU in every log read (`rbring R1: ... 0 waited for the GPU, 0 not done in time`) |
+| D2 | Culling results 0x3980 x2 (R4), big lists 0x9b040 (R5), particle state 0x1b580 (R6) | GPU compute of frame N, written back at the end of its submission | `f_800998a0` / `f_80365f00`, `f_80362ff0`, `f_80364080` on the module workers and the main thread | not established for a fixed lag (R6 is half CPU-written: #50) | `invalidate` waits for the write-back's recording and the GPU (`wait_recorded`) | 5070 (dc1-m-off): 0.01-0.02 ms a frame a range. PC 3050 native: Kokiri 0.38-0.75 ms a frame on each module worker and 0.19-0.31 on the main thread (`160 of 3000 waited, 4.57 ms each`); Market 0.01-0.12 a thread (`21 of 3000, 3.10`); Hyrule `28 of 3000, 4.05`. Default ini: `19-175 of 3000, 0.5-5.0 ms each` |
+| D3 | "The frame before is on the GPU": the game's fence wait and present pacing | the replay's progress (inline: the PT's chain; order thread: its jobs) | main thread (`nvnSyncWait` lr 8042cde0, present event lr 81207a6c) | the game itself allows one frame between its hand-over and the GPU | inline: the main thread waits for the present; order thread: it waits for the job of the fence's submission | inline, PC 3050: 2.0-4.2 ms a frame (default ini), 4.8-5.1 (native); 5070: 1.5-1.7. Order thread, PC 3050: fence join 0.85-2.8 (default), 3.9 (native Kokiri); 5070: 0.75-0.8. It is back-pressure: what it waits for is D4 |
+| D4 | **The replay's own order: one recording after the other** | the dry pass's stream-ordered effects (reports, conditions, events, uniform updates), and the memory state every recording shares (epoch, capture view, write-back and synced lists, the segments' tables) | the next submission's replay | none needed: it is our own serial chain | the replaying thread records its own last segment of every big command buffer and waits for the workers' before the next submission may begin (JOIN1, REC1, SUB1) | PC 3050, default ini: `a frame's replay time: submit` 11.7-14.6 ms a frame; profiled (Market 1080p): dry pass 4.8, **segments' recording and wait 8.0-8.7**, small command buffers 1.6, memory work 0.8. **The order thread idles 0.00-0.56 ms a frame in all four scenes: it is the frame** |
+| D5 | The GPU's feed | the replay (D4) | the GPU | - | the GPU idles when the next recording is not there | PC 3050 default ini: gaps 1.6-5.2 ms a frame inline, 1.1-4.8 with the order thread, of 14.2-18.9 ms frames. Native: idle 2.2-3.3 of 20.3-22.4 (replay not ready 1.0-1.8, sent and not started 0.9-1.0, sent before the GPU went idle 0.3). 5070 native: 0.5-0.8 inline, 0.3-0.4 with the order thread |
+| D6 | Write-backs of GPU-written pages (W), the readback refresh | every compute and pass that writes a bound range | whatever the CPU reads next | lazy on a slow link (WBL1, on by itself on the 3050) | GPU copies, bus traffic | PC 3050: 16.2-16.7 MB a frame with the lazy rule (58 before); 5070: 52.6-55 MB. GPU time on the 3050 before the lazy rule: wb 0.86-1.35 ms, refresh 0.16-0.24 of 18.0-18.7 (`gpuov-own-overhead.md`) |
+| D7 | Occlusion counts (R7) | not produced: every report reads 4096 | 445-920 render conditions a frame, evaluated on the CPU in the dry pass | same frame only (`occlusion.md`: a late count deletes buildings) | none | no wait; the GPU draws hidden objects (8.5 against 8.1 ms a frame with real counts on the 5070, `occlusion.md`) |
+| D8 | Guest memory "as submitted" | the game's writes up to its submit | the replay, later | exact | the capture's copy on the submitting thread | 0.2-0.7 ms a frame on the PT and 0.2-0.7 on the held-submits thread (wait log, "capture copy"); not a wait |
+| D9 | GPU -> GPU across frames (history, depth of the frame before) | frame N's passes | frame N+1's | - | none on one queue | none; it is what a second queue would have to order (ASYNC1) |
+
+### 1.2 What bounds the frame, scene by scene (ms a frame)
+
+PC 3050, default ini (render Auto), `pipe2e`, 23 Nov, one run each (the second of three):
+
+| scene | arm | fps | frame | GPU time | uploads | GPU gaps | replay wall (submit) | order thread idle | main waits |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---|
+| Market | inline | 52.3 | 18.87 | 13.2-13.4 | 0.4-3.0 | 4.5-5.2 | | | present 1.99 |
+| Market | order thread | 55.9 | 18.10 | 13.0-13.8 | 0.4-0.6 | 3.6-4.8 | 14.56 | 0.56 | fence 0.85 |
+| Hyrule Field | inline | 56.0 | 16.23 | 12.8 | 0.3 | 2.9-3.0 | 12.67 | | present 3.84 |
+| Hyrule Field | order thread | 60.6 | 15.42 | 12.8 | 0.3 | 2.1-2.4 | 13.73 | 0.00 | fence 2.78 |
+| Kokiri | inline | 63.6 | 14.60 | 12.0 | 0.2 | 2.0-2.5 | | | present 2.81 |
+| Kokiri | order thread | 67.9 | 14.22 | 12.1 | 0.2 | 1.2-1.6 | 11.66 | 0.44 | fence 1.78 |
+| castle | inline | 63.4 | 17.10 | 14.9 | 0.3 | 1.6-1.9 | | | present 4.16 |
+| castle | order thread | 68.8 | 14.83 | 13.1 | 0.3 | 1.1-1.3 | 13.48 | 0.00 | fence 2.81 |
+
+PC 3050, 1440p native (`matrix80`, `pipe4f`, one run each): Market inline 22.42 = GPU busy 19.15 + idle 3.27; Kokiri inline 20.25 =
+18.05 + 2.20, order thread 19.88 = 18.12 + 1.76 (order thread idle 0.00, fence join 3.92); Hyrule inline 20.94 = 18.12 + 2.82.
+
+Main PC, 1440p native (PIPE4's gate, speed lease): castle inline 8.67 (GPU 8.0, gaps 0.5), order thread 8.38-8.56 (7.9-8.0, 0.3; idle 0.00 and
+fence join 0.75 in the 8.38 run); Kokiri inline 8.57 (7.6, 0.8), order thread 7.96 (7.3, 0.4). Market: game-bound (PIPE2: order thread idle 1.9-2.9).
+
+Reading:
+1. **No game thread waits for the GPU any more in a way that sets the frame.** D1 is gone; D2 costs 0.0-0.75 ms on a thread and
+   only where the GPU is the limit anyway (native Kokiri on the 3050); D3 is the game waiting for our own chain.
+2. **On the PC 3050 at the default settings the frame is the replay's serial chain (D4), with or without the order thread**: the
+   order thread never idles, the GPU idles 1.1-4.8 ms a frame behind it, and the game waits 0.85-2.8 ms a frame for it. The GPU
+   needs 12.2-14.4 ms (its time plus uploads) of 14.2-18.1 ms frames.
+3. At 1440p native both PCs are within 4-17% of the GPU's own work (3050: 9-17% inline; 5070 with the order thread: 4-6%).
+4. The Market is the game's own loop on both PCs (order thread idle 0.56 on the 3050, 1.9-2.9 on the 5070).
+
+## 2. The design
+
+### 2.1 The pipeline: game -> spine -> lanes -> GPU
+
+Three stages joined by bounded queues, every value that crosses a stage with a fixed lag:
+
+- **Game** (frame N+1's CPU): reads GPU results from the ring only (D1 today, D2 in stage 5), never asks the GPU's timing; hands
+  its submissions over after their capture (the order thread, PIPE2).
+- **Spine** (one thread, the order thread): what must stay in stream order and nothing else: the memory work, the dry pass with
+  its guest-memory effects, the small command buffers. It never records a segment and never waits for one.
+- **Lanes** (the replay workers): the segments of up to K groups at once, each reading its own submission's state (epoch, capture
+  view, write-back and synced lists, segment table, render conditions); the last lane of a group ends its submission (write-backs,
+  the timeline's signal) and sends it. `vkQueueSubmit2` calls keep the stream's order (a group's segments, its tail, then the next
+  submission's first recording).
+- **GPU**: one queue. A second queue stays closed (ASYNC1) until D9 is mapped; nothing here needs it.
+
+What must become per-recording or per-submission state (from `recording-state.md`, checked against main's code): the epoch and the
+recording's value (REC1, built), the capture view (SUB1 A, built one capture deep; needs K deep), the pool's sync pair (SUB1 A,
+two pairs; a short list for K), the write-back and synced lists (SUB1 A), the segments' init table (REC1), the uniform updates'
+positions and prune (REC1, SUB1 A), the render conditions (one vector today: per group, not built), the end of a submission taken
+by its last lane (SUB1 B, built), `rb_joined` and the ring's staging per submission (SUB1 B).
+
+### 2.2 Stages, each behind a switch that is off, with its expected gain and its proof
+
+| Stage | What | Switch | Expected, from the map | Proof |
+|---|---|---|---|---|
+| 1 | `refactor/sub1` (REC1 + SUB1 A + B) merged onto today's main: the state per submission, the tail of a submission sent by its last lane | `RX_VK_SUB_OVERLAP` (exists) | small alone (SUB1 on the 5070: replay not ready for segments 1.08 -> 0.79 ms): the next submission's capture ends the window. It is the base | `RX_VK_REC_OVERLAP_CHECK=1`: 0 segments differ from the plan, every per-submission count 0; `tests/test_recording_state.py`; tour with `RX_VK_FLASH=1` |
+| 2 | The spine goes on beside pending groups: the next submission's memory work, small command buffers and dry pass while the lanes record; render conditions per group, the capture view K deep, the join made by completion | `RX_VK_LANES=<K>` (new) | PC 3050 default ini: the spine loses "segments' recording and wait" (8.0-8.7 of the 16.2-17.3 ms of submissions in the profiled run) and falls under the GPU's 12.2-14.4 ms: Hyrule 16.23 -> ~13.4 (+21% on inline, +15% on the order thread), Kokiri 14.60 -> ~12.6 (+16%, +13%), castle -> the GPU's 13.4-15.2, Market -> its game loop (~17.2: +5-9%). Native 1440p: 3050 +9-14% at most, 5070 +4-6% at most | a check mode that replays a group serially and compares draws, dispatches and write-back lists; 0 flashes over the warp tour; GPU gaps under 0.5 ms and order thread idle above 0 in the 3050's logs |
+| 3 | The order thread (PIPE4's hand-over) merged under the lanes, its present on the spine | `RX_VK_ORDER_THREAD` | already measured: +5-8% on the 3050, +2-6% on the 5070; with stage 2 the two bounds above | PIPE4's tour: 0 dark frames |
+| 4 | Fewer submissions a frame: a group's segments sent together when they are ready together | `RX_VK_LANE_BATCH` (new) | "sent, GPU not started" 0.87-1.00 ms a frame at 28-31 recordings (3050 native) | the feed log's line |
+| 5 | D2 into the ring (0x3980, then the lists) with the ring's lag, R6 only after its CPU writers are mapped | `HL_RB_R4` (new) | 0.4-0.75 ms a module worker in native Kokiri on the 3050; elsewhere under 0.1. No fps expected where the GPU is the limit; it removes the last reads that depend on the GPU's timing | `HL_RB_LAG_CHECK` at lag 1: 0 differences; cut-grass scene |
+| 6 | D7 on the GPU (conditional rendering from query results), only if stage 2 leaves the GPU as the limit | `RX_VK_OCC_GPU` (new) | at most the 5% of `occlusion.md` (8.5 -> 8.1 ms) | `RX_VK_OCC_REAL=4` pictures as the reference |
+
+### 2.3 Risks
+
+- One-frame flashes: a lane reading the next submission's bytes (the capture view) or a pool synced by a later submission. SUB1's
+  counters catch both; they must read 0 before any picture run.
+- The dark frames of the order thread: an ordering fault at the present (PIPE4). The lanes do not change the spine's order of
+  events and waits; the present still needs the frame whole, so it joins every pending group.
+- The exposure: the ring's lag must follow the pipeline's depth (2 inline, 3 with the order thread; unchanged by lanes, which
+  finish inside the frame). The freeze of 23 Nov was a range dropped by the ring; the take-over rule is on main.
+- Zone loads: the spine's queue grows while the game loads; K bounds the lanes, `RX_VK_ORDER_AHEAD` the presents.
+- The Market stays the game's loop: nothing here moves it.
+- `pipe4f` freezes on the PC 3050 (above): stage 3 waits for PIPE4's last state.
