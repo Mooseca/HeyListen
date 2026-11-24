@@ -27,7 +27,9 @@ import glob
 import os
 import re
 import sys
-import whole_write   # (rewrites written beside and moved over: issue 1197)
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # (python -I leaves the script folder off)
+import whole_write   # noqa: E402  (rewrites written beside and moved over: issue 1197)
 
 DECL = "extern volatile int hos_fixed_resolution;\nextern volatile int hos_dynres_runs;\nextern volatile uint32_t hos_fixed_scale_bits;\n"
 OLD = "if (!((c->x[8] >> 0) & 1)) { goto L_8082640c; }"

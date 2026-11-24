@@ -665,6 +665,7 @@ def main(argv):
 
 
 if __name__ == "__main__":
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # (python -I leaves the script folder off)
     import genlock
     if len(sys.argv) > 2 and sys.argv[2] == "--hash":   # (reads only)
         sys.exit(main(sys.argv[1:]))
