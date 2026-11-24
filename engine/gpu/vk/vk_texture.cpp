@@ -59,6 +59,7 @@
 #include "bc_levels.h"
 #include "msync_diff.h"   // (TICK-051: the BC cache's content hash)
 #include "astc_bc_policy.h"
+#include "astc_cpu_policy.h"
 #include "drawn_writeback.h"
 #include "keep_rendered.h"
 #include "target_overlap.h"
@@ -601,32 +602,36 @@ VkDescriptorSetLayout astc_set = VK_NULL_HANDLE;
 VkPipelineLayout astc_layout = VK_NULL_HANDLE;
 VkPipeline astc_pipe = VK_NULL_HANDLE;
 /// ASTC decoded on the CPU, not by the GPU decoder: RX_VK_ASTC_CPU=1 (or any value but 0, false, off, no, empty: 0 opts out);
-/// unset, on Windows with the graphics built into AMD's desktop CPUs: Ryzen 7000 (Raphael, PCI 0x164E) and Ryzen 9000 (Granite
-/// Ridge, 0x13C0), the same 2-CU RDNA 2 part; not the APUs' larger iGPUs (680M, 780M, 890M). Longshot's report (a Ryzen 9 7900X,
+/// unset, on Windows with AMD's integrated graphics (vendor 0x1002, device type INTEGRATED_GPU: the Ryzen desktop CPUs' 2-CU RDNA 2
+/// part, PCI 0x164E and 0x13C0, and the APUs' larger iGPUs, 680M, 780M, 890M; astc_cpu_policy.h). Longshot's report (a Ryzen 9 7900X,
 /// driver 26.10.1, the screen on another card): the device lost within seconds of Kokiri Forest loading in 7 runs of 8, the
 /// terrain's two 1365 x 1365 x 90 ASTC arrays decoded and re-encoded as BC3 in one upload submission (some 2000 dispatches)
 /// holding the GPU 4-6 s before Windows reset it. Decoded on the CPU, about 6 s an array on the replay thread (a pause as the
 /// area loads), it loaded 4 times of 4. The textures are then RGBA8 (no BC3), in the system memory an integrated GPU draws from
-/// anyway. Ryzen 9000's was not tried. (Ported from Longshot a4ead95c, #489)
-/// (HeyListen: Longshot d12ddf69b (#1833) took this rule away once GPU ASTC uploads went in bounded submissions, RX_VK_ASTC_CHUNK_MPX,
-/// upload_astc_gpu. Here they cannot while a parallel replay records the segments (upload_chunk_flush: an image's first layout change is
-/// in a later segment's init command buffer, so a chunk submitted early would copy into an image still UNDEFINED), and that is on by
-/// default from 8 threads: Ryzen 7000 and 9000 have 12 and more. So the rule stays until the chunks are tried on that graphics)
-bool astc_cpu_wanted(const char* e, uint32_t vendor_id, uint32_t device_id) {
-    bool v = false;
+/// anyway. Issue 127, an Xbox Ally X (Radeon 890M, driver 26.10.1): the driver reset the GPU while a save loaded, in a burst of
+/// GPU ASTC decodes (491 ms of uploads in one frame); RX_VK_ASTC_CPU=1 fixed it, so the rule now covers every AMD integrated GPU.
+/// (Ported from Longshot a4ead95c, #489)
+/// (HeyListen: Longshot d12ddf69b (#1833) took this rule away once GPU ASTC uploads went in bounded submissions of
+/// RX_VK_ASTC_CHUNK_MPX, upload_astc_gpu. Here they cannot while a parallel replay records the segments (upload_chunk_flush: an
+/// image's first layout change is in a later segment's init command buffer, so a chunk submitted early would copy into an image
+/// still UNDEFINED), and that is on by default from 8 threads: Ryzen 7000 and 9000 have 12 and more. So the rule stays until the
+/// chunks are tried on that graphics)
+bool astc_cpu_wanted(const char* e, uint32_t vendor_id, uint32_t device_id, bool integrated) {
 #ifdef _WIN32
-    v = vendor_id == 0x1002 && (device_id == 0x164E || device_id == 0x13C0);
+    const bool windows = true;
 #else
-    (void)vendor_id, (void)device_id;
+    const bool windows = false;
 #endif
+    bool v = astc_cpu_policy::by_default(windows, vendor_id, device_id, integrated);
     if (e) v = !(!*e || !strcmp(e, "0") || !strcmp(e, "false") || !strcmp(e, "off") || !strcmp(e, "no"));
     return v;
 }
 bool astc_on_cpu() {
     static const bool on = [] {
         const char* e = getenv("RX_VK_ASTC_CPU");
-        const bool v = astc_cpu_wanted(e, dev.props.vendorID, dev.props.deviceID);
-        if (v) logf("vk: ASTC decoded on the CPU (RX_VK_ASTC_CPU=0: by the GPU; on by default for the graphics in AMD's Ryzen 7000 and 9000 desktop CPUs on Windows)");
+        const bool v = astc_cpu_wanted(e, dev.props.vendorID, dev.props.deviceID,
+                                       dev.props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU);
+        if (v) logf("vk: ASTC decoded on the CPU (RX_VK_ASTC_CPU=0: by the GPU; on by default for AMD's integrated GPUs on Windows)");
         return v;
     }();
     return on;
