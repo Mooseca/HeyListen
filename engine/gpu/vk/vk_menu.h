@@ -43,6 +43,9 @@ struct Options {
     int sharpness = 0;    // 0 to 100
     int fps_limit = 0;    // the rate presented, the game's frames and the made ones (Real time only): 0 60, 1 90, 2 120, 3 144, 4 165, 5 240, 6 Unlimited
                           // (framegen_rows.h; host/nn_vi.c; HOS_FPS_LIMIT)
+    int fps_base = 0;     // the Base frame rate limit: the game's OWN rate before frame generation (framegen_rows.h kBaseFps): 0 Off (the Frame rate limit
+                          // alone), 1 30, 2 40, 3 45, 4 48, 5 50, 6 60, 7 72, 8 75, 9 90, 10 120. On: the game runs at it, the frames shown are it times the
+                          // multiplier, and the Frame rate limit holds nothing back (menu_fps_limit). Saved as base_frame_rate_limit (host/nn_vi.c; HL_OPT_BASE_LIMIT)
     int realtime = 1;     // game time follows the clock (host/nn_vi.c); 0: per frame (slower frames, slower game)
     int handheld = 0;     // the game's handheld profile: ~4 fps, softer; read once, at the start (host/nn_applet.c)
     int ultrawide = 0;    // the camera at the monitor's shape when it is wider than 16:9; read once, at the start (host/hos_main.c)
@@ -112,6 +115,9 @@ bool menu_is_open();
 /// Unlimited; the row (HOS_FPS_LIMIT over it). -1 in Game speed Per frame: the game's steps are whole frames of 1/60 s there,
 /// so the limit does not apply (it needs Real time)
 int menu_fps_limit();
+/// The Base frame rate limit in frames a second: the game's own rate before frame generation, 0 for Off (the row; Game speed Per frame:
+/// none, as the Frame rate limit; HOS_FPS_LIMIT stands over it). With it on menu_fps_limit answers 0 (the shown rate is not held)
+int menu_base_fps();
 /// (HeyListen, after Longshot ddb156df) The game's scene tone mapped by PsychoV35: HDR set to Native on an HDR display, and the Tone
 /// mapper row so
 bool scene_tonemap_on();

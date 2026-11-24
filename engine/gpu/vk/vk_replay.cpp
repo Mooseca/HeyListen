@@ -8827,7 +8827,7 @@ void fill_replay_table(MkwVkRenderer& t) {
         return id == 0 ? opts.realtime : id == 1 ? menu_is_open() : id == 2 ? resolution_auto() && !temporal_full_scale() : id == 3 ? (temporal_full_scale() ? 10000 : resolution_scale()) : id == 4 ? opts.pad_background : id == 5 ? opts.text_speed : id == 6 ? opts.mouse_native :
                id == 7 ? opts.mouse_sens : id == 8 ? opts.mouse_invert : id == 9 ? opts.rumble : id == 16 ? opts.invert_cam_x : id == 17 ? opts.invert_cam_y : id == HOS_OPT_GYRO ? opts.gyro : id == HOS_OPT_GYRO_SENS_X ? opts.gyro_sens_x : id == HOS_OPT_GYRO_SENS_Y ? opts.gyro_sens_y : id == HOS_OPT_GYRO_INV_X ? opts.gyro_inv_x : id == HOS_OPT_GYRO_INV_Y ? opts.gyro_inv_y : id == HOS_OPT_GYRO_DEADZONE ? opts.gyro_deadzone :
                id == HOS_OPT_DLSS_JITTER_W || id == HOS_OPT_DLSS_JITTER_H || id == HOS_OPT_DLSS_JITTER_PHASES ? jitter_option(id) :
-               id == HL_OPT_FPS_LIMIT ? menu_fps_limit() : id == HL_OPT_FRAMEGEN_MULT ? (framegen_on() && framegen_now() >= 2 ? framegen_now() : 1) : id == HL_OPT_VRR_CAP ? vrr_fps_cap() : 0;   // (HeyListen: the frame rate limit, the multiplier it is shared with and the VRR row's cap, host/nn_vi.c; vk_opt_ids.h)
+               id == HL_OPT_FPS_LIMIT ? menu_fps_limit() : id == HL_OPT_BASE_LIMIT ? menu_base_fps() : id == HL_OPT_FRAMEGEN_MULT ? (framegen_on() && framegen_now() >= 2 ? framegen_now() : 1) : id == HL_OPT_VRR_CAP ? vrr_fps_cap() : 0;   // (HeyListen: the frame rate limit, the multiplier it is shared with and the VRR row's cap, host/nn_vi.c; vk_opt_ids.h)
     };
     t.option_set = menu_option_set;
     t.nvn_register_sampler = register_sampler_queued;

@@ -112,6 +112,10 @@ HeyListen's `engine/` is Hookshot's source imported with its history and kept in
   Hookshot and Longshot; it replaces the HDR row's earlier fourth value, "Native + our tone mapper" (an options file that had it
   loads as Native with PsychoV35).
 
+*Frame generation*
+- **Base frame rate limit** (Graphics tab, off by default; `base_frame_rate_limit` in the options file): caps the game's own frame rate before frame generation, so every generator is fed an even rate and the shown rate is that times the multiplier (base 60 at 2x: 120; base 48 at 3x: 144); with frame generation Off it is the Frame rate limit itself.
+- **AMD FSR 4 frame generation**, a fourth choice of **Frame generation by** (2x, through AMD's own runtime, offered only on a Radeon RX 9000 where AMD's runtime says it runs; **not tested on real hardware yet**; `RX_VK_FSR4_FG`); anything it refuses is made by the renderer's own or FSR 3.1.
+
 *Tooling and packaging*
 - **HeyListen Builder**: its own releases, updates and work folder, so it never touches a Hookshot install; **emulator save import and export** with backup.
 - Game executable `HeyListen.exe`, an original icon (a blue fairy orb), and a Discord status that shows "Playing HeyListen".

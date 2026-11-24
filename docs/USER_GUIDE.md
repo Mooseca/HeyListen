@@ -70,7 +70,9 @@ and window settings after):
 3. **DLSS model** (with NVIDIA DLSS).
 4. **Frame generation by**: who makes the made frames: **Built-in / AMD FSR 3.1** (the game's own interpolation, and AMD FSR 3.1's at 2x
    where it runs), **NVIDIA DLSS FG** (RTX 40 and newer, with a temporal upscaler, DLSS or FSR 4, and NVIDIA's runtime files) or
-   **AMD FSR 3.1 FG**. In `hookshot_options.ini` it is `frame_generation_by` (0, 1, 2).
+   **AMD FSR 3.1 FG**, or, on a Radeon RX 9000 only, **AMD FSR 4 FG** (2x; the row offers it only where AMD's own runtime says it runs;
+   not tested on real hardware yet; AMD's `amd_fidelityfx_framegeneration_vk.dll` goes beside the other two AMD files). In
+   `hookshot_options.ini` it is `frame_generation_by` (0, 1, 2, 3).
 5. **Frame generation**, directly under it: Off, Auto and 2x to 8x, but only what the mode above makes. **NVIDIA DLSS FG** goes up to
    what NVIDIA's runtime makes on your GPU (**6x on an RTX 50, 2x on an RTX 40**) and has no Auto. **AMD FSR 3.1 FG** makes 2x only.
    **Built-in** has Auto and 2x to 8x. Changing the mode keeps the multiplier within the new mode's, never raising it (8x becomes 6x
@@ -88,6 +90,15 @@ FPS counter's line **Frame limit** says it, for example `120 fps (game 40 x 3)`.
 holds nothing back: the game runs as fast as the PC can, and every one of its frames gets its made frames (your display, and a
 V-Sync setting of the driver, may still hold the shown rate). Above 60 the limit needs **Game speed** on Real time (the default); with
 Per frame the game runs at 60 as before and the limit does not apply.
+
+### Base frame rate limit
+
+**Base frame rate limit** (under Frame rate limit; off by default; `base_frame_rate_limit` in the options file) holds the game's OWN
+frame rate, before frame generation: Off, or 30, 40, 45, 48, 50, 60, 72, 75, 90, 120. With it on, the game runs at that rate whatever
+the Frame rate limit says, and the frames shown are that rate times the multiplier that runs: base 60 at 2x shows 120, base 48 at 3x
+shows 144. Frame generation gets an even rate to work from, with Auto too (it fills up to your display's refresh from the base). The
+Frame rate limit then holds nothing back, and the FPS counter's **Frame limit** line says `144 fps (game 48 x 3)`. With Frame
+generation Off it does what the Frame rate limit does with the same number. Needs Game speed on Real time.
 
 ### HDR
 

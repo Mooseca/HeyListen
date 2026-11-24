@@ -2,7 +2,7 @@
  "schema": 1,
  "generated_by": "engine/scripts/list_switches.py",
  "scope": "C, C++ and headers under engine/ (engine/tests and vendored trees other than a64-kit excluded) and the Python the builder, the lifter and the scripts run: getenv, std::getenv, _wgetenv, the code's own env helpers and table-driven reads, and os.environ.",
- "count": 1462,
+ "count": 1463,
  "switches": [
   {
    "name": "A64_",
@@ -5088,7 +5088,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2520
+     "line": 2568
     }
    ],
    "default": "0 (unset)",
@@ -5235,11 +5235,15 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2528
+     "line": 2576
+    },
+    {
+     "path": "gpu/vk/vk_menu.cpp",
+     "line": 2584
     },
     {
      "path": "host/nn_vi.c",
-     "line": 124
+     "line": 126
     }
    ],
    "default": "unset",
@@ -5264,7 +5268,7 @@
     },
     {
      "path": "host/nn_vi.c",
-     "line": 329
+     "line": 344
     }
    ],
    "default": "off (unset)",
@@ -5310,11 +5314,15 @@
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2528
+     "line": 2576
+    },
+    {
+     "path": "gpu/vk/vk_menu.cpp",
+     "line": 2584
     },
     {
      "path": "host/nn_vi.c",
-     "line": 124
+     "line": 126
     }
    ],
    "default": "0",
@@ -5419,7 +5427,7 @@
    "files": [
     {
      "path": "host/nn_vi.c",
-     "line": 402
+     "line": 417
     }
    ],
    "default": "off (unset)",
@@ -5440,7 +5448,7 @@
    "files": [
     {
      "path": "host/nn_vi.c",
-     "line": 329
+     "line": 344
     }
    ],
    "default": "off (unset)",
@@ -5507,7 +5515,7 @@
    "files": [
     {
      "path": "host/nn_vi.c",
-     "line": 446
+     "line": 461
     }
    ],
    "default": "off (unset)",
@@ -5528,7 +5536,7 @@
    "files": [
     {
      "path": "host/nn_vi.c",
-     "line": 511
+     "line": 526
     }
    ],
    "default": "0",
@@ -5633,7 +5641,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2611
+     "line": 2671
     },
     {
      "path": "host/display.c",
@@ -5662,7 +5670,7 @@
    "files": [
     {
      "path": "host/nn_vi.c",
-     "line": 175
+     "line": 190
     }
    ],
    "default": "off (unset)",
@@ -6817,7 +6825,7 @@
    "files": [
     {
      "path": "host/nn_vi.c",
-     "line": 535
+     "line": 550
     }
    ],
    "default": "1",
@@ -7198,7 +7206,7 @@
    "files": [
     {
      "path": "host/nn_vi.c",
-     "line": 201
+     "line": 216
     }
    ],
    "default": "off (unset)",
@@ -7815,7 +7823,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2437
+     "line": 2485
     }
    ],
    "default": "unset",
@@ -7836,7 +7844,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2440
+     "line": 2488
     },
     {
      "path": "host/hos_main.c",
@@ -7924,7 +7932,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2521
+     "line": 2569
     },
     {
      "path": "host/nn_applet.c",
@@ -8335,7 +8343,7 @@
    "files": [
     {
      "path": "host/nn_vi.c",
-     "line": 459
+     "line": 474
     }
    ],
    "default": "unset",
@@ -8473,7 +8481,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2519
+     "line": 2567
     }
    ],
    "default": "0 (unset)",
@@ -8494,7 +8502,7 @@
    "files": [
     {
      "path": "host/nn_vi.c",
-     "line": 382
+     "line": 397
     }
    ],
    "default": "5",
@@ -8603,7 +8611,7 @@
    "files": [
     {
      "path": "host/nn_vi.c",
-     "line": 312
+     "line": 327
     }
    ],
    "default": "off (unset)",
@@ -8624,11 +8632,11 @@
    "files": [
     {
      "path": "host/nn_vi.c",
-     "line": 296
+     "line": 311
     },
     {
      "path": "host/nn_vi.c",
-     "line": 305
+     "line": 320
     }
    ],
    "default": "unset",
@@ -8787,7 +8795,7 @@
    "files": [
     {
      "path": "host/nn_vi.c",
-     "line": 222
+     "line": 237
     }
    ],
    "default": "unset",
@@ -9013,11 +9021,11 @@
    "files": [
     {
      "path": "host/nn_vi.c",
-     "line": 426
+     "line": 441
     },
     {
      "path": "host/nn_vi.c",
-     "line": 488
+     "line": 503
     }
    ],
    "default": "off (unset)",
@@ -9231,7 +9239,7 @@
    "files": [
     {
      "path": "host/nn_vi.c",
-     "line": 289
+     "line": 304
     }
    ],
    "default": "unset",
@@ -9701,7 +9709,7 @@
    "files": [
     {
      "path": "host/nn_vi.c",
-     "line": 202
+     "line": 217
     }
    ],
    "default": "off (unset)",
@@ -9894,11 +9902,11 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 450
+     "line": 455
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 485
+     "line": 490
     },
     {
      "path": "host/hos_wide_ui.c",
@@ -18342,7 +18350,7 @@
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 288
+     "line": 293
     }
    ],
    "default": "unset",
@@ -18384,11 +18392,11 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 324
+     "line": 329
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2515
+     "line": 2563
     }
    ],
    "default": "unset",
@@ -19684,7 +19692,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_framegen.cpp",
-     "line": 862
+     "line": 866
     }
    ],
    "default": "unset",
@@ -19713,15 +19721,15 @@
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 442
+     "line": 447
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 509
+     "line": 514
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 539
+     "line": 544
     }
    ],
    "default": "off (unset)",
@@ -20182,7 +20190,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_framegen.cpp",
-     "line": 563
+     "line": 566
     }
    ],
    "default": "on (unless set to 0, false, off or no)",
@@ -20203,7 +20211,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2509
+     "line": 2557
     }
    ],
    "default": "0 (unset)",
@@ -20224,7 +20232,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_framegen.cpp",
-     "line": 245
+     "line": 246
     }
    ],
    "default": "8",
@@ -20468,6 +20476,27 @@
    "use": null
   },
   {
+   "name": "RX_VK_FSR4_FG",
+   "area": "renderer",
+   "group": "Frame generation",
+   "audience": "developer",
+   "files": [
+    {
+     "path": "gpu/vk/vk_fsr4fg.cpp",
+     "line": 54
+    }
+   ],
+   "default": "-1 (unset)",
+   "values": "a whole number",
+   "explanation": "AMD FSR 4 frame generation (`gpu/vk/vk_fsr4fg.cpp`; a Radeon RX 9000 and AMD's `amd_fidelityfx_framegeneration_vk.dll`, not tried on real hardware) never / for the run whatever the Frame generation by row says (where AMD's runtime offers it).",
+   "comment": null,
+   "documented_in": "development.md",
+   "source": "development.md",
+   "documented": true,
+   "set_via": "In `hookshot_env.txt`, or in the environment.",
+   "use": null
+  },
+  {
    "name": "RX_VK_FSR4_HDR",
    "area": "renderer",
    "group": "HDR, V-Sync and presentation",
@@ -20538,7 +20567,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_framegen.cpp",
-     "line": 837
+     "line": 841
     }
    ],
    "default": "unset",
@@ -20559,7 +20588,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_framegen.cpp",
-     "line": 872
+     "line": 876
     }
    ],
    "default": "unset",
@@ -20580,7 +20609,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_fsr3_inputs.cpp",
-     "line": 386
+     "line": 387
     },
     {
      "path": "gpu/vk/vk_temporal.cpp",
@@ -21066,7 +21095,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2511
+     "line": 2559
     }
    ],
    "default": "unset",
@@ -21288,15 +21317,15 @@
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 442
+     "line": 447
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 509
+     "line": 514
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 539
+     "line": 544
     }
    ],
    "default": "off (unset)",
@@ -22948,7 +22977,7 @@
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2503
+     "line": 2551
     }
    ],
    "default": "2",
@@ -23032,7 +23061,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2809
+     "line": 2869
     }
    ],
    "default": "unset",
@@ -25382,7 +25411,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2510
+     "line": 2558
     }
    ],
    "default": "0 (unset)",
@@ -25403,7 +25432,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 329
+     "line": 334
     },
     {
      "path": "gpu/vk/vk_replay.cpp",
@@ -27021,7 +27050,7 @@
     },
     {
      "path": "gpu/vk/vk_fsr3_inputs.cpp",
-     "line": 220
+     "line": 221
     },
     {
      "path": "gpu/vk/vk_temporal.cpp",
@@ -30311,7 +30340,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2781
+     "line": 2841
     }
    ],
    "default": "unset",
@@ -30479,7 +30508,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2516
+     "line": 2564
     }
    ],
    "default": "0 (unset)",
@@ -30500,12 +30529,12 @@
    "files": [
     {
      "path": "gpu/vk/vk_framegen.cpp",
-     "line": 693
+     "line": 697
     }
    ],
    "default": "off (unset)",
    "values": "on or off (0, false, off, no and empty are off)",
-   "explanation": "undocumented: gpu/vk/vk_framegen.cpp:693 (in `framegen_scale()`) reads it as an on/off switch: `static const bool report = getenv(\"RX_VK_UPSCALE_LOG\") != nullptr;`. No comment in the source says what it changes.",
+   "explanation": "undocumented: gpu/vk/vk_framegen.cpp:697 (in `framegen_scale()`) reads it as an on/off switch: `static const bool report = getenv(\"RX_VK_UPSCALE_LOG\") != nullptr;`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
