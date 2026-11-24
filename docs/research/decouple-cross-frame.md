@@ -440,8 +440,11 @@ cores (the 5070 / 7800X3D: 8 cores, 16 threads).
   screen): the whole scene blown out white, the exposure of another scene: a warp's first frames. Without the overlap the order
   thread's tours read 0 (`dec2a-tour-ot`, `dec3b-tour-ln`, where the lanes were inert); inline with the overlap before the fix
   `dec2b-tour-on` read 0 (with every GPU-written page copied again from guest memory, which may have hidden a stale read). The inline
-  tour on `dec3c` is series 8 (`c8-dec3c.log`, `dec3c-tour-so`). Not explained yet; the order thread with the overlap is not sent to
-  the 3050.
+  tour on `dec3c` (series 8, `E:\OOT\scratch-decouple\c8-dec3c.log`, `build/s5/dec3c-tour-so`, 19:14): **0 flashes**, all five maps, 0 pages
+  from guest memory, the meter's held reads 12 / 365 / 686 / 11 / 5 / 0 / 0 / 0 / 455. So the flashes come with the overlap **on the order
+  thread** only (step 3a, `7f12b5ae8`): not explained yet (suspects: the done marks held by `DoneHold` let a fence wait through
+  before the end's write-backs, or the game threads' captures taken beside a pending end); the order thread with the overlap is not
+  sent to the 3050.
 - **The gate is reopened.** hT started with a cold shader cache for its build ("12 graphics pipelines from 5354 notes carried over
   from another shader translation (5342 notes name no program)", "noted pipelines warmed (in play) ... 5168 left out", where kA1 reads
   "5309 graphics pipelines ... built in 1586 ms"); its three unnamed threads at 92-99% are the background shader workers, in 16 of
