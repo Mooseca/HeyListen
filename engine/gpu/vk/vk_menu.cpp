@@ -229,6 +229,17 @@ const char* tx_upscaler(int) {
                                             "AMD FSR 4", "Off"};
     return t[std::clamp(upscaler(), 0, ur::kUpscalers - 1)];
 }
+/// Whether a file (a path with /) is in the game folder: NVIDIA's DLSS runtime and AMD's FSR 4 loader, which a game built without
+/// them can have beside it (Windows' file names: the Linux runtimes carry a version in theirs)
+bool file_beside_game(const char* relative) {
+#ifdef _WIN32
+    std::error_code ec;
+    return std::filesystem::is_regular_file(game_dir_path() / relative, ec);
+#else
+    (void)relative;
+    return false;
+#endif
+}
 /// The Upscaler: the one shown (what runs, upscaler()), and with the game's own, why DLSS and FSR are not offered. Variants
 /// (every one): each value, then the game's own with each of DLSS's reasons, then with each of FSR's
 const char* hn_upscaler(int v, int variant) {
@@ -278,8 +289,18 @@ const char* hn_upscaler(int v, int variant) {
     // (the reasons are said only where the engine is in the build: one without FSR does not tell an NVIDIA user why)
     const char* dn = dlss_built() || variant >= 0 ? dlss_no[d] : nullptr;
     const char* fn = fsr4_built() || variant >= 0 ? fsr_no[f] : nullptr;
+    // (a build without DLSS or FSR 4 says nothing of it, except where its files are in the game folder on a card that would use
+    // them: then the way to get it. Each answer is kept: the folder and the GPU do not change while the game runs)
+    if (variant < 0 && v == ur::GAME) {
+        static const bool dlss_hint = ur::dlss_rebuild_hint_wanted(dlss_built(), ur::nvidia_rtx(dev.props.vendorID, dev.props.deviceName),
+                                                                    file_beside_game("ngx/nvngx_dlss.dll"));
+        static const bool fsr_hint = ur::fsr4_rebuild_hint_wanted(fsr4_built(), ur::amd_gpu(dev.props.vendorID),
+                                                                   file_beside_game("amd_fidelityfx_loader_vk.dll"));
+        if (dlss_hint) dn = ur::dlss_rebuild_hint();
+        if (fsr_hint) fn = ur::fsr4_rebuild_hint();
+    }
     if (v != ur::GAME || (!dn && !fn)) return t[v];
-    static char b[DLSS_WHY_COUNT][FSR_WHY_COUNT][320];
+    static char b[DLSS_WHY_COUNT][FSR_WHY_COUNT][520];
     snprintf(b[d][f], sizeof b[d][f], "%s%s%s%s%s", t[0], dn ? " " : "", dn ? dn : "", fn ? " " : "", fn ? fn : "");
     return b[d][f];
 }

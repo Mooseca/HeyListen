@@ -29,6 +29,7 @@
 #include "present_mode.h"
 #include "sparse_queue.h"
 #include "vk_menu.h"
+#include "upscaler_rows.h"
 #include "perf_report.h"
 #include "report_info.h"
 #include "vk_dlss.h"
@@ -1462,6 +1463,10 @@ const MkwVkRenderer* mkwvk_init(const MkwVkHost* h) {
          dev.props.driverVersion, dev.mesh_shader ? "yes" : "no", dev.external_memory_host ? "yes" : "no",
          dev.graphics_pipeline_library ? "yes" : "no");
     mkwvk::report_info::log_lines();   // (the crash report's facts: host/hos_crash_dialog.h reads "vk: driver:" and "report:" lines)
+    // (what this build has of the upscalers that come from the Builder's boxes: a menu without DLSS, and nothing in the log of why, was
+    // issue 130)
+    logf("%s", mkwvk::upscaler_rows::dlss_build_line(dlss_built()));
+    logf("%s", mkwvk::upscaler_rows::fsr4_build_line(fsr4_built()));
     if (!dev.mesh_shader && !dev.mesh_fallback && !getenv("RX_VK_NO_MESH_WARNING")) {
         // (the game draws its foliage, grass and many effects with mesh shaders: without them those draws are left out and the
         // picture is broken (an RX 580's "static"-like scenes, 2026-11-08). Said once, on its own thread, and the game goes on.)
