@@ -242,12 +242,15 @@ classes measured so far differ by device class, not by a few percent.
 
 ## State
 
-- 2026-11-24 20:59: perf/texcache commits c189dafe9 (texcache1), 5d8066c3c (2), a45465f05 (3), d7abeb700 (4: map lists, pool by RAM,
-  writes at normal IO priority), 63fc1fe6f (5: the first map's list read; pool by total RAM), plus notes. Whole suite on 63fc1fe6f:
-  511 passed, the 3 known failures. Build texcache5 queued (behind VAR1's speed lease); texcache4 built and measured.
-- Lists for texcache5: `E:\OOT\scratch-texcache\list-3050-3.txt` (replaces list 2) and `list-laptop-3.txt` (list 3 ran on
-  texcache4: its map lists read nothing, the bug 63fc1fe6f fixes; a laptop pair on texcache5 is worth it but not urgent).
-- Open: the main PC warm arms' steady-fps episodes (above); the 3050's list 3 decides. Next lever for the laptop is not the cache:
-  the game's native BC textures (BC7/BC6H/BC5, 2048x2048 x3) unswizzled on the CPU, and small BC4/BC1 ones stalled 100-190 ms/MB
-  (page faults suspected): a GPU unswizzle into a buffer + copy for BC formats (LAPTOP1).
-- Cache folder for tests: `E:\OOT\scratch-texcache\cache` (4.3 GB, my runs; delete when done). No leases held, nothing running.
+- 2026-11-25 00:55: texcache6 (commit 68366a529): the cache on by default for integrated GPUs that transcode ASTC and discrete cards
+  under 10 GB; 4096 MB rolling cap, the disk's last GB never written, writes off for the session on any write error; pool by RAM.
+  Build build/s5/bin/texcache6 (-Block -Lift -Pgo), suite under the build lease: 510 passed, the 3 known failures and
+  test_crash_record (passes alone, `tests-texcache6.log` in my scratch: a flake under the parallel run's load).
+- Main PC function check (`E:\OOT\scratch-texcache\check6.sh`, runs build/s5/ck-texcache6-<arm>, kokiri-idle, slot b): default
+  arm reached play with "vk: BC disk cache off (by default: a discrete GPU with 10 GB of VRAM or more: nothing to gain; discrete
+  GPU, 11943 MB of VRAM)"; RX_VK_BC_DISK=1 cold wrote 68 records (263 MB) into an empty folder, the warm start read them (67 read
+  ahead, 11 textures from the cache before the run's last counter line), "read-ahead pool 1024 MB (from the machine's RAM)". The
+  RX_VK_BC_DISK=0 arm never reached play in 3 starts (0.8 fps: the machine was loaded by other agents' jobs; the default arm, the
+  same path, did). Pictures warm against off NOT compared this time (the warm run was too slow to reach the same frames).
+- List `E:\OOT\scratch-texcache\list-3050-4.txt`: the default against RX_VK_BC_DISK=0, hyrule-walk and market-spin, after primes.
+- Test cache folders `E:\OOT\scratch-texcache\cache` (4.3 GB) and `cache6` (263 MB), mine. No leases, nothing running.
