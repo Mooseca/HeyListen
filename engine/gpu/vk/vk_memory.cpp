@@ -2272,18 +2272,18 @@ const uint8_t* memory_as_submitted(uint64_t guest, const uint8_t* live, uint64_t
                 } else {
                     if (earlier_on) {
                         if (!own) {   // (the submission's capture took no page: no copy of it is that submission's)
-                            const int64_t n = st_no_own.fetch_add(1, std::memory_order_relaxed) + 1;
-                            if (n <= 8 || n % 1024 == 0)
+                            const int64_t seen = st_no_own.fetch_add(1, std::memory_order_relaxed) + 1;
+                            if (seen <= 8 || seen % 1024 == 0)
                                 logf("vk: texture read with no capture of its own submission (%lld so far, texture frame %llu): page %#llx, the "
                                      "shadow's copy %llu (the game wrote it after the submit, or long before it)",
-                                     (long long)n, (unsigned long long)texture_frame_no(), (unsigned long long)(p << 12),
+                                     (long long)seen, (unsigned long long)texture_frame_no(), (unsigned long long)(p << 12),
                                      (unsigned long long)it->second.seq);
                         } else if (it->second.seq > own) {   // (a later capture's copy: the page was written after the submit)
-                            const int64_t n = st_after_submit.fetch_add(1, std::memory_order_relaxed) + 1;
-                            if (n <= 12 || n % 64 == 0)
+                            const int64_t seen = st_after_submit.fetch_add(1, std::memory_order_relaxed) + 1;
+                            if (seen <= 12 || seen % 64 == 0)
                                 logf("vk: texture read outside its submission's capture (%lld so far, texture frame %llu): page %#llx, the "
                                      "submission's own capture %llu, the copy %llu (the game wrote it after the submit)",
-                                     (long long)n, (unsigned long long)texture_frame_no(), (unsigned long long)(p << 12),
+                                     (long long)seen, (unsigned long long)texture_frame_no(), (unsigned long long)(p << 12),
                                      (unsigned long long)own, (unsigned long long)it->second.seq);
                         }
                     }
