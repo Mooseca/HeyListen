@@ -60,8 +60,26 @@ PC 3050, default ini (render Auto), `pipe2e`, 23 Nov, one run each (the second o
 | castle | inline | 63.4 | 17.10 | 14.9 | 0.3 | 1.6-1.9 | | | present 4.16 |
 | castle | order thread | 68.8 | 14.83 | 13.1 | 0.3 | 1.1-1.3 | 13.48 | 0.00 | fence 2.81 |
 
+PC 3050, default ini again, `matrix80` (`pipe4f`, 24 Nov, `RX_VK_FEED_LOG=1`, one run each): what the GPU's idle is made of.
+
+| scene | arm | fps | frame | GPU busy | GPU idle | of it replay not ready (before the hand-over / small command buffers / dry pass / own segment / wait for segments) | sent, not started | sent before the GPU went idle | order thread idle | main waits |
+|---|---|---:|---:|---:|---:|---|---:|---:|---:|---|
+| Market | inline | 50.4 | 18.01 | 13.48 | 4.53 | 3.61 (0.21 / 0.74 / 0.48 / 1.10 / 0.46) | 0.54 | 0.26 | | present 1.35 |
+| Market | order thread | 55.3 | 17.64 | 13.73 | 3.91 | 2.87 (0.69 / 0.08 / 0.45 / 0.94 / 0.29) | 0.50 | 0.28 | 1.05 | fence 0.54 |
+| Kokiri | inline | 60.3 | 15.66 | 12.85 | 2.81 | 2.11 (0.10 / 0.87 / 0.24 / 0.44 / 0.05) | 0.36 | 0.25 | | present 4.30 |
+| Kokiri | order thread | 64.7 | 14.64 | 12.88 | 1.75 | 1.14 (0.70 / 0.05 / 0.05 / 0.19 / 0.05) | 0.22 | 0.37 | 0.01 | fence 2.75 |
+| Hyrule Field | inline | 58.8 | 15.28 | 12.22 | 3.05 | 2.37 (0.09 / 1.33 / 0.13 / 0.43 / 0.05) | 0.34 | 0.24 | | present 2.93 |
+| Hyrule Field | order thread | 63.2 | 14.51 | 12.39 | 2.12 | 1.52 (1.03 / 0.11 / 0.04 / 0.18 / 0.04) | 0.19 | 0.35 | 0.06 | fence 2.55 |
+
+With the order thread the GPU's idle is no longer inside the big command buffers (own segment 0.18-0.19, wait 0.04-0.05 in Kokiri and
+Hyrule): the GPU has the recordings of the submission before to run meanwhile. What is left is the difference of two rates: the
+order thread needs the whole frame (idle 0.01-0.06) and the GPU 12.4-12.9 ms of it, so 1.75-2.12 ms of GPU idle fall wherever the
+order thread has nothing for it yet ("before the hand-over" in the feed log is the time before the order thread began the
+submission: its other jobs, the present). The frame shortens only if the order thread's work a frame falls under the GPU's.
+
 PC 3050, 1440p native (`matrix80`, `pipe4f`, one run each): Market inline 22.42 = GPU busy 19.15 + idle 3.27; Kokiri inline 20.25 =
-18.05 + 2.20, order thread 19.88 = 18.12 + 1.76 (order thread idle 0.00, fence join 3.92); Hyrule inline 20.94 = 18.12 + 2.82.
+18.05 + 2.20, order thread 19.88 = 18.12 + 1.76 (order thread idle 0.00, fence join 3.92); Hyrule inline 20.94 = 18.12 + 2.82, order thread 19.97 = 17.74 + 2.23 (order thread idle 0.03, fence join 3.42). The Market's
+order-thread run froze (State).
 
 Main PC, 1440p native (PIPE4's gate, speed lease): castle inline 8.67 (GPU 8.0, gaps 0.5), order thread 8.38-8.56 (7.9-8.0, 0.3; idle 0.00 and
 fence join 0.75 in the 8.38 run); Kokiri inline 8.57 (7.6, 0.8), order thread 7.96 (7.3, 0.4). Market: game-bound (PIPE2: order thread idle 1.9-2.9).
@@ -119,3 +137,47 @@ by its last lane (SUB1 B, built), `rb_joined` and the ring's staging per submiss
 - Zone loads: the spine's queue grows while the game loads; K bounds the lanes, `RX_VK_ORDER_AHEAD` the presents.
 - The Market stays the game's loop: nothing here moves it.
 - `pipe4f` freezes on the PC 3050 (above): stage 3 waits for PIPE4's last state.
+
+## 3. The owner's question (24 Nov): can the replay go, or the preparation of the commands be made cheaper?
+
+The lanes make the preparation parallel. Whether the work itself can go was measured before this stream; nothing was run again.
+
+### 3.1 Reusing the frame before's recording
+
+Measured by MEMO1 on 22 Nov (`docs/research/memo1-replay-reuse.md` on `perf/memo1`, `RX_VK_REPEAT_STATS`, main PC, Market / castle /
+Kokiri, the camera moving in the first two; every draw hashed with its program, pipeline and dynamic state, texture and sampler
+handles and what they resolve to, vertex, index and storage buffers, arguments and targets; uniform contents left out):
+
+- **The stream is not stable by position**: the draw count differs from the frame before's in about 100% of the frames (culling),
+  and 2.1-3.1% of the draws are identical to the draw at the same place of the frame before (1.8-4.0% two frames before). A segment
+  is a run of ~128 draws at a place, so a segment identical to the frame before's is rarer than that; whole passes identical to
+  the frame before: 1.5-4.7% of the draws, 1.1-2.2% of `draw()` time. **A recorded secondary command buffer has nothing to be
+  reused for.** (A per-segment hash was not run: the per-draw figure bounds it.)
+- By hash anywhere in the two frames before: 33-40% of the draws but 14-22% of `draw()` time (the cheap draws repeat).
+- What breaks it: the texture handle words and the registrations behind them change every frame for the costly draws (with
+  textures left out of the key 45-76% of the time repeats); the uniform blocks' addresses move in the game's ring; storage and
+  vertex buffers alternate with period 2; visibility changes the draw list.
+- Worth, on the 5070's critical path (MEMO1 section 4): 0.21-0.57 ms a frame (2-6%) for strict repeats, 0.40-0.83 ms (5-9%) with a
+  texture-free key; the ceiling with every draw repeating and half its cost saved 0.63-1.7 ms. Against the PC 3050's 8.0-8.7 ms of
+  "segments' recording and wait" the same shares give a few percent; the lanes take that whole item off the chain. Not measured on
+  the 3050.
+- The dry pass (4.8 ms of the 3050's chain) cannot be replaced by a hash walk: a span's effect on the state depends on the state
+  going in (MEMO1 section 5.4; `replay-cost.md` R6 item 3).
+
+### 3.2 Removing the replay for a pass (direct emission)
+
+The verdict of 22 Nov (`refactor-plan.md`: heavy passes are 54-63 draws, 95% of their uniform blocks are written after the recording,
+ceiling ~5% of CPU, dropped) stands with this map, for a reason the map adds: **no pass holds the cost**. The frame is ~2,400 draws in
+60-118 passes (MEMO1), each draw 5.8 us on the 5070 and 10.5 us on the 3050 (`prof-A`: draw idx 24.83 ms for 2,362 draws), so one
+heavy pass is 0.3-0.7 ms summed over the recording threads and a quarter of that on the chain. The replay goes only where most
+draws are produced natively (the draw loop `0x80255be0`, `direct-emission.md` brick D), and the dry pass's stream-ordered effects
+(1,300 report counters, 641 render conditions, 85 CPU clears a frame on the 3050) stay with whatever is still translated. No pass
+was found where it pays alone.
+
+### 3.3 What this changes in the design
+
+Nothing in the stages. One risk it points at, not measured yet: lanes add no CPU. On 16 Nov the 3050's threads ran 74-83 ms of CPU a
+frame in Kokiri and Hyrule (`frame-truth.md`: 3.4 cores at 21.6-24.3 ms frames); at the 12.8-13.3 ms the lanes aim at that is 5.6-6.5
+cores of a 6-core, 12-thread CPU. If the CPU is that full, the summed cost of the preparation (not its place on the chain) becomes
+the limit, and MEMO1's section 5 (the texture resolution kept per thread, the program pick, same-frame duplicates: 0.5-1.3 ms summed
+gains each) is where to look. To settle before stage 2: one PC 3050 run at the default ini with `HOS_THREAD_TIMES=5`.
