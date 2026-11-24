@@ -3752,26 +3752,6 @@ void build_descriptors(const NvnState& s, const Program& p) {
                     const uint64_t head = std::min<uint64_t>(n, (addr - base) + 0x40);
                     (void)gpu_buffer_bind_guess(base, (head + 3) & ~3ull);   // (CRASH3: staged and checked, never over a CPU write)
                 }
-                {   // (CRASH3, HL_TRACE_WB=1: the write-back watch's origins) each storage binding marked written, of 16 KB or
-                    // less, once per guest range and program: which program, stage and descriptor, the table entry, bare or sized
-                    static const bool wb_watch = [] { const char* e = getenv("HL_TRACE_WB"); return e && atoi(e) != 0; }();
-                    if (wb_watch && b && d.is_written && addr) {
-                        const uint64_t wn = bare ? (d.cbuf_offset != 0x880 ? ((std::min<uint64_t>(n, (addr - base) + 0x40) + 3) & ~3ull) : 0) : n;
-                        static std::mutex om;
-                        static std::unordered_set<uint64_t> seen;
-                        const uint64_t g = host->gpu_guest(base);
-                        if (wn && wn <= (16u << 10) && g) {
-                            std::lock_guard lk(om);
-                            if (seen.size() < 20000 && seen.insert(g * 0x9E3779B97F4A7C15ull ^ p.key ^ ((uint64_t)ns << 60) ^ ((uint64_t)d.cbuf_offset << 32) ^ k).second)
-                                logf("vk: wb watch: written binding [%#llx, %#llx) (%s) by program %016llx stage %d desc #%zu c%u+%#x entry %u of %u: "
-                                     "pointer %#llx, size word %#llx",
-                                     (unsigned long long)g, (unsigned long long)(g + wn), bare ? "bare entry's head" : "sized",
-                                     (unsigned long long)p.key, ns, (size_t)(&d - info.storage_buffers_descriptors.data()),
-                                     (unsigned)d.cbuf_index, off, k, (unsigned)d.count, (unsigned long long)addr,
-                                     (unsigned long long)stage_cbuf_word(s, st, d.cbuf_index, off + 8));
-                        }
-                    }
-                }
                 // (RX_VK_PROTECT_BARE=1: the whole range kept for the GPU against the CPU's page syncs, vk_memory.cpp prot_pages)
                 if (b && bare && d.is_written)
                     if (const uint64_t guest = host->gpu_guest(base)) memory_protect_gpu(guest, n);
@@ -3795,6 +3775,26 @@ void build_descriptors(const NvnState& s, const Program& p) {
                             logf("vk: descriptors of %016llx stage %d: #%zu[%u] c%u+%#x%s -> %#llx size %#llx (bound %s)", (unsigned long long)p.key,
                                  ns, n_desc, k, (unsigned)d.cbuf_index, off, d.is_written ? " written" : "", (unsigned long long)addr,
                                  (unsigned long long)size, b ? "yes" : "NO");
+                    }
+                }
+                {   // (CRASH3, HL_TRACE_WB=1: the write-back watch's origins) each storage binding marked written, of 16 KB or
+                    // less, once per guest range and program: which program, stage and descriptor, the table entry, bare or sized
+                    static const bool wb_watch = [] { const char* e = getenv("HL_TRACE_WB"); return e && atoi(e) != 0; }();
+                    if (wb_watch && b && d.is_written && addr) {
+                        const uint64_t wn = bare ? (d.cbuf_offset != 0x880 ? ((std::min<uint64_t>(n, (addr - base) + 0x40) + 3) & ~3ull) : 0) : n;
+                        static std::mutex om;
+                        static std::unordered_set<uint64_t> seen;
+                        const uint64_t g = host->gpu_guest(base);
+                        if (wn && wn <= (16u << 10) && g) {
+                            std::lock_guard lk(om);
+                            if (seen.size() < 20000 && seen.insert(g * 0x9E3779B97F4A7C15ull ^ p.key ^ ((uint64_t)ns << 60) ^ ((uint64_t)d.cbuf_offset << 32) ^ k).second)
+                                logf("vk: wb watch: written binding [%#llx, %#llx) (%s) by program %016llx stage %d desc #%zu c%u+%#x entry %u of %u: "
+                                     "pointer %#llx, size word %#llx",
+                                     (unsigned long long)g, (unsigned long long)(g + wn), bare ? "bare entry's head" : "sized",
+                                     (unsigned long long)p.key, ns, (size_t)(&d - info.storage_buffers_descriptors.data()),
+                                     (unsigned)d.cbuf_index, off, k, (unsigned)d.count, (unsigned long long)addr,
+                                     (unsigned long long)stage_cbuf_word(s, st, d.cbuf_index, off + 8));
+                        }
                     }
                 }
                 {   // (EXPO1, RX_VK_LOG_METER=<rows>, default off) every storage descriptor of the two exposure programs: which program

@@ -17,6 +17,7 @@
 #include <string>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 #include <algorithm>
 #include <set>
@@ -110,6 +111,9 @@ bool rbclass_check(int) { return false; }
 bool rbring_stage_bind(uint64_t, uint64_t, VkBuffer, uint64_t) { return false; }
 // (EXPO1's test switch HL_RB_TEST_DIRECT: unset in the model, so no binding goes to guest memory on purpose)
 bool rbring_test_direct(uint64_t, uint64_t) { return false; }
+// (CRASH3: a bare entry's guessed head, RX_VK_WB_GUESS_CHECKED: in the model a written binding like any other)
+thread_local bool tl_bind_guess = false;
+bool wb_guess_checked_on() { return false; }
 uint64_t mem_rec_value = 0;
 void wb_pages_note(uint64_t, uint64_t, uint64_t) {}   // (WBL1's put-off pages: never reached in the model)
 void rbck_record(VkCommandBuffer, int, const std::map<Pool*, std::vector<VkBufferCopy>>&) {}   // (READB2 CHECK: off)
@@ -128,6 +132,7 @@ BufferRef gpu_buffer_bind(uint64_t gpu, uint64_t size, bool written) {
 #include "rb_bindtail.inc"
     return {p->mirror, off, size, 0};
 }
+BufferRef gpu_buffer_bind_guess(uint64_t gpu, uint64_t size) { return gpu_buffer_bind(gpu, size, true); }
 uint64_t gpu_pool_end(uint64_t gpu) {
     std::lock_guard lk(pools_mu);
     auto it = imported.upper_bound(gpu);
