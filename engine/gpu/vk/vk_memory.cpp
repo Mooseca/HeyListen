@@ -1060,10 +1060,41 @@ bool gpu_pages_on() {
     static const bool v = getenv("RX_VK_GPU_PAGES") != nullptr;
     return v;
 }
+// (PIPE4) the generation of each page's last GPU stamp (a write-back), with the order thread only (ot_read_capture_on): a replay
+// read whose capture entry a CPU write has made stale since takes the capture's copy, one a GPU write has made stale guest memory.
+// By page in chunks made when first used, and by region for the whole-region stamps
+bool ot_read_capture_on();
+static std::atomic<uint32_t*> gpug_chunks[kPages / kChunkPages];
+static std::vector<uint32_t> gpug_region(kPages / kRegionPages);
+inline uint32_t gpu_gen(uint64_t p) {
+    const uint32_t* c = gpug_chunks[p / kChunkPages].load(std::memory_order_acquire);
+    return std::max(c ? load_u32(const_cast<uint32_t&>(c[p % kChunkPages])) : 0u, load_u32(gpug_region[p / kRegionPages]));
+}
+static void gpu_gen_note(uint64_t guest, uint64_t size) {
+    const uint32_t g = gen_now;   // (the stamp's, just made)
+    const uint64_t p0 = guest >> kPageShift, p1 = std::min((guest + size - 1) >> kPageShift, kPages - 1);
+    for (uint64_t p = p0; p <= p1;) {
+        if (p % kRegionPages == 0 && p + kRegionPages - 1 <= p1) {
+            store_u32(gpug_region[p / kRegionPages], g);
+            p += kRegionPages;
+            continue;
+        }
+        std::atomic<uint32_t*>& a = gpug_chunks[p / kChunkPages];
+        uint32_t* c = a.load(std::memory_order_acquire);
+        if (!c) {
+            uint32_t* n = (uint32_t*)calloc(kChunkPages, sizeof(uint32_t));
+            if (a.compare_exchange_strong(c, n, std::memory_order_acq_rel)) c = n;
+            else free(n);
+        }
+        store_u32(c[p % kChunkPages], g);
+        p++;
+    }
+}
 void memory_stamp_gpu(uint64_t guest, uint64_t size) {
     if (!size) return;
     diff_gpu_wrote(guest, size);
     memory_stamp(guest, size);
+    if (ot_read_capture_on()) gpu_gen_note(guest, size);
     if (!gpu_pages_on()) return;
     std::lock_guard lk(gpu_pages_mu);
     const uint64_t p0 = guest >> kPageShift, p1 = (guest + size - 1) >> kPageShift;
@@ -2072,6 +2103,7 @@ std::atomic<int64_t> st_late_def_full{0}, st_late_reads{0}, st_late_syncs{0};   
 // so this is the read outside the submission's capture view. Counted per read, published in batches of 256 (it is on the
 // replay's hot path).
 std::atomic<int64_t> st_read_late{0};
+std::atomic<int64_t> st_read_kept{0};   // (PIPE4: pages a CPU write made stale since their capture's copy, read from the copy)
 
 bool memory_read_as_submitted(uint64_t gpu, void* dst, uint64_t n) {
     if (cap_only_gpu()) cap_excl_note(gpu, n, "a replay read as submitted");
@@ -2085,6 +2117,7 @@ bool memory_read_as_submitted(uint64_t gpu, void* dst, uint64_t n) {
     const uint64_t view = cap_view_gen.load(std::memory_order_acquire);
     if (page0 == page1 && submitted_known(page0, page_gen(page0), view)) return true;
     static std::atomic<int64_t> reads{0}, pages_from{0};
+    static const bool read_capture = ot_read_capture_on();
     int64_t from = 0;
     {
         std::lock_guard lk(pools_mu);
@@ -2094,7 +2127,13 @@ bool memory_read_as_submitted(uint64_t gpu, void* dst, uint64_t n) {
         for (uint64_t page = guest >> kPageShift; page < (guest + n + 4095) >> kPageShift; page++) {
             const CapEntry e = cap_entry(page);
             if (!e.gen) continue;
-            if (e.gen != page_gen(page)) { stale = true; continue; }
+            if (e.gen != page_gen(page)) {
+                // (PIPE4) with the order thread a CPU write since the capture's copy came after the submission (a write before it
+                // would be in its capture or an earlier one's entry would not be the newest): the copy is the page as submitted,
+                // guest memory the frame after it. A GPU stamp since (a write-back of work up to this one): guest memory
+                if (!read_capture || gpu_gen(page) >= page_gen(page)) { stale = true; continue; }
+                st_read_kept.fetch_add(1, std::memory_order_relaxed);
+            }
             auto b = cap_bufs.find(e.gen);
             if (b == cap_bufs.end() || !b->second.map) continue;
             const uint64_t a = std::max(page << kPageShift, guest), z = std::min((page + 1) << kPageShift, guest + n);
@@ -2160,8 +2199,8 @@ bool memory_read_as_submitted(uint64_t gpu, void* dst, uint64_t n) {
     pages_from += from;
     if (++reads % 20000 == 0)
         logf("vk: replay reads of guest memory as submitted: %lld (%lld pages from the captures); of them %lld took guest memory for a "
-             "page written after its capture's copy (at least: counted in batches)",
-             (long long)reads.load(), (long long)pages_from.load(), (long long)st_read_late.load());
+             "page written after its capture's copy (at least: counted in batches); %lld pages written by the CPU since their copy read from it (order thread)",
+             (long long)reads.load(), (long long)pages_from.load(), (long long)st_read_late.load(), (long long)st_read_kept.load());
     return true;
 }
 
@@ -2209,6 +2248,16 @@ std::atomic<int64_t> st_after_submit{0};   // (pages read from guest memory whos
 std::atomic<int64_t> st_no_own{0};         // (pages read from guest memory where the submission's capture took no page of its own)
 std::atomic<int64_t> st_earlier_used{0};   // (re-upload pages served from an earlier capture's copy: the page as of the submit)
 /// (PIPE3) the replay on an order thread (RX_VK_ORDER_THREAD): its reads run a frame or more after the submission they belong to
+// (PIPE4) RX_VK_ORDER_READ_CAPTURE=0: with the order thread, a replay read of a page a CPU write made stale since its capture's
+// copy reads guest memory, as before (default: the copy, the page as submitted)
+bool ot_read_capture_on() {
+    static const bool v = [] {
+        const char* e = getenv("RX_VK_ORDER_THREAD");
+        const char* r = getenv("RX_VK_ORDER_READ_CAPTURE");
+        return e && atoi(e) != 0 && (!r || atoi(r) != 0);
+    }();
+    return v;
+}
 bool ot_late_reads() {
     static const bool v = [] {
         const char* e = getenv("RX_VK_ORDER_THREAD");

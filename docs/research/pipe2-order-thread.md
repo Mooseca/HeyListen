@@ -99,6 +99,11 @@ PIPE4 (lease name `pipe4`, scratch `E:\OOT\scratch-pipe4`, scripts `build/s5/pip
   River's first frames, `E:\OOT\scratch-pipe4\shots\p4t4-on\flash_3633_{a,b}.png`) on a loaded machine (39 ms frames, the order thread
   89.7 jobs queued on average, 417 at most; slot b's game running and taking the focus) - the late-read class (section 9), not the
   ordering fault. Two more on tours queued: `p4t5-on`, `p4t6-on` (`s4.log`).
+- `p4t5-on` (slot a 10:37-10:42, cut after it again for the owner's second window, released 10:42:51): 0 flashes, 1 present forced,
+  but the game ended before the fourth warp (Market, Field, Kakariko only; as `p4t1-on`, cause not found, rc 0). The order thread's
+  backlog on these tours (20-125 jobs on average, up to 891) is the same on pipe3b's `p3t-on` (22-176, up to 1336): not this fix's.
+- Queued (`s5.sh`, `s5.log`): `p4t6-on`, `p4t7-on` in slot b (the owner holds slot a), then the fps gate on pipe4c
+  (`build/s5/pipe4/gate.sh pipe4c p4g`, one speed lease, slot c; table `python -I E:/OOT/scratch-pipe4/tmp/gate.py p4g`).
 
 Where it stands: the three tasks of the brief are done and measured. (1) The present thread works and is safe, but **the gate that
 keeps the GPU's order takes the present's serial part back into the chain** (Kokiri 0.47-0.51 ms a frame, chain 7.76 against 7.79):
