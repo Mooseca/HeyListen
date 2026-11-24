@@ -6,31 +6,48 @@ Branch `perf/decouple` from main `c79bee6f6`, worktree `E:\OOT\HeyListen-wt\deco
 other value that depends on another frame, so that nothing waits and frames can be worked on in parallel. Targets: +30% on the RTX
 3050 / i5-10400F (about +20% reached), 120+ fps on the RTX 5070 / 7800X3D, no stutters.
 
-## State (keep current; last edit 24 Nov 15:00)
+## Summary at the stop of 24 Nov, 16:40 (first session)
 
-- Done: the reading (the brief's list; `direct-emission.md` sections 1-7 and 12 whole, 8-11 and 13-15 by their headings only;
-  `recording-state.md` of `refactor/sub1` and `memo1-replay-reuse.md` of `perf/memo1`, which the brief did not list); the map
-  (section 1); the design (section 2), reported to the coordinator at 14:45; the owner's question on reuse and direct emission
-  (section 3).
-- Stage 1, in progress: `refactor/sub1` merged (`5054c6330`: 17 conflict hunks resolved by hand, listed in the commit), the six
-  checks that cut the changed source updated (`a1ce2732f`). Build `dec1a` = the engine code of `5054c6330`, started 14:52 under the
-  build lease (`E:/OOT/scratch-decouple/build.sh dec1a`, log `build-dec1a.log`, `mkg-dec1a.log`). The suite run before the test
-  fixes: 505 passed, 9 failed (the 3 known and those six); the six pass one by one now; **the whole suite is to be run again**.
-- Next, exact: (1) `python -I E:/OOT/scratch-pipe4/tmp/launch.py E:/OOT/scratch-decouple/c1-dec1a.sh` (slot lease priority 1:
-  warm-up, `RX_VK_REC_OVERLAP_CHECK=1` with the switches off, `RX_VK_SUB_OVERLAP=1` with its check in Kokiri and the Market, the
-  warp tour with `RX_VK_FLASH=1` on and off; log `c1-dec1a.log`, runs `build/s5/dec1a-*` in the main checkout). Pass = every
-  "per submission (SUB1)" count 0, 0 segments differ, 0 flashes, the meter's held reads as off. (2) `dec1a` to the PC 3050
-  (`C:/OOT/builds/dec1a/`), list `matrix81`: default ini, Market / Kokiri / Hyrule, A plain against B `RX_VK_SUB_OVERLAP=1`, 3
-  passes interleaved; and two `pipe4f` runs with `HOS_THREAD_TIMES=5` (section 3.3). (3) `perf/pipe2` (tip `f24afbe94`, handed over
-  by PIPE4 at 14:35 with its State) merged into this branch: a trial merge (`git merge-tree`) conflicts in `vk_memory.cpp` and the
-  generated lists only. (4) Stage 2 (`RX_VK_LANES`), starting with the capture view K deep: with the order thread the captures of
-  two or three later submissions exist while one is replayed, and SUB1's view keeps one older entry a page (`cap_prev`).
-- Measurement series of this stream: `m1.sh` (cut: 110 s runs did not reach play on the loaded machine), `m1b.sh` (175 s runs;
-  `dc1-m-off`, `dc1-m-on`, `dc1-k-off` done, the rest cut at 14:42 to free the slot for the queue). `matrix80` on the PC 3050: 12
-  counter runs in (`E:\OOT\scratch-decouple\matrix80.txt`), the two `RX_VK_RB_PROF` runs not read yet.
-- Known bad: `pipe4f`'s order thread froze the game on the PC 3050 in the Market at the native ini (`NmB`: 8.5 fps, p50 36.8 ms,
-  max 632 ms); its five other order-thread runs there were normal. PIPE4's `pipe4g` (never run) is the candidate.
-- Nothing of this stream holds a lease except the build above; slot a's exe and dll were put back (`bak-a`).
+1. **The map** (section 1): no game thread waits for the GPU in a way that sets the frame any more. On the PC 3050 at the default
+   settings the frame is our own serial replay: the order thread idles 0.00-1.05 ms a frame while the GPU idles 1.1-4.8 ms behind it.
+   At 1440p native both PCs are within 4-17% of the GPU's own work. The Market is the game's own loop.
+2. **The design** (section 2): game -> spine -> lanes -> GPU; the ceilings read off the logs are +13-21% on the 3050 at the default
+   settings in Kokiri and Hyrule, +5-9% in the Market, +4-6% at most on the 5070 at 1440p native. Not measured gains.
+3. **The owner's question** (section 3): reusing the frame before's recording and removing the replay for a pass were both measured
+   before (MEMO1, step 2): neither pays; nothing changes in the stages.
+4. **Built** (section 4), every switch off by default: the state per submission (`refactor/sub1`) and the order thread
+   (`perf/pipe2`, PIPE4's hand-over) merged onto main in one tree; `RX_VK_CAP_DEPTH`; the guessed write-backs' snapshots per
+   submission. Checks with `RX_VK_SUB_OVERLAP=1`: 0 differences in every counter (Kokiri), 0 flashes over one warp tour; the order
+   thread: one tour, 0 flashes, no hang. **No fps number yet**: the PC 3050's list `matrix81` had not started at the stop.
+5. **Not built**: the lanes themselves (`RX_VK_LANES`, section 4.3 has the recipe). `RX_VK_SUB_OVERLAP` and `RX_VK_ORDER_THREAD` do
+   not work together yet (the first is left off when the second is on).
+
+## State (keep current; last edit 24 Nov 16:40)
+
+- Branch `perf/decouple`, nothing pushed. Code tip `b4f558d20` (the commits after it are notes). Suite on the tip: 512 passed, 3
+  failed, the known three (`E:\OOT\scratch-decouple\tests-tip.log`). Switch lists regenerated.
+- Builds in `E:\OOT\HeyListen\build\s5\bin`: `dec1a` (= `5054c6330`: main + `refactor/sub1`), `dec2a` (= `09484e740`: + `perf/pipe2`
+  + `RX_VK_CAP_DEPTH`), `dec2b` (= `e67d919c8`: + the snapshots per submission; the tip's code). On the PC 3050: `C:\OOT\builds\dec1a`
+  (hashes checked) and `pipe4f`.
+- **Waiting on the PC 3050**: list `matrix81` (sent 15:28, corrected 15:38 to leave the Market out; its script `matrix81.sh` was
+  there at 15:50, not started at 16:25, behind the coordinator's `matrix58`): `dec1a` at the default ini, Kokiri and Hyrule, plain
+  against `RX_VK_SUB_OVERLAP=1`, 3 passes interleaved; a check run; two `pipe4f` runs with `HOS_THREAD_TIMES=5` for section 3.3.
+  Read `C:\OOT\pc3050s-out\matrix81.txt` and `C:\OOT\pc3050s-out\dc81\`. Expected from the design: little or nothing from this
+  switch alone (the present still waits for the frame whole); the list is there to have the base measured where the replay binds.
+- Nothing of this stream runs or holds a lease; slots a and b hold their own exe and dll again (`bak-a`, `bak-b` compared).
+- Scripts in `E:\OOT\scratch-decouple`: `build.sh <name> [tests]` (build lease priority 1, the suite, `mkg.ps1`), `c1.sh` / `c2.sh` /
+  `c3.sh` (check series on a slot lease priority 1: counters, tours with the flash detector), `m1b.sh` (counter runs), `sum.py`
+  (a run's counters, short), `syn.sh <file.cpp>` (a syntax check with the build's flags); all launched with
+  `python -I E:/OOT/scratch-pipe4/tmp/launch.py <script>`. Runs are 175 s (tours 300 s): the machine was loaded all day and a 110 s
+  run often has no play in it; a first run of a build with a new shader stamp only prepares shaders.
+- **Next, in order**: (1) read `matrix81`; (2) on a quiet machine, the Market save with `RX_VK_SUB_OVERLAP=1` three times on `dec2b`
+  (section 4.2: the loads that never reached play); (3) stage 2, `RX_VK_LANES`, by the recipe of section 4.3, starting with the
+  submit sequencer (pure rules and a test) and `par_conds` per group, on the order thread; first make `RX_VK_SUB_OVERLAP`'s
+  hand-off the order thread's (its captures are taken by the submitting threads, the pending end must be completed by its jobs);
+  (4) two more order-thread tours and a PC 3050 function run on `dec2b` (PIPE4's rule ran once here; `pipe4f` froze the 3050's
+  Market at the native ini); (5) stage 5 (R4 into the ring) only after the lanes.
+- Measurement series of this stream: `m1.sh` (cut: 110 s runs), `m1b.sh` (`dc1-m-off`, `dc1-m-on`, `dc1-k-off`; cut at 14:42 to free
+  the slot), `matrix80` on the PC 3050 (done, copy in `E:\OOT\scratch-decouple\matrix80.txt`), check series 1-3 (section 4).
 
 ## 1. The dependency map
 
@@ -236,6 +253,11 @@ Series 1 and 2 of check runs with the switch on (main PC, slot a, machine shared
 | `dec2a-m-dj2` | dec2a | Market (`market-mid`) | `RX_VK_DEFER_JOIN=2`, REC1's check | play at 77.68 s; 16,200 joins, 0 segments differ |
 | `dec2a-ot-on` | dec2a | Kokiri | `RX_VK_ORDER_THREAD=1`, the feed log | play at 98.01 s; frame 8.22-8.25 ms = GPU busy 7.45 + idle 0.77-0.79 (replay not ready 0.52-0.54); order thread idle 0.23-0.27, fence join 0.97-0.99 ms a frame |
 | `dec2a-tour-ot` | dec2a | warp tour | `RX_VK_ORDER_THREAD=1` | play at 89.85 s; Market, Hyrule Field, Zora's River, Hyrule Field (the Kakariko warp did not take, as in PIPE4's on tours); **0 flashes, no hang**; 1 present forced ("waited its time", after present 2243), 7 waits gone past; the meter's held reads 11 / 0; the longest frame 5,454 ms |
+| `dec2b-warm` | dec2b | Kokiri | none | **never reached play** (16:14; see below) |
+| `dec2b-m-on-a` | dec2b | Market (`market-mid`) | `RX_VK_SUB_OVERLAP=1`, both checks | **never left the first screen** (1 draw a frame for 150 s) |
+| `dec2b-m-on-b` | dec2b | Market (`market-mid`) | `RX_VK_SUB_OVERLAP=1` | play at 84.58 s |
+| `dec2b-tour-on` | dec2b | warp tour | `RX_VK_SUB_OVERLAP=1` | play at 71.83 s; Market, Hyrule Field, Zora's River, Hyrule Field; **0 flashes**; the meter's held reads 9 / 10 / 0 / 0; the longest frame 2,981 ms |
+| `dec2a-m-on-c` | dec2a | Market (`market-mid`) | `RX_VK_SUB_OVERLAP=1` | play at 55.40 s (`dec2a-m-on-b` did not start: the slot's exe was still held by the game before) |
 
 `dec2a-tour-ot` is the first run in the game of PIPE4's last rule (`pipe4g`: the watch spares a stopped queue only while the order
 thread finished a job in the last 250 ms), here merged under the per-submission state: one tour, no hang at a load, no dark frame.
@@ -248,8 +270,8 @@ play on `dec2a` (`dec2a-m-on`); (2) in series 3 a run with **no switch** failed 
 screen until the title skip gave up; "the game read no controller for 11.2 s", presents at 0.1-0.3 fps) and the next one never left
 the first screen (`dec2b-m-on-a`, 1 draw a frame at 360 fps for 150 s); (3) other streams' runs on this PC gave up at the title the
 same way today (`c3-v42b` 13:10, `U-d1` 13:30, `U-d2` 13:36, `c3-v42d` 14:01, `V-t` and `p4t13-on` 14:16: `skip title: gave up` in
-their `build/s5/<run>/game_log.txt`). The machine ran two games and a build or a lift through all of it. To settle on a quiet
-machine: the Market save with the switch alone, three runs, on `dec2b`.
+their `build/s5/<run>/game_log.txt`). The machine ran two games and a build or a lift through all of it. Over the day, the Market save with the switch on: `dec1a` 0 of 2, `dec2a` 2 of 2, `dec2b` 1 of 2 (the
+failed one before the title). To settle on a quiet machine: the Market save with the switch alone, three runs, on `dec2b`.
 
 One real gap was found by reading while looking for a cause and removed in `e67d919c8` (build `dec2b`): CRASH3's guessed write-backs
 kept their snapshots in one map that every submission's start cleared; a pending submission's guessed write-backs would not be
