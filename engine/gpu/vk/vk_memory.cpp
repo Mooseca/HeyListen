@@ -8067,6 +8067,34 @@ void accum_sweep() {   // (pools_mu held, at a submission's start)
     }
 }
 
+// ---- (HeyListen, issues 131, 121) RX_VK_RETIRE_STRESS=<n>: a test hook, off by default ----
+// Every <n> submissions the RX_VK_RETIRE_STRESS_N (default 2) imported pools the GPU is done with and bound last are retired as a
+// larger import takes a pool in: the node leaves the table, its mirror is inherited, the next binding imports the range again
+// (overlapping the retired import until that is given back). Hundreds of retirements, imports and give-backs in a short run, where
+// a field retires a dozen: for the bounded give-back (retired_bound.h) on a driver that lost the device with the old one.
+void retire_stress() {   // (pools_mu held)
+    static const uint64_t every = getenv("RX_VK_RETIRE_STRESS") ? strtoull(getenv("RX_VK_RETIRE_STRESS"), nullptr, 10) : 0;
+    static const size_t per = getenv("RX_VK_RETIRE_STRESS_N") ? (size_t)strtoull(getenv("RX_VK_RETIRE_STRESS_N"), nullptr, 10) : 2;
+    static int64_t total = 0;
+    if (!every || mirror_epoch % every) return;
+    std::vector<std::map<uint64_t, Pool>::iterator> cand;
+    for (auto it = imported.begin(); it != imported.end(); ++it) {
+        const Pool& p = it->second;
+        if (p.memory && p.last_value && p.last_value <= mem_completed && !p.lazy_held && !p.prefetched && !p.never_imported) cand.push_back(it);
+    }
+    std::sort(cand.begin(), cand.end(), [](auto a, auto b) { return a->second.last_value > b->second.last_value; });
+    if (cand.size() > per) cand.resize(per);
+    for (auto it : cand) {
+        std::erase(lazy_release, &it->second);
+        retire_pool(it);
+        total++;
+    }
+    static int logged;
+    if (!cand.empty() && (logged++ < 4 || logged % 64 == 0))
+        logf("vk: retire stress (RX_VK_RETIRE_STRESS=%llu): %zu pools retired now, %lld in all, %zu retired still held", (unsigned long long)every,
+             cand.size(), (long long)total, retired_pools_count());
+}
+
 void memory_begin_submission() {
     std::lock_guard lk(pools_mu);
     AccumTimer acc_timer_(st_acc_begin_ns);
@@ -8074,6 +8102,7 @@ void memory_begin_submission() {
     reap_mirrors();
     if (pool_finalize_on()) finalize_retire();
     accum_sweep();
+    retire_stress();
     pool_mirror_log();
     retired_imports_give_back();
     imports_release();   // (RX_VK_NO_HOST_IMPORT)

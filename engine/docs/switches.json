@@ -2,7 +2,7 @@
  "schema": 1,
  "generated_by": "engine/scripts/list_switches.py",
  "scope": "C, C++ and headers under engine/ (engine/tests and vendored trees other than a64-kit excluded) and the Python the builder, the lifter and the scripts run: getenv, std::getenv, _wgetenv, the code's own env helpers and table-driven reads, and os.environ.",
- "count": 1468,
+ "count": 1470,
  "switches": [
   {
    "name": "A64_",
@@ -21489,7 +21489,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 8267
+     "line": 8296
     }
    ],
    "default": "off (unset)",
@@ -22029,7 +22029,7 @@
     },
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 8203
+     "line": 8232
     }
    ],
    "default": "off (unset)",
@@ -22331,7 +22331,7 @@
     },
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 8293
+     "line": 8322
     }
    ],
    "default": "off (unset)",
@@ -22931,7 +22931,7 @@
     },
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 9301
+     "line": 9330
     }
    ],
    "default": "off (unset)",
@@ -23581,7 +23581,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 8172
+     "line": 8201
     }
    ],
    "default": "off (unset)",
@@ -24775,7 +24775,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 8110
+     "line": 8139
     }
    ],
    "default": "off (unset)",
@@ -25101,7 +25101,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 9186
+     "line": 9215
     }
    ],
    "default": "off (unset)",
@@ -26224,7 +26224,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 10014
+     "line": 10043
     }
    ],
    "default": "on (unless set to 0, false, off or no)",
@@ -27866,6 +27866,48 @@
    "values": "on or off (0, false, off, no and empty are off); the description names `0`",
    "explanation": "(Hookshot 20352f9c, ported by hand) The retired pools nothing needs any more: their import given back, no mirror, no shadow, nothing pending, the GPU past them. Each area change retires ~30 pools (798 in a 10-minute tour of six places) and each stayed in retired_pools for the whole session, walked at every submission (retired_imports_give_back), for every range the game frees (release_uncovered), at each of the game threads' frees (memory_guest_imported) and at every mirror made: the longer the game ran, the longer each of those walks. Such a node moves here, alive at the same address (pointers to it may be kept elsewhere: the pool cache, the mirror lists), and its per-page vector is let go. RX_VK_RETIRED_COMPACT=0: as before.",
    "comment": "(Hookshot 20352f9c, ported by hand) The retired pools nothing needs any more: their import given back, no mirror, no shadow, nothing pending, the GPU past them. Each area change retires ~30 pools (798 in a 10-minute tour of six places) and each stayed in retired_pools for the whole session, walked at every submission (retired_imports_give_back), for every range the game frees (release_uncovered), at each of the game threads' frees (memory_guest_imported) and at every mirror made: the longer the game ran, the longer each of those walks. Such a node moves here, alive at the same address (pointers to it may be kept elsewhere: the pool cache, the mirror lists), and its per-page vector is let go. RX_VK_RETIRED_COMPACT=0: as before.",
+   "documented_in": null,
+   "source": "comment at gpu/vk/vk_memory.cpp",
+   "documented": true,
+   "set_via": "In `hookshot_env.txt`, or in the environment.",
+   "use": null
+  },
+  {
+   "name": "RX_VK_RETIRE_STRESS",
+   "area": "renderer",
+   "group": "Rendering and GPU",
+   "audience": "developer",
+   "files": [
+    {
+     "path": "gpu/vk/vk_memory.cpp",
+     "line": 8076
+    }
+   ],
+   "default": "0",
+   "values": "a whole number",
+   "explanation": "(HeyListen, issues 131, 121) RX_VK_RETIRE_STRESS=<n>: a test hook, off by default ---- Every <n> submissions the RX_VK_RETIRE_STRESS_N (default 2) imported pools the GPU is done with and bound last are retired as a larger import takes a pool in: the node leaves the table, its mirror is inherited, the next binding imports the range again (overlapping the retired import until that is given back). Hundreds of retirements, imports and give-backs in a short run, where a field retires a dozen: for the bounded give-back (retired_bound.h) on a driver that lost the device with the old one.",
+   "comment": "(HeyListen, issues 131, 121) RX_VK_RETIRE_STRESS=<n>: a test hook, off by default ---- Every <n> submissions the RX_VK_RETIRE_STRESS_N (default 2) imported pools the GPU is done with and bound last are retired as a larger import takes a pool in: the node leaves the table, its mirror is inherited, the next binding imports the range again (overlapping the retired import until that is given back). Hundreds of retirements, imports and give-backs in a short run, where a field retires a dozen: for the bounded give-back (retired_bound.h) on a driver that lost the device with the old one.",
+   "documented_in": null,
+   "source": "comment at gpu/vk/vk_memory.cpp",
+   "documented": true,
+   "set_via": "In `hookshot_env.txt`, or in the environment.",
+   "use": null
+  },
+  {
+   "name": "RX_VK_RETIRE_STRESS_N",
+   "area": "renderer",
+   "group": "Rendering and GPU",
+   "audience": "developer",
+   "files": [
+    {
+     "path": "gpu/vk/vk_memory.cpp",
+     "line": 8077
+    }
+   ],
+   "default": "2",
+   "values": "a whole number",
+   "explanation": "(HeyListen, issues 131, 121) RX_VK_RETIRE_STRESS=<n>: a test hook, off by default ---- Every <n> submissions the RX_VK_RETIRE_STRESS_N (default 2) imported pools the GPU is done with and bound last are retired as a larger import takes a pool in: the node leaves the table, its mirror is inherited, the next binding imports the range again (overlapping the retired import until that is given back). Hundreds of retirements, imports and give-backs in a short run, where a field retires a dozen: for the bounded give-back (retired_bound.h) on a driver that lost the device with the old one.",
+   "comment": "(HeyListen, issues 131, 121) RX_VK_RETIRE_STRESS=<n>: a test hook, off by default ---- Every <n> submissions the RX_VK_RETIRE_STRESS_N (default 2) imported pools the GPU is done with and bound last are retired as a larger import takes a pool in: the node leaves the table, its mirror is inherited, the next binding imports the range again (overlapping the retired import until that is given back). Hundreds of retirements, imports and give-backs in a short run, where a field retires a dozen: for the bounded give-back (retired_bound.h) on a driver that lost the device with the old one.",
    "documented_in": null,
    "source": "comment at gpu/vk/vk_memory.cpp",
    "documented": true,
@@ -31173,7 +31215,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 8401
+     "line": 8430
     }
    ],
    "default": "on (unless set to 0, false, off or no)",
@@ -31299,12 +31341,12 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 8640
+     "line": 8669
     }
    ],
    "default": "off (unset)",
    "values": "on or off (0, false, off, no and empty are off)",
-   "explanation": "undocumented: gpu/vk/vk_memory.cpp:8640 (in `wbl_put_off()`) reads it as an on/off switch: `static const uint32_t hot_need = wb_defer::hot_frames(getenv(\"RX_VK_WB_LAZY_HOT\"));`. No comment in the source says what it changes.",
+   "explanation": "undocumented: gpu/vk/vk_memory.cpp:8669 (in `wbl_put_off()`) reads it as an on/off switch: `static const uint32_t hot_need = wb_defer::hot_frames(getenv(\"RX_VK_WB_LAZY_HOT\"));`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -31320,12 +31362,12 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 8637
+     "line": 8666
     }
    ],
    "default": "off (unset)",
    "values": "on or off (0, false, off, no and empty are off)",
-   "explanation": "undocumented: gpu/vk/vk_memory.cpp:8637 (in `wbl_put_off()`) reads it as an on/off switch: `static const uint64_t min_run = wb_defer::min_run_bytes(getenv(\"RX_VK_WB_LAZY_MIN_KB\"));`. No comment in the source says what it changes.",
+   "explanation": "undocumented: gpu/vk/vk_memory.cpp:8666 (in `wbl_put_off()`) reads it as an on/off switch: `static const uint64_t min_run = wb_defer::min_run_bytes(getenv(\"RX_VK_WB_LAZY_MIN_KB\"));`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -31433,7 +31475,7 @@
     },
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 9779
+     "line": 9808
     }
    ],
    "default": "on (unless set to 0, false, off or no)",
@@ -31517,7 +31559,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 8420
+     "line": 8449
     }
    ],
    "default": "0 (unset)",
@@ -31626,7 +31668,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_memory.cpp",
-     "line": 8855
+     "line": 8884
     }
    ],
    "default": "unset",

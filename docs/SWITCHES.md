@@ -10,7 +10,7 @@ python -I engine/scripts/list_switches.py
 
 and commit both files. A test (`engine/tests/test_switches_documented.py`) fails when a switch read in the source is missing here or the data file is out of date.
 
-1468 switches: 56 players may be told to use, 381 diagnostic, 1031 developer-only; 1253 have a real explanation and 215 are marked `undocumented`.
+1470 switches: 56 players may be told to use, 381 diagnostic, 1033 developer-only; 1255 have a real explanation and 215 are marked `undocumented`.
 
 ## How to set a switch
 
@@ -64,7 +64,7 @@ The entries below say what each one does, its values and default, and when it is
 
 | Area | Switches | Player | Diagnostic | Developer |
 |---|---:|---:|---:|---:|
-| [Renderer](#renderer-upscaling-frame-generation-hdr-v-sync-and-presentation) | 468 | 23 | 14 | 431 |
+| [Renderer](#renderer-upscaling-frame-generation-hdr-v-sync-and-presentation) | 470 | 23 | 14 | 433 |
 | [Shaders and pipelines](#shaders-and-pipelines) | 128 | 6 | 0 | 122 |
 | [Memory and textures](#memory-and-textures) | 202 | 10 | 0 | 192 |
 | [Audio](#audio) | 14 | 5 | 9 | 0 |
@@ -77,7 +77,7 @@ The entries below say what each one does, its values and default, and when it is
 
 ## Renderer: upscaling, frame generation, HDR, V-Sync and presentation
 
-468 switches of the renderer: the upscaler, frame generation, HDR, V-Sync and what reaches the screen.
+470 switches of the renderer: the upscaler, frame generation, HDR, V-Sync and what reaches the screen.
 
 ### Upscaling (DLSS, FSR, TAAU)
 
@@ -2785,7 +2785,7 @@ Its synced_gen is raised only at the submission's end (memory_end_submission), s
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_memory.cpp:8267`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_memory.cpp:8296`.
 
 #### `RX_VK_INVALIDATE_WAIT` - developer
 
@@ -3265,7 +3265,7 @@ undocumented: gpu/vk/vk_draw.cpp:10938 reads it as a text value: `if (notes.empt
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_memory.cpp:8110`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_memory.cpp:8139`.
 
 #### `RX_VK_NO_PUSH_FIX` - developer
 
@@ -4067,6 +4067,26 @@ undocumented: gpu/vk/vk_memory.cpp:7379 (in `retired_bound_settings()`) reads it
 
 **Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_memory.cpp:5540`.
 
+#### `RX_VK_RETIRE_STRESS` - developer
+
+(HeyListen, issues 131, 121) RX_VK_RETIRE_STRESS=<n>: a test hook, off by default ---- Every <n> submissions the RX_VK_RETIRE_STRESS_N (default 2) imported pools the GPU is done with and bound last are retired as a larger import takes a pool in: the node leaves the table, its mirror is inherited, the next binding imports the range again (overlapping the retired import until that is given back). Hundreds of retirements, imports and give-backs in a short run, where a field retires a dozen: for the bounded give-back (retired_bound.h) on a driver that lost the device with the old one.
+
+**Values:** a whole number. **Default:** 0.
+
+**When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
+
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_memory.cpp:8076`.
+
+#### `RX_VK_RETIRE_STRESS_N` - developer
+
+(HeyListen, issues 131, 121) RX_VK_RETIRE_STRESS=<n>: a test hook, off by default ---- Every <n> submissions the RX_VK_RETIRE_STRESS_N (default 2) imported pools the GPU is done with and bound last are retired as a larger import takes a pool in: the node leaves the table, its mirror is inherited, the next binding imports the range again (overlapping the retired import until that is given back). Hundreds of retirements, imports and give-backs in a short run, where a field retires a dozen: for the bounded give-back (retired_bound.h) on a driver that lost the device with the old one.
+
+**Values:** a whole number. **Default:** 2.
+
+**When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
+
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_memory.cpp:8077`.
+
 #### `RX_VK_REUPLOAD_DIM` - developer
 
 (RX_VK_REUPLOAD_DIM=<w>x<h> (debugging): textures that size uploaded whole again every frame: is what a sampled texture misses in guest memory, unseen by the write tracking, or not there at all?).
@@ -4735,7 +4755,7 @@ RX_VK_WRITE_LIVE=0: not looked up, as then (said once in the log either way) (20
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_memory.cpp:8855`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_memory.cpp:8884`.
 
 #### `RX_WHOLE_CLEARS` - developer
 
@@ -6461,7 +6481,7 @@ GPU writes to mirrored pools are not copied back to guest memory (an experiment,
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_memory.cpp:9186`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_memory.cpp:9215`.
 
 #### `RX_VK_TEX_CAPTURE` - developer
 
@@ -6581,7 +6601,7 @@ Write-backs copy every byte again instead of only what changed against a VRAM sh
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_memory.cpp:8401`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_memory.cpp:8430`.
 
 #### `RX_VK_WB_EAGER` - developer
 
@@ -6635,23 +6655,23 @@ Now such ranges go through staging and are written by the CPU once the submissio
 
 #### `RX_VK_WB_LAZY_HOT` - developer
 
-undocumented: gpu/vk/vk_memory.cpp:8640 (in `wbl_put_off()`) reads it as an on/off switch: `static const uint32_t hot_need = wb_defer::hot_frames(getenv("RX_VK_WB_LAZY_HOT"));`. No comment in the source says what it changes.
+undocumented: gpu/vk/vk_memory.cpp:8669 (in `wbl_put_off()`) reads it as an on/off switch: `static const uint32_t hot_need = wb_defer::hot_frames(getenv("RX_VK_WB_LAZY_HOT"));`. No comment in the source says what it changes.
 
 **Values:** on or off (0, false, off, no and empty are off). **Default:** off (unset).
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_memory.cpp:8640`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_memory.cpp:8669`.
 
 #### `RX_VK_WB_LAZY_MIN_KB` - developer
 
-undocumented: gpu/vk/vk_memory.cpp:8637 (in `wbl_put_off()`) reads it as an on/off switch: `static const uint64_t min_run = wb_defer::min_run_bytes(getenv("RX_VK_WB_LAZY_MIN_KB"));`. No comment in the source says what it changes.
+undocumented: gpu/vk/vk_memory.cpp:8666 (in `wbl_put_off()`) reads it as an on/off switch: `static const uint64_t min_run = wb_defer::min_run_bytes(getenv("RX_VK_WB_LAZY_MIN_KB"));`. No comment in the source says what it changes.
 
 **Values:** on or off (0, false, off, no and empty are off). **Default:** off (unset).
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_memory.cpp:8637`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_memory.cpp:8666`.
 
 #### `RX_VK_WB_LAZY_OWN` - developer
 
@@ -6741,7 +6761,7 @@ One wait a call, however many pages and pools, and none when no page of the rang
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_memory.cpp:8420`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_memory.cpp:8449`.
 
 #### `RX_VK_WB_SMALL_EAGER_KB` - developer
 
@@ -7113,7 +7133,7 @@ No VRAM mirrors of the game's memory pools (on for discrete cards); their budget
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_memory.cpp:8172`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_memory.cpp:8201`.
 
 #### `RX_VK_MIRROR_VRAM_FREE` - developer
 
@@ -13823,7 +13843,7 @@ A buffer made for a caller that asked for its mapping and given none is returned
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_memory.cpp:10014`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_memory.cpp:10043`.
 
 #### `RX_VK_SEED_CHECK` - diagnostic
 

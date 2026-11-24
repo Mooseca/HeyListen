@@ -17,7 +17,7 @@ def check_source():
                    'getenv("RX_VK_RETIRED_BOUND_MB")', "d.not_before = mirror_epoch + bnd.flight;",
                    "mirror_epoch >= dead_imports.front().not_before", "old->retired_seq = mirror_epoch;",
                    "uint64_t retired_emergency_free(uint64_t need) {", 'getenv("RX_VK_IMPORT_EMERGENCY")',
-                   "import_forget_failure(lo, hi);"):
+                   "import_forget_failure(lo, hi);", 'getenv("RX_VK_RETIRE_STRESS")', "    retire_stress();"):
         if needle not in src:
             raise SystemExit("vk_memory.cpp no longer has: " + needle)
     # (a retired import is only handed to the plan when the GPU is past it and it has no mirror)
