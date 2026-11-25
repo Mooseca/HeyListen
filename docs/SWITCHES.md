@@ -229,7 +229,7 @@ NVIDIA DLAA before the game's bloom and tone map (HeyListen, after Longshot a762
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:351` and 1 more place.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:352` and 1 more place.
 
 #### `RX_VK_FORCE_UPSCALE_STUB` - developer
 
@@ -369,7 +369,7 @@ No frame generation whatever the menu says; over the options file: its multiplie
 
 **When a player would use it:** The upscaler causes artifacts: `=0` to `2` choose the filter for one run.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2658`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2661`.
 
 ### Frame generation
 
@@ -461,7 +461,7 @@ No frame generation whatever the menu says; over the options file: its multiplie
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2651`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2654`.
 
 #### `RX_VK_FRAMEGEN_RADIUS` - developer
 
@@ -583,7 +583,7 @@ Starts in fullscreen; the Insert menu's Fullscreen row is then left alone.
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2765` and 2 more places.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2768` and 2 more places.
 
 #### `HOS_HUD_FULL_RATIO` - developer
 
@@ -633,7 +633,7 @@ Over the options file: the output resolution (0 2048x1152, 1 2560x1440, 2 3840x2
 
 **When a player would use it:** The output resolution is wrong or the game starts at a size the screen cannot show: `0` to `4` pick a resolution for one run.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2663` and 1 more place.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2666` and 1 more place.
 
 #### `HOS_PRESENT_NOWAIT` - diagnostic
 
@@ -683,7 +683,7 @@ The HUD's layout on a screen that is not 16:9, over the menu's HUD layout row: `
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:477` and 2 more places.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:478` and 2 more places.
 
 #### `HOS_WINDOW_NOACTIVATE` - diagnostic
 
@@ -743,7 +743,7 @@ The Insert menu's HDR row for one run (the ini keeps the player's choice).
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2653`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2656`.
 
 #### `RX_VK_HDR_FIND` - developer
 
@@ -783,7 +783,7 @@ No frame generation whatever the menu says; over the options file: its multiplie
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2652`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2655`.
 
 #### `RX_VK_PRESENT_QUEUE` - diagnostic
 
@@ -843,7 +843,7 @@ The menu's button prompts for a controller or the keys, whatever was used last (
 
 **When a player would use it:** Screenshots need one set of button prompts: `pad` or `keys`.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2935`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2938`.
 
 #### `SDL_VIDEODRIVER` - diagnostic
 
@@ -2529,13 +2529,13 @@ The flash detector, with `RX_VK_SHOTS` and `RX_VK_SHOT_EVERY=1`: writes the fram
 
 #### `RX_VK_FOG` - developer
 
-undocumented: gpu/vk/vk_menu.cpp:2515 (in `fog_runs()`) reads it as an on/off switch: `const bool v = lowend_rule::fog_on(env_int("RX_VK_FOG"), opts.fog);`. No comment in the source says what it changes.
+undocumented: gpu/vk/vk_menu.cpp:2518 (in `fog_runs()`) reads it as an on/off switch: `const bool v = lowend_rule::fog_on(env_int("RX_VK_FOG"), opts.fog);`. No comment in the source says what it changes.
 
 **Values:** on or off (0, false, off, no and empty are off). **Default:** off (unset).
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2515` and 1 more place.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2518` and 1 more place.
 
 #### `RX_VK_FOG_BOXES` - developer
 
@@ -3075,7 +3075,7 @@ Timed Insert menu keys: `INS`, `UP`, `DOWN`, `LEFT`, `RIGHT`, `ESC`, `ENTER`, `T
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2963`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2966`.
 
 #### `RX_VK_METER_HOLD` - player
 
@@ -3595,7 +3595,7 @@ DLAA only (DLSS's other modes draw the scene smaller than the output), and not w
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:356` and 2 more places.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:357` and 2 more places.
 
 #### `RX_VK_PARALLEL_AFFINITY` - developer
 
@@ -9303,13 +9303,13 @@ The native job system then runs the stage's work as one of its jobs, under the l
 
 #### `HL_LOWEND` - developer
 
-undocumented: gpu/vk/vk_menu.cpp:2538 (in `menu_first_run_lowend()`) reads it as an on/off switch: `const lowend_rule::Apply a = lowend_rule::first_start(env_int("HL_LOWEND"), lowend_marked, gpu);`. No comment in the source says what it changes.
+undocumented: gpu/vk/vk_menu.cpp:2541 (in `menu_first_run_lowend()`) reads it as an on/off switch: `const lowend_rule::Apply a = lowend_rule::first_start(env_int("HL_LOWEND"), lowend_marked, gpu);`. No comment in the source says what it changes.
 
 **Values:** on or off (0, false, off, no and empty are off). **Default:** off (unset).
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2538`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2541`.
 
 #### `HL_MATH` - developer
 
@@ -9775,7 +9775,7 @@ The Frame rate limit for the run, over the row and Unlimited: the rate presented
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2670` and 2 more places.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2673` and 2 more places.
 
 #### `HOS_FPS_LOOP` - developer
 
@@ -10523,7 +10523,7 @@ Over the options file: Resolution 100% (non-zero: Auto), Game speed Per frame (1
 
 **When a player would use it:** The dynamic resolution makes the picture soft: `=0` holds 100% for one run.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2662`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2665`.
 
 #### `HOS_EVENT_FAST` - developer
 
@@ -10853,7 +10853,7 @@ To enable the debug tools, turn **Debug tools** on in the menu's Debug tab (or a
 
 **When a player would use it:** The Debug tab's tools should show without turning them on in the menu.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2578`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2581`.
 
 #### `HOS_OOT_PROTECT_HEARTS` - developer
 
@@ -10863,7 +10863,7 @@ To enable the debug tools, turn **Debug tools** on in the menu's Debug tab (or a
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2581` and 1 more place.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2584` and 1 more place.
 
 #### `HOS_OOT_TELEPORT_EVENT` - developer
 
@@ -10963,7 +10963,7 @@ Over the options file: Resolution 100% (non-zero: Auto), Game speed Per frame (1
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2661`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2664`.
 
 #### `HOS_RESTART_OF` - developer
 

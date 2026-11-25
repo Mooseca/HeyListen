@@ -888,8 +888,10 @@ static void npad_states(Ctx *c) {
         }
         /* Sprint with L3 (the Controls row, host/oot_sprint.c): with it on the left stick's press (the game's LS) is Sprint's, not the
            game's, except for one that begins outside gameplay. Off: the buttons as they are. */
-        uint64_t hos_sprint_input(uint64_t buttons, int on, int blocked);   /* host/oot_sprint.c */
-        buttons = hos_sprint_input(buttons, rx_option(HL_OPT_SPRINT, 0), menu_open);
+        uint64_t hos_sprint_input(uint64_t buttons, int on, int blocked, int moving);   /* host/oot_sprint.c */
+        const int zone = rx_option(11, 0);   /* (the menu's Stick dead zone: the left stick at rest for Sprint's Toggle) */
+        const int moving = hos_stick_axis((int16_t)stick[0], zone) || hos_stick_axis((int16_t)stick[1], zone);
+        buttons = hos_sprint_input(buttons, rx_option(HL_OPT_SPRINT, 0), menu_open, moving);
         __atomic_store_n(&flight_input, flight, __ATOMIC_RELAXED);
         __atomic_store_n(&free_camera_axes, axes, __ATOMIC_RELAXED);
         __atomic_store_n(&free_camera_height, height, __ATOMIC_RELAXED);
