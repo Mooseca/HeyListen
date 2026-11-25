@@ -369,7 +369,7 @@ No frame generation whatever the menu says; over the options file: its multiplie
 
 **When a player would use it:** The upscaler causes artifacts: `=0` to `2` choose the filter for one run.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2668`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2669`.
 
 ### Frame generation
 
@@ -461,7 +461,7 @@ No frame generation whatever the menu says; over the options file: its multiplie
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2661`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2662`.
 
 #### `RX_VK_FRAMEGEN_RADIUS` - developer
 
@@ -583,7 +583,7 @@ Starts in fullscreen; the Insert menu's Fullscreen row is then left alone.
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2775` and 2 more places.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2776` and 2 more places.
 
 #### `HOS_HUD_FULL_RATIO` - developer
 
@@ -633,7 +633,7 @@ Over the options file: the output resolution (0 2048x1152, 1 2560x1440, 2 3840x2
 
 **When a player would use it:** The output resolution is wrong or the game starts at a size the screen cannot show: `0` to `4` pick a resolution for one run.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2673` and 1 more place.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2674` and 1 more place.
 
 #### `HOS_PRESENT_NOWAIT` - diagnostic
 
@@ -743,7 +743,7 @@ The Insert menu's HDR row for one run (the ini keeps the player's choice).
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2663`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2664`.
 
 #### `RX_VK_HDR_FIND` - developer
 
@@ -783,7 +783,7 @@ No frame generation whatever the menu says; over the options file: its multiplie
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2662`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2663`.
 
 #### `RX_VK_PRESENT_QUEUE` - diagnostic
 
@@ -843,7 +843,7 @@ The menu's button prompts for a controller or the keys, whatever was used last (
 
 **When a player would use it:** Screenshots need one set of button prompts: `pad` or `keys`.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2949`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2954`.
 
 #### `SDL_VIDEODRIVER` - diagnostic
 
@@ -2529,13 +2529,13 @@ The flash detector, with `RX_VK_SHOTS` and `RX_VK_SHOT_EVERY=1`: writes the fram
 
 #### `RX_VK_FOG` - developer
 
-undocumented: gpu/vk/vk_menu.cpp:2525 (in `fog_runs()`) reads it as an on/off switch: `const bool v = lowend_rule::fog_on(env_int("RX_VK_FOG"), opts.fog);`. No comment in the source says what it changes.
+undocumented: gpu/vk/vk_menu.cpp:2526 (in `fog_runs()`) reads it as an on/off switch: `const bool v = lowend_rule::fog_on(env_int("RX_VK_FOG"), opts.fog);`. No comment in the source says what it changes.
 
 **Values:** on or off (0, false, off, no and empty are off). **Default:** off (unset).
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2525` and 1 more place.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2526` and 1 more place.
 
 #### `RX_VK_FOG_BOXES` - developer
 
@@ -3075,7 +3075,7 @@ Timed Insert menu keys: `INS`, `UP`, `DOWN`, `LEFT`, `RIGHT`, `ESC`, `ENTER`, `T
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2977`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2982`.
 
 #### `RX_VK_METER_HOLD` - player
 
@@ -9303,13 +9303,13 @@ The native job system then runs the stage's work as one of its jobs, under the l
 
 #### `HL_LOWEND` - developer
 
-undocumented: gpu/vk/vk_menu.cpp:2548 (in `menu_first_run_lowend()`) reads it as an on/off switch: `const lowend_rule::Apply a = lowend_rule::first_start(env_int("HL_LOWEND"), lowend_marked, gpu);`. No comment in the source says what it changes.
+undocumented: gpu/vk/vk_menu.cpp:2549 (in `menu_first_run_lowend()`) reads it as an on/off switch: `const lowend_rule::Apply a = lowend_rule::first_start(env_int("HL_LOWEND"), lowend_marked, gpu);`. No comment in the source says what it changes.
 
 **Values:** on or off (0, false, off, no and empty are off). **Default:** off (unset).
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2548`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2549`.
 
 #### `HL_MATH` - developer
 
@@ -9775,7 +9775,7 @@ The Frame rate limit for the run, over the row and Unlimited: the rate presented
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2680` and 2 more places.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2681` and 2 more places.
 
 #### `HOS_FPS_LOOP` - developer
 
@@ -10523,7 +10523,7 @@ Over the options file: Resolution 100% (non-zero: Auto), Game speed Per frame (1
 
 **When a player would use it:** The dynamic resolution makes the picture soft: `=0` holds 100% for one run.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2672`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2673`.
 
 #### `HOS_EVENT_FAST` - developer
 
@@ -10853,7 +10853,7 @@ To enable the debug tools, turn **Debug tools** on in the menu's Debug tab (or a
 
 **When a player would use it:** The Debug tab's tools should show without turning them on in the menu.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2588`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2589`.
 
 #### `HOS_OOT_PROTECT_HEARTS` - developer
 
@@ -10863,7 +10863,7 @@ To enable the debug tools, turn **Debug tools** on in the menu's Debug tab (or a
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2591` and 1 more place.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2592` and 1 more place.
 
 #### `HOS_OOT_TELEPORT_EVENT` - developer
 
@@ -10963,7 +10963,7 @@ Over the options file: Resolution 100% (non-zero: Auto), Game speed Per frame (1
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2671`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2672`.
 
 #### `HOS_RESTART_OF` - developer
 
@@ -14433,13 +14433,13 @@ undocumented: third_party/a64-kit/lift/a64_lift.py:2289 reads it as an on/off sw
 
 #### `A64_HOT_FUNCS` - developer
 
-undocumented: nx2/make_game.py:1700 reads it as a path: `env["A64_HOT_FUNCS"] = os.path.join(work, "hot_funcs.txt")`. No comment in the source says what it changes.
+undocumented: nx2/make_game.py:1713 reads it as a path: `env["A64_HOT_FUNCS"] = os.path.join(work, "hot_funcs.txt")`. No comment in the source says what it changes.
 
 **Values:** text. **Default:** unset.
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/make_game.py:1700` and 1 more place.
+**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/make_game.py:1713` and 1 more place.
 
 #### `A64_KEEP_FLAGS` - developer
 
@@ -14671,7 +14671,7 @@ The free memory is read again as compiles start and end, so a game or browser op
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/make_game.py:1324`.
+**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/make_game.py:1337`.
 
 #### `HOOKSHOT_FSR` - developer
 
@@ -14761,7 +14761,7 @@ The llvm-mingw to build with; the Visual Studio route instead.
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/make_game.py:629` and 5 more places.
+**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/make_game.py:642` and 5 more places.
 
 #### `HOOKSHOT_MSVC` - developer
 
@@ -14771,7 +14771,7 @@ The llvm-mingw to build with; the Visual Studio route instead.
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/make_game.py:628`.
+**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/make_game.py:641`.
 
 #### `HOOKSHOT_NGX_SDK` - developer
 
@@ -14795,13 +14795,13 @@ undocumented: host/nn_video.c:331 (in `dec_init_sized()`) reads it as a text val
 
 #### `HOOKSHOT_NO_PREPARE` - developer
 
-undocumented: nx2/make_game.py:1009 reads it as an on/off switch: `if environ.get("HOOKSHOT_NO_PREPARE", "0") != "0": # (set and not 0, as the game reads HOOKSHOT_NO_UPDATE_CHECK)`. No comment in the source says what it changes.
+undocumented: nx2/make_game.py:1022 reads it as an on/off switch: `if environ.get("HOOKSHOT_NO_PREPARE", "0") != "0": # (set and not 0, as the game reads HOOKSHOT_NO_UPDATE_CHECK)`. No comment in the source says what it changes.
 
 **Values:** on or off (0, false, off, no and empty are off). **Default:** off (unset).
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/make_game.py:1009`.
+**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/make_game.py:1022`.
 
 #### `HOOKSHOT_NO_SETTLE` - developer
 
@@ -15027,33 +15027,33 @@ undocumented: scripts/release_parts.py:56 reads it as a text value: `token = os.
 
 #### `INCLUDE` - developer
 
-undocumented: nx2/make_game.py:516 reads it as a path: `env["INCLUDE"] = ";".join(x for x in [get("INCLUDE")] + [os.path.join(inc, v, d) for d in ("ucrt", "um", "shared", "w...`. No comment in the source says what it changes.
+undocumented: nx2/make_game.py:529 reads it as a path: `env["INCLUDE"] = ";".join(x for x in [get("INCLUDE")] + [os.path.join(inc, v, d) for d in ("ucrt", "um", "shared", "w...`. No comment in the source says what it changes.
 
 **Values:** text (`True` named). **Default:** unset.
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/make_game.py:516`.
+**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/make_game.py:529`.
 
 #### `LANG` - developer
 
-undocumented: nx2/make_game.py:1505 reads it as a text value: `name = (locale.getlocale()[0] or os.environ.get("LANG", "")).split(".")[0]`. No comment in the source says what it changes.
+undocumented: nx2/make_game.py:1518 reads it as a text value: `name = (locale.getlocale()[0] or os.environ.get("LANG", "")).split(".")[0]`. No comment in the source says what it changes.
 
 **Values:** text. **Default:** .
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/make_game.py:1505`.
+**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/make_game.py:1518`.
 
 #### `LIB` - developer
 
-undocumented: nx2/make_game.py:517 reads it as a path: `env["LIB"] = ";".join(x for x in [get("LIB")] + [os.path.join(kits, "Lib", v, d, "x64") for d in ("ucrt", "um")] if x)`. No comment in the source says what it changes.
+undocumented: nx2/make_game.py:530 reads it as a path: `env["LIB"] = ";".join(x for x in [get("LIB")] + [os.path.join(kits, "Lib", v, d, "x64") for d in ("ucrt", "um")] if x)`. No comment in the source says what it changes.
 
 **Values:** text (`True` named). **Default:** unset.
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/make_game.py:517`.
+**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/make_game.py:530`.
 
 #### `OOT_DUMP` - developer
 
@@ -15307,13 +15307,13 @@ The CPM cache (Vulkan and SPIR-V headers, VMA, FFmpeg) and wgpu-native.
 
 #### `XDG_CACHE_HOME` - developer
 
-undocumented: nx2/make_game.py:1429 reads it as a path: `p.add_argument("--work", default=os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"),`. No comment in the source says what it changes.
+undocumented: nx2/make_game.py:1442 reads it as a path: `p.add_argument("--work", default=os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"),`. No comment in the source says what it changes.
 
 **Values:** a path (text). **Default:** unset.
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/make_game.py:1429`.
+**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/make_game.py:1442`.
 
 #### `XDG_CONFIG_HOME` - developer
 

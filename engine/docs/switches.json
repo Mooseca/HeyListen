@@ -226,7 +226,7 @@
    "files": [
     {
      "path": "nx2/make_game.py",
-     "line": 1700
+     "line": 1713
     },
     {
      "path": "third_party/a64-kit/lift/a64_lift.py",
@@ -235,7 +235,7 @@
    ],
    "default": "unset",
    "values": "text",
-   "explanation": "undocumented: nx2/make_game.py:1700 reads it as a path: `env[\"A64_HOT_FUNCS\"] = os.path.join(work, \"hot_funcs.txt\")`. No comment in the source says what it changes.",
+   "explanation": "undocumented: nx2/make_game.py:1713 reads it as a path: `env[\"A64_HOT_FUNCS\"] = os.path.join(work, \"hot_funcs.txt\")`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -1550,12 +1550,12 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2548
+     "line": 2549
     }
    ],
    "default": "off (unset)",
    "values": "on or off (0, false, off, no and empty are off)",
-   "explanation": "undocumented: gpu/vk/vk_menu.cpp:2548 (in `menu_first_run_lowend()`) reads it as an on/off switch: `const lowend_rule::Apply a = lowend_rule::first_start(env_int(\"HL_LOWEND\"), lowend_marked, gpu);`. No comment in the source says what it changes.",
+   "explanation": "undocumented: gpu/vk/vk_menu.cpp:2549 (in `menu_first_run_lowend()`) reads it as an on/off switch: `const lowend_rule::Apply a = lowend_rule::first_start(env_int(\"HL_LOWEND\"), lowend_marked, gpu);`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -3472,11 +3472,11 @@
     },
     {
      "path": "nx2/make_game.py",
-     "line": 1952
+     "line": 1965
     },
     {
      "path": "nx2/make_game.py",
-     "line": 1953
+     "line": 1966
     }
    ],
    "default": "unset",
@@ -3501,11 +3501,11 @@
     },
     {
      "path": "nx2/make_game.py",
-     "line": 1949
+     "line": 1962
     },
     {
      "path": "nx2/make_game.py",
-     "line": 1950
+     "line": 1963
     }
    ],
    "default": "unset",
@@ -3593,7 +3593,7 @@
    "files": [
     {
      "path": "nx2/make_game.py",
-     "line": 1324
+     "line": 1337
     }
    ],
    "default": "unset",
@@ -3618,7 +3618,7 @@
     },
     {
      "path": "nx2/make_game.py",
-     "line": 1593
+     "line": 1606
     }
    ],
    "default": "",
@@ -3647,7 +3647,7 @@
     },
     {
      "path": "nx2/make_game.py",
-     "line": 620
+     "line": 633
     }
    ],
    "default": "unset",
@@ -3672,7 +3672,7 @@
     },
     {
      "path": "nx2/make_game.py",
-     "line": 1964
+     "line": 1977
     }
    ],
    "default": "",
@@ -3814,15 +3814,7 @@
    "files": [
     {
      "path": "nx2/make_game.py",
-     "line": 629
-    },
-    {
-     "path": "nx2/make_game.py",
-     "line": 630
-    },
-    {
-     "path": "nx2/make_game.py",
-     "line": 633
+     "line": 642
     },
     {
      "path": "nx2/make_game.py",
@@ -3830,7 +3822,15 @@
     },
     {
      "path": "nx2/make_game.py",
-     "line": 665
+     "line": 646
+    },
+    {
+     "path": "nx2/make_game.py",
+     "line": 656
+    },
+    {
+     "path": "nx2/make_game.py",
+     "line": 678
     },
     {
      "path": "third_party/a64-kit/tools/toolchain.py",
@@ -3855,7 +3855,7 @@
    "files": [
     {
      "path": "nx2/make_game.py",
-     "line": 628
+     "line": 641
     }
    ],
    "default": "off (unset)",
@@ -3884,31 +3884,31 @@
     },
     {
      "path": "nx2/make_game.py",
-     "line": 1278
+     "line": 1291
     },
     {
      "path": "nx2/make_game.py",
-     "line": 1298
+     "line": 1311
     },
     {
      "path": "nx2/make_game.py",
-     "line": 1366
+     "line": 1379
     },
     {
      "path": "nx2/make_game.py",
-     "line": 1551
+     "line": 1564
     },
     {
      "path": "nx2/make_game.py",
-     "line": 1552
+     "line": 1565
     },
     {
      "path": "nx2/make_game.py",
-     "line": 1553
+     "line": 1566
     },
     {
      "path": "nx2/make_game.py",
-     "line": 1554
+     "line": 1567
     }
    ],
    "default": "unset",
@@ -3950,12 +3950,12 @@
    "files": [
     {
      "path": "nx2/make_game.py",
-     "line": 1009
+     "line": 1022
     }
    ],
    "default": "off (unset)",
    "values": "on or off (0, false, off, no and empty are off)",
-   "explanation": "undocumented: nx2/make_game.py:1009 reads it as an on/off switch: `if environ.get(\"HOOKSHOT_NO_PREPARE\", \"0\") != \"0\": # (set and not 0, as the game reads HOOKSHOT_NO_UPDATE_CHECK)`. No comment in the source says what it changes.",
+   "explanation": "undocumented: nx2/make_game.py:1022 reads it as an on/off switch: `if environ.get(\"HOOKSHOT_NO_PREPARE\", \"0\") != \"0\": # (set and not 0, as the game reads HOOKSHOT_NO_UPDATE_CHECK)`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -4234,11 +4234,11 @@
     },
     {
      "path": "nx2/make_game.py",
-     "line": 578
+     "line": 591
     },
     {
      "path": "nx2/make_game.py",
-     "line": 792
+     "line": 805
     }
    ],
    "default": "",
@@ -4288,7 +4288,7 @@
     },
     {
      "path": "nx2/make_game.py",
-     "line": 1768
+     "line": 1781
     }
    ],
    "default": "unset",
@@ -4321,7 +4321,7 @@
     },
     {
      "path": "nx2/make_game.py",
-     "line": 1846
+     "line": 1859
     }
    ],
    "default": "unset",
@@ -4408,11 +4408,11 @@
     },
     {
      "path": "nx2/make_game.py",
-     "line": 449
+     "line": 462
     },
     {
      "path": "nx2/make_game.py",
-     "line": 1600
+     "line": 1613
     }
    ],
    "default": "",
@@ -5176,7 +5176,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2672
+     "line": 2673
     }
    ],
    "default": "0 (unset)",
@@ -5323,11 +5323,11 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2680
+     "line": 2681
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2688
+     "line": 2689
     },
     {
      "path": "host/nn_vi.c",
@@ -5402,11 +5402,11 @@
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2680
+     "line": 2681
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2688
+     "line": 2689
     },
     {
      "path": "host/nn_vi.c",
@@ -5729,7 +5729,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2775
+     "line": 2776
     },
     {
      "path": "host/display.c",
@@ -7911,7 +7911,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2588
+     "line": 2589
     }
    ],
    "default": "unset",
@@ -7932,7 +7932,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2591
+     "line": 2592
     },
     {
      "path": "host/hos_main.c",
@@ -8041,7 +8041,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2673
+     "line": 2674
     },
     {
      "path": "host/nn_applet.c",
@@ -8590,7 +8590,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2671
+     "line": 2672
     }
    ],
    "default": "0 (unset)",
@@ -10182,12 +10182,12 @@
    "files": [
     {
      "path": "nx2/make_game.py",
-     "line": 516
+     "line": 529
     }
    ],
    "default": "unset",
    "values": "text (`True` named)",
-   "explanation": "undocumented: nx2/make_game.py:516 reads it as a path: `env[\"INCLUDE\"] = \";\".join(x for x in [get(\"INCLUDE\")] + [os.path.join(inc, v, d) for d in (\"ucrt\", \"um\", \"shared\", \"w...`. No comment in the source says what it changes.",
+   "explanation": "undocumented: nx2/make_game.py:529 reads it as a path: `env[\"INCLUDE\"] = \";\".join(x for x in [get(\"INCLUDE\")] + [os.path.join(inc, v, d) for d in (\"ucrt\", \"um\", \"shared\", \"w...`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -10203,12 +10203,12 @@
    "files": [
     {
      "path": "nx2/make_game.py",
-     "line": 1505
+     "line": 1518
     }
    ],
    "default": "",
    "values": "text",
-   "explanation": "undocumented: nx2/make_game.py:1505 reads it as a text value: `name = (locale.getlocale()[0] or os.environ.get(\"LANG\", \"\")).split(\".\")[0]`. No comment in the source says what it changes.",
+   "explanation": "undocumented: nx2/make_game.py:1518 reads it as a text value: `name = (locale.getlocale()[0] or os.environ.get(\"LANG\", \"\")).split(\".\")[0]`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -10224,12 +10224,12 @@
    "files": [
     {
      "path": "nx2/make_game.py",
-     "line": 517
+     "line": 530
     }
    ],
    "default": "unset",
    "values": "text (`True` named)",
-   "explanation": "undocumented: nx2/make_game.py:517 reads it as a path: `env[\"LIB\"] = \";\".join(x for x in [get(\"LIB\")] + [os.path.join(kits, \"Lib\", v, d, \"x64\") for d in (\"ucrt\", \"um\")] if x)`. No comment in the source says what it changes.",
+   "explanation": "undocumented: nx2/make_game.py:530 reads it as a path: `env[\"LIB\"] = \";\".join(x for x in [get(\"LIB\")] + [os.path.join(kits, \"Lib\", v, d, \"x64\") for d in (\"ucrt\", \"um\")] if x)`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -10257,11 +10257,11 @@
     },
     {
      "path": "nx2/make_game.py",
-     "line": 1431
+     "line": 1444
     },
     {
      "path": "nx2/make_game.py",
-     "line": 1540
+     "line": 1553
     },
     {
      "path": "scripts/oot_saves.py",
@@ -12728,7 +12728,7 @@
     },
     {
      "path": "nx2/make_game.py",
-     "line": 449
+     "line": 462
     }
    ],
    "default": "unset",
@@ -14195,7 +14195,7 @@
     },
     {
      "path": "nx2/make_game.py",
-     "line": 1702
+     "line": 1715
     }
    ],
    "default": "",
@@ -18740,7 +18740,7 @@
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2667
+     "line": 2668
     }
    ],
    "default": "unset",
@@ -20304,16 +20304,16 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2525
+     "line": 2526
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2526
+     "line": 2527
     }
    ],
    "default": "off (unset)",
    "values": "on or off (0, false, off, no and empty are off)",
-   "explanation": "undocumented: gpu/vk/vk_menu.cpp:2525 (in `fog_runs()`) reads it as an on/off switch: `const bool v = lowend_rule::fog_on(env_int(\"RX_VK_FOG\"), opts.fog);`. No comment in the source says what it changes.",
+   "explanation": "undocumented: gpu/vk/vk_menu.cpp:2526 (in `fog_runs()`) reads it as an on/off switch: `const bool v = lowend_rule::fog_on(env_int(\"RX_VK_FOG\"), opts.fog);`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -20685,7 +20685,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2661
+     "line": 2662
     }
    ],
    "default": "0 (unset)",
@@ -21569,7 +21569,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2663
+     "line": 2664
     }
    ],
    "default": "unset",
@@ -23572,7 +23572,7 @@
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2655
+     "line": 2656
     }
    ],
    "default": "2",
@@ -23656,7 +23656,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2977
+     "line": 2982
     }
    ],
    "default": "unset",
@@ -26219,7 +26219,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2662
+     "line": 2663
     }
    ],
    "default": "0 (unset)",
@@ -31433,7 +31433,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2949
+     "line": 2954
     }
    ],
    "default": "unset",
@@ -31601,7 +31601,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2668
+     "line": 2669
     }
    ],
    "default": "0 (unset)",
@@ -33288,12 +33288,12 @@
    "files": [
     {
      "path": "nx2/make_game.py",
-     "line": 1429
+     "line": 1442
     }
    ],
    "default": "unset",
    "values": "a path (text)",
-   "explanation": "undocumented: nx2/make_game.py:1429 reads it as a path: `p.add_argument(\"--work\", default=os.path.join(os.environ.get(\"XDG_CACHE_HOME\") or os.path.expanduser(\"~/.cache\"),`. No comment in the source says what it changes.",
+   "explanation": "undocumented: nx2/make_game.py:1442 reads it as a path: `p.add_argument(\"--work\", default=os.path.join(os.environ.get(\"XDG_CACHE_HOME\") or os.path.expanduser(\"~/.cache\"),`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
