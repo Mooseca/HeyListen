@@ -6335,6 +6335,9 @@ bool wait_value_bounded(uint64_t v) {
 }
 void ot_join_all(int site);   // (PIPE2)
 void ot_join_readback(uint64_t gpu, uint64_t size);
+bool ot_audit_on();
+uint64_t ot_audit_begin(uint64_t gpu, uint64_t size, uint64_t* v0);
+void ot_audit_end(uint64_t want, uint64_t v0, uint64_t gpu, uint64_t size);
 void invalidate(uint64_t gpu, uint64_t size) {
     static const bool rb_prof = getenv("RX_VK_RB_PROF") != nullptr || getenv("RX_VK_TL") != nullptr || getenv("RX_VK_TL_S") != nullptr;
     RbScope rbs(rb_prof, gpu, size);
@@ -6367,6 +6370,19 @@ void invalidate(uint64_t gpu, uint64_t size) {
     // as the submitting thread's own replay had them by now (their write-back registrations are made as they replay): ot_join_readback
     if (size && !ring_serve && !rb_late && order_thread_on() && !(size == 0x1040 && expo_mode() == 1 && expo_serves(host->gpu_guest(gpu))))
         ot_join_readback(gpu, size);
+    // (FLASH2, RX_VK_ORDER_RB_AUDIT=1, logging only) when the read is done, the order thread caught up with every job handed over
+    // before it: did the range's write-back value move? Then this read saw the range before a writer of another thread had replayed
+    struct RbAuditPost {
+        uint64_t gpu = 0, size = 0, want = 0, v0 = 0;
+        bool on = false;
+        RbAuditPost(uint64_t g, uint64_t n, bool go) {
+            if (go) on = true, gpu = g, size = n, want = ot_audit_begin(g, n, &v0);
+        }
+        ~RbAuditPost() {
+            if (on) ot_audit_end(want, v0, gpu, size);
+        }
+    } rb_audit_post{gpu, size, size && !ring_serve && !rb_late && order_thread_on() && ot_audit_on() &&
+                    !(size == 0x1040 && expo_mode() == 1 && expo_serves(host->gpu_guest(gpu)))};
     struct RbClassPost {
         int cls;
         uint64_t gpu, size;
@@ -6486,6 +6502,7 @@ void invalidate(uint64_t gpu, uint64_t size) {
             rbs.mark(1);
             const auto w1 = std::chrono::steady_clock::now();
             const uint64_t v = memory_writeback_value(host->gpu_guest(gpu), size, nullptr);
+            if (rb_audit_post.on) rb_audit_post.v0 = v;   // (FLASH2: the value this read waits for)
             rbs.value = v, rbs.fence_at = f0;
             rbs.skip();
             // (RX_VK_READBACK_LATE: a range a rule names is read as guest memory holds it, with no wait at all)
@@ -9273,12 +9290,20 @@ void ot_join_all(int site) {
 /// so it waits for the submissions this thread handed over (RX_VK_ORDER_RB_JOIN=1, the default); =2: every job handed over (all threads'),
 /// =0: none. RX_VK_ORDER_LOG=1: the first 60 reads that waited, by range
 void ot_join_readback(uint64_t gpu, uint64_t size) {
-    // (PIPE2) RX_VK_ORDER_RB_JOIN=<0|1|2> (1): what a CPU readback waits for with the order thread: nothing, this thread's jobs, all jobs
+    // (PIPE2) RX_VK_ORDER_RB_JOIN=<0..3> (1): what a CPU readback waits for with the order thread: nothing, this thread's jobs, all jobs, all jobs for a range with write-backs (3)
     static const int mode = getenv("RX_VK_ORDER_RB_JOIN") ? atoi(getenv("RX_VK_ORDER_RB_JOIN")) : 1;
     // (PIPE2) RX_VK_ORDER_LOG=1: the order thread's joins one by one (the first 60 readbacks that waited)
     static const bool log_each = getenv("RX_VK_ORDER_LOG") && atoi(getenv("RX_VK_ORDER_LOG")) != 0;
     if (ot_self || !mode) return;
     if (mode == 2) return ot_join_all(OT_READBACK);
+    // (FLASH2) =3: a range the GPU's write-backs have covered before (any page of it) waits for every job handed over, as =2: its
+    // writer may be a submission of another thread, whose write-back is registered only when the order thread replays it. The ranges
+    // no write-back ever covered wait for this thread's jobs only, as =1
+    if (mode == 3) {
+        bool ever = false;
+        memory_writeback_value(host->gpu_guest(gpu), size, &ever);
+        if (ever) return ot_join_all(OT_READBACK);
+    }
     const uint64_t want = ot_my_seq;
     if (ot_seq_done.load(std::memory_order_acquire) >= want) return ot_note(OT_READBACK, 0, false);
     const int64_t t0 = ot_now();
@@ -9287,6 +9312,48 @@ void ot_join_readback(uint64_t gpu, uint64_t size) {
     ot_note(OT_READBACK, d, true);
     static std::atomic<int> logged{0};
     if (log_each && logged++ < 60) logf("vk: order thread: readback %#llx +%#llx waited %.2f ms for this thread's jobs", (unsigned long long)gpu, (unsigned long long)size, d / 1e6);
+}
+bool ot_audit_on() {
+    // (FLASH2) RX_VK_ORDER_RB_AUDIT=1 (logging only): after each CPU readback the ring does not serve, the game thread waits for every
+    // job handed over before it and notes whether the range's write-back value moved (a "stale" read: the writer was another thread's
+    // submission, not replayed when the read took its value). A line per stale read (200), a summary by guest range
+    static const bool on = getenv("RX_VK_ORDER_RB_AUDIT") && atoi(getenv("RX_VK_ORDER_RB_AUDIT")) != 0;
+    return on;
+}
+uint64_t ot_audit_begin(uint64_t gpu, uint64_t size, uint64_t* v0) {
+    uint64_t want;
+    {
+        std::lock_guard lk(ot_mu);
+        want = ot_seq_pushed;
+    }
+    *v0 = memory_writeback_value(host->gpu_guest(gpu), size, nullptr);
+    return want;
+}
+void ot_audit_end(uint64_t want, uint64_t v0, uint64_t gpu, uint64_t size) {
+    if (ot_self) return;
+    const bool behind = ot_seq_done.load(std::memory_order_acquire) < want;
+    if (behind) ot_wait_until([want] { return ot_seq_done.load(std::memory_order_acquire) >= want; }, UINT64_MAX);
+    const uint64_t v1 = memory_writeback_value(host->gpu_guest(gpu), size, nullptr);
+    struct Row { int64_t reads = 0, behind = 0, stale = 0; };
+    static std::mutex mu;
+    static std::map<std::pair<uint64_t, uint64_t>, Row> rows;   // (guest address, size)
+    static int lines = 0;
+    static int64_t total = 0;
+    std::lock_guard lk(mu);
+    Row& r = rows[{host->gpu_guest(gpu), size}];
+    r.reads++, r.behind += behind;
+    const bool stale = v1 != v0;
+    r.stale += stale;
+    if (stale && lines++ < 200)
+        logf("vk: rb audit: STALE read present %lld guest %#llx +%#llx: write-back value %llu -> %llu after the order thread caught up (done %llu, fence %llu)",
+             (long long)presents_now, (unsigned long long)host->gpu_guest(gpu), (unsigned long long)size, (unsigned long long)v0,
+             (unsigned long long)v1, (unsigned long long)completed(), (unsigned long long)fence());
+    if (++total % 3000 == 0) {
+        for (const auto& [k, row] : rows)
+            if (row.stale || row.reads >= 100)
+                logf("vk: rb audit: guest %#llx +%#llx: %lld reads, %lld with the order thread behind, %lld stale", (unsigned long long)k.first,
+                     (unsigned long long)k.second, (long long)row.reads, (long long)row.behind, (long long)row.stale);
+    }
 }
 /// a fence wait (nvnSyncWait, nvnQueueFinish's) for value f: false when the game is to be told "not yet" (a poll, or the timeout
 /// ran out while its submission waited for the order thread); *timeout_ns is what is left of the wait
