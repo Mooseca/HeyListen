@@ -644,6 +644,44 @@ const char* hn_mic(int v, int variant) {
     if (variant > 1) return nullptr;
     return missing ? "Not plugged in: Default stands in until it is back." : "This microphone, by its name. A change applies at once.";
 }
+// (heylisten) the Output device row: Default (the system's default output, followed as it changes) or one of the host's outputs
+// (host/nn_audio.c), by its friendly name, told to the host by its id (host->out_select) whenever it changes; it applies at
+// once. The chosen one is kept by its id (output_device_id=, cut to kMicNameKept as the microphone's name is) and its name
+// (output_device_name=, for display), also while it is unplugged: the row then has one more entry, "<name> (not connected)",
+// the host lets Default stand in (with a log line) and tries it again when the menu opens. Where the host cannot list them (Linux:
+// the sound goes to SDL's default device) the row has Default only
+constexpr int kMaxOuts = 16;
+std::string out_want_id;     // (the chosen output's id, cut; empty: Default chosen)
+std::string out_want_name;   // (its name when it was chosen, cut: shown while it is not connected)
+bool out_missing = false;    // (out_want_id is not listed: the row's last entry, 1 + out_listed, stands for it)
+int out_listed = 0;          // (the outputs as the host last listed them)
+bool can_out() { return host && host->out_count && host->out_name && host->out_id && host->out_select; }
+const char* tx_out(int v) {
+    static char buf[160];
+    if (v <= 0) return "Default";
+    if (out_missing && v == 1 + out_listed) {
+        const int room = (int)sizeof buf - (int)sizeof " (not connected)";
+        snprintf(buf, (size_t)room + 1, "%s", out_want_name.empty() ? "Output device" : out_want_name.c_str());
+        utf8_whole(buf);
+        strcat(buf, " (not connected)");
+        return buf;
+    }
+    const char* n = can_out() ? host->out_name(v - 1) : "";
+    snprintf(buf, sizeof buf, "%s", n && *n ? n : "Output device");
+    utf8_whole(buf);
+    return buf;
+}
+/// The Output device row: Default, an output of the list, or the chosen one while it is unplugged (variant 1)
+const char* hn_out(int v, int variant) {
+    if (v <= 0)
+        return variant <= 0 ? "The system's default output device, followed as it changes. The list of other outputs is on "
+                              "Windows only; on Linux the system's sound settings choose the device."
+                            : nullptr;
+    const bool missing = variant < 0 ? out_missing && v == 1 + out_listed : variant == 1;
+    if (variant > 1) return nullptr;
+    return missing ? "Not plugged in: Default stands in until it is back (open this menu again to try it)."
+                   : "This output device. A change applies at once, no restart.";
+}
 const char* tx_rumble(int v) { return v ? tx_percent(v) : "Off"; }
 // (hookshot) Menu size: how large the overlays are drawn (vk_ui.h unit); Auto is Large in fullscreen at 1080 lines and up while
 // a controller is the menu's input, else Medium
@@ -1039,6 +1077,9 @@ Row rows[] = {
     {TAB_GAMEPLAY, "Microphone", &opts.mic, 0, 2 + kMaxMics, 1, tx_mic,
      "What the ocarina hears when the game's microphone option is on (playing an instrument, or humming).", hn_mic, false,
      true},
+    {TAB_GAMEPLAY, "Output device", &opts.out_dev, 0, 1 + kMaxOuts, 1, tx_out,
+     "The device the game's sound plays on. Default follows the system's default output. A change applies at once.", hn_out,
+     false, true},
     {TAB_GAMEPLAY, "Skip title screen", &opts.skip_title, 0, 1, 1, tx_onoff,   // (HL_OPT_SKIP_TITLE, vk_opt_ids.h, host/oot_autoload.c)
      "Starts a launch with the most recent saved game: presses through the title screen and its file list. Does nothing "
      "until the game has a save. Applies after a restart.", nullptr, true, true},
@@ -1518,6 +1559,57 @@ void mic_chosen() {
     mic_row_ends();
     mic_tell_host();
 }
+// (heylisten) the Output device row's choice to the host: Default, or the output by its id (the kept one while it is not listed)
+void out_tell_host() {
+    if (!can_out()) return;
+    if (opts.out_dev <= 0) host->out_select(0, "", "");
+    else if (out_missing && opts.out_dev == 1 + out_listed) host->out_select(1, out_want_id.c_str(), out_want_name.c_str());
+    else host->out_select(1, host->out_id(opts.out_dev - 1), host->out_name(opts.out_dev - 1));
+}
+void out_row_ends() {
+    for (Row& r : rows)
+        if (r.value == &opts.out_dev) r.hi = out_listed + (out_missing ? 1 : 0);
+}
+// (heylisten) the outputs listed again (one plugged in since shows up), the row on out_want_id's: by its id, never by its place,
+// else its "(not connected)" entry. The host is told again: a device that was given up for is tried again
+void refresh_outs() {
+    out_listed = 0, out_missing = false;
+    if (!can_out()) {
+        opts.out_dev = 0;
+        out_row_ends();
+        return;
+    }
+    const int found = host->out_count();
+    if (found < 0) {   // (no list here: Default only; the kept choice stays in the ini, as another system's)
+        opts.out_dev = 0;
+        out_row_ends();
+        return;
+    }
+    out_listed = std::min(found, kMaxOuts);
+    int at = -1;
+    if (!out_want_id.empty()) {
+        for (int i = 0; i < out_listed && at < 0; i++)
+            if (mic_key(host->out_id(i)) == out_want_id) at = i;
+        opts.out_dev = at >= 0 ? at + 1 : 1 + out_listed;
+        if (at >= 0) out_want_name = mic_key(host->out_name(at));   // (a renamed device shows, and is kept, under its new name)
+    } else {
+        opts.out_dev = 0;
+    }
+    out_missing = !out_want_id.empty() && at < 0;
+    out_row_ends();
+    out_tell_host();
+}
+// (the row changed by the player: the choice is this one, by its id)
+void out_chosen() {
+    if (opts.out_dev >= 1 && !(out_missing && opts.out_dev == 1 + out_listed)) {
+        out_want_id = mic_key(host->out_id(opts.out_dev - 1)), out_want_name = mic_key(host->out_name(opts.out_dev - 1));
+        out_missing = false;
+    } else if (opts.out_dev < 1) {
+        out_want_id.clear(), out_want_name.clear(), out_missing = false;
+    }
+    out_row_ends();
+    out_tell_host();
+}
 // (HeyListen) the options file's lowend_rule line: the low-end rule was applied once (menu_first_run_lowend), never again: the
 // player's choices stay theirs. Kept by save()
 [[maybe_unused]] static bool lowend_marked;   // (unused where a test cuts save() out alone)
@@ -1535,7 +1627,7 @@ void save() {
             const char* eq = strchr(line, '=');
             if (!eq || eq == line) continue;
             const std::string key(line, (size_t)(eq - line));
-            bool mine = key == "microphone_device" || key == "options_version" || key == "lowend_rule";
+            bool mine = key == "microphone_device" || key == "output_device_id" || key == "output_device_name" || key == "options_version" || key == "lowend_rule";
             for (const Row& r : rows)
                 if (!mine && r.value && key == ini_key(r)) mine = true;
             if (!mine) others += line, others += others.back() == '\n' ? "" : "\n";
@@ -1554,6 +1646,8 @@ void save() {
         for (const Row& r : rows)
             if (r.value) put("%s=%d\n", ini_key(r), *r.value);
         if (!mic_want.empty()) put("microphone_device=%s\n", mic_want.c_str());   // (hookshot: also while it is unplugged)
+        if (!out_want_id.empty())   // (heylisten: the same)
+            put("output_device_id=%s\noutput_device_name=%s\n", out_want_id.c_str(), out_want_name.c_str());
         // (2: game_speed below 2 was only ever the old default, see menu_init; 3: the mouse's buttons are bindings, see
         // host/nn_hid.c binds_load)
         put("options_version=3\n");
@@ -1617,6 +1711,7 @@ void set_row(Row& r, int v, int dir, bool keep = true) {
     // becomes 6x, AMD FSR 3.1 2x, Auto with either 2x)
     if (r.value == &opts.framegen_by) opts.framegen = fgr::on_mode_change(framegen_by_now(), dlss_fg_most(), opts.framegen);
     if (r.value == &opts.mic && can_mic()) mic_chosen();   // (hookshot)
+    if (r.value == &opts.out_dev && can_out()) out_chosen();   // (heylisten)
     {   // (a row that takes a restart, or a preset that sets one: asked again at the next close)
         int now[mr::kMax];
         restart_values(now);
@@ -2607,6 +2702,11 @@ void menu_init() {
             if (!strcmp(line, "lowend_rule")) lowend_marked = true;   // (menu_first_run_lowend: applied once, never again)
             if (!strcmp(line, "vsync")) saved_vsync = atoi(eq + 1);
             if (!strcmp(line, "vsync_mode")) has_vsync_mode = true;
+            if (!strcmp(line, "output_device_id") || !strcmp(line, "output_device_name")) {   // (heylisten: the output, by its id)
+                std::string& want = !strcmp(line, "output_device_id") ? out_want_id : out_want_name;
+                want = mic_key(eq + 1);
+                while (!want.empty() && (want.back() == '\n' || want.back() == '\r')) want.pop_back();
+            }
             if (!strcmp(line, "microphone_device")) {   // (hookshot: the microphone, by its name)
                 mic_want = mic_key(eq + 1);
                 while (!mic_want.empty() && (mic_want.back() == '\n' || mic_want.back() == '\r')) mic_want.pop_back();
@@ -2623,6 +2723,8 @@ void menu_init() {
             if (opts.mic >= 2) opts.mic = 1;
             mic_tell_host();
         }
+        if (!out_want_id.empty()) refresh_outs();   // (heylisten: Default needs no list at the start)
+        else opts.out_dev = 0, out_tell_host();
         // (HDR saved as "Native + our tone mapper", the fourth value of the row in v0.4.3's work: that tone mapper is gone, the
         // PsychoV35 one is the HDR tone mapper row's now, and the nearest to it: Native with the tone mapper row on PsychoV35)
         if (saved_hdr_ours) {
@@ -3024,6 +3126,7 @@ void menu_tick() {
         if (open_now.load()) opts.pad_layout = detect_pad_layout();
         if (open_now.load()) dlss_probe(), dlss_fg_probe(), fsr4_probe(), fsr4fg_probe();   // (whether the Upscaler row can offer DLSS and FSR here: asked once)
         if (open_now.load()) refresh_mics();   // (the microphones as they are now)
+        if (open_now.load()) refresh_outs();   // (heylisten: and the outputs)
     }
     if (open_now.load() && page == 5) {   // (hookshot) the restart question: Later (the default) or Restart now
         if (mouse) {   // (a button under the cursor chosen, a click on it pressed, a right click is Later; no list: the wheel does nothing)

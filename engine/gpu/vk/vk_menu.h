@@ -93,6 +93,7 @@ struct Options {
     int send_perf = 0;    // (heylisten) "Send performance statistics" (gpu/vk/perf_report.cpp): 0 off (the default), 1 on; saved as send_performance_stats=
     int send_crash = 0;   // (heylisten) "Send crash reports automatically" (host/hos_crash_dialog.c): 0 off, the crash window asks (the default), 1 on; send_crash_reports=
     int debug_tools = 0;   // (hookshot) the Debug tab's tools (#785: flight, free camera, teleport, inventory): 0 off; HOS_OOT_CHEATS=1 also turns them on
+    int out_dev = 0;      // (heylisten) the Output device row: 0 the system's default, 1.. a device as host->out_name lists it (host/nn_audio.c), saved as output_device= (and its id, output_device_id=)
     int mic = 1;          // (hookshot) the ocarina's microphone: 0 Off, 1 the system's default, 2.. a device as host->mic_name lists it (host/nn_audio_in.c)
 };
 extern Options opts;
