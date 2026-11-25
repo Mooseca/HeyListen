@@ -83,7 +83,7 @@ struct Options {
     int sampler_cache = 0;     // sampler ids answer their parameters without the registrations' lock (gpu/vk/vk_draw.cpp; RX_VK_SAMPLER_CACHE)
     int intel_compiles = 0;    // (longshot #252) Intel's shader compiler on Windows: 0 one thread at a time, 1 side by side (gpu/vk/vk_internal.h
                                // IntelDriverGate, vk_draw.cpp intel_compiles_side_by_side; RX_VK_NO_INTEL_SERIAL=1 over it). Read once, at the start
-    int preset = 0;       // quality preset: 0 Custom, 1 Minimum (4GB), 2 Low (6GB), 3 Balanced (8GB), 4 High (12GB), 5 Ultra (16GB+)
+    int preset = 0;       // quality preset: 0 Custom, 1 Lowest (integrated GPU), 2 Minimum (4GB), 3 Low (6GB), 4 Balanced (8GB), 5 High (12GB), 6 Ultra (16GB+)
     int vram_mb = 0;      // dynamic texture cache budget limit in MB
     int mirror_mb = 0;    // staging mirror limit in MB
     int audio_output = 0; // (hookshot) the speakers the game mixes for: 0 Auto (the default output's), 1 Stereo, 2 5.1; read once, at the start (host/nn_audio.c; HOS_AUDIO_CHANNELS)

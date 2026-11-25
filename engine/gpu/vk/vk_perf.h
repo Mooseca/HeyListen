@@ -42,5 +42,8 @@ void perf_set_waits(const PerfWaits& w);   // (the back end's counters, once a w
 void perf_note_frame();
 /// The latest numbers.
 void perf_snapshot(PerfStats* out);
+/// The 1% and 0.1% lows (fps, perf_lows.h) of the window of shown frames and how many frames it holds; the overlay's thread only
+/// (it keeps a scratch of its own, 64 KB). Frames are noted by perf_note_frame while the counter is on
+void perf_lows(double* low1, double* low01, int* frames);
 
 } // namespace mkwvk

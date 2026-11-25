@@ -4933,8 +4933,8 @@ uint64_t device_vram_bytes() {
     return test_vram_bytes(vram);
 }
 bool preset_caps_memory() {
-    static const uint64_t nominal_gb[] = {0, 4, 6, 8, 12, 16};
-    if (opts.preset <= 0 || opts.preset > 5) return true;   // (Custom: what the file says)
+    static const uint64_t nominal_gb[] = {0, 4, 4, 6, 8, 12, 16};   // (Custom, Lowest, Minimum, Low, Balanced, High, Ultra)
+    if (opts.preset <= 0 || opts.preset > 6) return true;   // (Custom: what the file says)
     const uint64_t vram = device_vram_bytes();
     return !vram || vram <= ((nominal_gb[opts.preset] << 30) + (768ull << 20));
 }

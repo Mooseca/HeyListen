@@ -4,6 +4,9 @@
 #include "../gpu/vk/lowend_rule.h"
 
 #include <cstdio>
+#include <string>
+#include <utility>
+#include <vector>
 
 static int failures = 0;
 static void expect(bool ok, const char* what) {
@@ -31,12 +34,13 @@ int main() {
     expect(!lowend_gpu(false, false), "discrete without mesh shaders (an RX 5700): not this rule");
     expect(!lowend_gpu(false, true), "discrete with mesh shaders");
 
-    expect(first_start(-1, false, true) == APPLY_AND_SAVE, "low-end GPU, never applied: applied and saved");
-    expect(first_start(-1, true, true) == NONE, "applied once already: the player's rows stay");
-    expect(first_start(-1, false, false) == NONE, "another GPU: nothing");
-    expect(first_start(0, false, true) == NONE, "HL_LOWEND=0: never");
-    expect(first_start(1, false, false) == APPLY_THIS_RUN, "HL_LOWEND=1 on any GPU: this run only");
-    expect(first_start(1, true, true) == APPLY_THIS_RUN, "HL_LOWEND=1 after it was applied: this run only, nothing saved");
+    expect(first_start(-1, false, true, true) == PROBE, "an integrated GPU, never asked, settings the player's own: measured");
+    expect(first_start(-1, true, true, true) == NONE, "asked once already: never again");
+    expect(first_start(-1, false, false, true) == NONE, "a discrete GPU: never");
+    expect(first_start(-1, false, true, false) == NONE, "the row or its settings touched by the player: not measured");
+    expect(first_start(0, false, true, true) == NONE, "HL_LOWEND=0: never");
+    expect(first_start(1, false, false, true) == APPLY_THIS_RUN, "HL_LOWEND=1 on any GPU: this run only");
+    expect(first_start(1, true, true, false) == APPLY_THIS_RUN, "HL_LOWEND=1 after it was asked: this run only, nothing saved");
 
     expect(mirror_not_wait(0x1002, true, false), "AMD integrated without mesh shaders (a Vega 8): the mirror, no wait");
     expect(!mirror_not_wait(0x8086, true, false), "Intel integrated without mesh shaders: not measured, as before");
@@ -55,6 +59,25 @@ int main() {
         expect(ini_put_text("resolution_x=1\r\nlast=2", keys).rfind("resolution_x=1\r\nlast=2\r\nresolution=6\r\n", 0) == 0,
                "a key that only starts the same is not the key; a last line without its ending gets the file's");
     }
+    {   // (the Lowest preset's first start: the preset's line and the rows it sets in place, other lines and endings kept)
+        const std::vector<std::pair<std::string, int>> on = {{"quality_preset", 1}, {"resolution", kResolution}, {"handheld_profile", kHandheld},
+                                                             {"volumetric_fog", kFog}, {"options_version", 4}, {"lowend_rule", 1}};
+        for (const char* eol : {"\r\n", "\n"}) {
+            const std::string e = eol;
+            const std::string before = "a=1" + e + "resolution=0" + e + "options_version=3" + e + "handheld_profile=0" + e + "x=2" + e;
+            expect(ini_put_text(before, on) == "a=1" + e + "resolution=6" + e + "options_version=4" + e + "handheld_profile=1" + e + "x=2" + e +
+                                                   "quality_preset=1" + e + "volumetric_fog=0" + e + "lowend_rule=1" + e,
+                   "the rows in place (the version too), the others at the end, the file's endings");
+        }
+    }
+    // (the Quality preset's numbers: a file from before version 4 has Minimum to Ultra at 1 to 5; the old Low-end settings row On is Lowest)
+    expect(migrate_preset(3, 0, false) == 0, "Custom stays Custom");
+    expect(migrate_preset(3, 1, false) == 2 && migrate_preset(3, 3, false) == 4 && migrate_preset(3, 5, false) == 6, "Minimum, Balanced, Ultra move up one");
+    expect(migrate_preset(0, 2, false) == 3, "a file with no version is the old numbering too");
+    expect(migrate_preset(4, 1, false) == 1 && migrate_preset(4, 6, false) == 6, "version 4: as saved (1 is Lowest)");
+    expect(migrate_preset(3, 0, true) == kLowestPreset && migrate_preset(3, 4, true) == kLowestPreset && migrate_preset(4, 0, true) == kLowestPreset,
+           "the old row On: the Lowest preset, whatever the file's preset was");
+    expect(migrate_preset(3, 9, false) == kPresets, "a number past the list stops at the last");
     if (failures) return 1;
     std::printf("lowend_rule: all checks passed\n");
     return 0;

@@ -73,6 +73,8 @@ bool fsr4fg_offered() { return g_fsr4; }   /* (AMD FSR 4 FG: AMD's runtime offer
 const char* tx_framegen_by(int) { return ""; }
 const char* hn_framegen_by(int, int) { return ""; }
 void mic_chosen() {}
+[[maybe_unused]] static bool lowend_touched;   // (the Lowest preset's measure: vk_menu.cpp)
+namespace lowend_rule { constexpr int kResolution = 6, kHandheld = 1, kFog = 0; }   // (the preset Lowest's rows: lowend_rule.h)
 int step_output_choice(int id, int dir) { return id + dir; }
 const char* tx_framegen(int) { return ""; }
 const char* hn_framegen(int, int) { return ""; }

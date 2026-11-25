@@ -107,6 +107,34 @@ shows 144. Frame generation gets an even rate to work from, with Auto too (it fi
 Frame rate limit then holds nothing back, and the FPS counter's **Frame limit** line says `144 fps (game 48 x 3)`. With Frame
 generation Off it does what the Frame rate limit does with the same number. Needs Game speed on Real time.
 
+### Lowest quality preset (weak integrated GPU)
+
+The Graphics tab's **Quality preset** row has an entry before Minimum (4GB): **Lowest (integrated GPU)**. It sets Render resolution to 33%
+(at once), Volumetric fog to Off and the Handheld profile to On (a smaller scene with lower shadow and fog detail; both from the next
+start, and the menu asks to restart for them), plus what Minimum sets: the Lanczos window filter, Sharpness 30%, the frame pacing, Game
+speed on Real time and the smallest memory limits. Every preset sets the Volumetric fog too (On, except Lowest), so choosing another preset after Lowest
+puts the fog and the Handheld profile back as that preset says (from the next start); nothing else is remembered.
+
+On an integrated GPU the game also chooses it by itself, once: after 15 seconds of play it times the frames of the next 10 seconds (the
+title and the load screens do not count). Under 20 frames a second at your own settings (a Ryzen 7 5700U's Vega 8 runs 11 to 13) it
+selects the preset and says so in the log (`turned to Lowest (integrated GPU)`); at 20 or more (a Steam Deck, a ROG Ally, a Radeon 780M)
+it leaves everything as it is and never asks again (`lowend_rule=1`). It does not ask if you had set the Quality preset, Render
+resolution, Volumetric fog, the Handheld profile, the Window scaling filter, Sharpness, the frame pacing or Game speed yourself. A
+discrete GPU is never asked. `HL_LOWEND=0` stops it, `HL_LOWEND=1` chooses the preset for one run, `HL_LOWEND_FPS=<n>` changes the 20.
+
+An options file from a build that had the separate **Low-end settings** row On (`lowend_settings=1`) reads as this preset, its rows as
+they were saved; the old `lowend_settings` and `lowend_prev_*` lines go at the next save. The preset list gained an entry, so the saved
+`quality_preset` numbers moved up by one (`options_version=4`); a file from before that is moved once when it is read.
+
+### FPS counter: 1% low and 0.1% low
+
+The full FPS counter (F10 until the panel shows) has two lines under its graph, **1% low** and **0.1% low**, in frames a second, the
+way the benchmark counts them: 1000 over the mean frame time of the slowest 1% (0.1%) of the frames of the window, at least one frame.
+A stall counts for its length, not as one frame in a hundred. The window is the last 10 seconds or the last 1000 frames, whichever is
+longer, and the lines read `-` until 100 frames are in. With frame generation on they count the frames shown, the made ones too, as
+the counter's own rate does (the lines then say "shown frames"). The compact FPS box has no such lines, and nothing is computed while
+the counter is off or compact.
+
 ### HDR
 
 The Graphics tab's **HDR** row sends HDR10 to an HDR screen (Windows: turn on **Use HDR** in the display settings). **Off** is the

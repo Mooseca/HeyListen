@@ -1,7 +1,7 @@
 // Copyright (C) 2026 Sacrappy
-// Low-end GPUs: the volumetric fog's programs (the Volumetric fog row, vk_draw.cpp dispatch), the first-start rule that gives an
-// integrated GPU without mesh shaders Render resolution 33%, the handheld profile and the fog off (vk_menu.cpp
-// menu_first_run_lowend), and the VRAM mirror in place of the present's wait on AMD's (vk_memory.cpp mirror_on, vk_replay.cpp).
+// Low-end GPUs: the volumetric fog's programs (the Volumetric fog row, vk_draw.cpp dispatch), the Lowest quality preset's rows (Render
+// resolution 33%, the handheld profile, the fog off: vk_menu.cpp apply_preset) and the first-start measure that chooses it
+// (menu_first_run_lowend), and the VRAM mirror in place of the present's wait on AMD's (vk_memory.cpp mirror_on, vk_replay.cpp).
 // tests/test_lowend_rule.py; the measures: docs/research/lowend-laptop.md
 #pragma once
 #include <cstdint>
@@ -69,14 +69,31 @@ inline std::string ini_put_text(const std::string& in, const std::vector<std::pa
     return out;
 }
 
-enum Apply { NONE, APPLY_AND_SAVE, APPLY_THIS_RUN };
-/// The first-start rule: env is HL_LOWEND (-1 unset; 0 never; 1 as if the GPU were one, for this run only: nothing saved),
-/// marked whether the options file already has the rule's line (lowend_rule=: once applied or declined, never again: the
-/// player's choices stay theirs), gpu lowend_gpu's answer
-inline Apply first_start(int env, bool marked, bool gpu) {
+/// The options file's lines of the Low-end settings row of a build of 25 Nov (lowend_settings, and lowend_prev_ + a row's key): the
+/// row is the Quality preset's Lowest entry now (vk_menu.cpp apply_preset case 1); menu_init reads lowend_settings=1 as that preset once
+/// and save() drops the lines
+constexpr const char* kPrevPrefix = "lowend_prev_";
+/// The Quality preset an options file means (preset: its quality_preset line as the menu read it, clamped; saved: the raw number;
+/// version: options_version; old_row: lowend_settings=1). Before version 4 Minimum to Ultra were 1 to 5 and are 2 to 6 now (Lowest
+/// is 1); a file with the old row On is the Lowest preset, its rows kept as they are
+constexpr int kLowestPreset = 1, kPresets = 6;
+inline int migrate_preset(int version, int saved, bool old_row) {
+    if (old_row) return kLowestPreset;
+    if (version < 4 && saved > 0) return saved + 1 > kPresets ? kPresets : saved + 1;
+    return saved;
+}
+
+enum Apply { NONE, PROBE, APPLY_THIS_RUN };
+/// The first-start question (HeyListen: not "integrated and no mesh shaders": a Steam Deck or a Radeon 780M is integrated and strong).
+/// env is HL_LOWEND (-1 unset; 0 never; 1 the rule's settings now, for this run only: nothing saved), marked whether the options file
+/// already has the rule's line (lowend_rule=: the question was asked once, by the measure or by this rule, and is never asked again),
+/// integrated the GPU's kind (a discrete GPU is never asked), untouched that the player has not set the Quality preset or the rows
+/// its Lowest entry sets (Render resolution, Volumetric fog, Handheld profile, the Window scaling filter, Sharpness, the pacing and the
+/// game speed). PROBE: measure the frames of play (lowend_measure.h) and choose the Lowest preset if they are too slow
+inline Apply first_start(int env, bool marked, bool integrated, bool untouched) {
     if (env == 0) return NONE;
     if (env > 0) return APPLY_THIS_RUN;
-    return gpu && !marked ? APPLY_AND_SAVE : NONE;
+    return integrated && !marked && untouched ? PROBE : NONE;
 }
 
 }  // namespace lowend_rule
