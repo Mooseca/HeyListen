@@ -705,27 +705,28 @@ void apply_preset(int p) {
         break;
     case 2: // Minimum (4GB VRAM / iGPU)
         opts.resolution = 4; opts.upscale = 2; opts.sharpness = 30;
-        opts.pace = 1;    opts.realtime = 1; opts.handheld = 1;
+        opts.pace = 1;    opts.realtime = 1; opts.handheld = 1; opts.fog = 1;
         break;
     case 3: // Low (6GB VRAM)
         opts.resolution = 2; opts.upscale = 2; opts.sharpness = 30;
-        opts.pace = 1;    opts.realtime = 1; opts.handheld = 1;
+        opts.pace = 1;    opts.realtime = 1; opts.handheld = 1; opts.fog = 1;
         break;
     case 4: // Balanced (8GB VRAM)
         opts.resolution = 1; opts.upscale = 1; opts.sharpness = 30;
-        opts.pace = 1;    opts.realtime = 1; opts.handheld = 0;
+        opts.pace = 1;    opts.realtime = 1; opts.handheld = 0; opts.fog = 1;
         break;
     case 5: // High (12GB VRAM)
         opts.resolution = 1; opts.upscale = 2; opts.sharpness = 40;
-        opts.pace = 1;    opts.realtime = 1; opts.handheld = 0;
+        opts.pace = 1;    opts.realtime = 1; opts.handheld = 0; opts.fog = 1;
         break;
     case 6: // Ultra (16GB+ VRAM)
         opts.resolution = 1; opts.upscale = 2; opts.sharpness = 50;
-        opts.pace = 1;    opts.realtime = 1; opts.handheld = 0;
+        opts.pace = 1;    opts.realtime = 1; opts.handheld = 0; opts.fog = 1;
         break;
     default:
         break;
     }
+    // (every preset sets the Volumetric fog too: On, as the game's default, but Lowest; the fog and the Handheld profile apply from the next start)
     // (the Upscaler and Frame generation are the player's: a preset never turns DLSS or made frames on or off. With DLSS
     // its resolution is DLSS's nearest mode)
     if (p > 0) opts.resolution = ur::snap(upscaler(), opts.resolution);
@@ -735,11 +736,11 @@ void apply_preset(int p) {
 MENU_HINTS(hn_preset, 0, "Each row as you set it. Changing most rows yourself comes back to Custom.",
            "Resolution 33% (with DLSS its nearest mode), Lanczos, Sharpness 30%, Handheld profile, Volumetric fog Off. The Handheld profile and "
            "the fog apply after a restart.",
-           "Resolution 50% (with DLSS its nearest mode), Lanczos, Sharpness 30%, Handheld profile.",
-           "Resolution 75% (with DLSS its nearest mode), Lanczos, Sharpness 30%, Handheld profile.",
-           "Resolution 100% (with DLSS its nearest mode), Catmull-Rom, Sharpness 30%.",
-           "Resolution 100% (with DLSS its nearest mode), Lanczos, Sharpness 40%.",
-           "Resolution 100% (with DLSS its nearest mode), Lanczos, Sharpness 50%.")
+           "Resolution 50% (with DLSS its nearest mode), Lanczos, Sharpness 30%, Handheld profile. Volumetric fog On.",
+           "Resolution 75% (with DLSS its nearest mode), Lanczos, Sharpness 30%, Handheld profile. Volumetric fog On.",
+           "Resolution 100% (with DLSS its nearest mode), Catmull-Rom, Sharpness 30%. Volumetric fog On.",
+           "Resolution 100% (with DLSS its nearest mode), Lanczos, Sharpness 40%. Volumetric fog On.",
+           "Resolution 100% (with DLSS its nearest mode), Lanczos, Sharpness 50%. Volumetric fog On.")
 MENU_HINTS(hn_gpu, 0, "The best dedicated GPU.")
 /// The line about the Frame rate limit under a fixed multiplier (v: the value shown): what the game runs at and what is shown,
 /// or that the multiplier runs lower to keep the game's 20 frames a second. worst: the longest it can be (for the help's height)

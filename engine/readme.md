@@ -331,7 +331,7 @@ they apply at once, with no new translation.
 - **Handheld profile** runs the game as if the console were undocked: lower resolution, lighter on the GPU.
 - **Lowest (integrated GPU)**, the Quality preset's first entry, is for a weak GPU: Render resolution 33%, Volumetric fog Off and the
   Handheld profile On (the resolution changes at once, the fog and the Handheld profile from the next start), with Minimum's other rows
-  (Lanczos, Sharpness 30%, frame pacing, Real time, the smallest memory limits). It restores nothing when another preset is chosen. On an
+  (Lanczos, Sharpness 30%, frame pacing, Real time, the smallest memory limits). Every preset sets the fog (On except Lowest), so another preset undoes it. On an
   integrated GPU, once, the game measures its own frames: from 15 seconds into play it times 10 seconds, and under 20 frames a second (the
   reference laptop's Ryzen 7 5700U runs 11 to 13) it selects the preset by itself, saved in the options file (`quality_preset`, the rows
   it sets, `lowend_rule`) and said in the log; at 20 or more (a Steam Deck, a ROG Ally, a Radeon 780M) it leaves everything as it is and

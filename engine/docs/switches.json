@@ -1550,11 +1550,11 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2592
+     "line": 2593
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2596
+     "line": 2597
     }
    ],
    "default": "off (unset)",
@@ -1575,7 +1575,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2588
+     "line": 2589
     }
    ],
    "default": "0 (unset)",
@@ -1596,7 +1596,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2577
+     "line": 2578
     }
    ],
    "default": "unset",
@@ -5222,7 +5222,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2749
+     "line": 2750
     }
    ],
    "default": "0 (unset)",
@@ -5369,11 +5369,11 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2757
+     "line": 2758
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2765
+     "line": 2766
     },
     {
      "path": "host/nn_vi.c",
@@ -5448,11 +5448,11 @@
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2757
+     "line": 2758
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2765
+     "line": 2766
     },
     {
      "path": "host/nn_vi.c",
@@ -5775,7 +5775,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2853
+     "line": 2854
     },
     {
      "path": "host/display.c",
@@ -7957,7 +7957,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2653
+     "line": 2654
     }
    ],
    "default": "unset",
@@ -7978,7 +7978,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2656
+     "line": 2657
     },
     {
      "path": "host/hos_main.c",
@@ -8087,7 +8087,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2750
+     "line": 2751
     },
     {
      "path": "host/nn_applet.c",
@@ -8636,7 +8636,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2748
+     "line": 2749
     }
    ],
    "default": "0 (unset)",
@@ -18786,7 +18786,7 @@
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2744
+     "line": 2745
     }
    ],
    "default": "unset",
@@ -20350,16 +20350,16 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2536
+     "line": 2537
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2537
+     "line": 2538
     }
    ],
    "default": "off (unset)",
    "values": "on or off (0, false, off, no and empty are off)",
-   "explanation": "undocumented: gpu/vk/vk_menu.cpp:2536 (in `fog_runs()`) reads it as an on/off switch: `const bool v = lowend_rule::fog_on(env_int(\"RX_VK_FOG\"), opts.fog);`. No comment in the source says what it changes.",
+   "explanation": "undocumented: gpu/vk/vk_menu.cpp:2537 (in `fog_runs()`) reads it as an on/off switch: `const bool v = lowend_rule::fog_on(env_int(\"RX_VK_FOG\"), opts.fog);`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -20731,7 +20731,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2738
+     "line": 2739
     }
    ],
    "default": "0 (unset)",
@@ -21615,7 +21615,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2740
+     "line": 2741
     }
    ],
    "default": "unset",
@@ -23618,7 +23618,7 @@
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2732
+     "line": 2733
     }
    ],
    "default": "2",
@@ -23702,7 +23702,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 3051
+     "line": 3052
     }
    ],
    "default": "unset",
@@ -26265,7 +26265,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2739
+     "line": 2740
     }
    ],
    "default": "0 (unset)",
@@ -31479,7 +31479,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 3023
+     "line": 3024
     }
    ],
    "default": "unset",
@@ -31647,7 +31647,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2745
+     "line": 2746
     }
    ],
    "default": "0 (unset)",

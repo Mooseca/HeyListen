@@ -110,8 +110,8 @@ generation Off it does what the Frame rate limit does with the same number. Need
 The Graphics tab's **Quality preset** row has an entry before Minimum (4GB): **Lowest (integrated GPU)**. It sets Render resolution to 33%
 (at once), Volumetric fog to Off and the Handheld profile to On (a smaller scene with lower shadow and fog detail; both from the next
 start, and the menu asks to restart for them), plus what Minimum sets: the Lanczos window filter, Sharpness 30%, the frame pacing, Game
-speed on Real time and the smallest memory limits. Like the other presets it does not restore anything when you choose another: that
-preset sets its own rows, and Volumetric fog stays as the row says (set it back by hand).
+speed on Real time and the smallest memory limits. Every preset sets the Volumetric fog too (On, except Lowest), so choosing another preset after Lowest
+puts the fog and the Handheld profile back as that preset says (from the next start); nothing else is remembered.
 
 On an integrated GPU the game also chooses it by itself, once: after 15 seconds of play it times the frames of the next 10 seconds (the
 title and the load screens do not count). Under 20 frames a second at your own settings (a Ryzen 7 5700U's Vega 8 runs 11 to 13) it
