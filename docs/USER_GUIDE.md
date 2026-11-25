@@ -381,6 +381,16 @@ next time you start the game. The icons are drawn when the builder makes your ga
 copied from anywhere, so a folder from another build is not needed. No `prompts` folder in your game folder (a game built by a release up to 0.4.2,
 whose builder could not draw them): update to a newer release and build again to make it; the game's log says `prompts: no prompts folder` while it is missing.
 
+## Sound output device
+
+The **Output device** row (Insert menu, Gameplay page) chooses where the game's sound plays. **Default** follows Windows' default
+output device, as it always did, also when you change that in Windows' sound settings. Any other entry is one active output by
+its name (speakers, a headset, a TV over HDMI): a change applies at once, with no restart and no click. The choice is saved by the
+device's id in `hookshot_options.ini`. When the saved device is not plugged in at the start, the row shows it as *not connected*,
+the sound plays on Default and the game's log (`hookshot_log.txt`) says so; open the menu again once it is back to try it again.
+A device unplugged while you play is left for Default the same way. The **Audio output** row (Auto, Stereo, 5.1) is another
+thing: the speakers the game mixes for, not the device. On Linux the sound goes to SDL's default device and the row has Default only.
+
 ## Known issues
 
 Occlusion is off; rare missing or teal textures while walking when VRAM runs short; tested on NVIDIA RTX (Windows; Linux: see its

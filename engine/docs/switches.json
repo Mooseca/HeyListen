@@ -1550,12 +1550,12 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2538
+     "line": 2627
     }
    ],
    "default": "off (unset)",
    "values": "on or off (0, false, off, no and empty are off)",
-   "explanation": "undocumented: gpu/vk/vk_menu.cpp:2538 (in `menu_first_run_lowend()`) reads it as an on/off switch: `const lowend_rule::Apply a = lowend_rule::first_start(env_int(\"HL_LOWEND\"), lowend_marked, gpu);`. No comment in the source says what it changes.",
+   "explanation": "undocumented: gpu/vk/vk_menu.cpp:2627 (in `menu_first_run_lowend()`) reads it as an on/off switch: `const lowend_rule::Apply a = lowend_rule::first_start(env_int(\"HL_LOWEND\"), lowend_marked, gpu);`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -4517,7 +4517,7 @@
    "files": [
     {
      "path": "host/nn_audio.c",
-     "line": 945
+     "line": 1126
     }
    ],
    "default": "off (unset)",
@@ -4538,7 +4538,7 @@
    "files": [
     {
      "path": "host/nn_audio.c",
-     "line": 884
+     "line": 1063
     }
    ],
    "default": "unset",
@@ -4580,15 +4580,19 @@
    "files": [
     {
      "path": "host/nn_audio.c",
-     "line": 905
+     "line": 946
+    },
+    {
+     "path": "host/nn_audio.c",
+     "line": 1084
     }
    ],
    "default": "unset",
    "values": "text",
-   "explanation": "The device: HOS_AUDIO_DEVICE=<n> (a waveOut device number) first, then the Windows default (WAVE_MAPPER), then each device in turn. Players had no sound at all while every other program played (\"no sound in 2.0.5\"): the log now names the device; one that takes no block for 1.5 s (an unplugged headset, a default bound to a dead output) is closed and the next candidate opened (at most 6 times a run); 10 s after opening the log says how many blocks the device took and how loud the game's sound was, which tells a silent game from a deaf device. Issue 99: when HOS_AUDIO_DEVICE is unset, device 0 is tried first (not skipped to WAVE_MAPPER). the next candidate: 0 = device 0 (or HOS_AUDIO_DEVICE), 1 = the default, 2.. = device n-2.",
+   "explanation": "**Output device** is where the game's sound plays. Default follows Windows' default output device; the list shows each active output by its name, and a change applies at once, with no restart. The choice is kept by the device's id (`output_device_id`, with its name beside it, in `hookshot_options.ini`). A chosen device that is unplugged stays chosen (shown as not connected) and Default stands in, with a line in the log; it is tried again when the menu is opened. A device unplugged while the game plays is left for Default the same way. On Linux the sound goes to SDL's default device and the row has Default only: the system's sound settings choose the device. `HOS_AUDIO_DEVICE=<n>` (a waveOut device number) still wins over the row for one run. Audio output (Auto, Stereo, 5.1) is the speakers the game mixes for; this row is the device they play on.",
    "comment": "The device: HOS_AUDIO_DEVICE=<n> (a waveOut device number) first, then the Windows default (WAVE_MAPPER), then each device in turn. Players had no sound at all while every other program played (\"no sound in 2.0.5\"): the log now names the device; one that takes no block for 1.5 s (an unplugged headset, a default bound to a dead output) is closed and the next candidate opened (at most 6 times a run); 10 s after opening the log says how many blocks the device took and how loud the game's sound was, which tells a silent game from a deaf device. Issue 99: when HOS_AUDIO_DEVICE is unset, device 0 is tried first (not skipped to WAVE_MAPPER). the next candidate: 0 = device 0 (or HOS_AUDIO_DEVICE), 1 = the default, 2.. = device n-2.",
-   "documented_in": null,
-   "source": "comment at host/nn_audio.c",
+   "documented_in": "readme.md",
+   "source": "readme.md",
    "documented": true,
    "set_via": "In `hookshot_env.txt`, or in the environment.",
    "use": null
@@ -4601,7 +4605,7 @@
    "files": [
     {
      "path": "host/nn_audio.c",
-     "line": 937
+     "line": 1116
     }
    ],
    "default": "unset",
@@ -4622,7 +4626,7 @@
    "files": [
     {
      "path": "host/nn_audio.c",
-     "line": 1186
+     "line": 1405
     }
    ],
    "default": "off (unset)",
@@ -4748,7 +4752,7 @@
    "files": [
     {
      "path": "host/nn_audio.c",
-     "line": 1668
+     "line": 1887
     }
    ],
    "default": "unset",
@@ -5176,7 +5180,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2662
+     "line": 2758
     }
    ],
    "default": "0 (unset)",
@@ -5323,11 +5327,11 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2670
+     "line": 2766
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2678
+     "line": 2774
     },
     {
      "path": "host/nn_vi.c",
@@ -5402,11 +5406,11 @@
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2670
+     "line": 2766
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2678
+     "line": 2774
     },
     {
      "path": "host/nn_vi.c",
@@ -5729,7 +5733,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2765
+     "line": 2861
     },
     {
      "path": "host/display.c",
@@ -6037,7 +6041,7 @@
     },
     {
      "path": "host/rx_backend.c",
-     "line": 297
+     "line": 301
     }
    ],
    "default": "unset",
@@ -7911,7 +7915,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2578
+     "line": 2667
     }
    ],
    "default": "unset",
@@ -7932,7 +7936,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2581
+     "line": 2670
     },
     {
      "path": "host/hos_main.c",
@@ -8041,7 +8045,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2663
+     "line": 2759
     },
     {
      "path": "host/nn_applet.c",
@@ -8590,7 +8594,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2661
+     "line": 2757
     }
    ],
    "default": "0 (unset)",
@@ -8653,11 +8657,11 @@
    "files": [
     {
      "path": "host/rx_backend.c",
-     "line": 612
+     "line": 617
     },
     {
      "path": "host/rx_backend.c",
-     "line": 705
+     "line": 710
     }
    ],
    "default": "off (unset)",
@@ -9327,7 +9331,7 @@
    "files": [
     {
      "path": "host/rx_backend.c",
-     "line": 601
+     "line": 606
     }
    ],
    "default": "off (unset)",
@@ -9839,7 +9843,7 @@
    "files": [
     {
      "path": "host/rx_backend.c",
-     "line": 472
+     "line": 477
     }
    ],
    "default": "unset",
@@ -10768,7 +10772,7 @@
     },
     {
      "path": "host/rx_backend.c",
-     "line": 456
+     "line": 461
     }
    ],
    "default": "unset",
@@ -17764,7 +17768,7 @@
     },
     {
      "path": "host/rx_backend.c",
-     "line": 92
+     "line": 96
     }
    ],
    "default": "unset",
@@ -18740,7 +18744,7 @@
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2657
+     "line": 2753
     }
    ],
    "default": "unset",
@@ -20304,16 +20308,16 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2515
+     "line": 2604
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2516
+     "line": 2605
     }
    ],
    "default": "off (unset)",
    "values": "on or off (0, false, off, no and empty are off)",
-   "explanation": "undocumented: gpu/vk/vk_menu.cpp:2515 (in `fog_runs()`) reads it as an on/off switch: `const bool v = lowend_rule::fog_on(env_int(\"RX_VK_FOG\"), opts.fog);`. No comment in the source says what it changes.",
+   "explanation": "undocumented: gpu/vk/vk_menu.cpp:2604 (in `fog_runs()`) reads it as an on/off switch: `const bool v = lowend_rule::fog_on(env_int(\"RX_VK_FOG\"), opts.fog);`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -20685,7 +20689,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2651
+     "line": 2747
     }
    ],
    "default": "0 (unset)",
@@ -21175,7 +21179,7 @@
     },
     {
      "path": "host/rx_backend.c",
-     "line": 426
+     "line": 431
     }
    ],
    "default": "off (unset)",
@@ -21569,7 +21573,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2653
+     "line": 2749
     }
    ],
    "default": "unset",
@@ -23572,7 +23576,7 @@
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2645
+     "line": 2741
     }
    ],
    "default": "2",
@@ -23656,7 +23660,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2963
+     "line": 3059
     }
    ],
    "default": "unset",
@@ -26219,7 +26223,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2652
+     "line": 2748
     }
    ],
    "default": "0 (unset)",
@@ -31433,7 +31437,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2935
+     "line": 3031
     }
    ],
    "default": "unset",
@@ -31601,7 +31605,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2658
+     "line": 2754
     }
    ],
    "default": "0 (unset)",
