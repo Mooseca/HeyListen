@@ -50,6 +50,7 @@
 #include "vk_framegen.h"  // (the Frame generation row: the multiplier as it runs, who makes the frames)
 #include "framegen_rows.h"   // (what each Frame generation by offers; the Frame rate limit's share)
 #include "vk_fsr4.h"
+#include "vk_fsr4fg.h"
 #include "vk_temporal.h"
 #include "vk_reflex.h"
 #include "upscaler_rows.h"
@@ -113,7 +114,7 @@ const char* tx_framegen(int v) {
 }
 const char* tx_onoff(int v) { return v ? "On" : "Off"; }
 const char* tx_framegen_by(int v) {
-    static const char* t[fgr::kBy] = {"Built-in / AMD FSR 3.1", "NVIDIA DLSS FG", "AMD FSR 3.1 FG"};
+    static const char* t[fgr::kBy] = {"Built-in / AMD FSR 3.1", "NVIDIA DLSS FG", "AMD FSR 3.1 FG", "AMD FSR 4 FG"};
     return t[std::clamp(v, 0, fgr::kBy - 1)];
 }
 const char* tx_intel_compiles(int v) { return v ? "Side by side" : "One at a time"; }
@@ -124,6 +125,10 @@ MENU_HINTS(hn_intel_compiles, 0,
 const char* tx_fps_limit(int v) {
     static const char* t[fgr::kLimits] = {"60", "90", "120", "144", "165", "240", "Unlimited"};
     return t[v < 0 || v >= fgr::kLimits ? 0 : v];
+}
+const char* tx_fps_base(int v) {
+    static const char* t[fgr::kBases] = {"Off", "30", "40", "45", "48", "50", "60", "72", "75", "90", "120"};
+    return t[v < 0 || v >= fgr::kBases ? 0 : v];
 }
 const char* tx_perf(int v) { return v == 2 ? "Full" : v ? "FPS" : "Off"; }
 const char* tx_menu_shortcut(int v) {
@@ -733,6 +738,10 @@ const char* framegen_limit_note(int v, bool worst) {
     static char b[200];
     const int limit = worst ? fgr::limit_fps(fgr::kLimit60) : menu_fps_limit();
     if (limit < 0) return "";
+    if (!worst && menu_base_fps() > 0) {   // (the Base frame rate limit on: the shown rate is the game's times the multiplier)
+        snprintf(b, sizeof b, " The Base frame rate limit holds the game at %d frames a second, so %d are shown.", menu_base_fps(), menu_base_fps() * v);
+        return b;
+    }
     if (limit == 0) return " Unlimited: the game is not held back, and every frame of it gets its made frames.";
     const int run = worst ? v : fgr::limited(limit, v);
     if (run < v || worst)
@@ -747,9 +756,10 @@ const char* framegen_limit_note(int v, bool worst) {
 const char* hn_framegen(int v, int variant) {
     static char b[9][420];
     int shown = v;
-    bool fsr = false, worst = false;
+    bool fsr = false, worst = false, fsr4 = false;
     if (variant < 0) {
         shown = fgr::clamp(framegen_by_now(), dlss_fg_most(), std::clamp(v, 0, 8));
+        fsr4 = shown == 2 && framegen_by_now() == fgr::BY_FSR4;   // (AMD FSR 4 frame generation makes it, where AMD's runtime runs here)
         // (2x: by AMD FSR 3.1 where it runs, from the scene's depth and motion: vk_framegen.cpp)
         fsr = shown == 2 && (framegen_by_now() == fgr::BY_FSR3 || fsr3fi::frames_wanted() != 0);
     } else if (v >= 2) {
@@ -766,7 +776,7 @@ const char* hn_framegen(int v, int variant) {
     const char* made = shown == 2 ? "One made frame" : shown == 3 ? "Two made frames" : shown == 4 ? "Three made frames" : shown == 5 ? "Four made frames"
                        : shown == 6 ? "Five made frames" : shown == 7 ? "Six made frames" : "Seven made frames";
     char* out = b[std::clamp(shown, 2, 8)];
-    snprintf(out, sizeof b[0], "%s between each two of the game's%s.%s", made, fsr ? ", by AMD FSR 3.1 from the scene's depth and motion" : "",
+    snprintf(out, sizeof b[0], "%s between each two of the game's%s.%s", made, fsr4 ? ", by AMD FSR 4 from the scene's depth and motion" : fsr ? ", by AMD FSR 3.1 from the scene's depth and motion" : "",
              variant < 0 || worst ? framegen_limit_note(shown, worst) : "");
     return out;
 }
@@ -775,6 +785,17 @@ const char* hn_framegen(int v, int variant) {
 /// (4), no temporal Upscaler (5)
 const char* hn_framegen_by(int v, int variant) {
     static char b[260];
+    if (v == fgr::BY_FSR4) {   // (AMD FSR 4 frame generation: variants 0 it runs, 1 not offered here (the reason: its why text) )
+        static char c[420];
+        const bool offered = variant < 0 ? fsr4fg_offered() : variant == 0;
+        if (variant > 1) return nullptr;
+        if (offered)
+            return "AMD FSR 4 frame generation (a Radeon RX 9000 and AMD's runtime), from the scene's depth and motion: one made frame between two of "
+                   "the game's, 2x only. NOT TESTED on real hardware yet. Where AMD's runtime refuses a frame, the renderer's own makes it.";
+        snprintf(c, sizeof c, "Not available: %s The renderer's own (or AMD FSR 3.1) makes the frames.",
+                 *fsr4fg_why_text(fsr4fg_why()) ? fsr4fg_why_text(fsr4fg_why()) : "Not asked yet.");
+        return c;
+    }
     if (v == fgr::BY_FSR3)
         return variant > 0 ? nullptr
                            : "AMD FSR 3.1's frame interpolation, from the scene's depth and motion: one made frame between two of the "
@@ -801,6 +822,25 @@ const char* hn_framegen_by(int v, int variant) {
         snprintf(b, sizeof b, "NVIDIA DLSS Frame Generation makes the frames, from the scene's depth and motion: 2x up to %dx on this GPU, no Auto.", most + 1);
     else
         snprintf(b, sizeof b, "NVIDIA DLSS Frame Generation makes the frames, from the scene's depth and motion (RTX 40 and newer): 2x and up, no Auto.");
+    return b;
+}
+/// The Base frame rate limit: what the value makes at the multiplier that runs now. Variants (every one): none made; a multiplier
+/// (the longest); Game speed on Per frame
+const char* hn_fps_base(int v, int variant) {
+    static char b[240];
+    if (v <= 0) return variant > 0 ? nullptr : "The Frame rate limit holds the rate alone, as before: the rate shown, the game's frames and the made ones.";
+    if (variant > 2) return nullptr;
+    const int base = fgr::base_fps(v);
+    const bool per_frame = variant < 0 ? !opts.realtime : variant == 2;
+    if (per_frame) return "Game speed is on Per frame: the game runs at its own 60 and this holds nothing. Set Game speed to Real time.";
+    const int mult = variant < 0 ? (framegen_on() && framegen_now() >= 2 ? framegen_now() : 1) : variant == 0 ? 1 : 3;
+    if (mult < 2)
+        snprintf(b, sizeof b, "The game runs at %d frames a second%s.", base,
+                 variant < 0 && framegen_on() && framegen_now() == 1 ? ", and Auto frame generation fills up to the display's refresh from them"
+                                                                       : " (with Frame generation Off, the frames shown are those)");
+    else
+        snprintf(b, sizeof b, "At %dx the game runs at %d and %d frames a second are shown (the Frame rate limit holds nothing back; "
+                              "the VRR row's cap still does).", mult, base, base * mult);
     return b;
 }
 MENU_HINTS(hn_pace, 0, "As soon as it is ready.", "At an even interval: less stutter, at up to one frame of delay.")
@@ -888,7 +928,8 @@ Row rows[] = {
      hn_dlss_pre_bloom, false, true},
     {TAB_GRAPHICS, "Frame generation by", &opts.framegen_by, 0, fgr::kBy - 1, 1, tx_framegen_by,
      "Who makes the made frames, and so how many the Frame generation row offers. NVIDIA DLSS Frame Generation (RTX 40 and newer, "
-     "with a temporal Upscaler) is off unless chosen here. Changing it keeps the multiplier within what the new mode makes.",
+     "with a temporal Upscaler) is off unless chosen here. AMD FSR 4 FG (a Radeon RX 9000, 2x) is a choice only where AMD's own runtime "
+     "says it runs on this GPU, and is not tested on real hardware yet. Changing it keeps the multiplier within what the new mode makes.",
      hn_framegen_by, false, true},
     {TAB_GRAPHICS, "Frame generation", &opts.framegen, 0, 8, 1, tx_framegen,
      "Makes frames between the game's own, for smoother motion, at a little input delay. Fast motion or camera cuts can "
@@ -955,6 +996,12 @@ Row rows[] = {
      "Frame generation multiplier the game runs at the limit over it (120 at 3x: the game at 40). Unlimited holds nothing back. "
      "Above 60 it needs Game speed on Real time (the game's time follows the clock, so it does not run faster), and your display "
      "must run that fast to show every frame.", nullptr, false, true},
+    {TAB_GRAPHICS, "Base frame rate limit", &opts.fps_base, 0, fgr::kBases - 1, 1, tx_fps_base,   // (HeyListen: HL_OPT_BASE_LIMIT, vk_opt_ids.h, host/nn_vi.c)
+     "The game's OWN frame rate, before frame generation makes more: the Frame rate limit above holds what is shown, this holds what "
+     "the game draws. With it on, the game runs at this rate, the frames shown are this rate times the Frame generation multiplier "
+     "(60 at 2x is 120, 48 at 3x is 144), and Auto fills up to the display's refresh from it; the Frame rate limit then holds nothing "
+     "back. Every frame generator then gets an even rate. With Frame generation Off it is the limit itself. Off: the Frame rate limit "
+     "alone, as before. Needs Game speed on Real time.", hn_fps_base, false, true},
     // (the picture's way, top to bottom: the output's size, what fills it from the 3D, the 3D's size, then the window)
     {TAB_GRAPHICS, "Output resolution", &opts.output_res, 0, kLastOutput, 1, tx_output_res,
      "The game's whole frame, HUD included, before it is scaled to the window. Docked only. Applies after a restart.",
@@ -1306,7 +1353,7 @@ bool row_shown(int i) {
     const int* v = rows[i].value;
     return (rows[i].cheat < 0 || cheats_on()) &&
            (rows[i].value != &opts.dlss_model || ur::model_shown(dlss_built(), upscaler())) &&
-           (rows[i].value != &opts.framegen_by || dlss_built() || fsr3fi::capable()) &&   // (a build with DLSS, or a GPU AMD FSR 3.1's frame interpolation runs on: the row has a choice)
+           (rows[i].value != &opts.framegen_by || dlss_built() || fsr3fi::capable() || fsr4fg_offered()) &&   // (a build with DLSS, or a GPU AMD FSR 3.1's frame interpolation runs on: the row has a choice)
            (rows[i].value != &opts.dlss_pre_bloom || ur::pre_bloom_shown(dlss_why() == DLSS_OK, upscaler_mode())) &&
            // (HeyListen: the rows that only matter with another setting on show only then. Frame generation's sub-rows with it on)
            ((v != &opts.framegen_by && v != &opts.pace) || mrow::framegen_sub_shown(opts.framegen)) &&
@@ -1545,7 +1592,8 @@ void set_row(Row& r, int v, int dir, bool keep = true) {
     // (Frame generation by: NVIDIA DLSS FG is not a stop where this build has none: the row is there for AMD FSR 3.1's)
     if (r.value == &opts.framegen_by) {
         v = (v % fgr::kBy + fgr::kBy) % fgr::kBy;
-        if (v == fgr::BY_DLSS && !dlss_built()) v = (v + (dir < 0 ? fgr::kBy - 1 : 1)) % fgr::kBy;
+        // (a stop this PC cannot make is stepped over: NVIDIA DLSS FG without it in the build, AMD FSR 4 where AMD's runtime does not offer it)
+        if ((v == fgr::BY_DLSS && !dlss_built()) || (v == fgr::BY_FSR4 && !fsr4fg_offered())) v = fgr::step_by(v, dir, dlss_built(), fsr4fg_offered());
     }
     if (stops_at_ends(r)) v = std::min(std::max(v, r.lo), r.hi);   // (a scale: it stops at its ends)
     if (r.value == &opts.pad_layout) {
@@ -2616,13 +2664,25 @@ void menu_init() {
     restart_init();   // (what this run started with: the rows that take a restart differ from it once changed)
 }
 
+int menu_base_fps() {
+    if (!opts.realtime) return 0;   // (Per frame: the limit does not apply, the base one neither)
+    static const int env = [] {   // (the environment's limit stands over both rows, as host/nn_vi.c fps_plan has it)
+        const char* e = getenv("HOS_FPS_LIMIT") ? getenv("HOS_FPS_LIMIT") : getenv("HOS_FPS_MAX");
+        return e ? atoi(e) : 0;
+    }();
+    return env > 0 ? 0 : fgr::base_fps(opts.fps_base);
+}
 int menu_fps_limit() {
     if (!opts.realtime) return -1;   // (Per frame: the game's steps are whole frames of 1/60 s, the limit does not apply)
     static const int env = [] {   // (as host/nn_vi.c reads them: HOS_FPS_LIMIT, or Hookshot's HOS_FPS_MAX)
         const char* e = getenv("HOS_FPS_LIMIT") ? getenv("HOS_FPS_LIMIT") : getenv("HOS_FPS_MAX");
         return e ? atoi(e) : 0;
     }();
-    return env > 0 ? std::clamp(env, 30, 360) : fgr::limit_fps(opts.fps_limit);
+    if (env > 0) return std::clamp(env, 30, 360);
+    // (the Base frame rate limit on: the game's own rate is held, the rate shown is that times the multiplier and nothing holds it:
+    // Unlimited to the rest of the renderer)
+    if (menu_base_fps() > 0) return 0;
+    return fgr::limit_fps(opts.fps_limit);
 }
 bool resolution_auto() { return upscaler_rows::snap(upscaler(), opts.resolution) == 0; }
 int resolution_scale() {
@@ -2962,7 +3022,7 @@ void menu_tick() {
         // layout is not applied over them at start)
         if (open_now.load()) auto_pad = pad_last;   // (Menu size Auto: by what opened the menu)
         if (open_now.load()) opts.pad_layout = detect_pad_layout();
-        if (open_now.load()) dlss_probe(), dlss_fg_probe(), fsr4_probe();   // (whether the Upscaler row can offer DLSS and FSR here: asked once)
+        if (open_now.load()) dlss_probe(), dlss_fg_probe(), fsr4_probe(), fsr4fg_probe();   // (whether the Upscaler row can offer DLSS and FSR here: asked once)
         if (open_now.load()) refresh_mics();   // (the microphones as they are now)
     }
     if (open_now.load() && page == 5) {   // (hookshot) the restart question: Later (the default) or Restart now
