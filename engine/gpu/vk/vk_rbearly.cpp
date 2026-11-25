@@ -111,8 +111,10 @@ bool prev_on() {
     static const bool on = getenv("RX_VK_RB_EARLY_PREV") && atoi(getenv("RX_VK_RB_EARLY_PREV")) != 0;
     return on;
 }
+thread_local uint64_t tl_read_target = 0;   // (the target when this thread's read began: rbearly_note_read; the check compares with what the read
+                                            // would have been answered with then, not after the old path's waits, by which the next frames may be in)
 bool fetch(unsigned ri, uint64_t size, uint8_t* out, bool count, uint32_t* seq_out, double cap_ms, bool prev = false) {
-    const uint64_t target = ot_rb_target();
+    const uint64_t target = tl_read_target ? tl_read_target : ot_rb_target();
     const int64_t t0 = now_ns(), cap = (int64_t)(cap_ms * 1e6);
     rb_early::Pick p;
     bool rec_waited = false;
@@ -181,6 +183,7 @@ int rbearly_mode() { return config().mode; }
 /// The CPU reads (guest, size): a served size becomes a range the copies are made for
 void rbearly_note_read(uint64_t guest, uint64_t size) {
     if (!config().mode || !rb_early::served_size(size) || size > rb_early::kMaxBytes) return;
+    tl_read_target = ot_rb_target();
     std::lock_guard lk(mu);
     if (find_locked(guest, size) >= 0 || nranges >= rb_early::kRanges) return;
     rb_early::Range& r = ranges[nranges];
@@ -334,7 +337,7 @@ void rbearly_check(uint64_t gpu, uint64_t size) {
         }
         if (std::memcmp(mine, old, (size_t)size)) {
             const int64_t m = ++st.mismatches;
-            if (m <= 40) {   // (the words that differ: how many, and the first eight with both values)
+            if (m <= 24 || m % 100 == 0) {   // (the words that differ: how many, and the first eight with both values; then one in 100)
                 char b[600];
                 int n = 0, words = 0;
                 for (size_t w = 0; w + 4 <= size; w += 4) {
@@ -343,8 +346,22 @@ void rbearly_check(uint64_t gpu, uint64_t size) {
                     if (x == y) continue;
                     if (words++ < 8 && n < (int)sizeof b - 40) n += snprintf(b + n, sizeof b - n, " +%#zx %08x/%08x", w, x, y);
                 }
-                logf("vk: rbearly check MISMATCH %#llx +%#llx (clk %lld, seq %u): %d words differ, copy/old path:%s", (unsigned long long)host->gpu_guest(gpu),
-                     (unsigned long long)size, (long long)rb_frame_now(), seq, words, n ? b : "");
+                uint64_t job = 0, pjob = 0;
+                uint32_t pseq = 0;
+                unsigned learned_n = 0;
+                {
+                    std::lock_guard lk(mu);
+                    const rb_early::Range& r = ranges[ri];
+                    for (const rb_early::Slot& sl : r.slots)
+                        if (sl.seq == seq) job = sl.job;
+                    const rb_early::Pick pp = rb_early::pick_prev(r, tl_read_target);
+                    if (pp.kind == rb_early::kSlotFinal) pseq = pp.seq, pjob = r.slots[pp.slot].job;
+                    learned_n = rb_early::learned(r);
+                }
+                logf("vk: rbearly check MISMATCH %#llx +%#llx (clk %lld, seq %u job %llu; target %llu done %llu cur %llu; previous final seq %u job %llu; "
+                     "learned %u): %d words differ, copy/old path:%s", (unsigned long long)host->gpu_guest(gpu), (unsigned long long)size,
+                     (long long)rb_frame_now(), seq, (unsigned long long)job, (unsigned long long)tl_read_target, (unsigned long long)ot_rb_done(),
+                     (unsigned long long)ot_current_job(), pseq, (unsigned long long)pjob, learned_n, words, n ? b : "");
             }
         }
     }
