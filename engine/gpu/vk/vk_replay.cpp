@@ -9067,6 +9067,8 @@ void ot_main() {
     };
     Job held;              // (a present not ready yet: PIPE4)
     bool holding = false;
+    int64_t held_jobs = 0, held_since = 0;   // (FLASH1, HL_METER_TRACE: the jobs run behind a held present)
+    uint64_t held_first = 0, held_last = 0;
     int64_t held_until = 0;
     for (;;) {
         Job j;
@@ -9113,6 +9115,7 @@ void ot_main() {
             } else {
                 ot_sig_waits++;
                 held = std::move(j), holding = true, held_until = ot_now() + (int64_t)ms * 1000000;
+                held_jobs = 0, held_first = held_last = 0, held_since = ot_now();
                 ot_holding.store(true, std::memory_order_release);
             }
             continue;
@@ -9120,6 +9123,10 @@ void ot_main() {
         if (got) {
             ot_run(j);
             finish(j);
+            if (holding && j.kind == JOB_SUBMIT) {
+                held_jobs++, held_last = j.value;
+                if (!held_first) held_first = j.value;
+            }
         }
         if (holding) {
             const bool force = next_present || ot_now() >= held_until;
@@ -9131,6 +9138,10 @@ void ot_main() {
                         logf("vk: order thread: the present after %lld forced (%s; value %llu)", (long long)presents_now,
                              next_present ? "the next present came" : "waited its time", (unsigned long long)held.value);
                 }
+                if (meter_trace_on())   // (FLASH1: which presents were held, and what ran on the GPU's queue before them)
+                    logf("vk: mtrace hold present p %lld value %llu: %.2f ms, %lld submits run behind it (values %llu-%llu)%s",
+                         (long long)presents_now, (unsigned long long)held.value, (ot_now() - held_since) / 1e6, (long long)held_jobs,
+                         (unsigned long long)held_first, (unsigned long long)held_last, force ? ", forced" : "");
                 ot_held_present.store(0, std::memory_order_release);
                 finish(held);
                 holding = false;
