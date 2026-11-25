@@ -9,7 +9,7 @@
 #include <string>
 #include <vector>
 
-using namespace mkwvk::perf_lows;
+using namespace mkwvk::perflows;
 
 static int failures = 0;
 static void expect(bool ok, const char* what) {

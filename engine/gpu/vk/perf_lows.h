@@ -13,7 +13,7 @@
 #include <cstdio>
 
 namespace mkwvk {
-namespace perf_lows {
+namespace perflows {
 
 constexpr int kCap = 16384;                    // frame times kept: 10 s up to 1600 shown frames a second
 constexpr int kLeast = 1000;                   // the window holds at least this many frames...
@@ -72,5 +72,5 @@ inline void text(char* b, size_t cap, double fps, int frames) {
     else std::snprintf(b, cap, "%.0f FPS", fps);
 }
 
-}  // namespace perf_lows
+}  // namespace perflows
 }  // namespace mkwvk

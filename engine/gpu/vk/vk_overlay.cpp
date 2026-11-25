@@ -239,8 +239,8 @@ void perf_lows_draw(const ImVec4& c) {
         double a = 0, b = 0;
         int n = 0;
         perf_lows(&a, &b, &n);
-        perf_lows::text(v[0], sizeof v[0], a, n);
-        perf_lows::text(v[1], sizeof v[1], b, n);
+        perflows::text(v[0], sizeof v[0], a, n);
+        perflows::text(v[1], sizeof v[1], b, n);
         const bool fg = framegen_on() && framegen_now() >= 2;
         snprintf(l1, sizeof l1, "%s", fg ? "1% low (shown frames)" : "1% low");
         snprintf(l01, sizeof l01, "%s", fg ? "0.1% low (shown frames)" : "0.1% low");

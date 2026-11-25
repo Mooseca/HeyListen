@@ -30,8 +30,8 @@ int64_t ring_at[kPerfHistory];
 int ring_n = 0, ring_pos = 0;
 int64_t last_frame_ns = 0;
 PerfWaits waits;
-perf_lows::Ring lows_ring;   // (static: 192 KB, no allocation while frames are noted)
-float lows_scratch[perf_lows::kCap];   // (the overlay's thread)
+perflows::Ring lows_ring;   // (static: 192 KB, no allocation while frames are noted)
+float lows_scratch[perflows::kCap];   // (the overlay's thread)
 
 int64_t now_ns() {
     return std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
@@ -293,7 +293,7 @@ void perf_lows(double* low1, double* low01, int* frames) {
         n = lows_ring.window(now, lows_scratch);
     }
     *frames = n;
-    perf_lows::lows(lows_scratch, n, low1, low01);   // (a partial selection, outside the lock)
+    perflows::lows(lows_scratch, n, low1, low01);   // (a partial selection, outside the lock)
 }
 
 } // namespace mkwvk

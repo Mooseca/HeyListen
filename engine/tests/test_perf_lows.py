@@ -49,7 +49,7 @@ def check_source():
     if "perf_lows" in fps:
         raise SystemExit("the compact FPS box must not compute or show the lows")
     need("gpu/vk/vk_perf.cpp", ['#include "perf_lows.h"', "lows_ring.add((float)((now - last_frame_ns) / 1e6), now);", "lows_ring.clear();",
-                                "perf_lows::lows(lows_scratch, n, low1, low01);"])
+                                "perflows::lows(lows_scratch, n, low1, low01);"])
     need("gpu/vk/vk_menu.cpp", ["if (opts.show_fps) perf_note_frame();"])
     need("gpu/vk/vk_perf.h", ["void perf_lows(double* low1, double* low01, int* frames);"])
 
