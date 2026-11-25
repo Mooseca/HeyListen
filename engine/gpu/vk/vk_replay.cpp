@@ -8928,6 +8928,9 @@ std::deque<Job> ot_jobs;               // (ot_mu)
 uint64_t ot_seq_pushed = 0;            // (ot_mu)
 uint64_t ot_present_seq = 0;           // (ot_mu: the sequence number of the newest present handed over: the end of the game's last whole frame)
 uint64_t ot_present_seq_prev = 0;      // (ot_mu: the one before it: the end of the frame before the last whole one)
+uint64_t ot_last_submit_seq = 0;       // (ot_mu: the newest submission handed over)
+uint64_t ot_present_sub = 0;           // (ot_mu: the last submission before the newest present: what the frame's work ends with; the present's own job is not waited
+                                       // for, it is held until the game signals its event, and the game may be in the wait)
 std::atomic<uint64_t> ot_cur_since{0}; // (FLASH2: the place in its frame of the job the order thread is on)
 std::atomic<uint64_t> ot_r4_since[16]; // (FLASH2: the places in their frames of the jobs that wrote the 0x3980 culling results, the last 16 frames')
 std::atomic<uint64_t> ot_r4_n{0};
@@ -9249,8 +9252,8 @@ void ot_push(Job&& j) {
         std::lock_guard lk(ot_mu);
         j.seq = ++ot_seq_pushed;
         j.since = j.seq - ot_present_seq;
-        if (j.kind == JOB_SUBMIT) ot_my_seq = j.seq;   // (its submits: what it replayed itself inline; registrations never waited)
-        if (j.kind == JOB_PRESENT) ot_presents++, ot_present_seq_prev = ot_present_seq, ot_present_seq = j.seq, ot_last_present_push.store(ot_now(), std::memory_order_relaxed);
+        if (j.kind == JOB_SUBMIT) ot_my_seq = j.seq, ot_last_submit_seq = j.seq;   // (its submits: what it replayed itself inline; registrations never waited)
+        if (j.kind == JOB_PRESENT) ot_presents++, ot_present_seq_prev = ot_present_seq, ot_present_seq = j.seq, ot_present_sub = ot_last_submit_seq, ot_last_present_push.store(ot_now(), std::memory_order_relaxed);
         ot_jobs.push_back(std::move(j));
     }
     ot_cv.notify_one();
@@ -9322,7 +9325,7 @@ void ot_join_readback(uint64_t gpu, uint64_t size) {
         uint64_t want, prev;
         {
             std::lock_guard lk(ot_mu);
-            want = ot_present_seq, prev = ot_present_seq_prev;
+            want = ot_present_sub, prev = ot_present_seq_prev;
         }
         const uint64_t n = ot_r4_n.load(std::memory_order_acquire);
         bool placed = false;
