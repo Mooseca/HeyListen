@@ -112,6 +112,11 @@ static thread_local bool import_cooling;
 static thread_local VkResult import_result = VK_SUCCESS;
 static Pool* pool_lookup(uint64_t, uint64_t);
 static void retire_pool(std::map<uint64_t, Pool>::iterator);
+// (issues 131, 121: the retry of a refused import, the bytes the imports hold and the give-back of retired ones: none of that is run here)
+static uint64_t retired_emergency_free(uint64_t) { return 0; }
+static void import_forget_failure(uint64_t, uint64_t) {}
+[[maybe_unused]] static int64_t st_emergency_ok;
+static void pinned_sub(uint64_t) {}
 
 /* ACTUAL */
 
