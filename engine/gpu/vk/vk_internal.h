@@ -534,6 +534,7 @@ uint64_t ot_current_job();   // (vk_replay.cpp: the order thread's job being rep
 uint64_t ot_rb_target();     // (the last submission handed over before the newest present: what a read of the frame's results needs)
 uint64_t ot_rb_done();       // (the order thread's done mark)
 bool ot_on();                // (RX_VK_ORDER_THREAD in effect)
+void ot_describe_now(char* out, size_t cap);   // (ORDER2: the order thread's job now, for a read that waits long)
 /// (stream SUB1) the readback ring's staged ranges of one submission: its own list, so a submission that ends after the next began flushes its own
 struct RbPending {
     struct Req {

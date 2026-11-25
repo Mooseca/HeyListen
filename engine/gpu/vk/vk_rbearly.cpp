@@ -118,7 +118,7 @@ bool fetch(unsigned ri, uint64_t size, uint8_t* out, bool count, uint32_t* seq_o
     const uint64_t target = tl_read_target ? tl_read_target : ot_rb_target();
     const int64_t t0 = now_ns(), cap = (int64_t)(cap_ms * 1e6);
     rb_early::Pick p;
-    bool rec_waited = false;
+    bool rec_waited = false, logged_long = false;
     for (;;) {
         {
             std::lock_guard lk(mu);
@@ -126,6 +126,15 @@ bool fetch(unsigned ri, uint64_t size, uint8_t* out, bool count, uint32_t* seq_o
         }
         if (p.kind != rb_early::kWait) break;
         rec_waited = true;
+        if (count && !logged_long && now_ns() - t0 > 20000000) {   // (a read 20 ms behind the recording: what the order thread is on, 60 lines)
+            logged_long = true;
+            static std::atomic<int> rows{0};
+            if (rows++ < 60) {
+                char b[300];
+                ot_describe_now(b, sizeof b);
+                logf("vk: rbearly: a read of %#llx waits 20 ms for job %llu's copy: %s", (unsigned long long)ranges[ri].guest, (unsigned long long)target, b);
+            }
+        }
         if (now_ns() - t0 > cap) {
             if (count) st.fb_rec++;
             return false;

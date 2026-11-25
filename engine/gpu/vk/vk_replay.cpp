@@ -9424,6 +9424,19 @@ uint64_t ot_rb_target() {
 }
 uint64_t ot_rb_done() { return ot_seq_done.load(std::memory_order_acquire); }
 bool ot_on() { return order_thread_on(); }
+/// (ORDER2) what the order thread is on now, for a read that waits long: the job (kind, value, queue place in its frame, ms in it), the jobs queued
+void ot_describe_now(char* out, size_t cap) {
+    size_t queued;
+    uint64_t pushed;
+    {
+        std::lock_guard lk(ot_mu);
+        queued = ot_jobs.size(), pushed = ot_seq_pushed;
+    }
+    const int64_t t0 = r4map_job_t0.load(std::memory_order_relaxed);
+    snprintf(out, cap, "the order thread on job %llu (kind %d, value %llu, place %llu in its frame) for %.1f ms, done %llu, %zu jobs queued behind (pushed %llu)",
+             (unsigned long long)ot_cur_job.load(), ot_cur_kind.load(), (unsigned long long)ot_cur_value.load(), (unsigned long long)ot_cur_since.load(),
+             t0 ? (ot_now() - t0) / 1e6 : -1.0, (unsigned long long)ot_seq_done.load(), queued, (unsigned long long)pushed);
+}
 static bool r4map_window(int64_t* lo, int64_t* hi) {
     static int64_t a = -1, b = -1;
     static const bool on = [] {
