@@ -1039,11 +1039,11 @@ void perf_frame_shown() {
     if (const int hl = hitch_log_ms(); hitch_by_rel || (hl > 0 && f.ms >= (float)hl)) {   // (HL_HITCH_LOG=<ms> or rel:<ms>: the numbers a slow frame's cause was made of)
         logf("vk: hitch %.1f ms: %s%s | game %.1f render %.1f gpu_wait %.1f pace %.1f gpu %.1f | pipe %.1f xlate %.1f upload %.1f memsync %.1f "
              "readback %.1f drvcomp %.1f present %.1f | desc %.1f (build %.1f pool %.1f, tex %.1f in upload) | os_wait %.1f: lock %.1f sleep %.1f "
-             "vcore %.1f file %.1f, faults %lld, ws -%.0f MB (%s)",
+             "vcore %.1f file %.1f, faults %lld, ws -%.0f MB (%s) | rb %s",
              f.ms, pr::cause_name(pr::cause_of(f, w)), loading ? " (load)" : "", f.part[fs::kGame], f.part[fs::kRender], f.part[fs::kGpuWait],
              f.part[fs::kPace], f.gpu_ms, w.pipeline, w.translate, w.upload, w.memsync, w.readback, w.driver_compile, w.present,
              w.descriptors, w.desc_self, w.desc_pool, w.desc_tex, w.os_wait, w.ow_lock, w.ow_sleep, w.ow_vcore, w.ow_file, (long long)w.faults,
-             w.ws_drop_mb, pr::os_wait_kind(w).c_str());
+             w.ws_drop_mb, pr::os_wait_kind(w).c_str(), w.readback_which.empty() ? "-" : w.readback_which.c_str());
     }
     profile_feed(profile_host_map, f.ms, pr::is_hitch(f.ms, std::max(target, usual)));
     last_ms = f.ms;
