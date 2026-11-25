@@ -383,10 +383,15 @@ int main(void) {
     /* the next change finds it as it is, and puts the text's code back */
     *(uint32_t *)(window + 0x3000) = 0;
     CHECK(boxes_rewrite(&looked) == 1 && !memcmp(window + 0x4000, "Back \xEE\x81\x80", 8));
-    /* a box gone (its text pointer or its status another): let be, not even looked at */
+    /* the game sets the bar's text again (another string, codes in it): the same box, rewritten */
     *(uint64_t *)(window + 0x2000 + 0xf0) = 0x4800;
     memcpy(window + 0x4800, "x \xEE\x81\x80", 6);
     *(uint32_t *)(window + 0x2000 + 0x124) = 6;
+    *(uint32_t *)(window + 0x3000) = 0;
+    CHECK(boxes_rewrite(&looked) == 1 && looked == 1 && !memcmp(window + 0x4800, "x \xEF\x84\xA3", 6));
+    /* a box gone (its class another now): let be, not even looked at */
+    *(uint64_t *)(window + 0x2000) = 0x9999;
+    memcpy(window + 0x4800, "x \xEE\x81\x80", 6);
     *(uint32_t *)(window + 0x3000) = 0;
     CHECK(boxes_rewrite(&looked) == 0 && looked == 0 && !memcmp(window + 0x4800, "x \xEE\x81\x80", 6) && *(uint32_t *)(window + 0x3000) == 0);
     /* more boxes than the table holds: the oldest entry's place is taken, the table never grows past it */

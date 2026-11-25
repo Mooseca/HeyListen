@@ -985,9 +985,9 @@ static int text_code(unsigned c, int face, const int *bind) {   /* the code that
 
 /* the boxes seen with button codes in their text, by the hooks below: the game does not lay out or draw a box that stays on
    screen again (a hint bar, a menu's tabs), so a change while it is shown reaches them from this table: each is looked at
-   again (its text, its length and its status pointer as they were: a box gone is let be) and laid out anew */
+   again (its class and its status pointer as they were: a box gone is let be; its text whatever it is now) and laid out anew */
 #define BOXES 256
-typedef struct { uint64_t box, text, status; uint32_t len; } SeenBox;
+typedef struct { uint64_t box, text, status, vtable; uint32_t len; } SeenBox;
 static SeenBox seen_box[BOXES];
 static int seen_n, seen_next;
 static SRWLOCK seen_lock = SRWLOCK_INIT;
@@ -1016,6 +1016,8 @@ static int has_code(const uint8_t *s, uint32_t n) {
 static void box_note(uint64_t box, uint64_t text, uint32_t len, const uint8_t *s) {
     const uint64_t *st = (const uint64_t *)hos_guest_range(box + 8, 8);
     const uint64_t status = st ? *st : 0;
+    const uint64_t *vtp = (const uint64_t *)hos_guest_range(box, 8);
+    const uint64_t vtable = vtp ? *vtp : 0;
     int fresh = 0;
     AcquireSRWLockExclusive(&seen_lock);
     int k = 0;
@@ -1024,7 +1026,7 @@ static void box_note(uint64_t box, uint64_t text, uint32_t len, const uint8_t *s
         k = seen_n < BOXES ? seen_n++ : (seen_next++ % BOXES);
         fresh = 1;
     }
-    seen_box[k].box = box, seen_box[k].text = text, seen_box[k].len = len, seen_box[k].status = status;
+    seen_box[k].box = box, seen_box[k].text = text, seen_box[k].len = len, seen_box[k].status = status, seen_box[k].vtable = vtable;
     ReleaseSRWLockExclusive(&seen_lock);
     if (fresh && boxes_told < 60) {   /* (what has button codes: the first boxes, for a bar that never follows) */
         InterlockedIncrement(&boxes_told);
@@ -1036,9 +1038,8 @@ static void box_note(uint64_t box, uint64_t text, uint32_t len, const uint8_t *s
                 snprintf(codes + at, sizeof codes - at, " U+%04X", (unsigned)(s[i] & 0x0F) << 12 | (unsigned)(s[i + 1] & 0x3F) << 6 | (s[i + 2] & 0x3F));
                 m++, i += 2;
             }
-        const uint64_t *vt = (const uint64_t *)hos_guest_range(box, 8);
         hos_log("prompts: a box with button codes:%s (box %#llx, class %#llx, %u bytes, %s)", codes, (unsigned long long)box,
-                (unsigned long long)(vt ? *vt : 0), len, font_changes ? "after a change" : "at the start's face");
+                (unsigned long long)vtable, len, font_changes ? "after a change" : "at the start's face");
     }
 }
 
@@ -1107,7 +1108,10 @@ static int boxes_rewrite(int *looked) {
         uint64_t at;
         uint32_t len;
         const uint64_t *st = (const uint64_t *)hos_guest_range(copy[k].box + 8, 8);
-        if (!box_text(copy[k].box, &at, &len) || at != copy[k].text || len != copy[k].len || !st || *st != copy[k].status) continue;   /* (gone, or another) */
+        const uint64_t *vt = (const uint64_t *)hos_guest_range(copy[k].box, 8);
+        /* (the same box: its class and its status as they were; its text may be another string since, with codes still: the
+            game sets a bar's text again) */
+        if (!st || *st != copy[k].status || !vt || *vt != copy[k].vtable || !box_text(copy[k].box, &at, &len)) continue;   /* (gone, or another) */
         (*looked)++;
         if (box_rewrite(copy[k].box, 0)) {
             mark_box(copy[k].box, 0x20000 | 0x100000);
