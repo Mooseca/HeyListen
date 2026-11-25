@@ -3565,6 +3565,11 @@ int meter_log_rows() {
     static const int rows = getenv("HL_METER_LOG") ? atoi(getenv("HL_METER_LOG")) : 0;
     return rows;
 }
+// (FLASH1) HL_METER_TRACE=1: every meter read and every shot's mean luminance, one row each (vk_replay.cpp; default off)
+bool meter_trace_on() {
+    static const bool on = getenv("HL_METER_TRACE") && atoi(getenv("HL_METER_TRACE")) != 0;
+    return on;
+}
 namespace {
 void meter_work_note(uint64_t key, const MeterOut& m, bool dispatch) {
     if (meter_log_rows() <= 0) return;

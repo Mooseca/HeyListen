@@ -6608,6 +6608,14 @@ void invalidate(uint64_t gpu, uint64_t size) {
                 }
                 s.held = held, s.reads++;
             }
+            if (meter_trace_on()) {   // (FLASH1, HL_METER_TRACE=1: every read; the words the game is handed, where they came from)
+                const RbApplyNote rn = rbring_take_note();
+                const std::array<uint32_t, 4> g = held ? last[gpu] : w;
+                logf("vk: mtrace read f %lld p %lld %#llx: %08x %08x%s ring %d t %lld v %llu done %llu", (long long)rb_frame_now(),
+                     (long long)presents_now, (unsigned long long)host->gpu_guest(gpu), g[0], g[3], held ? " HELD" : "",
+                     ring_serve ? rn.kind : -1, (long long)rn.tag, (unsigned long long)rn.value,
+                     (unsigned long long)vk_timeline_reached());
+            }
             if (++st_reads % 2000 == 0)
                 logf("vk: exposure sums: 2000 reads, %lld of them given the last result again (RX_VK_METER_HOLD)", (long long)st_given.exchange(0));
         }
@@ -7740,6 +7748,17 @@ void do_present(const nvn_tex* t, const int crop[4]) {
         auto take = [&](uint64_t at_value, int64_t at_present) {
             auto px = pending.on && pending.presents == at_present && pending.pixels
                           ? std::move(pending.pixels) : shot_pixels(at_value, at_present);
+            if (meter_trace_on()) {   // (FLASH1, HL_METER_TRACE=1 with RX_VK_SHOT_EVERY=1: every shown frame's mean luminance, 0-255)
+                const uint8_t* q0 = px->data();
+                uint64_t sum = 0, n = 0;
+                for (uint32_t y = 0; y < kShotH; y += 2)
+                    for (uint32_t x = 0; x < kShotW; x += 2, n++) {
+                        const uint8_t* q = q0 + ((size_t)y * kShotW + x) * 4;
+                        sum += 54u * q[0] + 183u * q[1] + 19u * q[2];
+                    }
+                logf("vk: mtrace luma p %lld f %lld: %.2f (now p %lld, held present %llu)", (long long)at_present, (long long)rb_frame_now(),
+                     n ? sum / 256.0 / n : 0.0, (long long)presents_now, (unsigned long long)vk_timeline_held_present());
+            }
             // (RX_VK_DUMP_BLACK=<n>: a shot with 12-90% pure black pixels in a lit picture, or a green cast over it,
             // dumps the next frame, n times at most: the glitches some scenes show now and then)
             static int black_left = getenv("RX_VK_DUMP_BLACK") ? atoi(getenv("RX_VK_DUMP_BLACK")) : 0;
