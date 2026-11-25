@@ -1611,9 +1611,12 @@ void lowend_row_changed() {
     opts.handheld = lowend_rule::restore_value(opts.handheld, lowend_rule::kHandheld, lowend_prev[1]);
     opts.fog = lowend_rule::restore_value(opts.fog, lowend_rule::kFog, lowend_prev[2]);
     lowend_prev_ok = false;
-    logf("vk: Low-end settings row Off: Render resolution %d%%, Handheld profile %d and Volumetric fog %d back to before it was On (a row you "
+    char res[16];
+    snprintf(res, sizeof res, "%s", "Auto");
+    if (ur::percent(opts.resolution)) snprintf(res, sizeof res, "%d%%", ur::percent(opts.resolution));
+    logf("vk: Low-end settings row Off: Render resolution %s, Handheld profile %d and Volumetric fog %d back to before it was On (a row you "
          "had changed keeps your value); the fog and the handheld profile change at the next start",
-         ur::percent(opts.resolution), opts.handheld, opts.fog);
+         res, opts.handheld, opts.fog);
 }
 void set_row(Row& r, int v, int dir, bool keep = true) {
     // (nothing else to choose: no change, no save. A saved choice that cannot run here is kept)
