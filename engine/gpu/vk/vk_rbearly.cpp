@@ -95,7 +95,8 @@ thread_local bool tl_split = false;   // (a final copy was recorded: the replay 
 
 struct Stats {
     std::atomic<int64_t> reads{0}, final_ok{0}, newest{0}, rec_waits{0}, rec_ns{0}, rec_worst{0}, gpu_waits{0}, gpu_ns{0}, gpu_worst{0},
-        fb_rec{0}, fb_gpu{0}, fb_none{0}, binds{0}, finals{0}, left{0}, checks{0}, mismatches{0}, splits{0}, repeats{0}, late_ok{0}, stale{0}, prev_same{0}, prev_diff{0};
+        fb_rec{0}, fb_gpu{0}, fb_none{0}, binds{0}, finals{0}, left{0}, checks{0}, mismatches{0}, splits{0}, repeats{0}, late_ok{0}, stale{0}, prev_same{0}, prev_diff{0}, stall_prev{0}, old_nowhere{0}, old_same_range{0}, old_other_range{0};
+    std::atomic<int> old_logged{0};
     std::atomic<int> tainted_logged{0};
 } st;
 void note_max(std::atomic<int64_t>& m, int64_t v) {
@@ -167,13 +168,15 @@ void log_stats() {
          "worst %.2f); fell back to the old path: %lld recording not in time, %lld GPU not in time, %lld no copy; bindings copied %lld (%lld "
          "final), %lld left with no dispatch behind them, %lld parts ended behind a final copy; %lld reads with nothing newer (guest memory left "
          "alone), %lld answered after the longer wait, %lld left to guest memory as it was (STALE); check: %lld compared, %lld mismatches; the "
-         "previous copy (RX_VK_RB_EARLY_PREV) equal %lld, different %lld",
+         "previous copy (RX_VK_RB_EARLY_PREV) equal %lld, different %lld; answered with the previous copy in a stall (RX_VK_RB_EARLY_STALL_MS) %lld; the old path's value found among the copies: of the "
+         "range %lld, of another range %lld, none %lld",
          (long long)st.final_ok.exchange(0), (long long)st.newest.exchange(0), (long long)rw, ms(st.rec_ns.exchange(0), rw),
          st.rec_worst.exchange(0) / 1e6, (long long)gw, ms(st.gpu_ns.exchange(0), gw), st.gpu_worst.exchange(0) / 1e6,
          (long long)st.fb_rec.exchange(0), (long long)st.fb_gpu.exchange(0), (long long)st.fb_none.exchange(0), (long long)st.binds.exchange(0),
          (long long)st.finals.exchange(0), (long long)st.left.exchange(0), (long long)st.splits.exchange(0), (long long)st.repeats.exchange(0),
          (long long)st.late_ok.exchange(0), (long long)st.stale.exchange(0), (long long)st.checks.exchange(0), (long long)st.mismatches.exchange(0),
-         (long long)st.prev_same.exchange(0), (long long)st.prev_diff.exchange(0));
+         (long long)st.prev_same.exchange(0), (long long)st.prev_diff.exchange(0), (long long)st.stall_prev.exchange(0),
+         (long long)st.old_same_range.exchange(0), (long long)st.old_other_range.exchange(0), (long long)st.old_nowhere.exchange(0));
 }
 
 }   // namespace
@@ -289,7 +292,11 @@ bool rbearly_answer(uint64_t gpu, uint64_t size) {
     // order thread and the GPU; then guest memory as it is, counted as STALE)
     uint8_t buf[rb_early::kMaxBytes];
     uint32_t seq = 0;
-    bool ok = fetch((unsigned)ri, size, buf, true, &seq, config().wait_ms, prev_on());
+    // (ORDER2) RX_VK_RB_EARLY_STALL_MS=<ms> (0 off): a read whose own copy is not there within that time (the replay stalled behind uploads or a long job, a zone's load) takes the range's previous copy at once instead of waiting: one frame of last frame's culling results against a hitch of tens of ms
+    static const double stall_ms = getenv("RX_VK_RB_EARLY_STALL_MS") ? atof(getenv("RX_VK_RB_EARLY_STALL_MS")) : 0.0;
+    const double first_ms = stall_ms > 0 ? std::min(stall_ms, config().wait_ms) : config().wait_ms;
+    bool ok = fetch((unsigned)ri, size, buf, true, &seq, first_ms, prev_on());
+    if (!ok && stall_ms > 0 && fetch((unsigned)ri, size, buf, false, &seq, 0.0, true)) ok = true, st.stall_prev++;
     if (!ok && fetch((unsigned)ri, size, buf, false, &seq, 200.0)) ok = true, st.late_ok++;
     if (!ok) {
         st.stale++;
@@ -334,6 +341,21 @@ void rbearly_check(uint64_t gpu, uint64_t size) {
             uint8_t prev[rb_early::kMaxBytes];
             uint32_t pseq = 0;
             if (fetch((unsigned)ri, size, prev, false, &pseq, 0.0, true)) (std::memcmp(prev, old, (size_t)size) ? st.prev_diff : st.prev_same)++;
+        }
+        {   // (what the old path's value is, when it is no copy of this range: any stamped slot of any served range equal to it, by its age)
+            int found = -1;
+            uint32_t newest_seq = 0;
+            std::lock_guard lk(mu);
+            for (unsigned i = 0; i < nranges && found < 0; i++)
+                for (unsigned k = 0; k < rb_early::kSlots && found < 0; k++) {
+                    const rb_early::Slot& sl = ranges[i].slots[k];
+                    if (!sl.seq || stamp_of(i, k) != sl.seq) continue;
+                    if (!std::memcmp(ring_map + slot_at(i, k), old, (size_t)size)) found = (int)(i * 1000 + (ranges[i].next_seq - sl.seq)), newest_seq = sl.seq;
+                }
+            (found < 0 ? st.old_nowhere : (found / 1000 == ri ? st.old_same_range : st.old_other_range))++;
+            if (found >= 0 && st.old_logged++ < 12)
+                logf("vk: rbearly check: the old path's value is range %d's copy seq %u, %d bindings before its newest (the read is of range %d)", found / 1000,
+                     newest_seq, found % 1000, ri);
         }
         if (std::memcmp(mine, old, (size_t)size)) {
             const int64_t m = ++st.mismatches;

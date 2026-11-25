@@ -47,6 +47,25 @@ The producers are not behind a backlog; they are at the head of a long job whose
   go through `rbring_note_read` / the written bindings) can be staged at its writer. R5 and R6 are read a frame later (12 ms after
   their writer) and wait for nothing today; they keep the old path until an audit shows them stale.
 
+## What the builds showed (order2b-order2f, main PC, 25-26 Nov)
+
+- **The copy must be written once.** order2b answered every read from the copy: its check (`RX_VK_RB_EARLY=2`) differed from the
+  old path in half of the reads, the reads after the first of a frame. So a copy goes into guest memory once (a read with nothing
+  newer leaves guest memory alone), and the served range's write-backs are left out, so no write-back lands after the game's read
+  (order2c, `7207f5f54`). A written binding that overlaps a served range without being it sends the range back to the old path.
+- **The newest write is the right one.** `RX_VK_RB_EARLY_PREV=1` answered with the range as it stood before the frame's last
+  submission (its previous write, no wait at all): 232 one-frame luma steps a minute in the field (o2e-V1), the plants and lights
+  flicker. The copy of the frame's last submission itself: 0 in 156 s (o2d-E1, o2d-E2), as flash2f's wait (0 in 182 s, o2d-P1,
+  o2d-P2) against 2.0 a minute for the old read (o2d-B1). A fixed lag of any kind is refuted.
+- **What is left to wait for.** With the copy, ~35 % of the reads wait for the order thread to record the job's last copy (0.6-1.0 ms)
+  and ~45 % for the GPU to run it (1.0-1.3 ms), even with the recording's part ended right behind the copy
+  (`RX_VK_RB_EARLY_SPLIT`, so the copy goes to the GPU at once): the copy is queued behind the GPU work submitted before it (the
+  previous frame's passes). That GPU part is what a CPU version of the block (below) or a second queue for the eight programs
+  would remove.
+- **A read during a replay stall** (a texture-upload burst at a zone load, the order thread tens of ms behind): the read waits for its
+  own job's copy at most `RX_VK_RB_EARLY_WAIT_MS` (30 ms), then up to 200 ms more (the range's write-backs are left out, so it must
+  find a copy), then leaves guest memory as it is and counts it (STALE). It never waits for the rest of the replay or the present.
+
 ## Directions weighed and not taken first
 
 - **Overtake the order thread's backlog** (run the producer job ahead of others): there is no backlog to overtake at that point
