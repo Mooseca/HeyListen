@@ -42,11 +42,15 @@
 #include "compat/hookshot_env.h"   // (env_value_off: the switches' one rule)
 #include "vk_paths.h"
 #include "vk_draw.h"
+#include "vk_vrs.h"
+#include "thread_prio.h"
 #include "vk_draw_sample.h"
 #include "flat_map.h"
 #include "perf_report.h"   // (zone_note_program / zone_note_state: the per-zone key recorder, once a key per map)
 #include "dlss_actor.h"
 #include "vk_temporal.h"
+#include "vk_framegen.h"   // (framegen_hud_before: a gameplay upscale's picture, before the game draws its HUD into it)
+#include "vk_fsr3fi.h"     // (frames_wanted)
 #include "vk_fsr3.h"          // (AMD FSR 3.1 in the gameplay upscale's place)
 #include "vk_fsr3_inputs.h"
 #include "vk_dump.h"
@@ -75,6 +79,7 @@
 #include "precompile_save.h"   // (the pipeline cache written before the title after a long precompile)
 #include "prepare_work.h"   // (what a program of the seed costs a preparation: its progress bar)
 #include "mesh_conv.h"   // (RX_VK_MESH_CONV: the indirect mesh draws' ring slots and the batch at the game's barriers)
+#include "lowend_rule.h"   // (the Volumetric fog row: the fog's programs)
 #include "vk_work.h"   // (after the others: counts the commands that do GPU work, for full_barrier)
 
 namespace mkwvk {
@@ -1699,6 +1704,7 @@ void state_list_prepare(void (*progress)(size_t done, size_t total), bool backgr
     const auto worker = [&] {
         ub_thread_off();   // (a background thread: see ub_thread_off; the pipeline state list's builds raced the replay's updates)
         SetThreadPriority(GetCurrentThread(), background ? THREAD_PRIORITY_IDLE : THREAD_PRIORITY_BELOW_NORMAL);
+        if (background) MKWVK_PIN_BACKGROUND();   // (RX_VK_THREAD_PRIO: off the replay's core, thread_prio.h)
         for (;;) {
             const size_t i = next++;
             if (i >= want.size()) return;
@@ -1742,6 +1748,7 @@ void state_list_prepare(void (*progress)(size_t done, size_t total), bool backgr
     next = 0;
     const auto variant_worker = [&] {
         SetThreadPriority(GetCurrentThread(), background ? THREAD_PRIORITY_IDLE : THREAD_PRIORITY_BELOW_NORMAL);
+        if (background) MKWVK_PIN_BACKGROUND();   // (RX_VK_THREAD_PRIO: off the replay's core, thread_prio.h)
         for (;;) {
             const size_t i = next++;
             if (i >= variant_of.size()) return;
@@ -2327,6 +2334,7 @@ VkPipeline build_graphics(const Program& p, const NvnState& s, const Targets& at
     if (dev.eds3_polygon) dyn.push_back(VK_DYNAMIC_STATE_POLYGON_MODE_EXT);
     if (dev.eds3_clamp) dyn.push_back(VK_DYNAMIC_STATE_DEPTH_CLAMP_ENABLE_EXT);
     if (dev.eds3_a2c) dyn.push_back(VK_DYNAMIC_STATE_ALPHA_TO_COVERAGE_ENABLE_EXT);
+    if (dev.frag_shading_rate) dyn.push_back(VK_DYNAMIC_STATE_FRAGMENT_SHADING_RATE_KHR);   // (RX_VK_VRS: vk_vrs.h)
     VkPipelineDynamicStateCreateInfo dy{VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO};
     dy.dynamicStateCount = (uint32_t)dyn.size();
     dy.pDynamicStates = dyn.data();
@@ -3750,7 +3758,7 @@ void build_descriptors(const NvnState& s, const Program& p) {
                 // overwrote the CPU's own data beside it)
                 if (b && bare && d.is_written && d.cbuf_offset != 0x880) {
                     const uint64_t head = std::min<uint64_t>(n, (addr - base) + 0x40);
-                    (void)gpu_buffer_bind(base, (head + 3) & ~3ull, true);
+                    (void)gpu_buffer_bind_guess(base, (head + 3) & ~3ull);   // (CRASH3: staged and checked, never over a CPU write)
                 }
                 // (RX_VK_PROTECT_BARE=1: the whole range kept for the GPU against the CPU's page syncs, vk_memory.cpp prot_pages)
                 if (b && bare && d.is_written)
@@ -3775,6 +3783,26 @@ void build_descriptors(const NvnState& s, const Program& p) {
                             logf("vk: descriptors of %016llx stage %d: #%zu[%u] c%u+%#x%s -> %#llx size %#llx (bound %s)", (unsigned long long)p.key,
                                  ns, n_desc, k, (unsigned)d.cbuf_index, off, d.is_written ? " written" : "", (unsigned long long)addr,
                                  (unsigned long long)size, b ? "yes" : "NO");
+                    }
+                }
+                {   // (CRASH3, HL_TRACE_WB=1: the write-back watch's origins) each storage binding marked written, of 16 KB or
+                    // less, once per guest range and program: which program, stage and descriptor, the table entry, bare or sized
+                    static const bool wb_watch = [] { const char* e = getenv("HL_TRACE_WB"); return e && atoi(e) != 0; }();
+                    if (wb_watch && b && d.is_written && addr) {
+                        const uint64_t wn = bare ? (d.cbuf_offset != 0x880 ? ((std::min<uint64_t>(n, (addr - base) + 0x40) + 3) & ~3ull) : 0) : n;
+                        static std::mutex om;
+                        static std::unordered_set<uint64_t> seen;
+                        const uint64_t g = host->gpu_guest(base);
+                        if (wn && wn <= (16u << 10) && g) {
+                            std::lock_guard lk(om);
+                            if (seen.size() < 20000 && seen.insert(g * 0x9E3779B97F4A7C15ull ^ p.key ^ ((uint64_t)ns << 60) ^ ((uint64_t)d.cbuf_offset << 32) ^ k).second)
+                                logf("vk: wb watch: written binding [%#llx, %#llx) (%s) by program %016llx stage %d desc #%zu c%u+%#x entry %u of %u: "
+                                     "pointer %#llx, size word %#llx",
+                                     (unsigned long long)g, (unsigned long long)(g + wn), bare ? "bare entry's head" : "sized",
+                                     (unsigned long long)p.key, ns, (size_t)(&d - info.storage_buffers_descriptors.data()),
+                                     (unsigned)d.cbuf_index, off, k, (unsigned)d.count, (unsigned long long)addr,
+                                     (unsigned long long)stage_cbuf_word(s, st, d.cbuf_index, off + 8));
+                        }
                     }
                 }
                 {   // (EXPO1, RX_VK_LOG_METER=<rows>, default off) every storage descriptor of the two exposure programs: which program
@@ -4745,6 +4773,11 @@ struct Pass {
     std::vector<const Texture*> sampled;   // (rendered textures its draws sampled: a target among them is a hazard)
     uint16_t sampled_targets = 0;          // (colour i bit i, depth bit 8: targets earlier draws sampled)
     uint16_t written = 0;                  // (its targets written so far: colour i bit i, depth bit 8)
+    // (RX_VK_PASS_TIMING: what the pass map (docs/research/pass1-pass-map.md) lists per pass: its draws that write depth, that run
+    // with rasterizer discard, with alpha to coverage, whose fragment program writes depth or kills (early Z is lost), that blend;
+    // and the attachments its load operation clears: colour i bit i, depth bit 8)
+    uint32_t dw_draws = 0, disc_draws = 0, a2c_draws = 0, latez_draws = 0, blend_draws = 0;
+    uint16_t load_cleared = 0;
 };
 TLS_OBJECT(pass, Pass)
 thread_local bool work_since_barrier = false;   // (GPU work recorded since the last full barrier: a dispatch orders after it)
@@ -4887,6 +4920,30 @@ bool targets_persistent(const Targets& at) {
     return at.depth && at.depth->first_render_frame && at.depth->first_render_frame < now;
 }
 
+/// (RX_VK_LOAD_CLEAR) A full clear that is the first thing a pass does becomes the pass's loadOp CLEAR for that attachment instead
+/// of LOAD followed by vkCmdClearAttachments: the clear function says so here before it begins the pass, begin_pass takes it and
+/// says it did (taken_*), and the clear function then records nothing. Only the first clear of a pass can be one: the passes
+/// that open with a colour clear and then clear depth keep the second as a clear in the pass.
+struct LoadClear {
+    bool color[8]{};
+    float rgba[8][4]{};
+    bool depth = false;
+    VkClearDepthStencilValue ds{};
+    bool taken_color[8]{}, taken_depth = false;
+};
+thread_local LoadClear load_clear;
+bool load_clear_on() {
+    static const bool v = getenv("RX_VK_LOAD_CLEAR") && atoi(getenv("RX_VK_LOAD_CLEAR")) != 0;
+    return v;
+}
+/// Whether begin_pass would go on with the pass that is open (the same targets)
+bool pass_continues(const Targets& at) {
+    const Pass& ps = pass();
+    bool same = ps.open && ps.depth == at.depth_view && ps.n == at.n && ps.width == at.width && ps.height == at.height;
+    for (int i = 0; i < at.n && same; i++) same = ps.color[i] == at.color_view[i];
+    return same;
+}
+
 void begin_pass(VkCommandBuffer cmd, const Targets& at) {
     Pass& ps = pass();   // (hookshot, once: the accessor is a call and a thread-local read at each use (__tls_get_addr in the shared library). The same object for the thread's life: draw_begin_recording resets it in place)
     bool same = ps.open && ps.depth == at.depth_view && ps.n == at.n && ps.width == at.width &&
@@ -4894,7 +4951,12 @@ void begin_pass(VkCommandBuffer cmd, const Targets& at) {
     for (int i = 0; i < at.n && same; i++) same = ps.color[i] == at.color_view[i];
     if (same) return;
     end_pass(cmd);
-    pass_start_barrier(cmd);   // (what the pass before wrote, and the transfers before it: vk_texture.cpp)
+    // (GPUPOV) the barrier this pass starts with, left out when the work recorded since the command buffer's last one wrote
+    // nothing this pass writes and nothing the draw about to be recorded samples (RX_VK_BARRIER_HAZARD=2; with the audit on,
+    // it counts what it found either way). The draw's descriptors are built before its pass begins (draw(), build_descriptors)
+    if (!hazard_pass_barrier_elidable(cmd, at.color, at.n, at.depth, gfx_sampled().data(), gfx_sampled().size(), "barrier (pass start)"))
+        pass_start_barrier(cmd);   // (what the pass before wrote, and the transfers before it: vk_texture.cpp)
+    hazard_note_pass(cmd, at.color, at.n, at.depth);   // (GPUPOV: written from here on)
     work_since_barrier = true;
     VkRenderingAttachmentInfo ca[8]{};
     bool marks = !texture_marked(at.depth);
@@ -4906,6 +4968,12 @@ void begin_pass(VkCommandBuffer cmd, const Targets& at) {
         ca[i].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
         ca[i].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
         ca[i].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        if (load_clear.color[i]) {
+            ca[i].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+            std::memcpy(&ca[i].clearValue.color, load_clear.rgba[i], 16);
+            load_clear.taken_color[i] = true;
+            ps.load_cleared |= (uint16_t)(1u << i);
+        }
         ps.color[i] = at.color_view[i];
         ps.tex[i] = at.color[i], ps.level[i] = at.color_level[i], ps.layer[i] = at.color_layer[i];
         texture_written(at.color[i], "a pass's colour target");
@@ -4918,6 +4986,12 @@ void begin_pass(VkCommandBuffer cmd, const Targets& at) {
         da.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
         da.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
         da.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        if (load_clear.depth) {
+            da.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+            da.clearValue.depthStencil = load_clear.ds;
+            load_clear.taken_depth = true;
+            ps.load_cleared |= 1u << 8;
+        }
         texture_written(at.depth, "a pass's depth target");
         texture_rendered(at.depth);
     }
@@ -4935,6 +5009,7 @@ void begin_pass(VkCommandBuffer cmd, const Targets& at) {
     ps.draws = 0, ps.format0 = at.n ? at.color_format[0] : at.depth_format;
     ps.wm_or = 0, ps.wm_n = 0;
     ps.clears = 0, ps.first_prog = 0;
+    ps.dw_draws = ps.disc_draws = ps.a2c_draws = ps.latez_draws = ps.blend_draws = 0, ps.load_cleared = 0;
     ps.sampled.clear(), ps.sampled_targets = 0, ps.written = 0;
     vkCmdBeginRendering(cmd, &ri);
     ps.open = true;
@@ -4965,6 +5040,7 @@ struct DynState {
 };
 thread_local DynState last_dyn;
 thread_local bool last_dyn_valid = false;
+thread_local int last_rate = -1;   // (RX_VK_VRS: the shading rate set in this command buffer, 1 = 2x2, 0 = 1x1; -1 not set yet)
 #define DYN_CHANGED(f) ((!last_dyn_valid || std::memcmp(&d.f, &last_dyn.f, sizeof d.f)) && (FINE_X(FC_DYN_CALLS, 1), true))
 
 /// The inputs a draw's dynamic state is built from. Most draws repeat the draw before them.
@@ -5025,6 +5101,28 @@ void dynamic_state(VkCommandBuffer cmd, const NvnState& s, const Targets& at, Vk
     float df[kDynF];
     uint32_t du[kDynU];
     uint8_t db[160];
+    if (gprof_on()) {   // (RX_VK_PASS_TIMING: the pass map's per-pass counts)
+        ps.dw_draws += at.depth && s.ds.dw && s.ds.dt;
+        ps.disc_draws += s.raster_discard != 0, ps.a2c_draws += s.ms.a2c != 0;
+        ps.blend_draws += (s.color.blend_en & ((1u << at.n) - 1)) != 0;
+        if (cur_program)
+            for (const Stage& st : cur_program->stages)
+                if (st.nvn_stage == 1 && (st.info.stores_frag_depth || st.info.uses_demote_to_helper_invocation)) {
+                    ps.latez_draws++;
+                    break;
+                }
+    }
+    if (dev.frag_shading_rate) {   // (RX_VK_VRS: the rate of this draw's program; the dynamic state's fast path below does not see programs)
+        static const vrs::Rule rule = vrs::parse(getenv("RX_VK_VRS"), getenv("RX_VK_VRS_MIN_W") ? (uint32_t)atoi(getenv("RX_VK_VRS_MIN_W")) : 64u);
+        const bool dwrite = at.depth && depth_aspect(at.depth_format) && s.ds.dw;
+        const int want = cur_program && vrs::select(rule, cur_program->key, at.width, at.height, at.n, at.depth != nullptr, dwrite, (int)at.samples) ? 1 : 0;
+        if (want != last_rate) {
+            const VkExtent2D size = want ? VkExtent2D{2, 2} : VkExtent2D{1, 1};
+            const VkFragmentShadingRateCombinerOpKHR ops[2] = {VK_FRAGMENT_SHADING_RATE_COMBINER_OP_KEEP_KHR, VK_FRAGMENT_SHADING_RATE_COMBINER_OP_KEEP_KHR};
+            vkCmdSetFragmentShadingRateKHR(cmd, &size, ops);
+            last_rate = want;
+        }
+    }
     const int nb = dyn_pack(s, at, topo, mesh, df, du, db);
     if (!dump_on() && last_dyn_valid && dyn_fast.on && dyn_fast.nb == nb &&
         dyn_same(df, kDynF, du, kDynU, db, nb, dyn_fast.fp, dyn_fast.up, dyn_fast.raw)) {
@@ -5053,12 +5151,17 @@ void dynamic_state(VkCommandBuffer cmd, const NvnState& s, const Targets& at, Vk
     // the viewport upside down (negative height): NVN's NDC has +y up, Vulkan's down
     float vx = s.viewport[0][0], vy = s.viewport[0][1], vw = s.viewport[0][2], vh = s.viewport[0][3];
     if (vw == 0.0f && vh == 0.0f) vx = 0, vy = 0, vw = (float)at.width, vh = (float)at.height;
+    const uint32_t shrink = at.n == 0 && at.depth ? at.depth->shrink : 0;   // (RX_VK_SHADOW_SHIFT: the guest's coordinates are of the bigger map)
+    if (shrink) {
+        const float k = 1.0f / (float)(1u << shrink);
+        vx *= k, vy *= k, vw *= k, vh *= k;
+    }
     d.vp = {vx, vy + vh, vw, -vh, std::clamp(s.depth_near, 0.0f, 1.0f), std::clamp(s.depth_far, 0.0f, 1.0f)};
     d.sc = {{0, 0}, {at.width, at.height}};
     if (s.scissor[2] > 0 && s.scissor[3] > 0) {
-        const int32_t x0 = std::max(0, s.scissor[0]), y0 = std::max(0, s.scissor[1]);
-        const int32_t x1 = std::min<int32_t>(s.scissor[0] + s.scissor[2], (int32_t)at.width);
-        const int32_t y1 = std::min<int32_t>(s.scissor[1] + s.scissor[3], (int32_t)at.height);
+        const int32_t x0 = std::max(0, s.scissor[0] >> shrink), y0 = std::max(0, s.scissor[1] >> shrink);
+        const int32_t x1 = std::min<int32_t>((s.scissor[0] + s.scissor[2] + (1 << shrink) - 1) >> shrink, (int32_t)at.width);
+        const int32_t y1 = std::min<int32_t>((s.scissor[1] + s.scissor[3] + (1 << shrink) - 1) >> shrink, (int32_t)at.height);
         d.sc = {{x0, y0}, {(uint32_t)std::max(0, x1 - x0), (uint32_t)std::max(0, y1 - y0)}};
     }
     std::memcpy(d.blend, s.blend_color, sizeof d.blend);
@@ -5314,12 +5417,12 @@ void make_dummies() {
 
 // ---- clears: between the draws of a pass, cut by scissor 0 (as deko3d programs every clear), a channel mask with
 // a full-screen triangle (vkCmdClearAttachments has no write mask; TOTK's maxwell.md 1.3) ----
-VkRect2D clear_rect(const NvnState& s, uint32_t w, uint32_t h) {
+VkRect2D clear_rect(const NvnState& s, uint32_t w, uint32_t h, uint32_t shift = 0) {
     VkRect2D r{{0, 0}, {w, h}};
     if (s.scissor[2] > 0 && s.scissor[3] > 0) {
-        const int32_t x0 = std::clamp(s.scissor[0], 0, (int32_t)w), y0 = std::clamp(s.scissor[1], 0, (int32_t)h);
-        const int32_t x1 = std::clamp(s.scissor[0] + s.scissor[2], 0, (int32_t)w);
-        const int32_t y1 = std::clamp(s.scissor[1] + s.scissor[3], 0, (int32_t)h);
+        const int32_t x0 = std::clamp(s.scissor[0] >> shift, 0, (int32_t)w), y0 = std::clamp(s.scissor[1] >> shift, 0, (int32_t)h);
+        const int32_t x1 = std::clamp((s.scissor[0] + s.scissor[2] + (1 << shift) - 1) >> shift, 0, (int32_t)w);
+        const int32_t y1 = std::clamp((s.scissor[1] + s.scissor[3] + (1 << shift) - 1) >> shift, 0, (int32_t)h);
         r = {{x0, y0}, {(uint32_t)std::max(0, x1 - x0), (uint32_t)std::max(0, y1 - y0)}};
     }
     return r;
@@ -5497,11 +5600,24 @@ void clear_color_target(VkCommandBuffer cmd, NvnState& s, int index, const float
     const Targets at = targets(s);
     if (index < 0 || index >= at.n || !at.color_view[index]) return;
     clear_after_draws(cmd);
-    begin_pass(cmd, at);
     const uint32_t lw = at.width, lh = at.height;
-    const VkRect2D rect = clear_rect(s, lw, lh);
+    const VkRect2D rect = clear_rect(s, lw, lh, at.depth ? at.depth->shrink : 0);
+    const bool as_load = load_clear_on() && mask == 0xF && rect.offset.x == 0 && rect.offset.y == 0 && rect.extent.width == lw &&
+                         rect.extent.height == lh && !pass_continues(at);
+    if (as_load) {
+        load_clear = LoadClear{};
+        load_clear.color[index] = true;
+        std::memcpy(load_clear.rgba[index], rgba, 16);
+    }
+    begin_pass(cmd, at);
+    const bool taken = as_load && load_clear.taken_color[index];
+    load_clear = LoadClear{};
     if (!rect.extent.width || !rect.extent.height) return;
     st_clears++, pass().clears++;
+    if (taken) {   // (the pass's loadOp cleared it)
+        pass().written |= (uint16_t)(1u << index);
+        return;
+    }
     if (mask == 0xF) {
         VkClearAttachment ca{};
         ca.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
@@ -5519,7 +5635,7 @@ void clear_color_target(VkCommandBuffer cmd, NvnState& s, int index, const float
     if (!pl) return;
     st_masked_clears++;
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pl);
-    last_dyn_valid = false, last_desc_valid = false, last_vb_valid = false, last_pipeline = VK_NULL_HANDLE;
+    last_rate = -1, last_dyn_valid = false, last_desc_valid = false, last_vb_valid = false, last_pipeline = VK_NULL_HANDLE;
     vertex_set.on = false;   // (the next draw binds its vertex streams again, as last_vb_valid above asks)
     descriptors_disturbed();   // (the next draw pushes all its descriptors, not only those that changed)
     const VkViewport v{0, 0, (float)lw, (float)lh, 0.0f, 1.0f};
@@ -5543,9 +5659,26 @@ void clear_depth_stencil(VkCommandBuffer cmd, NvnState& s, float depth, bool dep
         if (logged++ < 4) logf("vk: stencil clear with write mask %#x: cleared whole", stencil_mask);
     }
     clear_after_draws(cmd);
+    const VkRect2D rect = clear_rect(s, at.width, at.height, at.depth ? at.depth->shrink : 0);
+    const VkImageAspectFlags all_aspects = (depth_aspect(at.depth_format) ? VK_IMAGE_ASPECT_DEPTH_BIT : 0) |
+                                           (has_stencil(at.depth_format) ? VK_IMAGE_ASPECT_STENCIL_BIT : 0);
+    const bool as_load = load_clear_on() && aspect == all_aspects && (!has_stencil(at.depth_format) || (stencil_mask & 0xFF) == 0xFF) &&
+                         rect.offset.x == 0 && rect.offset.y == 0 && rect.extent.width == at.width && rect.extent.height == at.height &&
+                         !pass_continues(at);
+    if (as_load) {
+        load_clear = LoadClear{};
+        load_clear.depth = true;
+        load_clear.ds = {std::clamp(depth, 0.0f, 1.0f), stencil & 0xFF};
+    }
     begin_pass(cmd, at);
-    const VkRect2D rect = clear_rect(s, at.width, at.height);
+    const bool taken = as_load && load_clear.taken_depth;
+    load_clear = LoadClear{};
     if (!rect.extent.width || !rect.extent.height) return;
+    if (taken) {
+        pass().written |= 1u << 8;
+        st_clears++, pass().clears++;
+        return;
+    }
     VkClearAttachment ca{};
     ca.aspectMask = aspect;
     ca.clearValue.depthStencil = {std::clamp(depth, 0.0f, 1.0f), stencil & 0xFF};
@@ -5644,7 +5777,7 @@ void draw_begin_recording(int slot, VkCommandBuffer cmd, uint64_t value) {
     cur = &r;
     pass() = Pass{};
     work_since_barrier = false;
-    last_dyn_valid = false, last_desc_valid = false, last_vb_valid = false, last_pipeline = VK_NULL_HANDLE;
+    last_rate = -1, last_dyn_valid = false, last_desc_valid = false, last_vb_valid = false, last_pipeline = VK_NULL_HANDLE;
     vertex_set.on = false, last_ib.on = false;
     descriptors_disturbed();
     static thread_local uint64_t hits_value = ~0ull;   // (resolved targets last a submission, through its parts: no CPU write is
@@ -5922,10 +6055,13 @@ void end_pass(VkCommandBuffer cmd) {
                    (unsigned long long)ps.first_prog, (unsigned long long)ps.prog, sampled);
     }
     if (gprof_on()) {
-        char label[160];
-        snprintf(label, sizeof label, "pass %ux%u f%d %dc%s, %s draws, %zu sampled, first prog %016llx, last prog %016llx", ps.width, ps.height,
-                 (int)ps.format0, ps.n, ps.depth ? "+d" : "", ps.draws > 256 ? ">256" : ps.draws > 32 ? "33-256" : ps.draws > 4 ? "5-32" : "0-4",
-                 ps.sampled.size(), (unsigned long long)ps.first_prog, (unsigned long long)ps.prog);
+        char label[288];
+        snprintf(label, sizeof label, "pass %ux%u f%d %dc%s, %s draws, %zu sampled, first prog %016llx, last prog %016llx, dw%s disc%s a2c%s latez%s blend%s cl%x vrs%d",
+                 ps.width, ps.height, (int)ps.format0, ps.n, ps.depth ? "+d" : "", ps.draws > 256 ? ">256" : ps.draws > 32 ? "33-256" : ps.draws > 4 ? "5-32" : "0-4",
+                 ps.sampled.size(), (unsigned long long)ps.first_prog, (unsigned long long)ps.prog,
+                 ps.dw_draws ? (ps.dw_draws >= (uint32_t)ps.draws ? "all" : "some") : "0", ps.disc_draws ? "Y" : "0", ps.a2c_draws ? "Y" : "0",
+                 ps.latez_draws ? (ps.latez_draws >= (uint32_t)ps.draws ? "all" : "some") : "0",
+                 ps.blend_draws ? (ps.blend_draws >= (uint32_t)ps.draws ? "all" : "some") : "0", (unsigned)ps.load_cleared, dev.frag_shading_rate ? 1 : 0);
         gprof_end(cmd, label, ps.draws);
     } else if (tprof_on()) {   // (the performance profile: the pass's kind and key; a dynamic resolution's small steps are one pass)
         const profile_report::PassKind kind = profile_report::pass_kind(ps.n, ps.depth != VK_NULL_HANDLE, ps.width, ps.height, ps.draws, tprof_output_pixels());
@@ -7513,6 +7649,7 @@ struct FallbackBuffers {
 // (grown pairs stay: a command buffer recorded before the growth may still read them)
 TLS_OBJECT(fallback_buffers, std::vector<FallbackBuffers>)
 thread_local VkBuffer fallback_draw_records = VK_NULL_HANDLE;   // (the last fallback_record's: its header is the draw's command)
+thread_local bool fallback_draw_indexed = false;   // (LAPTOP1: that draw's program writes a record a vertex: drawn indexed)
 
 uint64_t fallback_buffer_address(VkBuffer buffer) {
     VkBufferDeviceAddressInfo info{VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO};
@@ -7556,7 +7693,9 @@ bool fallback_buffers_of(const Program& p, FallbackBuffers*& out) {
         f.records_address = last.records_address, f.records_bytes = last.records_bytes;
     } else {
         // (the records' header is the vertex stage's indirect draw and the mesh stage's indirect dispatch)
-        if (!create_buffer(records, usage | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT, false, f.records, f.records_mem, &mapped)) return false;
+        // (and the indexed form's index buffer, at its end: MESH_FALLBACK_INDEX_WORDS)
+        if (!create_buffer(records, usage | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, false, f.records,
+                           f.records_mem, &mapped)) return false;
         f.records_address = fallback_buffer_address(f.records);
         f.records_bytes = records;
         if (!f.records_address) {
@@ -7743,11 +7882,21 @@ bool fallback_record(VkCommandBuffer cmd, Program& p, const DrawArgs& d) {
     // the payload buffer: the mesh dispatch reads only the map entries and payloads its task wrote. Fills that do not overlap:
     // two over the same bytes have no order between them without a barrier)
     static_assert(Shader::Backend::SPIRV::MESH_FALLBACK_DISPATCH_WORD == 5 && Shader::Backend::SPIRV::MESH_FALLBACK_HEADER_WORDS == 8);
+    const bool fb_timed = gprof_on() && gprof_begin(cmd);   // (LAPTOP1, RX_VK_PASS_TIMING: the fallback's fills, then each stage, a span each)
     vkCmdFillBuffer(cmd, f->records, 0, 4, 0);    // (vertexCount)
     vkCmdFillBuffer(cmd, f->records, 4, 4, 1);    // (instanceCount)
     vkCmdFillBuffer(cmd, f->records, 8, 16, 0);   // (firstVertex, firstInstance, the allocator, the dispatch's x)
     vkCmdFillBuffer(cmd, f->records, 24, 8, 1);   // (the dispatch's y and z)
+    if (p.fallback_indexed) {   // (LAPTOP1: the indexed form's command, indexCount 0 and instanceCount 1, and its allocator at 0)
+        const VkDeviceSize at = (VkDeviceSize)Shader::Backend::SPIRV::MESH_FALLBACK_INDEXED_DRAW_WORD * 4;
+        static_assert(Shader::Backend::SPIRV::MESH_FALLBACK_INDEX_ALLOC_WORD == Shader::Backend::SPIRV::MESH_FALLBACK_INDEXED_DRAW_WORD + 5);
+        vkCmdFillBuffer(cmd, f->records, at, 4, 0);        // (indexCount)
+        vkCmdFillBuffer(cmd, f->records, at + 4, 4, 1);    // (instanceCount)
+        vkCmdFillBuffer(cmd, f->records, at + 8, 16, 0);   // (firstIndex, vertexOffset, firstInstance, the allocator)
+    }
     fallback_draw_records = f->records;
+    fallback_draw_indexed = p.fallback_indexed;
+    if (fb_timed) gprof_end(cmd, "fallback fill (the records' header)");
     full_barrier(cmd);
     if (!bind_descriptors(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, p)) return false;
     push_constants(cmd, p, nullptr);
@@ -7760,6 +7909,16 @@ bool fallback_record(VkCommandBuffer cmd, Program& p, const DrawArgs& d) {
     const bool indirect{d.indirect && mesh_conv_buf != VK_NULL_HANDLE};
     auto send = [&](size_t stage, bool mesh_stage) {
         if (stage >= p.fallback_compute.size() || !p.fallback_compute[stage]) return false;
+        // (LAPTOP1, RX_VK_PASS_TIMING: each stage of a fallback draw, by its program, so the map names what the no-mesh path costs)
+        struct StageSpan {
+            VkCommandBuffer c; bool on; uint64_t key; bool mesh;
+            ~StageSpan() {
+                if (!on) return;
+                char label[96];
+                snprintf(label, sizeof label, "fallback %s stage prog %016llx", mesh ? "mesh" : "task", (unsigned long long)key);
+                gprof_end(c, label);
+            }
+        } span{cmd, gprof_on() && gprof_begin(cmd), p.key, mesh_stage};
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, p.fallback_compute[stage]);
         if (mesh_stage && p.fallback_task) {
             // (the mesh workgroups the task's started threads counted into the records' header, each its slot in the map:
@@ -8529,7 +8688,7 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
     // draw of the scene's size took the actor motion's upright viewport for the game's upside-down one (Longshot #1672)
     const bool pre_recorded = temporal_pre_bloom(cmd, p.key, gfx_sampled(), at.color, at.n);
     if (pre_recorded) {
-        last_dyn_valid = false, last_vb_valid = false, last_pipeline = VK_NULL_HANDLE;
+        last_rate = -1, last_dyn_valid = false, last_vb_valid = false, last_pipeline = VK_NULL_HANDLE;
         vertex_set.on = false, last_ib.on = false;
     }
     static const bool barrier_every = getenv("RX_VK_BARRIER_EVERY_DRAW") != nullptr;   // (an experiment: a pass each)
@@ -8607,11 +8766,18 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
     // compute-fallback mesh draw runs compute work of its own)
     if (mesh_batch.live() && (writes_memory(p) || p.fallback)) mesh_batch_drop();
     if (p.fallback && d.mesh && !fallback_record(cmd, p, d)) SKIP_HERE();
+    // (GPUPOV) this draw samples an image written before a pass start whose barrier was left out: the pass ends here and the
+    // one that begins after it records that barrier (hazard_pass_barrier_elidable finds the read then)
+    if (hazard_draw_reads_unordered(cmd, gfx_sampled().data(), gfx_sampled().size())) end_pass(cmd);
     {
         FINE_SCOPE(FT_HAZARD);
         begin_pass(cmd, at);
     }
     probe_draw(s, p, ps.draws);   // (hookshot: RX_VK_PROBE)
+    // (GPUPOV) a draw whose program stores to a storage buffer, an image or global memory: what it writes is not named, so the
+    // window says so and the next barrier is kept whatever else the window holds. After begin_pass's own decision, so it is
+    // about the work that follows this draw
+    if (writes_memory(p)) hazard_note_unknown(cmd);
     gprof_run(cmd, p.key);   // (RX_VK_PASS_TIMING=2)
     ps.prog = p.key;
     if (!ps.first_prog) ps.first_prog = p.key;
@@ -8745,7 +8911,15 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
                     vkCmdBindVertexBuffers2(cmd, 0, 1, &b, &off, &size, &stride);
                 }
                 checkpoint_work('F', 0);   // (the count is the records')
-                vkCmdDrawIndirect(cmd, fallback_draw_records, 0, 1, sizeof(VkDrawIndirectCommand));   // (its count: the records taken)
+                if (fallback_draw_indexed) {   // (LAPTOP1: the indices the mesh workgroups took, each a vertex's record)
+                    bind_index(cmd, fallback_draw_records, (VkDeviceSize)Shader::Backend::SPIRV::MESH_FALLBACK_INDEX_FIRST_WORD * 4,
+                               VK_INDEX_TYPE_UINT32);
+                    vkCmdDrawIndexedIndirect(cmd, fallback_draw_records,
+                                             (VkDeviceSize)Shader::Backend::SPIRV::MESH_FALLBACK_INDEXED_DRAW_WORD * 4, 1,
+                                             sizeof(VkDrawIndexedIndirectCommand));
+                } else {
+                    vkCmdDrawIndirect(cmd, fallback_draw_records, 0, 1, sizeof(VkDrawIndirectCommand));   // (its count: the records taken)
+                }
             }
             st_mesh++;
             st_draws++, ps.draws++;
@@ -9120,7 +9294,9 @@ static bool typed_upscale(VkCommandBuffer cmd, VkImageView input_view, VkImageVi
 static bool temporal_rejected_network(VkCommandBuffer cmd, uint64_t key, Texture* src, const nvn_tex* in, Texture* dst,
                                       const nvn_tex* out);
 
+thread_local Texture* stub_picture = nullptr;   // (upscale_stub's output, when it is the scene's format: framegen_hud_before)
 bool upscale_stub(VkCommandBuffer cmd, const NvnState& s, uint64_t key) {
+    stub_picture = nullptr;
     static const bool off = getenv("RX_VK_NO_UPSCALE_STUB") != nullptr;
     if (off) return false;
     nvn_tex out{}, in{};
@@ -9165,6 +9341,9 @@ bool upscale_stub(VkCommandBuffer cmd, const NvnState& s, uint64_t key) {
     if (!src || !dst || !src->image || !dst->image || (src->aspect | dst->aspect) != VK_IMAGE_ASPECT_COLOR_BIT || src->bc ||
         dst->bc || src->samples != VK_SAMPLE_COUNT_1_BIT || dst->samples != VK_SAMPLE_COUNT_1_BIT)
         return false;
+    // (the gameplay upscale's picture, for frame generation's HUD-less capture once this returns: the scene's format into the same,
+    // larger. framegen_hud_before takes only the picture's formats; the movies' RGBA8 is not one)
+    if (src->format == dst->format) stub_picture = dst;
     // (hookshot) an upscale network that did not translate here (the Render resolution's fixed shares have one each, and on a
     // GPU without cooperative matrices they are left out): the temporal upscaler is offered it first, as temporal_stand_in
     // offers the networks that did translate. It takes only the scene into the picture; anything else goes on below
@@ -9490,9 +9669,34 @@ bool temporal_stand_in(VkCommandBuffer cmd, const NvnState& s, const Program& p)
     }
     const bool done = temporal_upscale(cmd, p.key, gameplay_network(p.key), in, in_view, out, out_view, level);
     // (its actor motion may have drawn with a pipeline, viewport and descriptors of its own: the next draw sets all of its again)
-    last_dyn_valid = false, last_desc_valid = false, last_vb_valid = false, last_pipeline = VK_NULL_HANDLE;
+    last_rate = -1, last_dyn_valid = false, last_desc_valid = false, last_vb_valid = false, last_pipeline = VK_NULL_HANDLE;
     vertex_set.on = false, last_ib.on = false;
     return done;
+}
+/// (ported from Longshot 597c5a4e0 (#1464) and ed96031ac (#1691)) The picture a gameplay upscale writes (its output, found as
+/// temporal_stand_in finds it), for frame generation's HUD-less capture (vk_framegen.h framegen_hud_before: copied once the
+/// upscale wrote it, whichever drew it). Null unless the capture is wanted (framegen_hud_wanted), or for any other dispatch.
+/// At 100% render resolution the known gameplay pass writes the picture at the scene's own size: that is the picture too, an
+/// inferred dispatch (a shape, not a key) of the same size is not
+static Texture* upscale_picture(const NvnState& s, const Program& p, uint32_t* level) {
+    if (p.stages.empty() || !framegen_hud_wanted()) return nullptr;
+    const Stage& st = p.stages[0];
+    const bool known = gameplay_network(p.key);
+    if (!known && !(st.info.uses_cooperative_matrix && st.info.texture_descriptors.size() == 1 &&
+                    st.info.image_descriptors.size() == 1))
+        return nullptr;
+    if (st.info.texture_descriptors.empty() || st.info.image_descriptors.empty()) return nullptr;
+    Texture* in = nullptr;
+    const uint32_t in_handle = handle_of(s, st, st.info.texture_descriptors[0], 0);
+    if (in_handle) texture_view_of(in_handle, VK_IMAGE_VIEW_TYPE_2D, ViewUse::Sample, VK_FORMAT_UNDEFINED, &in);
+    const auto& od = st.info.image_descriptors[0];
+    Texture* out = nullptr;
+    const uint32_t out_handle = handle_of(s, st, od, 0);
+    if (out_handle) texture_view_of(out_handle, VK_IMAGE_VIEW_TYPE_2D, ViewUse::Storage, image_format(od.format), &out, level);
+    if (!in || !out || !temporal_colour_pair(in->format, out->format)) return nullptr;
+    const uint32_t width = out->width >> *level;
+    if (width <= in->width && !(known && width == in->width && (out->height >> *level) == in->height)) return nullptr;
+    return out;
 }
 /// (hookshot) The same for an upscale network that did not translate on this GPU (upscale_stub found its input, the largest
 /// texture it samples, and its output, the largest image it writes): the Render resolution row's fixed shares (67%
@@ -9516,7 +9720,7 @@ static bool temporal_rejected_network(VkCommandBuffer cmd, uint64_t key, Texture
                                 !fsr3_inputs::colour_pair(in_format, out_format)))
         return false;
     const bool done = temporal_upscale(cmd, key, false, src, in_view, dst, out_view, 0);
-    last_dyn_valid = false, last_desc_valid = false, last_vb_valid = false, last_pipeline = VK_NULL_HANDLE;
+    last_rate = -1, last_dyn_valid = false, last_desc_valid = false, last_vb_valid = false, last_pipeline = VK_NULL_HANDLE;
     vertex_set.on = false, last_ib.on = false;
     if (!done) return false;
     full_barrier(cmd);
@@ -10338,6 +10542,7 @@ bool prepare_run(void (*progress)(size_t done, size_t total), bool background) {
         ub_thread_off();   // (a background thread: see ub_thread_off)
         // (below normal, and half the CPUs, below: on all of them at High the driver's compiles froze the whole PC)
         SetThreadPriority(GetCurrentThread(), background ? THREAD_PRIORITY_IDLE : THREAD_PRIORITY_BELOW_NORMAL);
+        if (background) MKWVK_PIN_BACKGROUND();   // (RX_VK_THREAD_PRIO: off the replay's core, thread_prio.h)
         for (;;) {
             if (prepare_stopped()) return;
             const size_t i = next++;
@@ -10692,6 +10897,7 @@ void precompile_run(void (*progress)(size_t done, size_t total), bool wait) {
     if (!total) precompile_finished(pre);
     const auto worker = [pre, total, wait] {
         if (!wait) SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
+        if (!wait) MKWVK_PIN_BACKGROUND();
         ub_thread_off();   // (a background thread: see ub_thread_off)
         for (;;) {
             if (prepare_stopped() || pre->abandoned.load(std::memory_order_relaxed)) break;
@@ -10947,6 +11153,7 @@ void predict_run(void (*progress)(size_t done, size_t total), bool background, b
         auto& keys = S.keys;
         ub_thread_off();   // (a background thread: see ub_thread_off)
         SetThreadPriority(GetCurrentThread(), soft ? THREAD_PRIORITY_IDLE : THREAD_PRIORITY_BELOW_NORMAL);   // (as prepare_run's: these are the driver's compiles, see DriverTurn)
+        if (background) MKWVK_PIN_BACKGROUND();
         driver_cache_only = !noted;
         const unsigned me = worker_n++ % 32;
         std::atomic<uint64_t>& mine = in_flight[me];
@@ -11258,7 +11465,11 @@ void dispatch(VkCommandBuffer cmd, NvnState& s, uint32_t x, uint32_t y, uint32_t
                                   cp->stages[0].info.uses_cooperative_matrix, gameplay_network(cp->key)) ||
                                (force_stub && cp->stages[0].info.uses_cooperative_matrix &&
                                 (force_stub >= 2 || !gameplay_network(cp->key))));
-    if ((!cp || cp->failed || slow_network) && upscale_stub(cmd, s, compute_code_key(s))) return void(st_dispatches++);
+    if ((!cp || cp->failed || slow_network) && upscale_stub(cmd, s, compute_code_key(s))) {
+        // (a gameplay upscale's picture, as the dispatch below copies its own: frame generation's HUD-less capture)
+        if (stub_picture && framegen_hud_wanted()) framegen_hud_before(cmd, stub_picture, 0);
+        return void(st_dispatches++);
+    }
     if (slow_network) SKIP_HERE();   // (an earlier pass of the network: the stub is its last pass)
     if (!cp || !cp->ready.load(std::memory_order_acquire) || cp->failed) SKIP_HERE();
     hdr_find_dispatch(s, cp->key);   // (RX_VK_HDR_FIND)
@@ -11274,6 +11485,11 @@ void dispatch(VkCommandBuffer cmd, NvnState& s, uint32_t x, uint32_t y, uint32_t
                 q = *e ? e + 1 : e;
             }
         }
+    }
+    if (lowend_rule::fog_program(cp->key) && !fog_runs()) {   // (the Volumetric fog row Off, or RX_VK_FOG=0: lowend_rule.h)
+        static std::atomic<int> told{0};
+        if (!told++) logf("vk: volumetric fog off (the Volumetric fog row, RX_VK_FOG): its three programs' dispatches left out");
+        return;
     }
     dclock.key = cp->key;
     texture_watch_prog(cp->key);
@@ -11459,6 +11675,7 @@ void dispatch(VkCommandBuffer cmd, NvnState& s, uint32_t x, uint32_t y, uint32_t
     else if (after_dispatch && ++st_dispatch_unordered % 50000 == 1)
         logf("vk: %lld dispatches right after another ordered by the game's barriers so far, with none of their own (RX_VK_GAME_ORDER)",
              (long long)st_dispatch_unordered);
+    hazard_note_unknown(cmd);   // (GPUPOV: a dispatch writes memory we do not name: the next barrier is kept)
     work_since_barrier = true;
     {   // (ported from hookshot 53eb0441, pixl27, RX_VK_METER_ZERO=0 turns it off) OoT's exposure meter: 435a0138b9013040 and
         // 592079442d7129da add a frame's sums into the first 16 bytes of their block, which the game reads and sets back to zero.
@@ -11487,10 +11704,13 @@ void dispatch(VkCommandBuffer cmd, NvnState& s, uint32_t x, uint32_t y, uint32_t
             logf("%s", line);
         }
     }
-    if (fsr3_stand_in(cmd, s, p)) return void(st_dispatches++);
-    if (temporal_stand_in(cmd, s, p)) return void(st_dispatches++);
-    if (off_stand_in(cmd, s, p)) return void(st_dispatches++);
-    if (taau_stand_in(cmd, s, p)) return void(st_dispatches++);
+    // (a gameplay upscale's picture, copied for frame generation's HUD-less capture once it is written, whoever writes it)
+    uint32_t picture_level = 0;
+    Texture* const picture = upscale_picture(s, p, &picture_level);
+    if (fsr3_stand_in(cmd, s, p)) return framegen_hud_before(cmd, picture, picture_level), void(st_dispatches++);
+    if (temporal_stand_in(cmd, s, p)) return framegen_hud_before(cmd, picture, picture_level), void(st_dispatches++);
+    if (off_stand_in(cmd, s, p)) return framegen_hud_before(cmd, picture, picture_level), void(st_dispatches++);
+    if (taau_stand_in(cmd, s, p)) return framegen_hud_before(cmd, picture, picture_level), void(st_dispatches++);
     const VkPipeline pipe = cpipe();
     if (!pipe) SKIP_HERE();
     dump_ssbos(cmd, p, "before");
@@ -11586,6 +11806,7 @@ void dispatch(VkCommandBuffer cmd, NvnState& s, uint32_t x, uint32_t y, uint32_t
             expo_record(cmd, meter_out.buffer, meter_out.offset, meter_out.guest);
         if (p.key == 0x435a0138b9013040ull || p.key == 0x592079442d7129daull) meter_work_note(p.key, meter_out, true);   // (HL_METER_LOG)
     }
+    framegen_hud_before(cmd, picture, picture_level);   // (the game's own network drew the gameplay upscale)
     if (dump_on() && dump_ssbo_wanted(p.key)) dump_ssbos(cmd, p, "after");
     if (gprof_on()) {
         char label[128];   // (G2: the grid, and "mma" for the game's matrix networks, native or software multiplies)

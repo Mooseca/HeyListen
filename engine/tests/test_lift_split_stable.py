@@ -169,7 +169,20 @@ def test_gen_lock():
             check("a stale lock file naming live pid %d is taken over silently" % pid, r.returncode == 0 and not r.stderr)
 
 
+def test_scripts_start_isolated():
+    """The build runs these as `python -I nx2/<script> <gen>`: -I leaves the script's folder off the path, so each must put it
+    back before it imports its neighbours (hl_gates.py did not: "No module named 'genlock'" stopped every build)"""
+    with tempfile.TemporaryDirectory(prefix="hookshot-lift-split-") as d:
+        gen = os.path.join(d, "sa", "gen")
+        os.makedirs(gen)
+        for script in ("hl_gates.py", "split_hot.py", "oot_patches.py"):
+            r = subprocess.run([sys.executable, "-I", "-B", str(ROOT / "nx2" / script), gen], capture_output=True, text=True,
+                               cwd=str(ROOT))
+            check("%s starts under python -I" % script, "ModuleNotFoundError" not in r.stderr and "ImportError" not in r.stderr)
+
+
 def main():
+    test_scripts_start_isolated()
     test_gen_lock()
     test_edits_find_their_text_in_parts()
     test_check_whole()

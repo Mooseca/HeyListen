@@ -64,7 +64,7 @@ def check_source():
         if needle not in rep:
             raise SystemExit("vk_replay.cpp no longer has: " + needle)
     # the flush joins the present's recording before its write-back
-    if rep.index("memory_wb_flush_queue();") > rep.index("memory_end_submission(r.cmd);\n        full_barrier(r.cmd);\n        submit_recording(r);   // (nothing is stopped at a present: drain)"):
+    if rep.index("memory_wb_flush_queue();") > rep.index("memory_end_submission(r.cmd);\n        full_barrier(r.cmd);\n        {   // (DECOUPLE3) its own value, never below a signal already sent"):
         raise SystemExit("vk_replay.cpp: the flush must be queued before the present's write-back")
     hdr = (ROOT / "gpu/vk/vk_internal.h").read_text(encoding="utf-8")
     for needle in ("bool memory_wb_pending();", "void memory_wb_flush_queue();", "bool memory_wb_flush_own();"):
