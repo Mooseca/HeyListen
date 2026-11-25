@@ -107,6 +107,8 @@ static std::deque<DeadImport> dead_imports;
 static int64_t st_bg_waits, st_prefetch_sent, st_prefetch_used, st_prefetch_dropped, st_async_sent, st_async_copies;
 static std::vector<Pool*> mirror_wanted, sparse_wanted;
 static uint64_t mem_rec_value = 7, mirror_epoch = 10;
+static uint64_t rec_value_of() { return mem_rec_value; }   // (REC1: a segment's worker reads its own recording's; one thread here)
+static uint64_t rec_epoch() { return mirror_epoch; }
 static int failures;
 static thread_local bool import_cooling;
 static thread_local VkResult import_result = VK_SUCCESS;
