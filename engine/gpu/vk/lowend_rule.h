@@ -5,6 +5,9 @@
 // tests/test_lowend_rule.py; the measures: docs/research/lowend-laptop.md
 #pragma once
 #include <cstdint>
+#include <string>
+#include <utility>
+#include <vector>
 
 namespace lowend_rule {
 
@@ -34,6 +37,36 @@ constexpr int kResolution = 6, kHandheld = 1, kFog = 0;
 /// Not Intel's: not measured there
 inline bool mirror_not_wait(uint32_t vendor_id, bool integrated, bool mesh_shader) {
     return vendor_id == 0x1002 && lowend_gpu(integrated, mesh_shader);
+}
+
+/// The options file's text with these keys' lines set to these values, every other line kept as it is, in its place and with its
+/// own line ending; keys not there yet added at the end. The file's line ending (CRLF if any line has one, else LF) is used for the
+/// lines written: an options file edited on Windows kept CRLF (the laptop's) and the rule's first version turned all of it to LF
+inline std::string ini_put_text(const std::string& in, const std::vector<std::pair<std::string, int>>& keys) {
+    const std::string eol = in.find("\r\n") != std::string::npos ? "\r\n" : "\n";
+    std::string out;
+    std::vector<bool> done(keys.size());
+    for (size_t at = 0; at < in.size();) {
+        const size_t end = in.find('\n', at);
+        const size_t next = end == std::string::npos ? in.size() : end + 1;
+        std::string body = in.substr(at, (end == std::string::npos ? in.size() : end) - at);
+        if (!body.empty() && body.back() == '\r') body.pop_back();
+        const size_t eq = body.find('=');
+        bool replaced = false;
+        for (size_t i = 0; eq != std::string::npos && i < keys.size(); i++)
+            if (!done[i] && eq == keys[i].first.size() && body.compare(0, eq, keys[i].first) == 0) {
+                out += keys[i].first + "=" + std::to_string(keys[i].second) + eol;
+                done[i] = replaced = true;
+            }
+        if (!replaced) {
+            out.append(in, at, next - at);
+            if (end == std::string::npos) out += eol;
+        }
+        at = next;
+    }
+    for (size_t i = 0; i < keys.size(); i++)
+        if (!done[i]) out += keys[i].first + "=" + std::to_string(keys[i].second) + eol;
+    return out;
 }
 
 enum Apply { NONE, APPLY_AND_SAVE, APPLY_THIS_RUN };

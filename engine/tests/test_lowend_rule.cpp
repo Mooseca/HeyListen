@@ -43,6 +43,18 @@ int main() {
     expect(!mirror_not_wait(0x1002, true, true), "AMD integrated with mesh shaders (780M): as before");
     expect(!mirror_not_wait(0x1002, false, false), "AMD discrete: as before");
     expect(kResolution == 6 && kHandheld == 1 && kFog == 0, "the rule's rows: 33%, handheld, fog off");
+    {   // (the options file's own lines and line endings kept; only the rule's keys rewritten or added)
+        const std::vector<std::pair<std::string, int>> keys = {{"resolution", 6}, {"handheld_profile", 1}, {"volumetric_fog", 0},
+                                                               {"lowend_rule", 1}};
+        const std::string crlf = "microphone=2\r\nresolution=4\r\nframe_pacing=0\r\nhandheld_profile=0\r\n";
+        expect(ini_put_text(crlf, keys) == "microphone=2\r\nresolution=6\r\nframe_pacing=0\r\nhandheld_profile=1\r\n"
+                                           "volumetric_fog=0\r\nlowend_rule=1\r\n", "a CRLF file stays CRLF, appended lines too");
+        const std::string lf = "resolution=4\nx=1\n";
+        expect(ini_put_text(lf, keys) == "resolution=6\nx=1\nhandheld_profile=1\nvolumetric_fog=0\nlowend_rule=1\n", "an LF file stays LF");
+        expect(ini_put_text("", keys) == "resolution=6\nhandheld_profile=1\nvolumetric_fog=0\nlowend_rule=1\n", "no file: the keys alone");
+        expect(ini_put_text("resolution_x=1\r\nlast=2", keys).rfind("resolution_x=1\r\nlast=2\r\nresolution=6\r\n", 0) == 0,
+               "a key that only starts the same is not the key; a last line without its ending gets the file's");
+    }
     if (failures) return 1;
     std::printf("lowend_rule: all checks passed\n");
     return 0;

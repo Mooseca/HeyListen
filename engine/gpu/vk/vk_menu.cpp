@@ -2441,30 +2441,16 @@ bool fog_runs() {
 }
 static bool lowend_mirror;
 bool lowend_mirror_not_wait() { return lowend_mirror; }
-/// The options file's lines for these keys set to these values, every other line kept as it is (in its place); the keys not
-/// there yet added at the end. Written whole or not at all, as save() does
+/// The options file with only these keys' lines rewritten (lowend_rule.h ini_put_text: every other line and the file's line
+/// endings kept), written whole or not at all as save() does. Read in binary: a text read would turn CRLF into LF
 static void ini_put_only(const std::vector<std::pair<std::string, int>>& keys) {
-    std::string out;
-    std::vector<bool> done(keys.size());
-    if (FILE* f = fopen(ini_path().c_str(), "r")) {
-        char line[1024];
-        while (fgets(line, sizeof line, f)) {
-            const char* eq = strchr(line, '=');
-            bool replaced = false;
-            for (size_t i = 0; eq && i < keys.size(); i++)
-                if (!done[i] && (size_t)(eq - line) == keys[i].first.size() && !strncmp(line, keys[i].first.c_str(), keys[i].first.size())) {
-                    out += keys[i].first + "=" + std::to_string(keys[i].second) + "\n";
-                    done[i] = replaced = true;
-                }
-            if (!replaced) {
-                out += line;
-                if (!out.empty() && out.back() != '\n') out += "\n";
-            }
-        }
+    std::string in;
+    if (FILE* f = fopen(ini_path().c_str(), "rb")) {
+        char b[4096];
+        for (size_t n; (n = fread(b, 1, sizeof b, f)) > 0;) in.append(b, n);
         fclose(f);
     }
-    for (size_t i = 0; i < keys.size(); i++)
-        if (!done[i]) out += keys[i].first + "=" + std::to_string(keys[i].second) + "\n";
+    const std::string out = lowend_rule::ini_put_text(in, keys);
     hos_atomic_write(ini_path().c_str(), out.data(), out.size());
 }
 void menu_first_run_lowend(uint32_t vendor_id, bool integrated, bool mesh_shader) {

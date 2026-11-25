@@ -27,7 +27,7 @@ def check_source():
                                 'key == "lowend_rule";', 'if (lowend_marked) put("lowend_rule=1\\n");',
                                 "opts.resolution = ur::snap(upscaler(), lowend_rule::kResolution);",
                                 "opts.handheld = lowend_rule::kHandheld;\n    opts.fog = lowend_rule::kFog;",
-                                "static void ini_put_only(", "{\"volumetric_fog\", opts.fog}, {\"lowend_rule\", 1}});",
+                                "static void ini_put_only(", 'fopen(ini_path().c_str(), "rb")', "lowend_rule::ini_put_text(in, keys);", "{\"volumetric_fog\", opts.fog}, {\"lowend_rule\", 1}});",
                                 "lowend_mirror = lowend_rule::mirror_not_wait(vendor_id, integrated, mesh_shader);"])
     src = (ROOT / "gpu/vk/vk_menu.cpp").read_text(encoding="utf-8")
     body = src[src.index("void menu_first_run_lowend("):]
