@@ -77,6 +77,10 @@ void rx_request_frame_dump(void) { commands++; }
 void rx_set_screenshot_ms(int64_t ms) { (void)ms; commands++; }
 void rx_request_rdoc_capture(int frames) { (void)frames; commands++; }
 void rx_flash_dark_arm(void) { commands++; }
+void hos_prompts_live(void) {}   /* (host/prompts.c: the button prompts follow the controls) */
+volatile int hos_prompts_row = -1;   /* (host/prompts.c: "!prompts" in the live input) */
+void hos_bind(int set, int button, int slot, int code) { (void)set, (void)button, (void)slot, (void)code; }   /* ("!bind") */
+volatile int64_t input_pad_ns, input_key_ns;   /* (nn_hid.c: Auto's device in use, host/prompts.c) */
 
 #include "input_actual.inc"
 

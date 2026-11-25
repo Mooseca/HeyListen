@@ -401,15 +401,22 @@ release. On Linux the AppImage's `--play` starts the game, and the game asks as 
 
 ## Button prompts
 
-The **Button prompts** row (Insert menu, Controls page) chooses which controller's icons the game shows in its texts and menus:
-Auto follows the controller you plug in, and is the **Keyboard**'s when none is connected (through SDL or XInput); or pick Xbox,
-PlayStation 4, PlayStation 5, Steam Deck, Switch or Keyboard. Keyboard shows the key or mouse button your controls put each action
-on (the first of its two keys), WASD for the left stick's ways (or the movement keys you bound) and the mouse for the camera; the
-ocarina's notes and the pause menu's controller picture keep the Switch's buttons. A new choice shows the
-next time you start the game. The icons are drawn when the builder makes your game folder, from your own game files and
+The **Button prompts** row (Insert menu, Controls page) chooses which controller's icons the game shows in its texts and menus,
+on the ocarina's staff and in its hint, and on the Talk ring: **Auto** follows what you play with, or pick Xbox, PlayStation 4,
+PlayStation 5, Steam Deck, Switch or Keyboard. Auto starts with the first controller's icons (the Keyboard's when none is connected,
+through SDL or XInput), then follows the device that gave input last: the keyboard once you use its keys or the mouse's buttons,
+a controller once you press a button or push a stick over halfway on it (a Switch pad, an Xbox-type pad and a DualSense each show
+their own). It does not flip every second: the other device must be used for a few tenths of a second while the one in use has
+been quiet for a second, and a resting pad's drift or a nudge of the mouse count for nothing. Keyboard shows the key or mouse
+button your controls put each action on (the first of its two keys), including the ocarina's notes, WASD for the left stick's ways
+(or the movement keys you bound) and the mouse for the camera; the pause menu's controller picture keeps the Switch's buttons.
+A new choice, and a new binding on the Controls page, **show at once**: no restart, no reload, the textures and layouts changed in
+place within a frame and the texts that are on screen, the pause menu's hint bar and tabs, the song-score bar, the item labels, at the
+next frame. The row never asks for a restart. Where a mod replaces the game's font, textures or layouts, the mod's own files stay as they are. The choice is saved in `hookshot_options.ini` (`button_prompts=`: 0 Auto, 1 Switch,
+2 Xbox, 3 PlayStation 4, 4 PlayStation 5, 5 Steam Deck, 6 Keyboard). The icons are drawn when the builder makes your game folder, from your own game files and
 [Kenney's](https://kenney.nl/assets/input-prompts) CC0 Input Prompts, into the `prompts` folder there; they are not downloaded or
 copied from anywhere, so a folder from another build is not needed. No `prompts` folder in your game folder (a game built by a release up to 0.4.2,
-whose builder could not draw them): update to a newer release and build again to make it; the game's log says `prompts: no prompts folder` while it is missing.
+whose builder could not draw them): update to a newer release and build again to make it; the game's log says `prompts: NO PROMPTS FOLDER` while it is missing, the Button prompts row's help says it changes nothing, and the builder prints a boxed WARNING when it could not draw them (it needs the packages of `nx2/prompt_requirements.txt`).
 
 ## Known issues
 

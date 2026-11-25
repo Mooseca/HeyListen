@@ -29,6 +29,7 @@
 #include <vector>
 
 #include "vk_paths.h"
+#include "vk_opt_ids.h"   // (HL_OPT_PROMPTS_LIVE, HL_OPT_PROMPTS_MISSING)
 #include "../../host/hos_atomic_file.h"   // (the options file is written whole or not at all)
 #include "vk_menu.h"
 #include "vk_perf.h"
@@ -906,9 +907,18 @@ MENU_HINTS(hn_pad_layout, 0, "The Switch's order: A on the right, B at the botto
            "A at the bottom (action and talk), B on the right, X on the left, Y at the top.",
            "A at the bottom, B on the right; X and Y as on the Switch.",
            "Bindings of your own, from the Controls page.")
-MENU_HINTS(hn_prompts, 0,
-           "Those of the first controller, from its name (SDL's). With none, the keyboard's (the Switch's with XInput "
-           "alone).",
+std::atomic<int> prompts_missing{0};   // (HL_OPT_PROMPTS_MISSING, pushed by host/prompts.c: the game folder has no prompts/ folder)
+const char* hn_prompts_text(int v, int variant);
+const char* hn_prompts(int v, int variant) {
+    // (no prompts/ folder: the row can change nothing, and the hint says why)
+    if (prompts_missing.load(std::memory_order_relaxed) && variant <= 0)
+        return "Changes nothing here: this game folder has no prompts folder (the Builder could not make it: it needs fontTools and "
+               "Pillow), so the game shows its own icons. Run the Builder again with them installed.";
+    return hn_prompts_text(v, variant);
+}
+MENU_HINTS(hn_prompts_text, 0,
+           "Follows what you play with: a controller's (from its name, SDL's), or the keyboard's once you use its keys. "
+           "At the start, the first controller's; with none, the keyboard's (an Xbox's with XInput alone).",
            "The Switch's buttons.", "An Xbox controller's.", "A PlayStation 4 controller's.", "A PlayStation 5 controller's.",
            "A Steam Deck's.", "The keys and mouse buttons your controls put each action on.")
 
@@ -1090,8 +1100,8 @@ Row rows[] = {
     {TAB_CONTROLS, "Layout preset", &opts.pad_layout, 0, 3, 1, tx_pad_layout,
      "Which face button is which. Binding one yourself on the Controls page makes it Custom.", hn_pad_layout},
     {TAB_CONTROLS, "Button prompts", &opts.prompts, 0, HOS_PROMPT_N, 1, tx_prompts,
-     "The button icons the game shows, in its texts and menus: those of this controller, for the buttons your controls "
-     "put each action on.", hn_prompts, true, true},
+     "The button icons the game shows, in its texts, menus and the ocarina's notes: those of this controller or the keyboard, for "
+     "the buttons your controls put each action on. Applies at once, no restart; a mod's own icon files keep theirs.", hn_prompts, false, true},
     {TAB_CONTROLS, "Controller in background", &opts.pad_background, 0, 1, 1, tx_onoff,
      "Whether the controller plays the game while another window has the focus.", hn_background},
     {TAB_CONTROLS, "Sprint with L3", &opts.sprint, 0, 2, 1, tx_sprint,   // (HL_OPT_SPRINT, vk_opt_ids.h, host/oot_sprint.c; saved as sprint_with_l3)
@@ -1277,6 +1287,7 @@ constexpr ItemSections make_item_sections() {
     return r;
 }
 constexpr ItemSections item_sections = make_item_sections();
+std::atomic<int> prompts_live{0};   // (HL_PROMPTS_LIVE_* bits, pushed by host/prompts.c: what a new face of the Button prompts reaches while the game runs)
 std::atomic<int> item_counts[kItems];   // (-1 until the game side reports: OOT_CHEAT_ITEM_BASE + i)
 int item_choice = 0, item_scroll = 0;
 constexpr int kCheatRows = 11;   // (the debug tools' rows: Row::cheat 0 to 10)
@@ -2190,7 +2201,7 @@ void draw_controls(ui::Ctx& c) {
                                            "this menu. Home, Select and Start together, the touchpad click, Insert and F1 work too. "
                                            "A combination held does not reach the game. Enter binds it, Delete clears it."
                                   : "Which gamepad button and which keys press each of the Switch's buttons. Enter binds the one "
-                                    "selected; Delete clears it. The game's button icons follow after a restart.";
+                                    "selected; Delete clears it. The game's button icons follow at once, with no restart.";
     const char* hint = page_row ? (page_row->hint ? page_row->hint(*page_row->value, -1) : nullptr)
                                 : "Gamepad: the D-pad moves, A binds, B goes back.";
     float bottom = std::min(c.h - c.safe, bar_top) - 10 * s;   // (the rows end above the prompts)
@@ -2877,6 +2888,10 @@ void menu_option_set(int id, int value) {
             menu_refresh = true;
         return;
     }
+    if (id == HL_OPT_PROMPTS_MISSING) {   // (host/prompts.c: no prompts/ folder in the game's)
+        prompts_missing.store(value, std::memory_order_relaxed);
+        return;
+    }
     if (id == perf_parts::kOptPace) {   // (the frame's pacing sleep, host/nvn_native.c's push: the summary's pace part)
         perf_parts::note_pace(value);
         return;
@@ -2891,6 +2906,10 @@ void menu_option_set(int id, int value) {
             int expected = value ? 0 : 1;
             player_flight.compare_exchange_strong(expected, value != 0, std::memory_order_relaxed);
         }
+        return;
+    }
+    if (id == HL_OPT_PROMPTS_LIVE) {   // (host/prompts.c: the parts of the button prompts it can change while the game runs)
+        prompts_live.store(value, std::memory_order_relaxed);
         return;
     }
     if (id != 7) return;

@@ -1,10 +1,14 @@
 """Game-free: the button prompts' font patch at run time (host/prompts.c cmap4_glyph, cmap4_point, cmap4_bind) on a cmap made the
-way the build makes it (nx2/prompt_assets.py cmap4): a bound Switch button's code point gets its pad input's icon, an unbound one
-keeps its own, and the pad icons stay. The keyboard face (nx2/prompt_keys.py): a Switch button gets the icon of the first key bound
-to it (the second slot's when the first is clear), one whose key has no icon (or no key at all) its pad input's, and the sticks the
-keys that move and the mouse. Also the faces' order: host/prompts.c faces[], gpu/vk/vk_api.h HOS_PROMPT_* and nx2/prompt_faces.py
-FACES (after the Switch, then the keyboard), and the defaults: host/prompts.c switch_pad and stick_code, nx2/prompt_assets.py
-DEFAULT, nx2/prompt_keys.py STICKS and the code points.
+way the build makes it (nx2/prompt_assets.py cmap4, every face's icons: after Longshot #2366): a bound Switch button's code point
+gets the face's icon of its pad input, an unbound one the face's icon of its default's, the d-pad icons the face's, and the
+faces' icons stay. The keyboard face (nx2/prompt_keys.py): a Switch button gets the icon of the first key bound to it (the
+second slot's when the first is clear), one whose key has no icon (or no key at all) the face's icon of its pad input, and the
+sticks the keys that move and the mouse. And a text's codes after a change while the game runs (host/prompts.c text_code): a
+Switch button's, by the game or rewritten before, the code of the face's icon of its pad input now (nx2/prompt_assets.py
+BIND_BASE), the d-pad's the face's; on the keyboard face a button on a key a code of its own (key_slot), the sticks' codes the
+face's. Also the faces' order: host/prompts.c faces[], gpu/vk/vk_api.h HOS_PROMPT_* and nx2/prompt_faces.py FACES (after the
+Switch, then the keyboard), and the defaults: host/prompts.c switch_pad, static_code and stick_code, nx2/prompt_assets.py DEFAULT
+and STATIC, nx2/prompt_keys.py STICKS and the code points.
 
 python -I -B tests/test_prompt_font_bind.py [--cc gcc]
 """
@@ -92,33 +96,51 @@ def main():
     sticks = re.search(r"stick_code\[15\] = \{([^}]*)\}", src)
     check(sticks is not None and [int(c, 16) for c in sticks.group(1).split(",")] == [c for c, _, _ in prompt_keys.STICKS],
           "host/prompts.c stick_code is not nx2/prompt_keys.py STICKS")
-    for name, value in (("KEY_BASE", prompt_keys.KEY_BASE), ("STICK_KEYS", prompt_keys.STICK_KEYS),
-                        ("STICK_GAME", prompt_keys.STICK_GAME)):
+    statics = re.search(r"static_code\[3\] = \{([^}]*)\}", src)
+    check(statics is not None and [int(c, 16) for c in statics.group(1).split(",")] == list(prompt_assets.STATIC),
+          "host/prompts.c static_code is not nx2/prompt_assets.py STATIC")
+    check(len(prompt_assets.PADS) <= prompt_assets.STATIC_AT and prompt_assets.STATIC_AT + len(prompt_assets.STATIC) <=
+          prompt_assets.FACE_CODES, "a face's pad icons and d-pad icons overlap or pass its code points")
+    for name, value in (("PAD_BASE", prompt_assets.PAD_BASE), ("FACE_CODES", prompt_assets.FACE_CODES),
+                        ("STATIC_AT", prompt_assets.STATIC_AT), ("BIND_BASE", prompt_assets.BIND_BASE),
+                        ("SLOT_BASE", prompt_keys.SLOT_BASE), ("SLOTS", prompt_keys.SLOTS),
+                        ("STICK_KEYS", prompt_keys.STICK_KEYS), ("STICK_GAME", prompt_keys.STICK_GAME)):
         d = re.search(r"#define %s (0x[0-9A-Fa-f]+|\d+)" % name, src)
-        check(d is not None and int(d.group(1), 0) == value, "host/prompts.c %s is not nx2/prompt_keys.py's" % name)
-    check(prompt_keys.KEY_BASE + 256 <= prompt_keys.STICK_KEYS and prompt_keys.STICK_KEYS + 16 <= prompt_keys.STICK_GAME,
-          "the keyboard face's code points overlap")
+        check(d is not None and int(d.group(1), 0) == value, "host/prompts.c %s is not nx2/prompt_*.py's" % name)
+    check("#define KEY_BASE (PAD_BASE + FACE_CODES * HOS_PROMPT_N)" in src, "host/prompts.c KEY_BASE is not past every face's codes")
+    check(prompt_keys.KEY_BASE == prompt_assets.PAD_BASE + prompt_assets.FACE_CODES * len(names),
+          "nx2/prompt_keys.py KEY_BASE is not past every face's code points (host/prompts.c KEY_BASE)")
+    check(prompt_keys.KEY_BASE + 256 <= prompt_keys.STICK_KEYS and prompt_keys.STICK_KEYS + 16 <= prompt_keys.STICK_GAME and
+          prompt_keys.SLOT_BASE + prompt_keys.SLOTS <= prompt_assets.BIND_BASE and
+          prompt_assets.BIND_BASE + len(names) * len(prompt_assets.SWITCH) * len(prompt_assets.PADS) <= prompt_assets.PAD_BASE,
+          "the keyboard face's or the live codes' points overlap")
     check(len({c for c, _, _ in prompt_keys.STICKS}) == len(prompt_keys.STICKS), "nx2/prompt_keys.py STICKS repeats a code")
 
-    # the codes: the Switch buttons on glyphs 100.., the pad icons on 200.., the keyboard's keys' icons on 900 + key, its sticks on
-    # 1200.. (theirs) and 1300.. (the game's), each stick's code a segment of its own on 1400.. (as face_font: each Switch code, and
-    # on the keyboard face each stick's, a segment of its own)
+    # the codes: the Switch buttons on glyphs 100.., the d-pad's on 150.., each face's pad icons on 200 + 100 x face.., its d-pad
+    # icons on 290 + 100 x face.. (as faces_font: each Switch and d-pad code a segment of its own), the keyboard's keys' icons on
+    # 900 + key, its sticks on 1200.. (theirs) and 1300.. (the game's), each stick's code a segment of its own on 1400..
     nfaces = len(names)
     mapping = {c: 100 + b for b, c in enumerate(prompt_assets.SWITCH)}
-    mapping.update({prompt_assets.PAD_BASE + i: 200 + i for i in range(len(prompt_assets.PADS))})
+    mapping.update({c: 150 + k for k, c in enumerate(prompt_assets.STATIC)})
+    for f in range(nfaces):
+        base = prompt_assets.PAD_BASE + prompt_assets.FACE_CODES * f
+        mapping.update({base + i: 200 + 100 * f + i for i in range(len(prompt_assets.PADS))})
+        mapping.update({base + prompt_assets.STATIC_AT + k: 290 + 100 * f + k for k in range(len(prompt_assets.STATIC))})
     stick_codes = [c for c, _, _ in prompt_keys.STICKS]
     mapping.update({prompt_keys.KEY_BASE + k: 900 + k for k in KEY_ICONS})
     mapping.update({c: 1400 + i for i, c in enumerate(stick_codes)})
     mapping.update({prompt_keys.STICK_KEYS + i: 1200 + i for i in range(len(stick_codes))})
     mapping.update({prompt_keys.STICK_GAME + i: 1300 + i for i in range(len(stick_codes))})
-    # (the keyboard face's cmap: the Switch codes and the sticks' a segment of their own; a pad face's: the Switch codes)
-    subs = {f: prompt_assets.cmap4(mapping, set(prompt_assets.SWITCH) | (set(stick_codes) if f == KEYBOARD else set()))
-            [20:] for f in range(nfaces)}   # (one format 4 subtable, after the cmap's header and its two records)
-    codes = list(prompt_assets.SWITCH) + [prompt_assets.PAD_BASE + i for i in range(len(prompt_assets.PADS))] + stick_codes
+    # (one cmap for every face: the Switch, d-pad and stick codes a segment of their own; one format 4 subtable, after the cmap's
+    # header and its two records)
+    sub = prompt_assets.cmap4(mapping, set(prompt_assets.SWITCH) | set(prompt_assets.STATIC) | set(stick_codes))[20:]
+    codes = list(prompt_assets.SWITCH) + list(prompt_assets.STATIC) + [
+        prompt_assets.PAD_BASE + prompt_assets.FACE_CODES * f + i for f in range(nfaces) for i in range(len(prompt_assets.PADS))
+    ] + stick_codes
 
     harness = "\n".join([
         "#include <stdio.h>", "#include <stdlib.h>", "#include <string.h>", '#include "gpu/vk/vk_api.h"',
-        *defines(src, ["PAD_BASE", "KEY_BASE", "STICK_KEYS", "STICK_GAME"]),
+        *defines(src, ["PAD_BASE", "FACE_CODES", "STATIC_AT", "KEY_BASE", "STICK_KEYS", "STICK_GAME", "HOS_PAD_ART_N"]),
         "static int move_keys[4][2];",
         "static int hos_binding(int set, int button, int slot) {",
         "    if (set == HOS_BIND_KEY) {",
@@ -131,6 +153,7 @@ def main():
         "}",
         re.search(r"static const uint16_t switch_code\[HOS_SW_N\] = \{[^}]*\};", src).group(0),
         re.search(r"static const unsigned char switch_pad\[HOS_SW_N\] = \{[^}]*\};", src).group(0),
+        re.search(r"static const uint16_t static_code\[3\] = \{[^}]*\};", src).group(0),
         re.search(r"static const uint16_t stick_code\[15\] = \{[^}]*\};", src).group(0),
         re.search(r"static const unsigned char stick_ways\[7\] = \{[^}]*\};", src).group(0),
         re.search(r"static const unsigned char move_default\[4\] = \{[^}]*\};", src).group(0),
@@ -160,27 +183,31 @@ def main():
 
         def run(face, moves):
             bin_ = Path(tmp) / ("cmap4-%d.bin" % face)
-            bin_.write_bytes(subs[face])
+            bin_.write_bytes(sub)
             args = [str(exe), str(bin_), str(face)] + [str(k) for pair in moves for k in pair] + [str(x) for x in codes]
             return subprocess.run(args, check=True, capture_output=True, text=True).stdout.split()
 
         outs = [run(f, MOVES[0][1]) for f in range(nfaces)]
         moved = [(name, moves, run(KEYBOARD, moves)) for name, moves in MOVES]
-    nsw = len(prompt_assets.SWITCH)
+    nsw, npad, nstat = len(prompt_assets.SWITCH), len(prompt_assets.PADS), len(prompt_assets.STATIC)
+    default = [prompt_assets.PADS.index(p) for p in prompt_assets.DEFAULT]   # (the pad input of a Switch button unbound)
     for f, out in enumerate(outs):
         done, got = int(out[0]), [int(x) for x in out[1:]]
         keyed = {b: first_key(b) for b in range(nsw) if f == KEYBOARD and first_key(b) in KEY_ICONS}
         want_done = len(keyed) if f == KEYBOARD else len(BIND)
         check(done == want_done, "face %d: %d buttons bound, not %d" % (f, done, want_done))
         for b, code in enumerate(prompt_assets.SWITCH):
-            want = 900 + keyed[b] if b in keyed else (200 + BIND[b] if b in BIND else 100 + b)
+            want = 900 + keyed[b] if b in keyed else 200 + 100 * f + (BIND[b] if b in BIND else default[b])
             check(got[b] == want, "face %d: Switch button %d (U+%04X): glyph %d, not %d" % (f, b, code, got[b], want))
-        for i in range(len(prompt_assets.PADS)):
-            check(got[nsw + i] == 200 + i, "face %d: pad icon %d moved" % (f, i))
+        for k in range(nstat):   # (the d-pad's icons: the face's)
+            check(got[nsw + k] == 290 + 100 * f + k, "face %d: d-pad icon %d: glyph %d, not %d" % (f, k, got[nsw + k], 290 + 100 * f + k))
+        for g in range(nfaces):   # (every face's own pad icons stay)
+            for i in range(npad):
+                check(got[nsw + nstat + g * npad + i] == 200 + 100 * g + i, "face %d: face %d's pad icon %d moved" % (f, g, i))
+        at = nsw + nstat + nfaces * npad
         for i in range(len(stick_codes)):
             want = (1200 if f == KEYBOARD else 1300) + i
-            check(got[nsw + len(prompt_assets.PADS) + i] == want,
-                  "face %d: stick icon %d: glyph %d, not %d" % (f, i, got[nsw + len(prompt_assets.PADS) + i], want))
+            check(got[at + i] == want, "face %d: stick icon %d: glyph %d, not %d" % (f, i, got[at + i], want))
     # (the movement keys: each stick icon as nx2/prompt_keys.py's table and host/prompts.c stick_shows say)
     check([e.strip() for e in re.search(r"stick_ways\[7\] = \{([^}]*)\}", src).group(1).split(",")] ==
           [str(sum(1 << m for m, w in enumerate("udlr") if w in ways)) for _, _, ways in prompt_keys.STICKS[:7]],
@@ -188,7 +215,7 @@ def main():
     check([e.strip() for e in re.search(r"move_default\[4\] = \{([^}]*)\}", src).group(1).split(",")] ==
           ["0x%02X" % prompt_keys.MOVE[w] for w in "udlr"], "host/prompts.c move_default is not nx2/prompt_keys.py MOVE")
     for name, moves, out in moved:
-        got = [int(x) for x in out[1 + nsw + len(prompt_assets.PADS):]]
+        got = [int(x) for x in out[1 + nsw + nstat + nfaces * npad:]]
         for i in range(len(stick_codes)):
             ways = prompt_keys.STICKS[i][2]
             want = 1200 + i   # (the build's picture: the keys that move as they are, or the mouse for the camera)

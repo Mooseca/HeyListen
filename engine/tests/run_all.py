@@ -200,6 +200,8 @@ ARGS = {
     "tests/test_subgroup_pin_limit.py": ["--cxx", "{cxx}"],
     "tests/test_uint8_quads.py": ["--cxx", "{cxx}"],
     "tests/test_prompt_font_bind.py": ["--cc", "gcc"],
+    "tests/test_prompts_live.py": ["--cc", "gcc"],
+    "tests/test_prompts_face_runs.py": ["--cc", "gcc"],
     "tests/test_hl_gates.py": ["--cc", "gcc"],
     "tests/test_stick_dead_zone.py": ["--cc", "gcc", "--cxx", "g++"],
     "tests/test_menu_restart.py": ["--cxx", "g++", "--cc", "gcc"],

@@ -226,7 +226,7 @@
    "files": [
     {
      "path": "nx2/make_game.py",
-     "line": 1700
+     "line": 1713
     },
     {
      "path": "third_party/a64-kit/lift/a64_lift.py",
@@ -235,7 +235,7 @@
    ],
    "default": "unset",
    "values": "text",
-   "explanation": "undocumented: nx2/make_game.py:1700 reads it as a path: `env[\"A64_HOT_FUNCS\"] = os.path.join(work, \"hot_funcs.txt\")`. No comment in the source says what it changes.",
+   "explanation": "undocumented: nx2/make_game.py:1713 reads it as a path: `env[\"A64_HOT_FUNCS\"] = os.path.join(work, \"hot_funcs.txt\")`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -1550,11 +1550,11 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2596
+     "line": 2607
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2600
+     "line": 2611
     }
    ],
    "default": "off (unset)",
@@ -1575,7 +1575,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2592
+     "line": 2603
     }
    ],
    "default": "0 (unset)",
@@ -1596,7 +1596,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2581
+     "line": 2592
     }
    ],
    "default": "unset",
@@ -3238,7 +3238,7 @@
     },
     {
      "path": "host/nvn_native.c",
-     "line": 3018
+     "line": 3020
     }
    ],
    "default": "unset",
@@ -3334,7 +3334,7 @@
     },
     {
      "path": "host/nvn_native.c",
-     "line": 1874
+     "line": 1876
     }
    ],
    "default": "unset",
@@ -3355,7 +3355,7 @@
    "files": [
     {
      "path": "host/nvn_native.c",
-     "line": 2418
+     "line": 2420
     }
    ],
    "default": "unset",
@@ -3522,11 +3522,11 @@
     },
     {
      "path": "nx2/make_game.py",
-     "line": 1952
+     "line": 1965
     },
     {
      "path": "nx2/make_game.py",
-     "line": 1953
+     "line": 1966
     }
    ],
    "default": "unset",
@@ -3551,11 +3551,11 @@
     },
     {
      "path": "nx2/make_game.py",
-     "line": 1949
+     "line": 1962
     },
     {
      "path": "nx2/make_game.py",
-     "line": 1950
+     "line": 1963
     }
    ],
    "default": "unset",
@@ -3643,7 +3643,7 @@
    "files": [
     {
      "path": "nx2/make_game.py",
-     "line": 1324
+     "line": 1337
     }
    ],
    "default": "unset",
@@ -3668,7 +3668,7 @@
     },
     {
      "path": "nx2/make_game.py",
-     "line": 1593
+     "line": 1606
     }
    ],
    "default": "",
@@ -3697,7 +3697,7 @@
     },
     {
      "path": "nx2/make_game.py",
-     "line": 620
+     "line": 633
     }
    ],
    "default": "unset",
@@ -3722,7 +3722,7 @@
     },
     {
      "path": "nx2/make_game.py",
-     "line": 1964
+     "line": 1977
     }
    ],
    "default": "",
@@ -3864,15 +3864,7 @@
    "files": [
     {
      "path": "nx2/make_game.py",
-     "line": 629
-    },
-    {
-     "path": "nx2/make_game.py",
-     "line": 630
-    },
-    {
-     "path": "nx2/make_game.py",
-     "line": 633
+     "line": 642
     },
     {
      "path": "nx2/make_game.py",
@@ -3880,7 +3872,15 @@
     },
     {
      "path": "nx2/make_game.py",
-     "line": 665
+     "line": 646
+    },
+    {
+     "path": "nx2/make_game.py",
+     "line": 656
+    },
+    {
+     "path": "nx2/make_game.py",
+     "line": 678
     },
     {
      "path": "third_party/a64-kit/tools/toolchain.py",
@@ -3905,7 +3905,7 @@
    "files": [
     {
      "path": "nx2/make_game.py",
-     "line": 628
+     "line": 641
     }
    ],
    "default": "off (unset)",
@@ -3934,31 +3934,31 @@
     },
     {
      "path": "nx2/make_game.py",
-     "line": 1278
+     "line": 1291
     },
     {
      "path": "nx2/make_game.py",
-     "line": 1298
+     "line": 1311
     },
     {
      "path": "nx2/make_game.py",
-     "line": 1366
+     "line": 1379
     },
     {
      "path": "nx2/make_game.py",
-     "line": 1551
+     "line": 1564
     },
     {
      "path": "nx2/make_game.py",
-     "line": 1552
+     "line": 1565
     },
     {
      "path": "nx2/make_game.py",
-     "line": 1553
+     "line": 1566
     },
     {
      "path": "nx2/make_game.py",
-     "line": 1554
+     "line": 1567
     }
    ],
    "default": "unset",
@@ -4000,12 +4000,12 @@
    "files": [
     {
      "path": "nx2/make_game.py",
-     "line": 1009
+     "line": 1022
     }
    ],
    "default": "off (unset)",
    "values": "on or off (0, false, off, no and empty are off)",
-   "explanation": "undocumented: nx2/make_game.py:1009 reads it as an on/off switch: `if environ.get(\"HOOKSHOT_NO_PREPARE\", \"0\") != \"0\": # (set and not 0, as the game reads HOOKSHOT_NO_UPDATE_CHECK)`. No comment in the source says what it changes.",
+   "explanation": "undocumented: nx2/make_game.py:1022 reads it as an on/off switch: `if environ.get(\"HOOKSHOT_NO_PREPARE\", \"0\") != \"0\": # (set and not 0, as the game reads HOOKSHOT_NO_UPDATE_CHECK)`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -4284,11 +4284,11 @@
     },
     {
      "path": "nx2/make_game.py",
-     "line": 578
+     "line": 591
     },
     {
      "path": "nx2/make_game.py",
-     "line": 792
+     "line": 805
     }
    ],
    "default": "",
@@ -4338,7 +4338,7 @@
     },
     {
      "path": "nx2/make_game.py",
-     "line": 1768
+     "line": 1781
     }
    ],
    "default": "unset",
@@ -4371,7 +4371,7 @@
     },
     {
      "path": "nx2/make_game.py",
-     "line": 1846
+     "line": 1859
     }
    ],
    "default": "unset",
@@ -4458,11 +4458,11 @@
     },
     {
      "path": "nx2/make_game.py",
-     "line": 449
+     "line": 462
     },
     {
      "path": "nx2/make_game.py",
-     "line": 1600
+     "line": 1613
     }
    ],
    "default": "",
@@ -4966,7 +4966,7 @@
    "files": [
     {
      "path": "host/nvn_native.c",
-     "line": 2200
+     "line": 2202
     }
    ],
    "default": "0",
@@ -5226,7 +5226,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2753
+     "line": 2764
     }
    ],
    "default": "0 (unset)",
@@ -5373,11 +5373,11 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2761
+     "line": 2772
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2769
+     "line": 2780
     },
     {
      "path": "host/nn_vi.c",
@@ -5452,11 +5452,11 @@
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2761
+     "line": 2772
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2769
+     "line": 2780
     },
     {
      "path": "host/nn_vi.c",
@@ -5779,7 +5779,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2857
+     "line": 2868
     },
     {
      "path": "host/display.c",
@@ -6018,7 +6018,7 @@
    "files": [
     {
      "path": "host/pad_sdl.c",
-     "line": 140
+     "line": 141
     }
    ],
    "default": "unset",
@@ -6075,7 +6075,7 @@
     },
     {
      "path": "host/pad_sdl.c",
-     "line": 98
+     "line": 99
     },
     {
      "path": "host/posix/display_sdl.c",
@@ -6279,7 +6279,7 @@
    "files": [
     {
      "path": "host/nn_hid.c",
-     "line": 788
+     "line": 810
     }
    ],
    "default": "unset",
@@ -6300,7 +6300,7 @@
    "files": [
     {
      "path": "host/nn_hid.c",
-     "line": 774
+     "line": 796
     }
    ],
    "default": "off (unset)",
@@ -6405,7 +6405,7 @@
    "files": [
     {
      "path": "host/nn_hid.c",
-     "line": 782
+     "line": 804
     }
    ],
    "default": "off (unset)",
@@ -7013,7 +7013,7 @@
    "files": [
     {
      "path": "host/pad_sdl.c",
-     "line": 183
+     "line": 184
     }
    ],
    "default": "off (unset)",
@@ -7105,7 +7105,7 @@
     },
     {
      "path": "host/nn_hid.c",
-     "line": 813
+     "line": 836
     }
    ],
    "default": "unset",
@@ -7411,7 +7411,7 @@
    "files": [
     {
      "path": "host/pad_sdl.c",
-     "line": 452
+     "line": 466
     }
    ],
    "default": "off (unset)",
@@ -7495,7 +7495,7 @@
    "files": [
     {
      "path": "host/nvn_native.c",
-     "line": 2765
+     "line": 2767
     }
    ],
    "default": "off (unset)",
@@ -7537,7 +7537,7 @@
    "files": [
     {
      "path": "host/nvn_native.c",
-     "line": 1206
+     "line": 1208
     }
    ],
    "default": "unset",
@@ -7558,12 +7558,12 @@
    "files": [
     {
      "path": "host/nvn_native.c",
-     "line": 1208
+     "line": 1210
     }
    ],
    "default": "off (unset)",
    "values": "on or off (0, false, off, no and empty are off); the description names `0`",
-   "explanation": "undocumented: host/nvn_native.c:1208 (in `held_init()`) reads it as an on/off switch: `hold_check = getenv(\"HOS_NVN_HOLD_CHECK\") && atoi(getenv(\"HOS_NVN_HOLD_CHECK\")) != 0;`. No comment in the source says what it changes.",
+   "explanation": "undocumented: host/nvn_native.c:1210 (in `held_init()`) reads it as an on/off switch: `hold_check = getenv(\"HOS_NVN_HOLD_CHECK\") && atoi(getenv(\"HOS_NVN_HOLD_CHECK\")) != 0;`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -7579,7 +7579,7 @@
    "files": [
     {
      "path": "host/nvn_native.c",
-     "line": 1209
+     "line": 1211
     }
    ],
    "default": "0",
@@ -7600,7 +7600,7 @@
    "files": [
     {
      "path": "host/nvn_native.c",
-     "line": 1193
+     "line": 1195
     }
    ],
    "default": "off (unset)",
@@ -7646,7 +7646,7 @@
     },
     {
      "path": "host/nvn_native.c",
-     "line": 462
+     "line": 464
     }
    ],
    "default": "off (unset)",
@@ -7667,7 +7667,7 @@
    "files": [
     {
      "path": "host/nvn_native.c",
-     "line": 1794
+     "line": 1796
     }
    ],
    "default": "off (unset)",
@@ -7688,7 +7688,7 @@
    "files": [
     {
      "path": "host/nvn_native.c",
-     "line": 1319
+     "line": 1321
     }
    ],
    "default": "off (unset)",
@@ -7709,7 +7709,7 @@
    "files": [
     {
      "path": "host/nvn_native.c",
-     "line": 1325
+     "line": 1327
     }
    ],
    "default": "off (unset)",
@@ -7730,7 +7730,7 @@
    "files": [
     {
      "path": "host/nvn_native.c",
-     "line": 1961
+     "line": 1963
     }
    ],
    "default": "unset",
@@ -7751,7 +7751,7 @@
    "files": [
     {
      "path": "host/nvn_native.c",
-     "line": 3662
+     "line": 3664
     }
    ],
    "default": "off (unset)",
@@ -7772,12 +7772,12 @@
    "files": [
     {
      "path": "host/nvn_native.c",
-     "line": 1342
+     "line": 1344
     }
    ],
    "default": "off (unset)",
    "values": "on or off (0, false, off, no and empty are off)",
-   "explanation": "undocumented: host/nvn_native.c:1342 reads it as an on/off switch: `if (block < 0) block = getenv(\"HOS_NVN_SYNC_BLOCK\") != NULL;`. No comment in the source says what it changes.",
+   "explanation": "undocumented: host/nvn_native.c:1344 reads it as an on/off switch: `if (block < 0) block = getenv(\"HOS_NVN_SYNC_BLOCK\") != NULL;`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -7793,7 +7793,7 @@
    "files": [
     {
      "path": "host/nvn_native.c",
-     "line": 1123
+     "line": 1125
     }
    ],
    "default": "0",
@@ -7814,7 +7814,7 @@
    "files": [
     {
      "path": "host/nvn_native.c",
-     "line": 2559
+     "line": 2561
     }
    ],
    "default": "unset",
@@ -7835,12 +7835,12 @@
    "files": [
     {
      "path": "host/nvn_native.c",
-     "line": 2564
+     "line": 2566
     }
    ],
    "default": "unset",
    "values": "text",
-   "explanation": "undocumented: host/nvn_native.c:2564 (in `watch_draw()`) reads it as a text value: `const char *only = getenv(\"HOS_NVN_WATCH_DRAW_THREAD\");`. No comment in the source says what it changes.",
+   "explanation": "undocumented: host/nvn_native.c:2566 (in `watch_draw()`) reads it as a text value: `const char *only = getenv(\"HOS_NVN_WATCH_DRAW_THREAD\");`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -7856,7 +7856,7 @@
    "files": [
     {
      "path": "host/nvn_native.c",
-     "line": 2251
+     "line": 2253
     }
    ],
    "default": "0",
@@ -7877,7 +7877,7 @@
    "files": [
     {
      "path": "host/nvn_native.c",
-     "line": 2492
+     "line": 2494
     }
    ],
    "default": "0",
@@ -7961,7 +7961,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2657
+     "line": 2668
     }
    ],
    "default": "unset",
@@ -7982,7 +7982,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2660
+     "line": 2671
     },
     {
      "path": "host/hos_main.c",
@@ -8049,7 +8049,7 @@
    "files": [
     {
      "path": "host/nvn_native.c",
-     "line": 1386
+     "line": 1388
     }
    ],
    "default": "off (unset)",
@@ -8091,7 +8091,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2754
+     "line": 2765
     },
     {
      "path": "host/nn_applet.c",
@@ -8460,7 +8460,7 @@
    "files": [
     {
      "path": "host/nvn_native.c",
-     "line": 1375
+     "line": 1377
     }
    ],
    "default": "off (unset)",
@@ -8619,7 +8619,7 @@
    "files": [
     {
      "path": "host/nvn_native.c",
-     "line": 397
+     "line": 399
     }
    ],
    "default": "off (unset)",
@@ -8640,7 +8640,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2752
+     "line": 2763
     }
    ],
    "default": "0 (unset)",
@@ -8682,7 +8682,7 @@
    "files": [
     {
      "path": "host/nvn_native.c",
-     "line": 1787
+     "line": 1789
     }
    ],
    "default": "unset",
@@ -9021,7 +9021,7 @@
    "files": [
     {
      "path": "host/nvn_native.c",
-     "line": 1074
+     "line": 1076
     }
    ],
    "default": "unset",
@@ -9042,7 +9042,7 @@
    "files": [
     {
      "path": "host/nvn_native.c",
-     "line": 670
+     "line": 672
     }
    ],
    "default": "unset",
@@ -9063,7 +9063,7 @@
    "files": [
     {
      "path": "host/nvn_native.c",
-     "line": 677
+     "line": 679
     }
    ],
    "default": "unset",
@@ -9134,7 +9134,7 @@
    "files": [
     {
      "path": "host/nvn_native.c",
-     "line": 620
+     "line": 622
     }
    ],
    "default": "off (unset)",
@@ -10061,11 +10061,11 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 479
+     "line": 480
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 514
+     "line": 515
     },
     {
      "path": "host/hos_wide_ui.c",
@@ -10232,12 +10232,12 @@
    "files": [
     {
      "path": "nx2/make_game.py",
-     "line": 516
+     "line": 529
     }
    ],
    "default": "unset",
    "values": "text (`True` named)",
-   "explanation": "undocumented: nx2/make_game.py:516 reads it as a path: `env[\"INCLUDE\"] = \";\".join(x for x in [get(\"INCLUDE\")] + [os.path.join(inc, v, d) for d in (\"ucrt\", \"um\", \"shared\", \"w...`. No comment in the source says what it changes.",
+   "explanation": "undocumented: nx2/make_game.py:529 reads it as a path: `env[\"INCLUDE\"] = \";\".join(x for x in [get(\"INCLUDE\")] + [os.path.join(inc, v, d) for d in (\"ucrt\", \"um\", \"shared\", \"w...`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -10253,12 +10253,12 @@
    "files": [
     {
      "path": "nx2/make_game.py",
-     "line": 1505
+     "line": 1518
     }
    ],
    "default": "",
    "values": "text",
-   "explanation": "undocumented: nx2/make_game.py:1505 reads it as a text value: `name = (locale.getlocale()[0] or os.environ.get(\"LANG\", \"\")).split(\".\")[0]`. No comment in the source says what it changes.",
+   "explanation": "undocumented: nx2/make_game.py:1518 reads it as a text value: `name = (locale.getlocale()[0] or os.environ.get(\"LANG\", \"\")).split(\".\")[0]`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -10274,12 +10274,12 @@
    "files": [
     {
      "path": "nx2/make_game.py",
-     "line": 517
+     "line": 530
     }
    ],
    "default": "unset",
    "values": "text (`True` named)",
-   "explanation": "undocumented: nx2/make_game.py:517 reads it as a path: `env[\"LIB\"] = \";\".join(x for x in [get(\"LIB\")] + [os.path.join(kits, \"Lib\", v, d, \"x64\") for d in (\"ucrt\", \"um\")] if x)`. No comment in the source says what it changes.",
+   "explanation": "undocumented: nx2/make_game.py:530 reads it as a path: `env[\"LIB\"] = \";\".join(x for x in [get(\"LIB\")] + [os.path.join(kits, \"Lib\", v, d, \"x64\") for d in (\"ucrt\", \"um\")] if x)`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -10307,11 +10307,11 @@
     },
     {
      "path": "nx2/make_game.py",
-     "line": 1431
+     "line": 1444
     },
     {
      "path": "nx2/make_game.py",
-     "line": 1540
+     "line": 1553
     },
     {
      "path": "scripts/oot_saves.py",
@@ -10382,7 +10382,7 @@
    "files": [
     {
      "path": "host/nvn_native.c",
-     "line": 1457
+     "line": 1459
     }
    ],
    "default": "off (unset)",
@@ -10449,12 +10449,12 @@
    "files": [
     {
      "path": "nx2/oot_patches.py",
-     "line": 408
+     "line": 455
     }
    ],
    "default": "unset",
    "values": "text",
-   "explanation": "undocumented: nx2/oot_patches.py:408 reads it as a text value: `job_order = os.environ.get(\"OOT_JOB_ORDER\") == \"1\" # (TICK-047, lift time; off: no job order statements)`. No comment in the source says what it changes.",
+   "explanation": "undocumented: nx2/oot_patches.py:455 reads it as a text value: `job_order = os.environ.get(\"OOT_JOB_ORDER\") == \"1\" # (TICK-047, lift time; off: no job order statements)`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -12778,7 +12778,7 @@
     },
     {
      "path": "nx2/make_game.py",
-     "line": 449
+     "line": 462
     }
    ],
    "default": "unset",
@@ -13897,7 +13897,7 @@
     },
     {
      "path": "host/nvn_native.c",
-     "line": 988
+     "line": 990
     }
    ],
    "default": "off (unset)",
@@ -14002,12 +14002,12 @@
    "files": [
     {
      "path": "host/nvn_native.c",
-     "line": 898
+     "line": 900
     }
    ],
    "default": "0",
    "values": "a whole number",
-   "explanation": "undocumented: host/nvn_native.c:898 (in `wts_handler()`) reads it as a number: `if (after == ~0ull) after = GetTickCount64() + (getenv(\"RX_NVN_WATCH_AFTER\") ? (ULONGLONG)atoi(getenv(\"RX_NVN_WATCH_A...`. No comment in the source says what it changes.",
+   "explanation": "undocumented: host/nvn_native.c:900 (in `wts_handler()`) reads it as a number: `if (after == ~0ull) after = GetTickCount64() + (getenv(\"RX_NVN_WATCH_AFTER\") ? (ULONGLONG)atoi(getenv(\"RX_NVN_WATCH_A...`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -14023,7 +14023,7 @@
    "files": [
     {
      "path": "host/nvn_native.c",
-     "line": 900
+     "line": 902
     }
    ],
    "default": "off (unset)",
@@ -14048,7 +14048,7 @@
     },
     {
      "path": "host/nvn_native.c",
-     "line": 807
+     "line": 809
     }
    ],
    "default": "unset",
@@ -14073,7 +14073,7 @@
     },
     {
      "path": "host/nvn_native.c",
-     "line": 942
+     "line": 944
     }
    ],
    "default": "unset",
@@ -14245,7 +14245,7 @@
     },
     {
      "path": "nx2/make_game.py",
-     "line": 1702
+     "line": 1715
     }
    ],
    "default": "",
@@ -18744,7 +18744,7 @@
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 317
+     "line": 318
     }
    ],
    "default": "unset",
@@ -18786,11 +18786,11 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 353
+     "line": 354
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2748
+     "line": 2759
     }
    ],
    "default": "unset",
@@ -20136,15 +20136,15 @@
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 471
+     "line": 472
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 538
+     "line": 539
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 568
+     "line": 569
     }
    ],
    "default": "off (unset)",
@@ -20354,16 +20354,16 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2540
+     "line": 2551
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2541
+     "line": 2552
     }
    ],
    "default": "off (unset)",
    "values": "on or off (0, false, off, no and empty are off)",
-   "explanation": "undocumented: gpu/vk/vk_menu.cpp:2540 (in `fog_runs()`) reads it as an on/off switch: `const bool v = lowend_rule::fog_on(env_int(\"RX_VK_FOG\"), opts.fog);`. No comment in the source says what it changes.",
+   "explanation": "undocumented: gpu/vk/vk_menu.cpp:2551 (in `fog_runs()`) reads it as an on/off switch: `const bool v = lowend_rule::fog_on(env_int(\"RX_VK_FOG\"), opts.fog);`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -20735,7 +20735,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2742
+     "line": 2753
     }
    ],
    "default": "0 (unset)",
@@ -20831,7 +20831,7 @@
     },
     {
      "path": "host/nvn_native.c",
-     "line": 1376
+     "line": 1378
     }
    ],
    "default": "unset",
@@ -21619,7 +21619,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2744
+     "line": 2755
     }
    ],
    "default": "unset",
@@ -21841,15 +21841,15 @@
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 471
+     "line": 472
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 538
+     "line": 539
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 568
+     "line": 569
     }
    ],
    "default": "off (unset)",
@@ -22699,7 +22699,7 @@
     },
     {
      "path": "host/nvn_native.c",
-     "line": 2651
+     "line": 2653
     }
    ],
    "default": "off (unset)",
@@ -23622,7 +23622,7 @@
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2736
+     "line": 2747
     }
    ],
    "default": "2",
@@ -23706,7 +23706,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 3055
+     "line": 3074
     }
    ],
    "default": "unset",
@@ -26223,11 +26223,11 @@
     },
     {
      "path": "host/nvn_native.c",
-     "line": 1377
+     "line": 1379
     },
     {
      "path": "host/nvn_native.c",
-     "line": 1385
+     "line": 1387
     }
    ],
    "default": "unset",
@@ -26269,7 +26269,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2743
+     "line": 2754
     }
    ],
    "default": "0 (unset)",
@@ -26290,7 +26290,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 358
+     "line": 359
     },
     {
      "path": "gpu/vk/vk_replay.cpp",
@@ -26541,7 +26541,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 9933
+     "line": 9934
     }
    ],
    "default": "0 (unset)",
@@ -31483,7 +31483,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 3027
+     "line": 3046
     }
    ],
    "default": "unset",
@@ -31651,7 +31651,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2749
+     "line": 2760
     }
    ],
    "default": "0 (unset)",
@@ -33359,12 +33359,12 @@
    "files": [
     {
      "path": "nx2/make_game.py",
-     "line": 1429
+     "line": 1442
     }
    ],
    "default": "unset",
    "values": "a path (text)",
-   "explanation": "undocumented: nx2/make_game.py:1429 reads it as a path: `p.add_argument(\"--work\", default=os.path.join(os.environ.get(\"XDG_CACHE_HOME\") or os.path.expanduser(\"~/.cache\"),`. No comment in the source says what it changes.",
+   "explanation": "undocumented: nx2/make_game.py:1442 reads it as a path: `p.add_argument(\"--work\", default=os.path.join(os.environ.get(\"XDG_CACHE_HOME\") or os.path.expanduser(\"~/.cache\"),`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",

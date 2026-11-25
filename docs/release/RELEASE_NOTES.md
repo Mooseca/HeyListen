@@ -42,12 +42,16 @@ builds the driver's pipelines as you play, so it stutters more than usual. The s
 * **DLAA before the bloom** (Graphics, after Longshot): DLAA smooths the 3D before the game's bloom and tone map. It needs
   the Render resolution at Native (DLAA); the row is greyed out otherwise.
 * **Keyboard button prompts**: *Button prompts = Keyboard* shows the keys and mouse buttons you bound, in the game's
-  texts, hints and menus (movement keys as they are bound). Switching to it rebuilds the program cache once.
+  texts, hints and menus (movement keys as they are bound).
+* **Button prompts change while you play** (after Longshot #2366, Gabriel Moisan Matte): a new *Button prompts* choice or a
+  new binding shows at once, in the texts, the ocarina's staff and its hint, the Talk ring and the pause menu's controller picture (the Switch's buttons stay on the Keyboard face),
+  with no restart. **Auto** follows the device you play with (the keyboard, an Xbox-type pad, a DualSense, a Switch or Steam
+  Deck pad: the one that gave input last, without flipping on a resting pad's drift or a nudge of the mouse). The ocarina's
+  notes show the keys you bound on the Keyboard face, not the Switch's letters.
 * **HUD layout row**: the HUD at the screen's edges (every screen shape) or in the middle 16:9.
 * **A tidier menu**: rows that only matter with another setting on (V-Sync mode, the frame generation rows, the DLSS
   model, the HDR and PsychoV35 rows) are hidden while that setting is off; the HDR row says when your screen has no HDR
-  (Windows' *Use HDR* off); *Layout preset* and *Button prompts* are on the Controls tab. Button prompts apply after a
-  restart.
+  (Windows' *Use HDR* off); *Layout preset* and *Button prompts* are on the Controls tab. Button prompts apply at once, with no restart.
 * **Open menu** is a bindable control, and a touchpad click opens the in-game menu.
 * **Check for updates**: the update offer also works when the game is started without the launcher, with *Never ask
   again* and a Settings row. The Builder's **Play** button starts the game through the builder (`--play`).

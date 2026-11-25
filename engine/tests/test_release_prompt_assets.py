@@ -100,11 +100,11 @@ def main():
     check(face_names[1:] == list(prompt_faces.FACES) + ["keyboard"], "faces[] is not the Switch, prompt_faces.FACES, then the keyboard")
     per_face = set(re.findall(r'"%sprompts/%s/([A-Za-z.]+)"', src))
     per_face |= set(re.findall(r'prompts/%s/([A-Za-z.]+)"', src))
-    check({"External.bfotf", "textures.bin", "hint.bin"} <= per_face, "prompts.c reads %s under prompts/<face>/" % sorted(per_face))
+    check({"textures.bin", "hint.bin"} <= per_face, "prompts.c reads %s under prompts/<face>/" % sorted(per_face))
     for f in per_face:
         check('"%s"' % f in assets, "prompts.c opens prompts/<face>/%s, which prompt_assets.py never writes" % f)
     top = set(re.findall(r'prompts/([A-Za-z.]+)"', src)) - per_face - {"%s"}
-    for f in ("Common.bntx", "Common.blarc", "ring.bin", "rsizetable.zs"):
+    for f in ("External.bfotf", "Common.bntx", "Common.blarc", "ring.bin", "rsizetable.zs"):   # (the font: one, every face's icons)
         check(f in top or f in src, "prompts.c no longer uses prompts/%s" % f)
         check('"%s"' % f in assets, "prompts.c uses prompts/%s, which prompt_assets.py never writes" % f)
     # the build puts the folder in the game folder, where prompts.c looks (the folder with image.bin, not bin\)
@@ -115,9 +115,13 @@ def main():
     check('"%shookshot_options.ini"' in src and "button_prompts=" in src, "prompts.c does not read button_prompts=")
     menu = (ENGINE / "gpu" / "vk" / "vk_menu.cpp").read_text(encoding="utf-8")
     check('"Button prompts", &opts.prompts' in menu, "the menu has no Button prompts row on opts.prompts")
+    check("hn_prompts, false, true}" in menu, "the Button prompts row takes a restart again: the icons follow at once, it must not ask for one")
 
     # 4. no prompts/ folder: the log says so
-    check("prompts: no prompts folder" in src, "prompts.c is silent when the game folder has no prompts/")
+    check("prompts: NO PROMPTS FOLDER" in src, "prompts.c is silent when the game folder has no prompts/")
+    check("rx_option_set(HL_OPT_PROMPTS_MISSING, 1)" in src, "prompts.c does not tell the menu the prompts folder is missing")
+    check("HL_OPT_PROMPTS_MISSING" in menu and "prompts_missing.load" in menu, "the Button prompts row's hint does not say the folder is missing")
+    check(mg.count("prompts_warning(") == 3, "make_game.py does not say loudly that the icon sets were not generated (both ways)")
 
     # 5. the faces' fonts: free to ship, credited
     kenney = ENGINE / "third_party" / "kenney_input"
