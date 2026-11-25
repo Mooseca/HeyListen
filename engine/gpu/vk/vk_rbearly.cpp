@@ -95,7 +95,7 @@ thread_local bool tl_split = false;   // (a final copy was recorded: the replay 
 
 struct Stats {
     std::atomic<int64_t> reads{0}, final_ok{0}, newest{0}, rec_waits{0}, rec_ns{0}, rec_worst{0}, gpu_waits{0}, gpu_ns{0}, gpu_worst{0},
-        fb_rec{0}, fb_gpu{0}, fb_none{0}, binds{0}, finals{0}, left{0}, checks{0}, mismatches{0}, splits{0}, repeats{0}, late_ok{0}, stale{0};
+        fb_rec{0}, fb_gpu{0}, fb_none{0}, binds{0}, finals{0}, left{0}, checks{0}, mismatches{0}, splits{0}, repeats{0}, late_ok{0}, stale{0}, prev_same{0}, prev_diff{0};
     std::atomic<int> tainted_logged{0};
 } st;
 void note_max(std::atomic<int64_t>& m, int64_t v) {
@@ -106,7 +106,12 @@ int64_t now_ns() { return std::chrono::steady_clock::now().time_since_epoch().co
 
 /// The slot a read of range `ri` is answered with (waits for the order thread's recording and the GPU's copy, wait_ms at most):
 /// false = none in time. out gets the bytes, *seq_out the slot's sequence number. cap_ms: how long each of the two waits may last
-bool fetch(unsigned ri, uint64_t size, uint8_t* out, bool count, uint32_t* seq_out, double cap_ms) {
+bool prev_on() {
+    // (ORDER2) RX_VK_RB_EARLY_PREV=<0|1> (0): with RX_VK_RB_EARLY=1, a read is answered with its range as it stood before the job it would wait for (the newest copy of an earlier job: never a wait), the value flash2f's wait handed out; 0: the copy of that job
+    static const bool on = getenv("RX_VK_RB_EARLY_PREV") && atoi(getenv("RX_VK_RB_EARLY_PREV")) != 0;
+    return on;
+}
+bool fetch(unsigned ri, uint64_t size, uint8_t* out, bool count, uint32_t* seq_out, double cap_ms, bool prev = false) {
     const uint64_t target = ot_rb_target();
     const int64_t t0 = now_ns(), cap = (int64_t)(cap_ms * 1e6);
     rb_early::Pick p;
@@ -114,7 +119,7 @@ bool fetch(unsigned ri, uint64_t size, uint8_t* out, bool count, uint32_t* seq_o
     for (;;) {
         {
             std::lock_guard lk(mu);
-            p = rb_early::pick(ranges[ri], target, ot_rb_done(), last_final_job);
+            p = prev ? rb_early::pick_prev(ranges[ri], target) : rb_early::pick(ranges[ri], target, ot_rb_done(), last_final_job);
         }
         if (p.kind != rb_early::kWait) break;
         rec_waited = true;
@@ -159,12 +164,14 @@ void log_stats() {
          "the other range); %lld waited for the order thread's recording (%.2f ms each, worst %.2f), %lld for the GPU's copy (%.2f ms each, "
          "worst %.2f); fell back to the old path: %lld recording not in time, %lld GPU not in time, %lld no copy; bindings copied %lld (%lld "
          "final), %lld left with no dispatch behind them, %lld parts ended behind a final copy; %lld reads with nothing newer (guest memory left "
-         "alone), %lld answered after the longer wait, %lld left to guest memory as it was (STALE); check: %lld compared, %lld mismatches",
+         "alone), %lld answered after the longer wait, %lld left to guest memory as it was (STALE); check: %lld compared, %lld mismatches; the "
+         "previous copy (RX_VK_RB_EARLY_PREV) equal %lld, different %lld",
          (long long)st.final_ok.exchange(0), (long long)st.newest.exchange(0), (long long)rw, ms(st.rec_ns.exchange(0), rw),
          st.rec_worst.exchange(0) / 1e6, (long long)gw, ms(st.gpu_ns.exchange(0), gw), st.gpu_worst.exchange(0) / 1e6,
          (long long)st.fb_rec.exchange(0), (long long)st.fb_gpu.exchange(0), (long long)st.fb_none.exchange(0), (long long)st.binds.exchange(0),
          (long long)st.finals.exchange(0), (long long)st.left.exchange(0), (long long)st.splits.exchange(0), (long long)st.repeats.exchange(0),
-         (long long)st.late_ok.exchange(0), (long long)st.stale.exchange(0), (long long)st.checks.exchange(0), (long long)st.mismatches.exchange(0));
+         (long long)st.late_ok.exchange(0), (long long)st.stale.exchange(0), (long long)st.checks.exchange(0), (long long)st.mismatches.exchange(0),
+         (long long)st.prev_same.exchange(0), (long long)st.prev_diff.exchange(0));
 }
 
 }   // namespace
@@ -279,7 +286,7 @@ bool rbearly_answer(uint64_t gpu, uint64_t size) {
     // order thread and the GPU; then guest memory as it is, counted as STALE)
     uint8_t buf[rb_early::kMaxBytes];
     uint32_t seq = 0;
-    bool ok = fetch((unsigned)ri, size, buf, true, &seq, config().wait_ms);
+    bool ok = fetch((unsigned)ri, size, buf, true, &seq, config().wait_ms, prev_on());
     if (!ok && fetch((unsigned)ri, size, buf, false, &seq, 200.0)) ok = true, st.late_ok++;
     if (!ok) {
         st.stale++;
@@ -320,6 +327,11 @@ void rbearly_check(uint64_t gpu, uint64_t size) {
         }
         host->gpu_read(gpu, old, (size_t)size);
         st.checks++;
+        {   // (the previous copy, RX_VK_RB_EARLY_PREV's answer, against the same value)
+            uint8_t prev[rb_early::kMaxBytes];
+            uint32_t pseq = 0;
+            if (fetch((unsigned)ri, size, prev, false, &pseq, 0.0, true)) (std::memcmp(prev, old, (size_t)size) ? st.prev_diff : st.prev_same)++;
+        }
         if (std::memcmp(mine, old, (size_t)size)) {
             const int64_t m = ++st.mismatches;
             if (m <= 40) {   // (the words that differ: how many, and the first eight with both values)

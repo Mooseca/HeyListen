@@ -122,4 +122,16 @@ inline Pick pick(const Range& r, uint64_t target, uint64_t done, uint64_t other_
     return p;
 }
 
+/// (RX_VK_RB_EARLY_PREV=1) the newest final slot of a job before `target`: the range as it stood before the job the read would wait for, the
+/// value flash2f's wait handed out (its check: the job's own write-back lands after the read); none: kNone. Never waits: those jobs are done
+inline Pick pick_prev(const Range& r, uint64_t target) {
+    int best = -1;
+    for (unsigned i = 0; i < kSlots; i++) {
+        const Slot& s = r.slots[i];
+        if (s.seq && s.final && s.job < target && (best < 0 || s.seq > r.slots[best].seq)) best = (int)i;
+    }
+    if (best < 0) return Pick{};
+    return Pick{kSlotFinal, (unsigned)best, r.slots[best].seq};
+}
+
 }   // namespace rb_early

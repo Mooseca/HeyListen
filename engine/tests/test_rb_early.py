@@ -72,6 +72,13 @@ int main() {
     CHECK(!t.tainted);
     note_written(t, 0x0, 0x100000);   // (a bare entry's 1 MB guess over it)
     CHECK(t.tainted);
+    // the previous copy: the newest final slot of a job before the target (never a wait)
+    Range q;
+    for (int k = 0; k < 2; k++) issue(q, 20);   // job 20: 2 bindings (nothing learned: not final)
+    issue(q, 22), issue(q, 22);                 // job 22 learns 2: its second is final
+    issue(q, 24), issue(q, 24);                 // job 24: final at its second
+    CHECK(pick_prev(q, 24).kind == kSlotFinal && pick_prev(q, 24).seq == 4);   // (job 22's last)
+    CHECK(pick_prev(q, 25).seq == 6 && pick_prev(q, 22).kind == kNone);
     Range empty;
     CHECK(pick(empty, 5, 9, 0).kind == kNone && pick(empty, 5, 0, 0).kind == kWait);
     // the slots go round: a slot holds the newest binding that took it
