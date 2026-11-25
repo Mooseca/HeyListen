@@ -1,7 +1,7 @@
 // Copyright (C) 2026 Sacrappy
 // Is this integrated GPU too weak for the game at the player's own settings? Decided by a measure, not by a list of chips: the
 // frames shown while play is on (the player runs: no load screen, no title, no menu-only time) are timed over a window that starts
-// after the first seconds of play, and the average rate is compared with a threshold (lowend_rule.h turns the Low-end settings row On
+// after the first seconds of play, and the average rate is compared with a threshold (vk_menu.cpp chooses the Lowest quality preset
 // under it). The same rate as the benchmark's fps: frames over their total time. tests/test_lowend_measure.py
 #pragma once
 #include <cstdint>

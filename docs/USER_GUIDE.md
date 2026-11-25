@@ -105,20 +105,24 @@ shows 144. Frame generation gets an even rate to work from, with Auto too (it fi
 Frame rate limit then holds nothing back, and the FPS counter's **Frame limit** line says `144 fps (game 48 x 3)`. With Frame
 generation Off it does what the Frame rate limit does with the same number. Needs Game speed on Real time.
 
-### Low-end settings
+### Lowest quality preset (weak integrated GPU)
 
-The Graphics tab's **Low-end settings** row (Off by default; `lowend_settings` in the options file) is one switch for the three rows that
-help a weak GPU most: **On** sets Render resolution to 33% (at once), Volumetric fog to Off and the Handheld profile to On (a smaller
-scene with lower shadow and fog detail; both from the next start), and remembers what they were (`lowend_prev_resolution`,
-`lowend_prev_handheld_profile`, `lowend_prev_volumetric_fog`). **Off** puts each back to what it was before, unless you changed that row
-yourself since: then it keeps your value. You can turn it On on any GPU.
+The Graphics tab's **Quality preset** row has an entry before Minimum (4GB): **Lowest (integrated GPU)**. It sets Render resolution to 33%
+(at once), Volumetric fog to Off and the Handheld profile to On (a smaller scene with lower shadow and fog detail; both from the next
+start, and the menu asks to restart for them), plus what Minimum sets: the Lanczos window filter, Sharpness 30%, the frame pacing, Game
+speed on Real time and the smallest memory limits. Like the other presets it does not restore anything when you choose another: that
+preset sets its own rows, and Volumetric fog stays as the row says (set it back by hand).
 
-On an integrated GPU the game also decides by itself, once: after 15 seconds of play it times the frames of the next 10 seconds (the
-title and the load screens do not count). Under 20 frames a second at your own settings (a Ryzen 7 5700U's Vega 8 runs 11 to 13) it turns
-the row On and says so in the log (`the Low-end settings row (Graphics tab) turned On`); at 20 or more (a Steam Deck, a ROG Ally, a
-Radeon 780M) it leaves everything as it is and never asks again (`lowend_rule=1`, which also stops it after it turned the row On: turning
-the row Off later is final). It does not ask if you had set the row, Render resolution, Volumetric fog, the Handheld profile or the
-Quality preset yourself. `HL_LOWEND=0` stops it, `HL_LOWEND=1` turns the row On for one run, `HL_LOWEND_FPS=<n>` changes the 20.
+On an integrated GPU the game also chooses it by itself, once: after 15 seconds of play it times the frames of the next 10 seconds (the
+title and the load screens do not count). Under 20 frames a second at your own settings (a Ryzen 7 5700U's Vega 8 runs 11 to 13) it
+selects the preset and says so in the log (`turned to Lowest (integrated GPU)`); at 20 or more (a Steam Deck, a ROG Ally, a Radeon 780M)
+it leaves everything as it is and never asks again (`lowend_rule=1`). It does not ask if you had set the Quality preset, Render
+resolution, Volumetric fog, the Handheld profile, the Window scaling filter, Sharpness, the frame pacing or Game speed yourself. A
+discrete GPU is never asked. `HL_LOWEND=0` stops it, `HL_LOWEND=1` chooses the preset for one run, `HL_LOWEND_FPS=<n>` changes the 20.
+
+An options file from a build that had the separate **Low-end settings** row On (`lowend_settings=1`) reads as this preset, its rows as
+they were saved; the old `lowend_settings` and `lowend_prev_*` lines go at the next save. The preset list gained an entry, so the saved
+`quality_preset` numbers moved up by one (`options_version=4`); a file from before that is moved once when it is read.
 
 ### FPS counter: 1% low and 0.1% low
 

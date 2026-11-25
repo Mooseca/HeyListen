@@ -14,7 +14,7 @@ def main():
     parser.add_argument("--cxx", default="g++")
     args = parser.parse_args()
     menu = (ROOT / "gpu/vk/vk_menu.cpp").read_text(encoding="utf-8")
-    for needle in ["        lowend_probe_frame();   // (the Low-end settings measure, while it runs)", "host->play_on && host->play_on()"]:
+    for needle in ["        lowend_probe_frame();   // (the Lowest preset measure, while it runs)", "host->play_on && host->play_on()"]:
         if needle not in menu:
             raise SystemExit("vk_menu.cpp no longer has: " + needle)
     host = (ROOT / "host/rx_backend.c").read_text(encoding="utf-8")

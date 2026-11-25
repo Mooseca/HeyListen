@@ -49,7 +49,7 @@ def menu_rows():
         "Send performance statistics": "send_performance_stats", "Send crash reports automatically": "send_crash_reports",
         "Check for updates": "update_check", "V-Sync": "vsync", "V-Sync mode": "vsync_mode",
         "VRR (G-Sync / FreeSync)": "vrr",
-        "DLAA before the bloom": "dlss_pre_bloom", "Low-end settings": "lowend_settings"}
+        "DLAA before the bloom": "dlss_pre_bloom"}
     for key in re.findall(r'return "([a-z_0-9]+)";', ini_key):
         assert key in renamed.values(), key   # (a new special case: add it above)
     rows = {}

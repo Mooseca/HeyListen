@@ -172,7 +172,7 @@ typedef struct MkwVkHost {
        tells their role (the game) from this. Returns how many */
     int (*profile_threads)(uint32_t *tids, int max);
     /* (version 20) whether play is on: the player ran in the last quarter second (no title, no load screen: host/hos_main.c
-       hos_oot_player_seen); the Low-end settings measure (gpu/vk/lowend_measure.h) counts the frames of play only */
+       hos_oot_player_seen); the Lowest preset measure (gpu/vk/lowend_measure.h) counts the frames of play only */
     int (*play_on)(void);
 } MkwVkHost;
 enum {

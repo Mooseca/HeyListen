@@ -233,7 +233,7 @@ they apply at once, with no new translation.
 
 | Tab | Option | Choices | Default |
 |---|---|---|---|
-| Graphics | Quality preset | Custom, Minimum (4GB), Low (6GB), Balanced (8GB), High (12GB), Ultra (16GB+) | Custom |
+| Graphics | Quality preset | Custom, Lowest (integrated GPU), Minimum (4GB), Low (6GB), Balanced (8GB), High (12GB), Ultra (16GB+) | Custom |
 | | Fullscreen | Off, On (the same as <kbd>F11</kbd>) | Off |
 | | GPU device | Auto, or each graphics card by name (after a restart) | Auto |
 | | Upscaler | Game's own, NVIDIA DLSS (only in builds with NVIDIA's DLSS SDK, below; on RTX GPUs), AMD FSR 3.1 (every build, on GPUs it runs on, below), AMD FSR 4 (only in builds with FSR 4, below), Off (every build and GPU, `dlss=6`: no upscaling network, the 3D at the Render resolution stretched to the output, no anti-aliasing; Render resolution steps as for the game's own, Sharpness applies) | Game's own |
@@ -262,7 +262,6 @@ they apply at once, with no new translation.
 | | Window scaling filter | Off, Catmull-Rom, Lanczos | Off |
 | | Sharpness | 0 to 100%, in steps of 10 | 0% |
 | | Handheld profile | Off, On (after a restart) | Off |
-| | Low-end settings | Off, On. On sets Render resolution 33% (at once), Volumetric fog Off and the Handheld profile On (from the next start); Off puts the three rows back to what they were before On, any that you changed since keeps your value. Turned On once by itself when an integrated GPU runs the game under 20 fps (see Low-end settings below) | Off |
 | | Ultrawide | 16:9, Monitor's shape: wider than 16:9, or narrower down to 5:4 (after a restart) | 16:9 |
 | | HUD layout | Screen's edges, Middle 16:9 (on a screen that is not 16:9) | Screen's edges |
 | | Robust buffers | Auto, Off, On (after a restart) | Auto |
@@ -330,14 +329,15 @@ they apply at once, with no new translation.
 - **NVIDIA Reflex** Off is the game as without it. `RX_VK_REFLEX_LOG=1` logs the driver's latency timings every 300
   frames while it is on.
 - **Handheld profile** runs the game as if the console were undocked: lower resolution, lighter on the GPU.
-- **Low-end settings** is a preset of three rows for a weak GPU: On sets Render resolution 33%, Volumetric fog Off and the Handheld
-  profile On (the resolution changes at once, the fog and the Handheld profile from the next start), and remembers what they were;
-  Off puts them back, except a row you changed since. It can be turned On by hand on any GPU. On an integrated GPU, once, the game
-  measures its own frames: from 15 seconds into play it times 10 seconds, and under 20 frames a second (the reference laptop's Ryzen 7
-  5700U runs 11 to 13) it turns the row On by itself, saved in the options file (`lowend_settings`, `lowend_prev_*`, `lowend_rule`)
-  and said in the log; at 20 or more (a Steam Deck, a ROG Ally, a Radeon 780M) it leaves everything as it is and never asks again.
-  Not asked if you changed the row, the three rows or the Quality preset. `HL_LOWEND=0` never measures, `HL_LOWEND=1` turns the row On
-  for one run, `HL_LOWEND_FPS` changes the 20.
+- **Lowest (integrated GPU)**, the Quality preset's first entry, is for a weak GPU: Render resolution 33%, Volumetric fog Off and the
+  Handheld profile On (the resolution changes at once, the fog and the Handheld profile from the next start), with Minimum's other rows
+  (Lanczos, Sharpness 30%, frame pacing, Real time, the smallest memory limits). It restores nothing when another preset is chosen. On an
+  integrated GPU, once, the game measures its own frames: from 15 seconds into play it times 10 seconds, and under 20 frames a second (the
+  reference laptop's Ryzen 7 5700U runs 11 to 13) it selects the preset by itself, saved in the options file (`quality_preset`, the rows
+  it sets, `lowend_rule`) and said in the log; at 20 or more (a Steam Deck, a ROG Ally, a Radeon 780M) it leaves everything as it is and
+  never asks again. Not asked if you had set the Quality preset or the rows it sets. `HL_LOWEND=0` never measures, `HL_LOWEND=1` chooses
+  the preset for one run, `HL_LOWEND_FPS` changes the 20. An options file with the old Low-end settings row On (`lowend_settings=1`)
+  reads as this preset.
 - **Robust buffers:** a read past a buffer's end is dropped instead of stopping the GPU. Auto is on, on every card; Off
   can be faster on some NVIDIA cards.
 - **Game speed:** with Per frame, the game runs slower whenever it is below 60 fps. Real time keeps it at normal speed

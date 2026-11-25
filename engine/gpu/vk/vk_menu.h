@@ -47,7 +47,6 @@ struct Options {
                           // alone), 1 30, 2 40, 3 45, 4 48, 5 50, 6 60, 7 72, 8 75, 9 90, 10 120. On: the game runs at it, the frames shown are it times the
                           // multiplier, and the Frame rate limit holds nothing back (menu_fps_limit). Saved as base_frame_rate_limit (host/nn_vi.c; HL_OPT_BASE_LIMIT)
     int realtime = 1;     // game time follows the clock (host/nn_vi.c); 0: per frame (slower frames, slower game)
-    int lowend = 0;       // the Low-end settings row: 0 Auto (the low-end rule applies once on a low-end GPU), 1 Off (never; what it set goes back): lowend_rule.h
     int fog = 1;          // the volumetric fog: 1 on, 0 off (its programs left out: lowend_rule.h); read once, at the first dispatch. RX_VK_FOG over it
     int handheld = 0;     // the game's handheld profile: ~4 fps, softer; read once, at the start (host/nn_applet.c)
     int ultrawide = 0;    // the camera at the monitor's shape when it is wider than 16:9; read once, at the start (host/hos_main.c)
@@ -84,7 +83,7 @@ struct Options {
     int sampler_cache = 0;     // sampler ids answer their parameters without the registrations' lock (gpu/vk/vk_draw.cpp; RX_VK_SAMPLER_CACHE)
     int intel_compiles = 0;    // (longshot #252) Intel's shader compiler on Windows: 0 one thread at a time, 1 side by side (gpu/vk/vk_internal.h
                                // IntelDriverGate, vk_draw.cpp intel_compiles_side_by_side; RX_VK_NO_INTEL_SERIAL=1 over it). Read once, at the start
-    int preset = 0;       // quality preset: 0 Custom, 1 Minimum (4GB), 2 Low (6GB), 3 Balanced (8GB), 4 High (12GB), 5 Ultra (16GB+)
+    int preset = 0;       // quality preset: 0 Custom, 1 Lowest (integrated GPU), 2 Minimum (4GB), 3 Low (6GB), 4 Balanced (8GB), 5 High (12GB), 6 Ultra (16GB+)
     int vram_mb = 0;      // dynamic texture cache budget limit in MB
     int mirror_mb = 0;    // staging mirror limit in MB
     int audio_output = 0; // (hookshot) the speakers the game mixes for: 0 Auto (the default output's), 1 Stereo, 2 5.1; read once, at the start (host/nn_audio.c; HOS_AUDIO_CHANNELS)

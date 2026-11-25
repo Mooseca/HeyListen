@@ -134,7 +134,7 @@ enum MenuTab { TAB_CONTROLS, TAB_GRAPHICS };
 namespace ur { enum { kModels = 5 }; }   // (upscaler_rows.h: the DLSS model row's top, the last the CNN)
 static const char* tx_dlss_model(int) { return ""; }   // (stubs: the row's own, cut by the regex, only names them)
 static const char* hn_dlss_model(int, int) { return nullptr; }
-struct Options { int output_res = 0, resolution = 0, upscale = 0, dlss = 0, dlss_pre_bloom = 0, hdr = 0, dlss_model = 0, stick_dead_zone = 0, send_perf = 0, send_crash = 0, update_check = 1, vsync = 0, vsync_mode = 1, vrr = 0, lowend = 0; } opts;
+struct Options { int output_res = 0, resolution = 0, upscale = 0, dlss = 0, dlss_pre_bloom = 0, hdr = 0, dlss_model = 0, stick_dead_zone = 0, send_perf = 0, send_crash = 0, update_check = 1, vsync = 0, vsync_mode = 1, vrr = 0, preset = 0, sharpness = 0, pace = 0, realtime = 0, handheld = 0, fog = 0; } opts;
 static bool saved_hdr_ours;   // (menu_init's: the HDR row saved as the old fourth value)
 static bool dlss_model_saved;   // (vk_menu.cpp's, set by menu_init's loop when the file has a dlss_model line: menu_first_run_model)
 bool telemetry_available() { return true; }   // (heylisten: the two telemetry rows' availability, perf_report.cpp)

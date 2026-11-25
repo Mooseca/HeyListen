@@ -59,42 +59,25 @@ int main() {
         expect(ini_put_text("resolution_x=1\r\nlast=2", keys).rfind("resolution_x=1\r\nlast=2\r\nresolution=6\r\n", 0) == 0,
                "a key that only starts the same is not the key; a last line without its ending gets the file's");
     }
-    {   // (the Low-end settings row: On sets the three rows and keeps theirs from before, Off puts them back; other lines and endings stay)
-        const std::vector<std::pair<std::string, int>> on = {{"resolution", kResolution}, {"handheld_profile", kHandheld},
-                                                             {"volumetric_fog", kFog}, {"lowend_settings", 1},
-                                                             {"lowend_prev_resolution", 4}, {"lowend_prev_handheld_profile", 0},
-                                                             {"lowend_prev_volumetric_fog", 1}};
-        const std::vector<std::string> drop = {"lowend_prev_resolution", "lowend_prev_handheld_profile", "lowend_prev_volumetric_fog"};
-        const std::vector<std::pair<std::string, int>> off = {{"resolution", 4}, {"handheld_profile", 0}, {"volumetric_fog", 1},
-                                                              {"lowend_settings", 0}};
+    {   // (the Lowest preset's first start: the preset's line and the rows it sets in place, other lines and endings kept)
+        const std::vector<std::pair<std::string, int>> on = {{"quality_preset", 1}, {"resolution", kResolution}, {"handheld_profile", kHandheld},
+                                                             {"volumetric_fog", kFog}, {"options_version", 4}, {"lowend_rule", 1}};
         for (const char* eol : {"\r\n", "\n"}) {
             const std::string e = eol;
-            // the lines in the middle of the file, the row's own line there too, and lines after them that must not move
-            const std::string before = "a=1" + e + "resolution=4" + e + "handheld_profile=0" + e + "x=2" + e + "volumetric_fog=1" + e +
-                                       "lowend_settings=0" + e + "y=3" + e;
-            const std::string applied = ini_edit_text(before, on);
-            expect(applied == "a=1" + e + "resolution=6" + e + "handheld_profile=1" + e + "x=2" + e + "volumetric_fog=0" + e +
-                                  "lowend_settings=1" + e + "y=3" + e + "lowend_prev_resolution=4" + e +
-                                  "lowend_prev_handheld_profile=0" + e + "lowend_prev_volumetric_fog=1" + e,
-                   "On: the lines in place, the memory at the end");
-            expect(ini_edit_text(applied, off, drop) == before, "Off: exactly the earlier bytes, the memory gone");
-            expect(ini_edit_text(ini_edit_text(applied, off, drop), on) == applied, "On, Off, On: as the first On");
-            // the first start's marker stays after Off: never again by itself
-            const std::string marked = ini_edit_text(applied, {{"lowend_rule", 1}});
-            expect(ini_edit_text(marked, off, drop).find("lowend_rule=1") != std::string::npos, "Off keeps the first start's marker");
+            const std::string before = "a=1" + e + "resolution=0" + e + "options_version=3" + e + "handheld_profile=0" + e + "x=2" + e;
+            expect(ini_put_text(before, on) == "a=1" + e + "resolution=6" + e + "options_version=4" + e + "handheld_profile=1" + e + "x=2" + e +
+                                                   "quality_preset=1" + e + "volumetric_fog=0" + e + "lowend_rule=1" + e,
+                   "the rows in place (the version too), the others at the end, the file's endings");
         }
-        {   // (a row the file never had: Off writes its value from before, the default, explicitly)
-            const std::string r = ini_edit_text(ini_edit_text("a=1\n", on), off, drop);
-            expect(r == "a=1\nresolution=4\nhandheld_profile=0\nvolumetric_fog=1\nlowend_settings=0\n", "Off with lines the file never had");
-        }
-        expect(ini_edit_text("lowend_prev_x=1\nlowend_prev_resolution=1", {}, drop) == "lowend_prev_x=1\n", "drop: whole keys only");
-        // (a row the player changed by hand since keeps his value; a row still at the rule's value goes back)
-        expect(restore_value(6, kResolution, 4) == 4, "Off: the resolution still at the rule's value goes back");
-        expect(restore_value(3, kResolution, 4) == 3, "Off: a resolution the player changed since stays his");
-        expect(restore_value(1, kHandheld, 0) == 0 && restore_value(0, kHandheld, 1) == 0, "handheld: back if at the rule's value, else his");
-        expect(restore_value(0, kFog, 1) == 1 && restore_value(1, kFog, 0) == 1, "fog: back if at the rule's value, else his");
-        expect(kOff == 0 && kOn == 1, "the row's values: Off 0 (the default), On 1");
     }
+    // (the Quality preset's numbers: a file from before version 4 has Minimum to Ultra at 1 to 5; the old Low-end settings row On is Lowest)
+    expect(migrate_preset(3, 0, false) == 0, "Custom stays Custom");
+    expect(migrate_preset(3, 1, false) == 2 && migrate_preset(3, 3, false) == 4 && migrate_preset(3, 5, false) == 6, "Minimum, Balanced, Ultra move up one");
+    expect(migrate_preset(0, 2, false) == 3, "a file with no version is the old numbering too");
+    expect(migrate_preset(4, 1, false) == 1 && migrate_preset(4, 6, false) == 6, "version 4: as saved (1 is Lowest)");
+    expect(migrate_preset(3, 0, true) == kLowestPreset && migrate_preset(3, 4, true) == kLowestPreset && migrate_preset(4, 0, true) == kLowestPreset,
+           "the old row On: the Lowest preset, whatever the file's preset was");
+    expect(migrate_preset(3, 9, false) == kPresets, "a number past the list stops at the last");
     if (failures) return 1;
     std::printf("lowend_rule: all checks passed\n");
     return 0;

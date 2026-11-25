@@ -92,8 +92,7 @@ int dlss_fg_most() { return 0; }
 bool dlss_built() { return false; }
 bool fsr4fg_offered() { return false; }
 void mic_chosen() {}
-[[maybe_unused]] static bool lowend_touched;   // (the Low-end settings row: vk_menu.cpp)
-void lowend_row_changed() {}
+[[maybe_unused]] static bool lowend_touched;   // (the Lowest preset's measure: vk_menu.cpp)
 // (set_row steps the Output row through vk_menu.cpp's step_output_choice (#1144): not what this checks)
 int step_output_choice(int id, int dir) { return id + dir; }
 %(set_row)s

@@ -1,7 +1,7 @@
 // Copyright (C) 2026 Sacrappy
-// Low-end GPUs: the volumetric fog's programs (the Volumetric fog row, vk_draw.cpp dispatch), the first-start rule that gives an
-// integrated GPU without mesh shaders Render resolution 33%, the handheld profile and the fog off (vk_menu.cpp
-// menu_first_run_lowend), and the VRAM mirror in place of the present's wait on AMD's (vk_memory.cpp mirror_on, vk_replay.cpp).
+// Low-end GPUs: the volumetric fog's programs (the Volumetric fog row, vk_draw.cpp dispatch), the Lowest quality preset's rows (Render
+// resolution 33%, the handheld profile, the fog off: vk_menu.cpp apply_preset) and the first-start measure that chooses it
+// (menu_first_run_lowend), and the VRAM mirror in place of the present's wait on AMD's (vk_memory.cpp mirror_on, vk_replay.cpp).
 // tests/test_lowend_rule.py; the measures: docs/research/lowend-laptop.md
 #pragma once
 #include <cstdint>
@@ -39,12 +39,10 @@ inline bool mirror_not_wait(uint32_t vendor_id, bool integrated, bool mesh_shade
     return vendor_id == 0x1002 && lowend_gpu(integrated, mesh_shader);
 }
 
-/// The options file's text with these keys' lines set to these values and these keys' lines taken out, every other line kept as it
-/// is, in its place and with its own line ending; keys not there yet added at the end. The file's line ending (CRLF if any line has
-/// one, else LF) is used for the lines written: an options file edited on Windows kept CRLF (the laptop's) and the rule's first
-/// version turned all of it to LF
-inline std::string ini_edit_text(const std::string& in, const std::vector<std::pair<std::string, int>>& keys,
-                                 const std::vector<std::string>& drop = {}) {
+/// The options file's text with these keys' lines set to these values, every other line kept as it is, in its place and with its
+/// own line ending; keys not there yet added at the end. The file's line ending (CRLF if any line has one, else LF) is used for the
+/// lines written: an options file edited on Windows kept CRLF (the laptop's) and the rule's first version turned all of it to LF
+inline std::string ini_put_text(const std::string& in, const std::vector<std::pair<std::string, int>>& keys) {
     const std::string eol = in.find("\r\n") != std::string::npos ? "\r\n" : "\n";
     std::string out;
     std::vector<bool> done(keys.size());
@@ -54,15 +52,13 @@ inline std::string ini_edit_text(const std::string& in, const std::vector<std::p
         std::string body = in.substr(at, (end == std::string::npos ? in.size() : end) - at);
         if (!body.empty() && body.back() == '\r') body.pop_back();
         const size_t eq = body.find('=');
-        bool replaced = false, dropped = false;
+        bool replaced = false;
         for (size_t i = 0; eq != std::string::npos && i < keys.size(); i++)
             if (!done[i] && eq == keys[i].first.size() && body.compare(0, eq, keys[i].first) == 0) {
                 out += keys[i].first + "=" + std::to_string(keys[i].second) + eol;
                 done[i] = replaced = true;
             }
-        for (size_t i = 0; eq != std::string::npos && !replaced && i < drop.size(); i++)
-            if (eq == drop[i].size() && body.compare(0, eq, drop[i]) == 0) dropped = true;
-        if (!replaced && !dropped) {
+        if (!replaced) {
             out.append(in, at, next - at);
             if (end == std::string::npos) out += eol;
         }
@@ -72,25 +68,28 @@ inline std::string ini_edit_text(const std::string& in, const std::vector<std::p
         if (!done[i]) out += keys[i].first + "=" + std::to_string(keys[i].second) + eol;
     return out;
 }
-inline std::string ini_put_text(const std::string& in, const std::vector<std::pair<std::string, int>>& keys) {
-    return ini_edit_text(in, keys);
-}
 
-/// The Low-end settings row (opts.lowend, the options file's lowend_settings): On sets the three rows (kResolution, kHandheld, kFog) and
-/// remembers their values from before in the options file, one line each (kPrevPrefix + the row's key); Off puts them back. The
-/// first start on a low-end GPU turns it On once (lowend_rule=1 stays in the file after that: never again by itself)
-constexpr int kOff = 0, kOn = 1;
+/// The options file's lines of the Low-end settings row of a build of 25 Nov (lowend_settings, and lowend_prev_ + a row's key): the
+/// row is the Quality preset's Lowest entry now (vk_menu.cpp apply_preset case 1); menu_init reads lowend_settings=1 as that preset once
+/// and save() drops the lines
 constexpr const char* kPrevPrefix = "lowend_prev_";
-/// Off puts a row back only if it still holds the value the rule gave it: a row the player changed by hand since is his
-inline int restore_value(int current, int rule_value, int previous) { return current == rule_value ? previous : current; }
+/// The Quality preset an options file means (preset: its quality_preset line as the menu read it, clamped; saved: the raw number;
+/// version: options_version; old_row: lowend_settings=1). Before version 4 Minimum to Ultra were 1 to 5 and are 2 to 6 now (Lowest
+/// is 1); a file with the old row On is the Lowest preset, its rows kept as they are
+constexpr int kLowestPreset = 1, kPresets = 6;
+inline int migrate_preset(int version, int saved, bool old_row) {
+    if (old_row) return kLowestPreset;
+    if (version < 4 && saved > 0) return saved + 1 > kPresets ? kPresets : saved + 1;
+    return saved;
+}
 
 enum Apply { NONE, PROBE, APPLY_THIS_RUN };
 /// The first-start question (HeyListen: not "integrated and no mesh shaders": a Steam Deck or a Radeon 780M is integrated and strong).
 /// env is HL_LOWEND (-1 unset; 0 never; 1 the rule's settings now, for this run only: nothing saved), marked whether the options file
 /// already has the rule's line (lowend_rule=: the question was asked once, by the measure or by this rule, and is never asked again),
-/// integrated the GPU's kind (a discrete GPU is never asked), untouched that the player has not set the Low-end settings row or the
-/// three rows (Render resolution, Volumetric fog, Handheld profile) or the Quality preset. PROBE: measure the frames of play
-/// (lowend_measure.h) and turn the row On if they are too slow
+/// integrated the GPU's kind (a discrete GPU is never asked), untouched that the player has not set the Quality preset or the rows
+/// its Lowest entry sets (Render resolution, Volumetric fog, Handheld profile, the Window scaling filter, Sharpness, the pacing and the
+/// game speed). PROBE: measure the frames of play (lowend_measure.h) and choose the Lowest preset if they are too slow
 inline Apply first_start(int env, bool marked, bool integrated, bool untouched) {
     if (env == 0) return NONE;
     if (env > 0) return APPLY_THIS_RUN;

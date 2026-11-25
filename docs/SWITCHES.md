@@ -10,7 +10,7 @@ python -I engine/scripts/list_switches.py
 
 and commit both files. A test (`engine/tests/test_switches_documented.py`) fails when a switch read in the source is missing here or the data file is out of date.
 
-1516 switches: 56 players may be told to use, 388 diagnostic, 1072 developer-only; 1297 have a real explanation and 219 are marked `undocumented`.
+1516 switches: 56 players may be told to use, 388 diagnostic, 1072 developer-only; 1298 have a real explanation and 218 are marked `undocumented`.
 
 ## How to set a switch
 
@@ -369,7 +369,7 @@ No frame generation whatever the menu says; over the options file: its multiplie
 
 **When a player would use it:** The upscaler causes artifacts: `=0` to `2` choose the filter for one run.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2764`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2745`.
 
 ### Frame generation
 
@@ -461,7 +461,7 @@ No frame generation whatever the menu says; over the options file: its multiplie
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2757`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2738`.
 
 #### `RX_VK_FRAMEGEN_RADIUS` - developer
 
@@ -583,7 +583,7 @@ Starts in fullscreen; the Insert menu's Fullscreen row is then left alone.
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2872` and 2 more places.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2853` and 2 more places.
 
 #### `HOS_HUD_FULL_RATIO` - developer
 
@@ -633,7 +633,7 @@ Over the options file: the output resolution (0 2048x1152, 1 2560x1440, 2 3840x2
 
 **When a player would use it:** The output resolution is wrong or the game starts at a size the screen cannot show: `0` to `4` pick a resolution for one run.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2769` and 1 more place.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2750` and 1 more place.
 
 #### `HOS_PRESENT_NOWAIT` - diagnostic
 
@@ -743,7 +743,7 @@ The Insert menu's HDR row for one run (the ini keeps the player's choice).
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2759`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2740`.
 
 #### `RX_VK_HDR_FIND` - developer
 
@@ -783,7 +783,7 @@ No frame generation whatever the menu says; over the options file: its multiplie
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2758`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2739`.
 
 #### `RX_VK_PRESENT_QUEUE` - diagnostic
 
@@ -843,7 +843,7 @@ The menu's button prompts for a controller or the keys, whatever was used last (
 
 **When a player would use it:** Screenshots need one set of button prompts: `pad` or `keys`.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:3042`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:3023`.
 
 #### `SDL_VIDEODRIVER` - diagnostic
 
@@ -2529,13 +2529,13 @@ The flash detector, with `RX_VK_SHOTS` and `RX_VK_SHOT_EVERY=1`: writes the fram
 
 #### `RX_VK_FOG` - developer
 
-undocumented: gpu/vk/vk_menu.cpp:2560 (in `fog_runs()`) reads it as an on/off switch: `const bool v = lowend_rule::fog_on(env_int("RX_VK_FOG"), opts.fog);`. No comment in the source says what it changes.
+undocumented: gpu/vk/vk_menu.cpp:2536 (in `fog_runs()`) reads it as an on/off switch: `const bool v = lowend_rule::fog_on(env_int("RX_VK_FOG"), opts.fog);`. No comment in the source says what it changes.
 
 **Values:** on or off (0, false, off, no and empty are off). **Default:** off (unset).
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2560` and 1 more place.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2536` and 1 more place.
 
 #### `RX_VK_FOG_BOXES` - developer
 
@@ -3075,7 +3075,7 @@ Timed Insert menu keys: `INS`, `UP`, `DOWN`, `LEFT`, `RIGHT`, `ESC`, `ENTER`, `T
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:3070`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:3051`.
 
 #### `RX_VK_METER_HOLD` - player
 
@@ -8757,13 +8757,13 @@ HL_MAINLOOP_CHECK=1: the loop's invariants are counted (each phase once a frame 
 
 #### `HL_LOWEND_FPS` - developer
 
-Not asked if you changed the row, the three rows or the Quality preset. `HL_LOWEND=0` never measures, `HL_LOWEND=1` turns the row On for one run, `HL_LOWEND_FPS` changes the 20.
+Not asked if you had set the Quality preset or the rows it sets. `HL_LOWEND=0` never measures, `HL_LOWEND=1` chooses the preset for one run, `HL_LOWEND_FPS` changes the 20. An options file with the old Low-end settings row On (`lowend_settings=1`) reads as this preset.
 
 **Values:** a whole number (`0`, `1` in the description). **Default:** 0 (unset).
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2611`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2588`.
 
 #### `HL_STEP_SCAN` - developer
 
@@ -9313,23 +9313,23 @@ The native job system then runs the stage's work as one of its jobs, under the l
 
 #### `HL_LOWEND` - developer
 
-Not asked if you changed the row, the three rows or the Quality preset. `HL_LOWEND=0` never measures, `HL_LOWEND=1` turns the row On for one run, `HL_LOWEND_FPS` changes the 20.
+Not asked if you had set the Quality preset or the rows it sets. `HL_LOWEND=0` never measures, `HL_LOWEND=1` chooses the preset for one run, `HL_LOWEND_FPS` changes the 20. An options file with the old Low-end settings row On (`lowend_settings=1`) reads as this preset.
 
 **Values:** on or off (0, false, off, no and empty are off); the description names `0`, `1`. **Default:** off (unset).
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2616` and 1 more place.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2592` and 1 more place.
 
 #### `HL_LOWEND_TEST` - developer
 
-undocumented: gpu/vk/vk_menu.cpp:2600 (in `menu_first_run_lowend()`) reads it as a text value: `const char* test = getenv("HL_LOWEND_TEST"); "fps[,skip s,window s]": the measure runs on any GPU, with this rate in ...`. No comment in the source says what it changes.
+(HL_LOWEND_TEST: a test hook) The Lowest preset chosen, now (apply_preset: its rows and the memory limits), and the file written in place when save_it: only the lines of the rows the preset sets, the preset's own and the rule's (every other line stays as it is).
 
 **Values:** text. **Default:** unset.
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2600`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2577`.
 
 #### `HL_MATH` - developer
 
@@ -9795,7 +9795,7 @@ The Frame rate limit for the run, over the row and Unlimited: the rate presented
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2776` and 2 more places.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2757` and 2 more places.
 
 #### `HOS_FPS_LOOP` - developer
 
@@ -10543,7 +10543,7 @@ Over the options file: Resolution 100% (non-zero: Auto), Game speed Per frame (1
 
 **When a player would use it:** The dynamic resolution makes the picture soft: `=0` holds 100% for one run.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2768`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2749`.
 
 #### `HOS_EVENT_FAST` - developer
 
@@ -10873,7 +10873,7 @@ To enable the debug tools, turn **Debug tools** on in the menu's Debug tab (or a
 
 **When a player would use it:** The Debug tab's tools should show without turning them on in the menu.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2677`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2653`.
 
 #### `HOS_OOT_PROTECT_HEARTS` - developer
 
@@ -10883,7 +10883,7 @@ To enable the debug tools, turn **Debug tools** on in the menu's Debug tab (or a
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2680` and 1 more place.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2656` and 1 more place.
 
 #### `HOS_OOT_TELEPORT_EVENT` - developer
 
@@ -10983,7 +10983,7 @@ Over the options file: Resolution 100% (non-zero: Auto), Game speed Per frame (1
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2767`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2748`.
 
 #### `HOS_RESTART_OF` - developer
 
