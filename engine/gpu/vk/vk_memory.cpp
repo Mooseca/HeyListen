@@ -7731,7 +7731,7 @@ void retired_imports_give_back() {   // (pools_mu held)
             if (p.memory) lr.push_back({p.lo, p.hi});
         for (size_t i : retired_bound::plan(bcands, lr, retired_bytes, mirror_epoch, bnd.cfg)) {
             Pool& p = *bpools[i];
-            DeadImport d{p.buffer, p.memory, std::max(mem_rec_value, p.last_value), p.hi - p.lo, std::move(p.pieces)};
+            DeadImport d{p.buffer, p.memory, std::max(rec_value_of(), p.last_value), p.hi - p.lo, std::move(p.pieces)};
             d.lo = p.lo;
             d.not_before = mirror_epoch + bnd.flight;   // (a few frames after the GPU is done with it, whatever mem_completed says)
             dead_imports.push_back(std::move(d));
