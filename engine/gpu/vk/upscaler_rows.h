@@ -77,7 +77,10 @@ inline bool migrate(int& upscaler, int& resolution) {
 /// Performance and Ultra Performance; Auto too, since DLSS follows the game's dynamic size (vk_dlss.cpp makes its feature again
 /// when the size leaves the mode's range; FSR 4's context takes any size up to the output). FSR 4 the same, its native
 /// choice being its Native AA. FSR 3.1: the modes alone
-constexpr int kGameSteps[] = {0, 1, 2, 3, 4};
+// (HeyListen, LAPTOP1) The game's own and Off go down to 33% too: on a Ryzen 7 5700U's Vega 8 (no cooperative matrices: our
+// TAAU stand-in draws in the network's place) and on an RTX 5070 with the game's network (HOS_RES_SCALE=0.25: the picture
+// right) a share under 50% draws and upscales right (docs/research/lowend-laptop.md)
+constexpr int kGameSteps[] = {0, 1, 2, 3, 4, 6};
 constexpr int kDlssSteps[] = {0, 3, 5, 4, 6};
 constexpr int kNativeSteps[] = {0, kNativeAa, 3, 5, 4, 6};
 inline const int* steps(int upscaler, int& n) {

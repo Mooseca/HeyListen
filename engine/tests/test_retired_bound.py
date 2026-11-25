@@ -13,9 +13,9 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def check_source():
     src = (ROOT / "gpu/vk/vk_memory.cpp").read_text(encoding="utf-8")
-    for needle in ('#include "retired_bound.h"', "retired_bound::plan(bcands, lr, retired_bytes, mirror_epoch, bnd.cfg)",
-                   'getenv("RX_VK_RETIRED_BOUND_MB")', "d.not_before = mirror_epoch + bnd.flight;",
-                   "mirror_epoch >= dead_imports.front().not_before", "old->retired_seq = mirror_epoch;",
+    for needle in ('#include "retired_bound.h"', "retired_bound::plan(bcands, lr, retired_bytes, rec_epoch(), bnd.cfg)",
+                   'getenv("RX_VK_RETIRED_BOUND_MB")', "d.not_before = rec_epoch() + bnd.flight;",
+                   "rec_epoch() >= dead_imports.front().not_before", "old->retired_seq = rec_epoch();",
                    "uint64_t retired_emergency_free(uint64_t need) {", 'getenv("RX_VK_IMPORT_EMERGENCY")',
                    "import_forget_failure(lo, hi);", 'getenv("RX_VK_RETIRE_STRESS")', "    retire_stress();", 'getenv("RX_VK_IMPORT_REFUSE_MB")',
                    "st_pinned.fetch_add((int64_t)bytes);", "pinned_sub(dead_imports.front().bytes);"):

@@ -457,12 +457,20 @@ VkCommandBuffer upload_cmd() {
 // command buffers), and the queue reached that use with the image UNDEFINED (VUID-vkCmdDraw-None-09600, RX_VK_PARALLEL
 // only). The change goes to the init command buffer of the earliest segment still being recorded instead: those before
 // it were done before the image was made, so never used it, and each segment's init is submitted before its uploads.
+}  // namespace
 struct SegInit {
     VkCommandBuffer cmd = VK_NULL_HANDLE;
     bool used = false, open = false;
 };
-std::mutex seg_init_mu;
-std::vector<SegInit> seg_inits;    // (the submission's segments, in queue order; seg_init_mu)
+/// One big command buffer's segments' init command buffers (stream REC1). Made by texture_segments_begin for each group of segments and
+/// held by the group (the jobs and the join) and by each worker while it records one of them: a later group's table is another object,
+/// so a recording that begins while workers still record the last one does not replace what they index
+struct SegTable {
+    std::mutex mu;
+    std::vector<SegInit> inits;   // (the group's segments, in queue order; mu)
+};
+namespace {
+thread_local SegTable* tl_seg_table = nullptr;   // (the table of the group this thread records a segment of)
 thread_local int tl_seg_index = -1;   // (the segment this thread records; -1: none)
 /// While it lives, upload_cmd() is the earliest open segment's init command buffer (a segment's worker only)
 struct InitRedirect {
@@ -471,10 +479,11 @@ struct InitRedirect {
     VkCommandBuffer saved_cmd = VK_NULL_HANDLE;
     bool saved_used = false;
     explicit InitRedirect(bool want = true) {
-        if (!want || tl_seg_index < 0) return;
-        lk = std::unique_lock<std::mutex>(seg_init_mu);
-        for (int i = 0; i <= tl_seg_index && i < (int)seg_inits.size(); i++)
-            if (seg_inits[i].open) { to = &seg_inits[i]; break; }
+        if (!want || tl_seg_index < 0 || !tl_seg_table) return;
+        lk = std::unique_lock<std::mutex>(tl_seg_table->mu);
+        const std::vector<SegInit>& inits = tl_seg_table->inits;
+        for (int i = 0; i <= tl_seg_index && i < (int)inits.size(); i++)
+            if (inits[i].open) { to = &tl_seg_table->inits[i]; break; }
         if (!to) { lk.unlock(); return; }   // (none open: its own is, while it records)
         saved_cmd = up_cmd, saved_used = up_used;
         up_cmd = to->cmd, up_used = to->used;
@@ -2553,6 +2562,13 @@ bool upload_inner(Texture& tex, const Ranges* dirty) {
     // (depth-stencil: the depth aspect only; packed D24S8 storage is not copied into it as is: such targets are
     // rendered, not uploaded)
     if (tex.aspect == (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT)) return false;
+    if (tex.shrink && tex.image) {   // (RX_VK_SHADOW_SHIFT: its guest storage is another size's; the game clears the map before it draws it)
+        texture_resident_flush(&tex);
+        const VkImageSubresourceRange range{tex.aspect, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS};
+        const VkClearDepthStencilValue z{0.0f, 0};
+        vkCmdClearDepthStencilImage(upload_cmd(), tex.image, VK_IMAGE_LAYOUT_GENERAL, &z, 1, &range);
+        return true;
+    }
     st_uploads++;
     {   // RX_VK_LOG_UPLOADS=<present>: the uploads from that present on (200 of them; what churns)
         static const int64_t from = getenv("RX_VK_LOG_UPLOADS") ? atoll(getenv("RX_VK_LOG_UPLOADS")) : -1;
@@ -2967,6 +2983,18 @@ Texture* create(const Key& key, const nvn_tex* t, VkFormat vf, bool astc, int bw
     const nvn_texdesc& d = t->d;
     x.width = std::max(1u, d.width);
     x.height = std::max(1u, d.height);
+    {   // (RX_VK_SHADOW_SHIFT=<1..3>, a quality option, off by default: the game's sun shadow map, a square depth-only 2D image of 8192
+        // texels or more (12288 x 12288 D16, 288 MB), is made 2^n times smaller in each direction. The guest still addresses it
+        // at its own size: draw.cpp's viewport, scissor and clears shrink with it, and no upload goes into it)
+        static const uint32_t shift = getenv("RX_VK_SHADOW_SHIFT") ? (uint32_t)std::clamp(atoi(getenv("RX_VK_SHADOW_SHIFT")), 0, 3) : 0u;
+        if (shift && depth && x.aspect == VK_IMAGE_ASPECT_DEPTH_BIT && d.target == NVN_TEXTURE_TARGET_2D && d.width == d.height &&
+            d.width >= 8192 && d.samples <= 1 && d.depth <= 1) {
+            x.shrink = shift;
+            x.width = std::max(1u, x.width >> shift), x.height = std::max(1u, x.height >> shift);
+            static int told;
+            if (told++ < 4) logf("vk: shadow map %ux%u made %ux%u (RX_VK_SHADOW_SHIFT=%u)", d.width, d.height, x.width, x.height, shift);
+        }
+    }
     switch (d.target) {
     case NVN_TEXTURE_TARGET_1D: x.type = VK_IMAGE_TYPE_1D, x.height = 1; break;
     case NVN_TEXTURE_TARGET_1D_ARRAY: x.type = VK_IMAGE_TYPE_1D, x.layers = std::max(1u, d.height), x.height = 1; break;
@@ -5447,18 +5475,20 @@ void texture_set_segment(uint64_t seg) {
 uint64_t texture_segment() {
     return tl_seg;
 }
-void texture_segments_begin(const VkCommandBuffer* init_cmds, size_t n) {
-    std::lock_guard lk(seg_init_mu);
-    seg_inits.assign(n, SegInit{});
-    for (size_t i = 0; i < n; i++) seg_inits[i].cmd = init_cmds[i], seg_inits[i].open = true;
+SegTableRef texture_segments_begin(const VkCommandBuffer* init_cmds, size_t n) {
+    auto t = std::make_shared<SegTable>();
+    t->inits.assign(n, SegInit{});
+    for (size_t i = 0; i < n; i++) t->inits[i].cmd = init_cmds[i], t->inits[i].open = true;
+    return t;
 }
-void texture_segment_worker(int index) {
+void texture_segment_worker(const SegTableRef& table, int index) {
+    tl_seg_table = table.get();
     tl_seg_index = index;
 }
-int texture_segment_end(int index) {
-    std::lock_guard lk(seg_init_mu);
-    if (index < 0 || index >= (int)seg_inits.size()) return 0;
-    SegInit& s = seg_inits[index];
+int texture_segment_end(SegTable& table, int index) {
+    std::lock_guard lk(table.mu);
+    if (index < 0 || index >= (int)table.inits.size()) return 0;
+    SegInit& s = table.inits[index];
     s.open = false;   // (no new image's change goes to it from here: it is ended)
     if (s.used) full_barrier(s.cmd);   // (before its uploads and its commands)
     if (vkEndCommandBuffer(s.cmd) != VK_SUCCESS) return s.used ? -1 : 0;
