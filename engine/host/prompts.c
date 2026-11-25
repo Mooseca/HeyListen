@@ -993,11 +993,14 @@ static int text_code(unsigned c, int face, const int *bind) {   /* the code that
    screen again (a hint bar, a menu's tabs), so a change while it is shown reaches them from this table: each is looked at
    again (its class and its status pointer as they were: a box gone is let be; its text whatever it is now) and laid out anew */
 #define BOXES 256
-typedef struct { uint64_t box, text, status, vtable; uint32_t len; } SeenBox;
+typedef struct { uint64_t box, text, status, vtable; uint32_t len; uint8_t pend; int64_t last; } SeenBox;   /* (pend: rewritten at a change, to be laid out again once drawn) */
 static SeenBox seen_box[BOXES];
 static int seen_n, seen_next;
 static SRWLOCK seen_lock = SRWLOCK_INIT;
 static volatile LONG calls_layout, calls_draw, ret_text, ret_codes, boxes_told;
+static volatile LONG boxes_relaid;
+static volatile LONG pending_n;   /* (boxes rewritten at a change and not drawn since: a box hidden then is laid out hidden, its glyphs never made) */
+static volatile int64_t pending_until;   /* (hos_now_ns: the others are let go) */
 static volatile int64_t watch_at;   /* (hos_now_ns: when to say what the hooks saw since the last change) */   /* (hook calls, boxes with no text, with no codes: said at each change) */
 
 /* the box's text and length; NULL for a box without a readable text */
@@ -1032,7 +1035,7 @@ static void box_note(uint64_t box, uint64_t text, uint32_t len, const uint8_t *s
         k = seen_n < BOXES ? seen_n++ : (seen_next++ % BOXES);
         fresh = 1;
     }
-    seen_box[k].box = box, seen_box[k].text = text, seen_box[k].len = len, seen_box[k].status = status, seen_box[k].vtable = vtable;
+    seen_box[k].box = box, seen_box[k].text = text, seen_box[k].len = len, seen_box[k].status = status, seen_box[k].vtable = vtable, seen_box[k].pend = 0;
     ReleaseSRWLockExclusive(&seen_lock);
     if (fresh && boxes_told < 60) {   /* (what has button codes: the first boxes, for a bar that never follows) */
         InterlockedIncrement(&boxes_told);
@@ -1100,6 +1103,45 @@ static void mark_box(uint64_t box, uint32_t bits) {
     if (word) *word |= bits & word[1];
 }
 
+/* (the boxes known, as they are 1.5 s after a change: their codes and the words that say whether the game draws them) */
+static void boxes_dump(void) {
+    SeenBox copy[BOXES];
+    int n;
+    AcquireSRWLockExclusive(&seen_lock);
+    n = seen_n < 24 ? seen_n : 24;
+    memcpy(copy, seen_box, sizeof(seen_box[0]) * (size_t)n);
+    ReleaseSRWLockExclusive(&seen_lock);
+    for (int k = 0; k < n; k++) {
+        uint64_t at;
+        uint32_t len;
+        const uint8_t *s = box_text(copy[k].box, &at, &len);
+        const uint32_t *w = (const uint32_t *)hos_guest_range(copy[k].box + 380, 8);
+        const uint64_t *st = (const uint64_t *)hos_guest_range(copy[k].box + 8, 8);
+        const uint32_t *sw = st && *st ? (const uint32_t *)hos_guest_range(*st, 8) : NULL;
+        hos_log("prompts: box %#llx: text %#llx %u bytes, code %s%02X%02X%02X, +380 %#x +384 %#x, status %#x of %#x", (unsigned long long)copy[k].box,
+                (unsigned long long)at, len, s && len >= 3 ? "" : "none ", s ? s[0] : 0, s ? s[1] : 0, s ? s[2] : 0, w ? w[0] : 0, w ? w[1] : 0, sw ? sw[0] : 0,
+                sw ? sw[1] : 0);
+    }
+}
+
+/* the box is drawn: for 20 s after a change, a box it rewrote is laid out again every 250 ms it is drawn. A box that was hidden at
+   the change was laid out hidden (no glyphs made), and would be drawn with none when it is shown */
+static void box_drawn(uint64_t box) {
+    int mark = 0;
+    AcquireSRWLockExclusive(&seen_lock);
+    for (int k = 0; k < seen_n; k++)
+        if (seen_box[k].box == box) {
+            const int64_t now = hos_now_ns();
+            if (seen_box[k].pend && now - seen_box[k].last >= 250000000) seen_box[k].last = now, mark = 1;   /* (a box shown later is laid out within 250 ms of it) */
+            break;
+        }
+    ReleaseSRWLockExclusive(&seen_lock);
+    if (mark) {
+        InterlockedIncrement(&boxes_relaid);
+        mark_box(box, 0x20000 | 0x100000);
+    }
+}
+
 /* a change while the game runs (live_font, the font and the codes' tables already changed): every box seen and still as it was
    is rewritten and laid out anew; returns how many it rewrote, and in *looked how many were still there */
 static int boxes_rewrite(int *looked) {
@@ -1122,6 +1164,9 @@ static int boxes_rewrite(int *looked) {
         if (box_rewrite(copy[k].box, 0)) {
             mark_box(copy[k].box, 0x20000 | 0x100000);
             done++;
+            AcquireSRWLockExclusive(&seen_lock);   /* (laid out again when it is next drawn too: see box_drawn) */
+            if (seen_box[k].box == copy[k].box) seen_box[k].pend = 1, seen_box[k].last = 0;
+            ReleaseSRWLockExclusive(&seen_lock);
         }
     }
     return done;
@@ -1139,6 +1184,7 @@ void hos_prompts_text_draw(uint64_t box) {
     static int first = 1;
     if (first) first = 0, hos_log("prompts: the first text box drawn since the start (box %#llx)", (unsigned long long)box);
     InterlockedIncrement(&calls_draw);
+    if (pending_n) box_drawn(box);
     if (text_rewrite(box)) mark_box(box, 0x20000 | 0x100000);
 }
 
@@ -1205,6 +1251,8 @@ static int live_font(const char *dir, int face) {
                 (long)InterlockedExchange(&text_rewritten, 0), (long)InterlockedExchange(&calls_layout, 0), (long)InterlockedExchange(&calls_draw, 0),
                 (long)InterlockedExchange(&ret_text, 0), (long)InterlockedExchange(&ret_codes, 0), seen_n, looked, now);
         watch_at = hos_now_ns() + 1500000000;
+        pending_until = hos_now_ns() + 20000000000LL;
+        pending_n = 1;
     } else if (q) {
         hos_log("prompts: the font is no longer where FreeType read it: the icons in texts at the next start");
     }
@@ -1318,10 +1366,17 @@ void hos_prompts_live(void) {
     const int64_t now = hos_now_ns();
     if (now - last >= 100000000) {
         last = now;
+        if (pending_n && now >= pending_until) {   /* (the boxes not drawn since the change: let go) */
+            AcquireSRWLockExclusive(&seen_lock);
+            for (int k = 0; k < seen_n; k++) seen_box[k].pend = 0;
+            ReleaseSRWLockExclusive(&seen_lock);
+            pending_n = 0;
+        }
         if (watch_at && now >= watch_at) {   /* (a change's aftermath: do the hooks see the boxes laid out again?) */
             watch_at = 0;
-            hos_log("prompts: 1.5 s after the change: %ld layouts and %ld draws of boxes, %ld texts looked at, %ld rewritten by the hooks", (long)calls_layout,
-                    (long)calls_draw, (long)text_seen, (long)text_rewritten);
+            boxes_dump();
+            hos_log("prompts: 1.5 s after the change: %ld layouts and %ld draws of boxes, %ld texts looked at, %ld rewritten by the hooks, %ld boxes laid out again when drawn (%ld waiting)", (long)calls_layout,
+                    (long)calls_draw, (long)text_seen, (long)text_rewritten, (long)boxes_relaid, (long)pending_n);
         }
         find_layouts();
         {   /* (what the menu's row may promise: it asks for a restart when a part is not found: HL_OPT_PROMPTS_LIVE) */

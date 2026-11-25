@@ -346,6 +346,8 @@ typedef int SRWLOCK;
 #define HOS_PROMPT_N 6
 #define BINDS 32
 static LONG InterlockedIncrement(volatile LONG *p) { return ++*p; }
+static int64_t now_ns;
+static int64_t hos_now_ns(void) { return now_ns; }
 static void AcquireSRWLockExclusive(SRWLOCK *l) { (void)l; }
 static void ReleaseSRWLockExclusive(SRWLOCK *l) { (void)l; }
 static int logs;
@@ -394,6 +396,23 @@ int main(void) {
     memcpy(window + 0x4800, "x \xEE\x81\x80", 6);
     *(uint32_t *)(window + 0x3000) = 0;
     CHECK(boxes_rewrite(&looked) == 0 && looked == 0 && !memcmp(window + 0x4800, "x \xEE\x81\x80", 6) && *(uint32_t *)(window + 0x3000) == 0);
+    /* a box rewritten at a change is laid out again as it is drawn within 20 s: every 250 ms, for one hidden then shown */
+    *(uint64_t *)(window + 0x2000) = 0;   /* (its class as it was) */
+    *(uint64_t *)(window + 0x2000 + 0xf0) = 0x4000;
+    memcpy(window + 0x4000, "Back \xEE\x81\x80", 8);
+    *(uint32_t *)(window + 0x2000 + 0x124) = 8;
+    CHECK(boxes_rewrite(&looked) == 1 && seen_box[0].pend == 1);
+    *(uint32_t *)(window + 0x3000) = 0;
+    now_ns = 1000000000;
+    box_drawn(0x2000);
+    CHECK((*(uint32_t *)(window + 0x3000) & 0x120000) == 0x120000 && boxes_relaid == 1);
+    *(uint32_t *)(window + 0x3000) = 0;
+    now_ns += 100000000;
+    box_drawn(0x2000);
+    CHECK(*(uint32_t *)(window + 0x3000) == 0);   /* (not within 250 ms) */
+    now_ns += 200000000;
+    box_drawn(0x2000);
+    CHECK((*(uint32_t *)(window + 0x3000) & 0x120000) == 0x120000 && boxes_relaid == 2);
     /* more boxes than the table holds: the oldest entry's place is taken, the table never grows past it */
     for (int i = 0; i < BOXES + 5; i++) {
         make(0x10000 + (uint64_t)i * 0x200, 0x3200, 0x7000 + (uint64_t)i * 0x10, "a \xEE\x81\x80", 6);
