@@ -115,7 +115,7 @@ bool rbclass_check(int) { return false; }
 // (STEP1, HL_RB_LAG: the readback ring stages no range in the model, so every written binding queues its write-back)
 bool rbring_stage_bind(uint64_t, uint64_t, VkBuffer, uint64_t, int) { return false; }
 // (ORDER2, RX_VK_RB_EARLY: no range is served early in the model; the binding's copy request does nothing)
-void rbearly_bind(uint64_t, uint64_t, VkBuffer, uint64_t) {}
+bool rbearly_bind(uint64_t, uint64_t, VkBuffer, uint64_t) { return false; }
 // (EXPO1's test switch HL_RB_TEST_DIRECT: unset in the model, so no binding goes to guest memory on purpose)
 bool rbring_test_direct(uint64_t, uint64_t) { return false; }
 // (CRASH3: a bare entry's guessed head, RX_VK_WB_GUESS_CHECKED: in the model a written binding like any other)

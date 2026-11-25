@@ -7308,6 +7308,7 @@ BufferRef gpu_buffer_bind(uint64_t gpu, uint64_t size, bool written) {
     if (written && size == 0x3980) ot_note_r4_writer();   // (FLASH2: the culling results' writer's place in its frame, for the order thread's precise wait)
     if (written && (size == 0x3980 || size == 0x9b040 || size == 0x8b040 || size == 0x44b040 || size == 0x1b580))
         r4map_note_write(gpu >= (1ull << 40) ? host->gpu_guest(gpu) : gpu, size);   // (ORDER2, RX_VK_ORDER_R4_MAP: logging only)
+    if (written) rbearly_note_written(gpu >= (1ull << 40) ? host->gpu_guest(gpu) : gpu, size);   // (ORDER2, RX_VK_RB_EARLY: an overlap taints a served range)
     if (written && rbwho_on()) rbwho_write(gpu >= (1ull << 40) ? host->gpu_guest(gpu) : gpu, size);
     if (cap_only_gpu()) cap_excl_note(gpu, size, written ? "a buffer binding (written)" : "a buffer binding", __builtin_return_address(0));
     // (below 1 TB a GPU address is the guest address itself, and a pool holds the whole range or nothing: the host's
@@ -7455,8 +7456,9 @@ BufferRef gpu_buffer_bind(uint64_t gpu, uint64_t size, bool written) {
         // (CRASH3) a guessed range: guest memory as the mirror's sync just took it, for its checked write-back
         if (tl_bind_guess && wb_guess_checked_on()) guess_snap_take(p, off, std::min(off + size, p->hi - p->lo));
         // (STEP1, HL_RB_LAG) a range the CPU reads back that the readback ring stages: no write-back, the submission's end copies it
-        rbearly_bind(guest, size, p->mirror, off);   // (ORDER2, RX_VK_RB_EARLY: a served range's copy behind this binding's dispatch)
-        if ((!wb_max || size <= wb_max) && !rbring_stage_bind(guest, size, p->mirror, off, lists().rb))
+        // (ORDER2, RX_VK_RB_EARLY) a served range's copy behind this binding's dispatch: its write-back is left out (the reads write it)
+        const bool early = rbearly_bind(guest, size, p->mirror, off);
+        if (!early && (!wb_max || size <= wb_max) && !rbring_stage_bind(guest, size, p->mirror, off, lists().rb))
             lists().writebacks.push_back({p, off, std::min(off + size, p->hi - p->lo), tl_bind_guess && wb_guess_checked_on()});
         diff_gpu_wrote(p->lo + off, std::min(off + size, p->hi - p->lo) - off);   // (TICK-048)
         rb_hazard_locked(p->lo + off, p->lo + std::min(off + size, p->hi - p->lo));   // (memory_rb_refresh)

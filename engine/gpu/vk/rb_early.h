@@ -7,7 +7,11 @@
 // - a read needs the job the game handed over last before its present (the order thread's `ot_present_sub`): it is answered with the
 //   newest final slot of that job or a later one; if there is none yet, it waits while the order thread has not finished that job and the
 //   job has not finished writing some other served range (then the range is not this job's: its newest slot is the answer);
-// - the slot's bytes are taken once the GPU has stamped it (the copy is on the GPU right behind the dispatch, not at the submission's end).
+// - the slot's bytes are taken once the GPU has stamped it (the copy is on the GPU right behind the dispatch, not at the submission's end);
+// - a slot is written into guest memory once: a later read with no newer slot leaves guest memory alone, since the game writes into the
+//   block between its reads (the check of 25 Nov: half of the reads differed when every read was answered again), and the range's
+//   write-backs are left out while it is served, so no GPU result lands over the game's own writes;
+// - a written binding that overlaps a served range without being exactly it (a bare entry's guess) taints the range: it is no longer served.
 #pragma once
 #include <cstdint>
 #include <cstdlib>
@@ -57,7 +61,15 @@ struct Range {
     unsigned hist[kHist] = {};  // bindings a writer job, the last jobs
     unsigned nhist = 0;
     Slot slots[kSlots];
+    uint32_t applied = 0;   // the newest slot written into guest memory
+    bool tainted = false;   // a written binding overlapped it without being it: the old path, its write-backs kept
 };
+/// Whether the slot a read picked is to be written into guest memory (newer than the last one written)
+inline bool fresh(const Range& r, uint32_t seq) { return seq > r.applied; }
+/// A written binding [guest, guest + size): an overlap of the range that is not the range itself taints it
+inline void note_written(Range& r, uint64_t guest, uint64_t size) {
+    if (guest < r.guest + r.size && r.guest < guest + size && !(guest == r.guest && size == r.size)) r.tainted = true;
+}
 /// The bindings a writer job makes of the range, as learned (0: none learned yet)
 inline unsigned learned(const Range& r) {
     unsigned n = 0;

@@ -31,6 +31,8 @@ const rb_early::Config& config() {
 std::mutex mu;
 rb_early::Range ranges[rb_early::kRanges];
 unsigned nranges = 0;
+std::atomic<unsigned> nranges_a{0};   // (nranges, read without mu by the written-binding check)
+std::atomic<uint64_t> span_lo{~0ull}, span_hi{0};   // (the served ranges' span: a written binding outside it is not looked at)
 uint64_t last_final_job = 0;   // (mu: the newest job that finished writing some served range)
 VkBuffer ring_buffer = VK_NULL_HANDLE;
 uint8_t* ring_map = nullptr;
@@ -89,10 +91,12 @@ struct Pending {
     uint32_t seq;
 };
 thread_local std::vector<Pending> tl_pending;
+thread_local bool tl_split = false;   // (a final copy was recorded: the replay ends its part right after, rbearly_split_take)
 
 struct Stats {
     std::atomic<int64_t> reads{0}, final_ok{0}, newest{0}, rec_waits{0}, rec_ns{0}, rec_worst{0}, gpu_waits{0}, gpu_ns{0}, gpu_worst{0},
-        fb_rec{0}, fb_gpu{0}, fb_none{0}, binds{0}, finals{0}, left{0}, checks{0}, mismatches{0};
+        fb_rec{0}, fb_gpu{0}, fb_none{0}, binds{0}, finals{0}, left{0}, checks{0}, mismatches{0}, splits{0}, repeats{0}, late_ok{0}, stale{0};
+    std::atomic<int> tainted_logged{0};
 } st;
 void note_max(std::atomic<int64_t>& m, int64_t v) {
     int64_t w = m.load();
@@ -101,10 +105,10 @@ void note_max(std::atomic<int64_t>& m, int64_t v) {
 int64_t now_ns() { return std::chrono::steady_clock::now().time_since_epoch().count(); }
 
 /// The slot a read of range `ri` is answered with (waits for the order thread's recording and the GPU's copy, wait_ms at most):
-/// false = none in time (the old path). out gets the bytes
-bool fetch(unsigned ri, uint64_t size, uint8_t* out, bool count) {
+/// false = none in time. out gets the bytes, *seq_out the slot's sequence number. cap_ms: how long each of the two waits may last
+bool fetch(unsigned ri, uint64_t size, uint8_t* out, bool count, uint32_t* seq_out, double cap_ms) {
     const uint64_t target = ot_rb_target();
-    const int64_t t0 = now_ns(), cap = (int64_t)(config().wait_ms * 1e6);
+    const int64_t t0 = now_ns(), cap = (int64_t)(cap_ms * 1e6);
     rb_early::Pick p;
     bool rec_waited = false;
     for (;;) {
@@ -143,6 +147,7 @@ bool fetch(unsigned ri, uint64_t size, uint8_t* out, bool count) {
         return false;
     }
     if (count) (p.kind == rb_early::kSlotFinal ? st.final_ok : st.newest)++;
+    *seq_out = p.seq;
     return true;
 }
 void log_stats() {
@@ -153,11 +158,13 @@ void log_stats() {
     logf("vk: rbearly: 1200 reads of the 0x3980 culling results: %lld from their job's last copy, %lld from the newest copy (the job wrote "
          "the other range); %lld waited for the order thread's recording (%.2f ms each, worst %.2f), %lld for the GPU's copy (%.2f ms each, "
          "worst %.2f); fell back to the old path: %lld recording not in time, %lld GPU not in time, %lld no copy; bindings copied %lld (%lld "
-         "final), %lld left with no dispatch behind them; check: %lld compared, %lld mismatches",
+         "final), %lld left with no dispatch behind them, %lld parts ended behind a final copy; %lld reads with nothing newer (guest memory left "
+         "alone), %lld answered after the longer wait, %lld left to guest memory as it was (STALE); check: %lld compared, %lld mismatches",
          (long long)st.final_ok.exchange(0), (long long)st.newest.exchange(0), (long long)rw, ms(st.rec_ns.exchange(0), rw),
          st.rec_worst.exchange(0) / 1e6, (long long)gw, ms(st.gpu_ns.exchange(0), gw), st.gpu_worst.exchange(0) / 1e6,
          (long long)st.fb_rec.exchange(0), (long long)st.fb_gpu.exchange(0), (long long)st.fb_none.exchange(0), (long long)st.binds.exchange(0),
-         (long long)st.finals.exchange(0), (long long)st.left.exchange(0), (long long)st.checks.exchange(0), (long long)st.mismatches.exchange(0));
+         (long long)st.finals.exchange(0), (long long)st.left.exchange(0), (long long)st.splits.exchange(0), (long long)st.repeats.exchange(0),
+         (long long)st.late_ok.exchange(0), (long long)st.stale.exchange(0), (long long)st.checks.exchange(0), (long long)st.mismatches.exchange(0));
 }
 
 }   // namespace
@@ -173,29 +180,52 @@ void rbearly_note_read(uint64_t guest, uint64_t size) {
     r = rb_early::Range{};
     r.guest = guest, r.size = size;
     nranges++;
+    nranges_a.store(nranges, std::memory_order_relaxed);
+    if (guest < span_lo.load()) span_lo.store(guest);
+    if (guest + size > span_hi.load()) span_hi.store(guest + size);
     logf("vk: rbearly: %#llx +%#llx is served from copies behind its writers (%u ranges)", (unsigned long long)guest, (unsigned long long)size, nranges);
 }
 
 /// A program's binding for writing in a mirror (vk_memory.cpp gpu_buffer_bind, pools_mu held), on the thread recording it: a served
 /// range takes a slot, and the copy is recorded behind the thread's next dispatch (rbearly_after_dispatch)
-void rbearly_bind(uint64_t guest, uint64_t size, VkBuffer buffer, VkDeviceSize offset) {
-    if (!config().mode || !buffer || !rb_early::served_size(size)) return;
+/// true: the range is served (RX_VK_RB_EARLY=1, not tainted): the caller leaves its write-back out, the reads write it into guest memory
+bool rbearly_bind(uint64_t guest, uint64_t size, VkBuffer buffer, VkDeviceSize offset) {
+    if (!config().mode || !buffer || !rb_early::served_size(size)) return false;
     std::lock_guard lk(mu);
     const int ri = find_locked(guest, size);
-    if (ri < 0 || !ring_init()) return;
+    if (ri < 0 || ranges[ri].tainted || !ring_init()) return false;
+    const bool serve = config().mode == 1;
     const rb_early::Issue is = rb_early::issue(ranges[ri], ot_current_job());
     if (is.final) last_final_job = std::max(last_final_job, ranges[ri].cur_job), st.finals++;
     st.binds++;
+    if (is.final) tl_split = true;
     for (Pending& p : tl_pending)   // (bound twice before one dispatch: the copy goes to the newer slot)
         if (p.src == buffer && p.offset == offset && p.size == size) {
             p.dst = slot_at((unsigned)ri, is.slot), p.seq = is.seq;
-            return;
+            return serve;
         }
     if (tl_pending.size() >= 16) {
         st.left++;
-        return;
+        return serve;
     }
     tl_pending.push_back({buffer, offset, size, slot_at((unsigned)ri, is.slot), is.seq});
+    return serve;
+}
+
+/// Every written binding (vk_memory.cpp gpu_buffer_bind): one that overlaps a served range without being it taints the range (its
+/// write-backs would land in it: it goes back to the old path for good)
+void rbearly_note_written(uint64_t guest, uint64_t size) {
+    if (!config().mode || !nranges_a.load(std::memory_order_relaxed)) return;
+    if (guest >= span_hi.load(std::memory_order_relaxed) || guest + size <= span_lo.load(std::memory_order_relaxed)) return;
+    std::lock_guard lk(mu);
+    for (unsigned i = 0; i < nranges; i++) {
+        rb_early::Range& r = ranges[i];
+        const bool was = r.tainted;
+        rb_early::note_written(r, guest, size);
+        if (r.tainted && !was && st.tainted_logged++ < 8)
+            logf("vk: rbearly: %#llx +%#llx overlapped by a written binding %#llx +%#llx: back to the old path", (unsigned long long)r.guest,
+                 (unsigned long long)r.size, (unsigned long long)guest, (unsigned long long)size);
+    }
 }
 
 /// Right after a compute dispatch is recorded (vk_draw.cpp), on its command buffer: the served ranges it wrote, copied into their slots
@@ -225,6 +255,17 @@ void rbearly_after_dispatch(VkCommandBuffer cmd) {
     tl_pending.clear();
 }
 
+/// (RX_VK_RB_EARLY_SPLIT=0 off) after the dispatch that wrote a served range's last copy of its job, the replay ends the recording's part
+/// there (split_part), so the copy goes to the GPU at once and not with the rest of the part (up to 120 draws and dispatches later)
+bool rbearly_split_take() {
+    // (ORDER2) RX_VK_RB_EARLY_SPLIT=<0|1> (1): with RX_VK_RB_EARLY, the recording's part ends right after the dispatch that wrote the job's last copy of the culling results, so that copy reaches the GPU at once
+    static const bool on = !getenv("RX_VK_RB_EARLY_SPLIT") || atoi(getenv("RX_VK_RB_EARLY_SPLIT")) != 0;
+    if (!tl_split) return false;
+    tl_split = false;
+    if (on) st.splits++;
+    return on;
+}
+
 /// RX_VK_RB_EARLY=1: the read of a served range answered from its copy (into guest memory). false: not served (the old path runs)
 bool rbearly_answer(uint64_t gpu, uint64_t size) {
     if (config().mode != 1 || !rb_early::served_size(size)) return false;
@@ -232,13 +273,28 @@ bool rbearly_answer(uint64_t gpu, uint64_t size) {
     {
         std::lock_guard lk(mu);
         ri = find_locked(host->gpu_guest(gpu), size);
-        if (ri < 0 || !ring_map || !ranges[ri].next_seq) return false;
+        if (ri < 0 || !ring_map || !ranges[ri].next_seq || ranges[ri].tainted) return false;
     }
+    // (its write-backs are left out while it is served: a read must find its copy. Past the usual wait, a longer one (200 ms) for the
+    // order thread and the GPU; then guest memory as it is, counted as STALE)
     uint8_t buf[rb_early::kMaxBytes];
-    const bool ok = fetch((unsigned)ri, size, buf, true);
-    if (ok) host->gpu_write(gpu, buf, (size_t)size);
+    uint32_t seq = 0;
+    bool ok = fetch((unsigned)ri, size, buf, true, &seq, config().wait_ms);
+    if (!ok && fetch((unsigned)ri, size, buf, false, &seq, 200.0)) ok = true, st.late_ok++;
+    if (!ok) {
+        st.stale++;
+        log_stats();
+        return true;
+    }
+    bool write = false;
+    {
+        std::lock_guard lk(mu);
+        if (rb_early::fresh(ranges[ri], seq)) ranges[ri].applied = seq, write = true;
+    }
+    if (write) host->gpu_write(gpu, buf, (size_t)size);
+    else st.repeats++;   // (the game's own writes since the last copy are kept)
     log_stats();
-    return ok;
+    return true;
 }
 
 /// RX_VK_RB_EARLY=2, after the old path's waits: the copy the rule picks against what guest memory holds now
@@ -248,10 +304,20 @@ void rbearly_check(uint64_t gpu, uint64_t size) {
     {
         std::lock_guard lk(mu);
         ri = find_locked(host->gpu_guest(gpu), size);
-        if (ri < 0 || !ring_map || !ranges[ri].next_seq) return;
+        if (ri < 0 || !ring_map || !ranges[ri].next_seq || ranges[ri].tainted) return;
     }
     uint8_t mine[rb_early::kMaxBytes], old[rb_early::kMaxBytes];
-    if (fetch((unsigned)ri, size, mine, true)) {
+    uint32_t seq = 0;
+    if (fetch((unsigned)ri, size, mine, true, &seq, config().wait_ms)) {
+        {   // (only a read that would write a newer copy is compared: the game's writes between its reads are its own)
+            std::lock_guard lk(mu);
+            if (!rb_early::fresh(ranges[ri], seq)) {
+                st.repeats++;
+                log_stats();
+                return;
+            }
+            ranges[ri].applied = seq;
+        }
         host->gpu_read(gpu, old, (size_t)size);
         st.checks++;
         if (std::memcmp(mine, old, (size_t)size)) {

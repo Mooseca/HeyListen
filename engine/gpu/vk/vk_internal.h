@@ -523,8 +523,10 @@ extern std::atomic<int64_t> r4map_job_t0;   // (ORDER2: the start of the order t
 // program that writes them; the read waits for its own frame's copy only
 int rbearly_mode();
 void rbearly_note_read(uint64_t guest, uint64_t size);
-void rbearly_bind(uint64_t guest, uint64_t size, VkBuffer buffer, VkDeviceSize offset);
+bool rbearly_bind(uint64_t guest, uint64_t size, VkBuffer buffer, VkDeviceSize offset);   // (true: served, its write-back left out)
+void rbearly_note_written(uint64_t guest, uint64_t size);   // (every written binding: an overlap taints a served range)
 void rbearly_after_dispatch(VkCommandBuffer cmd);
+bool rbearly_split_take();   // (true once after the dispatch that recorded a final copy: the replay ends its part there)
 bool rbearly_answer(uint64_t gpu, uint64_t size);
 void rbearly_check(uint64_t gpu, uint64_t size);
 extern std::atomic<uint64_t> ot_cur_job;

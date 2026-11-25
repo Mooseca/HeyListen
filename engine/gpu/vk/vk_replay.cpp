@@ -2208,6 +2208,7 @@ void log_stage_bind(uint32_t op, int stage) {
 }
 
 void maybe_split(VkCommandBuffer& cmd);
+bool part_ends_before_draw();   // (below; ORDER2 asks for a part's end too)
 // (longshot #443) A part's end that waits for the next plain draw (maybe_split, split_part): see part_ends_before_draw
 void split_part(VkCommandBuffer& cmd);
 bool part_end_wanted = false;
@@ -3184,7 +3185,12 @@ void replay(VkCommandBuffer& cmd, NvnState& s, const uint8_t* p, const uint8_t* 
                 }
                 if (dry_work == presync_kick_at) presync_early_start();   // (TICK-056: a command buffer big enough to be cut, likely)
             } else if (!worker) {
-                maybe_split(cmd);
+                if (rbearly_split_take()) {   // (ORDER2, RX_VK_RB_EARLY: the culling results' last copy goes to the GPU now)
+                    if (part_ends_before_draw()) part_end_wanted = true;
+                    else split_part(cmd);
+                } else {
+                    maybe_split(cmd);
+                }
             }
         }
         // (RX_VK_MESH_CONV=2: the op that ended the last scan, with indirect mesh draws after it before the next barrier, is

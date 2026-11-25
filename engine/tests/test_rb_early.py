@@ -59,6 +59,19 @@ int main() {
     CHECK(learned(h) == 3);
     for (uint64_t j = 3; j < 3 + kHist; j++) issue(h, j);       // kHist jobs of one binding each push the 3 out
     CHECK(learned(h) == 1);
+    // a slot is written into guest memory once; a read with nothing newer leaves the game's own writes alone
+    CHECK(fresh(r, g.seq) && !fresh(r, 0));
+    r.applied = g.seq;
+    CHECK(!fresh(r, g.seq) && !fresh(r, f.seq));
+    // an overlapping written binding that is not the range taints it; the range itself does not
+    Range t;
+    t.guest = 0x1000, t.size = 0x3980;
+    note_written(t, 0x1000, 0x3980);
+    CHECK(!t.tainted);
+    note_written(t, 0x4980, 0x100);   // (just past its end)
+    CHECK(!t.tainted);
+    note_written(t, 0x0, 0x100000);   // (a bare entry's 1 MB guess over it)
+    CHECK(t.tainted);
     Range empty;
     CHECK(pick(empty, 5, 9, 0).kind == kNone && pick(empty, 5, 0, 0).kind == kWait);
     // the slots go round: a slot holds the newest binding that took it
@@ -91,12 +104,16 @@ def main():
     assert "if (size && !skip_old && !rb_late && order_thread_on()" in inv, "an answered read still waits for the order thread"
     assert "if (size && !skip_old) rbearly_check(gpu, size);" in inv, "the check is not called after the old path"
     mem = (ROOT / "gpu/vk/vk_memory.cpp").read_text(encoding="utf-8")
-    assert mem.index("rbearly_bind(guest, size, p->mirror, off);") < mem.index("!rbring_stage_bind(guest, size, p->mirror, off, lists().rb)"), \
-        "the copy is asked for after the write-back decision"
+    assert "const bool early = rbearly_bind(guest, size, p->mirror, off);\n        if (!early && (!wb_max || size <= wb_max) && !rbring_stage_bind(" in mem, \
+        "a served range's binding still queues its write-back, or the copy is asked for after the write-back decision"
+    assert "if (written) rbearly_note_written(" in mem, "an overlapping written binding does not taint a served range"
     draw = (ROOT / "gpu/vk/vk_draw.cpp").read_text(encoding="utf-8")
     d = draw.index("vkCmdDispatch(cmd, x, y, z);")
     assert draw.index("rbearly_after_dispatch(cmd);", d) - d < 300, "the copy is not recorded right behind the dispatch"
     early = (ROOT / "gpu/vk/vk_rbearly.cpp").read_text(encoding="utf-8")
+    an = early[early.index("bool rbearly_answer("):early.index("void rbearly_check(")]
+    assert "if (rb_early::fresh(ranges[ri], seq)) ranges[ri].applied = seq, write = true;" in an and "if (write) host->gpu_write(" in an, \
+        "a read with nothing newer writes over the game's own writes"
     ad = early[early.index("void rbearly_after_dispatch("):early.index("bool rbearly_answer(")]
     assert ad.index("vkCmdCopyBuffer") < ad.index("vkCmdFillBuffer"), "the stamp is written before the copy"
     assert "VK_PIPELINE_STAGE_2_HOST_BIT" in ad, "the host's read of the slot is not ordered after the stamp"
