@@ -8638,6 +8638,7 @@ struct Job {
     nvn_prog prog;
     std::chrono::steady_clock::time_point queued;
     uint64_t seq = 0;           // (PIPE2: its place among the order thread's jobs)
+    uint64_t since = 0;         // (FLASH2: its seq minus the newest present's before it: its place in its frame)
 };
 std::mutex q_mu;
 std::condition_variable q_cv, q_space, q_idle;
@@ -8926,6 +8927,10 @@ std::condition_variable ot_cv, ot_done_cv;
 std::deque<Job> ot_jobs;               // (ot_mu)
 uint64_t ot_seq_pushed = 0;            // (ot_mu)
 uint64_t ot_present_seq = 0;           // (ot_mu: the sequence number of the newest present handed over: the end of the game's last whole frame)
+uint64_t ot_present_seq_prev = 0;      // (ot_mu: the one before it: the end of the frame before the last whole one)
+std::atomic<uint64_t> ot_cur_since{0}; // (FLASH2: the place in its frame of the job the order thread is on)
+std::atomic<uint64_t> ot_r4_since[16]; // (FLASH2: the places in their frames of the jobs that wrote the 0x3980 culling results, the last 16 frames')
+std::atomic<uint64_t> ot_r4_n{0};
 int ot_presents = 0;                   // (handed over, not yet shown: ot_mu)
 int ot_waiters = 0;                    // (threads in ot_done_cv: ot_mu)
 std::atomic<uint64_t> ot_seq_done{0}, ot_value_done{0};
@@ -9121,7 +9126,7 @@ void ot_main() {
             }
         }
         WaitScope job_scope(WS_OT_JOB);   // (DECOUPLE: the stall watch's site; the waits inside it nest)
-        if (got) ot_cur_kind.store((int)j.kind, std::memory_order_relaxed), ot_cur_value.store(j.value, std::memory_order_relaxed);
+        if (got) ot_cur_kind.store((int)j.kind, std::memory_order_relaxed), ot_cur_value.store(j.value, std::memory_order_relaxed), ot_cur_since.store(j.since, std::memory_order_relaxed);
         else if (holding) ot_cur_kind.store(-2, std::memory_order_relaxed), ot_cur_value.store(held.value, std::memory_order_relaxed);
         if (got && j.kind == JOB_PRESENT) {
             // (DECOUPLE3) its value, until it is recorded: the recordings of the jobs run behind it while it is held signal below it
@@ -9243,8 +9248,9 @@ void ot_push(Job&& j) {
     {
         std::lock_guard lk(ot_mu);
         j.seq = ++ot_seq_pushed;
+        j.since = j.seq - ot_present_seq;
         if (j.kind == JOB_SUBMIT) ot_my_seq = j.seq;   // (its submits: what it replayed itself inline; registrations never waited)
-        if (j.kind == JOB_PRESENT) ot_presents++, ot_present_seq = j.seq, ot_last_present_push.store(ot_now(), std::memory_order_relaxed);
+        if (j.kind == JOB_PRESENT) ot_presents++, ot_present_seq_prev = ot_present_seq, ot_present_seq = j.seq, ot_last_present_push.store(ot_now(), std::memory_order_relaxed);
         ot_jobs.push_back(std::move(j));
     }
     ot_cv.notify_one();
@@ -9308,12 +9314,29 @@ void ot_join_readback(uint64_t gpu, uint64_t size) {
     // thread has done up to the newest present handed over (and this thread's own jobs), not for the frame in progress's submissions as =4 does
     // (it cost the 3050 10-14 fps). The ring's R4 class (RX_VK_RB_R4=1) gave these values at a fixed lag of 3 and made the plants pop: off
     if (mode == 5 && size == 0x3980) {
-        uint64_t want;
+        // (FLASH2, RX_VK_ORDER_R4_LEARN=0 off) the writer is not the end of the frame but its place in it: the order thread notes where in its
+        // frame (jobs since the frame's start) the job that binds a 0x3980 range for writing is (ot_note_r4_writer, at the binding), and the
+        // read waits for that place in the last whole frame (the largest of the last 16 frames', and 2 more for a registration between); the end of
+        // the frame (the present's job) as long as none is learned
+        static const bool learn = !getenv("RX_VK_ORDER_R4_LEARN") || atoi(getenv("RX_VK_ORDER_R4_LEARN")) != 0;
+        uint64_t want, prev;
         {
             std::lock_guard lk(ot_mu);
-            want = ot_present_seq;
+            want = ot_present_seq, prev = ot_present_seq_prev;
         }
-        want = std::max(want, ot_my_seq);
+        const uint64_t n = ot_r4_n.load(std::memory_order_acquire);
+        bool placed = false;
+        if (learn && n && prev) {
+            uint64_t d = 0;
+            for (uint64_t i = 0; i < std::min<uint64_t>(n, 16); i++) d = std::max(d, ot_r4_since[i].load(std::memory_order_relaxed));
+            if (d && prev + d + 2 < want) want = prev + d + 2, placed = true;
+        }
+        static std::atomic<int64_t> st_placed{0};
+        st_placed += placed;
+        // (RX_VK_ORDER_R4_OWN=1: also this thread's own jobs, as flash2c did: the main thread's submissions of the frame in progress, which the
+        // buffer read was not written by: it made a quarter of the reads wait 3.6 ms)
+        static const bool own = getenv("RX_VK_ORDER_R4_OWN") && atoi(getenv("RX_VK_ORDER_R4_OWN")) != 0;
+        if (own) want = std::max(want, ot_my_seq);
         static std::atomic<int64_t> reads{0}, waits{0}, wait_ns{0}, worst_ns{0};
         int64_t d = 0;
         if (ot_seq_done.load(std::memory_order_acquire) < want) {
@@ -9329,8 +9352,9 @@ void ot_join_readback(uint64_t gpu, uint64_t size) {
         }
         if (++reads % 1200 == 0) {   // (about every 600 frames: two reads a frame)
             const int64_t n = waits.exchange(0), ns = wait_ns.exchange(0);
-            logf("vk: order thread: the 0x3980 culling results' reads wait for the last whole frame's jobs: %lld of 1200 waited, %.2f ms each, worst %.2f ms",
-                 (long long)n, n ? ns / (double)n / 1e6 : 0.0, worst_ns.exchange(0) / 1e6);
+            logf("vk: order thread: the 0x3980 culling results' reads wait for the last whole frame's jobs: %lld of 1200 waited, %.2f ms each, worst %.2f ms; "
+                 "%lld of 1200 only up to the writer's place in the frame",
+                 (long long)n, n ? ns / (double)n / 1e6 : 0.0, worst_ns.exchange(0) / 1e6, (long long)st_placed.exchange(0));
         }
         return;
     }
@@ -9347,6 +9371,12 @@ void ot_join_readback(uint64_t gpu, uint64_t size) {
     ot_note(OT_READBACK, d, true);
     static std::atomic<int> logged{0};
     if (log_each && logged++ < 60) logf("vk: order thread: readback %#llx +%#llx waited %.2f ms for this thread's jobs", (unsigned long long)gpu, (unsigned long long)size, d / 1e6);
+}
+/// (FLASH2) the order thread, replaying a job, binds a 0x3980 range for writing (vk_memory.cpp gpu_buffer_bind): the job's place in its frame is noted
+void ot_note_r4_writer() {
+    if (!ot_self) return;
+    const uint64_t i = ot_r4_n.fetch_add(1, std::memory_order_acq_rel);
+    ot_r4_since[i % 16].store(ot_cur_since.load(std::memory_order_relaxed), std::memory_order_relaxed);
 }
 bool ot_audit_on() {
     // (FLASH2) RX_VK_ORDER_RB_AUDIT=1 (logging only): after each CPU readback the ring does not serve, the game thread waits for every

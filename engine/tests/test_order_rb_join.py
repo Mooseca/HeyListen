@@ -41,9 +41,16 @@ def main():
     need("if (mode == 2) return ot_join_all(OT_READBACK);" in f, "mode 2 is not the join of every job")
     need("if (mode == 4 && size == 0x3980) return ot_join_all(OT_READBACK);" in f, "mode 4 is not the join of every job for the 0x3980 range")
     m5 = f[f.index("if (mode == 5 && size == 0x3980) {"):f.index("if (mode == 3) {")]
-    need("want = ot_present_seq;" in m5 and "std::max(want, ot_my_seq)" in m5 and "ot_wait_until" in m5 and "ot_join_all" not in m5,
+    need("want = ot_present_seq, prev = ot_present_seq_prev;" in m5 and "if (own) want = std::max(want, ot_my_seq);" in m5 and "ot_wait_until" in m5 and "ot_join_all" not in m5,
          "mode 5 does not wait for the last present's jobs and this thread's own only")
     need("ot_present_seq = j.seq" in rp[rp.index("void ot_push("):], "ot_push does not note the newest present's sequence")
+    need("ot_present_seq_prev = ot_present_seq, ot_present_seq = j.seq" in rp and "j.since = j.seq - ot_present_seq;" in rp,
+         "ot_push does not note the jobs' places in their frames")
+    need("prev + d + 2 < want" in m5 and 'getenv("RX_VK_ORDER_R4_LEARN")' in m5, "the learned writer place is not what the wait goes up to")
+    need("ot_note_r4_writer();" in (ROOT / "gpu/vk/vk_memory.cpp").read_text(encoding="utf-8").split("BufferRef gpu_buffer_bind(")[1][:900],
+         "gpu_buffer_bind does not note the 0x3980 writer")
+    onr = function(rp, "void ot_note_r4_writer() {")
+    need("if (!ot_self) return;" in onr and "ot_cur_since" in onr, "the writer's place is noted off the order thread or not from the job it is on")
     rr = (ROOT / "gpu/vk/rb_ring.h").read_text(encoding="utf-8")
     need("size == 0x3980 ? 4 : 0" in rr, "the ring has no class for the 0x3980 culling results")
     rb = (ROOT / "gpu/vk/vk_rbring.cpp").read_text(encoding="utf-8")

@@ -7305,6 +7305,7 @@ BufferRef gpu_buffer_bind_guess(uint64_t gpu, uint64_t size) {
 BufferRef gpu_buffer_bind(uint64_t gpu, uint64_t size, bool written) {
     if (written) texture_gpu_wrote(gpu, size);
     if (written) rbring_note_written(gpu >= (1ull << 40) ? host->gpu_guest(gpu) : gpu, size);   // (STEP1, HL_RB_LAG)
+    if (written && size == 0x3980) ot_note_r4_writer();   // (FLASH2: the culling results' writer's place in its frame, for the order thread's precise wait)
     if (written && rbwho_on()) rbwho_write(gpu >= (1ull << 40) ? host->gpu_guest(gpu) : gpu, size);
     if (cap_only_gpu()) cap_excl_note(gpu, size, written ? "a buffer binding (written)" : "a buffer binding", __builtin_return_address(0));
     // (below 1 TB a GPU address is the guest address itself, and a pool holds the whole range or nothing: the host's

@@ -514,6 +514,7 @@ bool rbring_on();
 bool rbring_check_on();
 void rbring_note_read(uint64_t guest, uint64_t size);
 void rbring_note_written(uint64_t guest, uint64_t size);
+void ot_note_r4_writer();   // (FLASH2, vk_replay.cpp) a 0x3980 range bound for writing on the order thread: the job's place in its frame
 /// (stream SUB1) the readback ring's staged ranges of one submission: its own list, so a submission that ends after the next began flushes its own
 struct RbPending {
     struct Req {
