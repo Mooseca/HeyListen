@@ -46,3 +46,7 @@
 /* The Controls tab's Sprint with L3 row (host/nn_hid.c asks at each read of the controllers, host/oot_sprint.c acts;
    gpu/vk/vk_replay.cpp answers 0 or 1). 97 is Longshot's id for its Sprint row (HOS_OPT_SPRINT in its vk_api.h); free here. */
 #define HL_OPT_SPRINT 97
+
+/* The Graphics tab's Handheld profile row (host/nn_applet.c asks at each poll for notifications, gpu/vk/vk_replay.cpp answers 0 docked
+   or 1 handheld, -1 while the options are not read yet): a change of the row is told to the game as an undock or a dock. */
+#define HL_OPT_HANDHELD 101

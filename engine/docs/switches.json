@@ -1550,12 +1550,12 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2538
+     "line": 2540
     }
    ],
    "default": "off (unset)",
    "values": "on or off (0, false, off, no and empty are off)",
-   "explanation": "undocumented: gpu/vk/vk_menu.cpp:2538 (in `menu_first_run_lowend()`) reads it as an on/off switch: `const lowend_rule::Apply a = lowend_rule::first_start(env_int(\"HL_LOWEND\"), lowend_marked, gpu);`. No comment in the source says what it changes.",
+   "explanation": "undocumented: gpu/vk/vk_menu.cpp:2540 (in `menu_first_run_lowend()`) reads it as an on/off switch: `const lowend_rule::Apply a = lowend_rule::first_start(env_int(\"HL_LOWEND\"), lowend_marked, gpu);`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -5176,7 +5176,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2662
+     "line": 2664
     }
    ],
    "default": "0 (unset)",
@@ -5239,7 +5239,7 @@
    "files": [
     {
      "path": "host/nn_applet.c",
-     "line": 242
+     "line": 291
     }
    ],
    "default": "0",
@@ -5323,11 +5323,11 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2670
+     "line": 2673
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2678
+     "line": 2681
     },
     {
      "path": "host/nn_vi.c",
@@ -5402,11 +5402,11 @@
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2670
+     "line": 2673
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2678
+     "line": 2681
     },
     {
      "path": "host/nn_vi.c",
@@ -5729,7 +5729,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2765
+     "line": 2768
     },
     {
      "path": "host/display.c",
@@ -5821,7 +5821,7 @@
    "files": [
     {
      "path": "host/nn_applet.c",
-     "line": 406
+     "line": 455
     }
    ],
    "default": "the engine's own value",
@@ -5948,12 +5948,16 @@
     {
      "path": "host/nn_applet.c",
      "line": 120
+    },
+    {
+     "path": "host/nn_applet.c",
+     "line": 220
     }
    ],
    "default": "off (unset)",
    "values": "on or off (0, false, off, no and empty are off); the description names `0`",
    "explanation": "Over the options file: the output resolution (0 2048x1152, 1 2560x1440, 2 3840x2160, 3 1920x1080, 4 5120x1440, or one of those sizes written out; any other value is logged and the game's size kept), the handheld profile, a picture wider than 16:9 (2.3889 for 3440x1440).",
-   "comment": "HOS_HANDHELD=1: handheld (the 1080p screen: 1080p output and the game's handheld resolutions) instead of docked (MKW docked composes 3840 x 2160).",
+   "comment": "(The row's value now, from the menu: -1 while it is not known, or while HOS_HANDHELD decides) -> the change of profile queued as its two messages; returns the number of messages waiting.",
    "documented_in": "development.md",
    "source": "development.md",
    "documented": true,
@@ -7911,7 +7915,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2578
+     "line": 2580
     }
    ],
    "default": "unset",
@@ -7932,7 +7936,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2581
+     "line": 2583
     },
     {
      "path": "host/hos_main.c",
@@ -8041,7 +8045,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2663
+     "line": 2665
     },
     {
      "path": "host/nn_applet.c",
@@ -8590,7 +8594,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2661
+     "line": 2663
     }
    ],
    "default": "0 (unset)",
@@ -17936,7 +17940,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_draw.cpp",
-     "line": 11519
+     "line": 11568
     }
    ],
    "default": "off (unset)",
@@ -18740,7 +18744,7 @@
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2657
+     "line": 2659
     }
    ],
    "default": "unset",
@@ -20241,7 +20245,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_draw.cpp",
-     "line": 11898
+     "line": 11947
     }
    ],
    "default": "unset",
@@ -20305,19 +20309,15 @@
     {
      "path": "gpu/vk/vk_menu.cpp",
      "line": 2515
-    },
-    {
-     "path": "gpu/vk/vk_menu.cpp",
-     "line": 2516
     }
    ],
-   "default": "off (unset)",
-   "values": "on or off (0, false, off, no and empty are off)",
-   "explanation": "undocumented: gpu/vk/vk_menu.cpp:2515 (in `fog_runs()`) reads it as an on/off switch: `const bool v = lowend_rule::fog_on(env_int(\"RX_VK_FOG\"), opts.fog);`. No comment in the source says what it changes.",
-   "comment": null,
+   "default": "unset",
+   "values": "text",
+   "explanation": "(Asked at each fog dispatch: the row applies at once; RX_VK_FOG, read once, stands over it).",
+   "comment": "(Asked at each fog dispatch: the row applies at once; RX_VK_FOG, read once, stands over it).",
    "documented_in": null,
-   "source": "undocumented",
-   "documented": false,
+   "source": "comment at gpu/vk/vk_menu.cpp",
+   "documented": true,
    "set_via": "In `hookshot_env.txt`, or in the environment.",
    "use": null
   },
@@ -20643,7 +20643,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_draw.cpp",
-     "line": 11461
+     "line": 11500
     }
    ],
    "default": "0",
@@ -20685,7 +20685,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2651
+     "line": 2653
     }
    ],
    "default": "0 (unset)",
@@ -21263,7 +21263,7 @@
     },
     {
      "path": "gpu/vk/vk_draw.cpp",
-     "line": 11770
+     "line": 11819
     }
    ],
    "default": "off (unset)",
@@ -21569,7 +21569,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2653
+     "line": 2655
     }
    ],
    "default": "unset",
@@ -23186,7 +23186,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_draw.cpp",
-     "line": 11497
+     "line": 11546
     }
    ],
    "default": "unset",
@@ -23572,7 +23572,7 @@
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2645
+     "line": 2647
     }
    ],
    "default": "2",
@@ -23656,7 +23656,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2963
+     "line": 2966
     }
    ],
    "default": "unset",
@@ -24687,11 +24687,11 @@
     },
     {
      "path": "gpu/vk/vk_draw.cpp",
-     "line": 11539
+     "line": 11588
     },
     {
      "path": "gpu/vk/vk_draw.cpp",
-     "line": 11607
+     "line": 11656
     }
    ],
    "default": "off (unset)",
@@ -24800,7 +24800,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_draw.cpp",
-     "line": 11669
+     "line": 11718
     }
    ],
    "default": "off (unset)",
@@ -24930,7 +24930,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_draw.cpp",
-     "line": 11839
+     "line": 11888
     }
    ],
    "default": "off (unset)",
@@ -25072,7 +25072,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_draw.cpp",
-     "line": 11635
+     "line": 11684
     }
    ],
    "default": "off (unset)",
@@ -25156,7 +25156,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_draw.cpp",
-     "line": 12238
+     "line": 12287
     }
    ],
    "default": "unset",
@@ -26219,7 +26219,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2652
+     "line": 2654
     }
    ],
    "default": "0 (unset)",
@@ -26491,7 +26491,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 9933
+     "line": 9934
     }
    ],
    "default": "0 (unset)",
@@ -26684,7 +26684,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_draw.cpp",
-     "line": 12016
+     "line": 12065
     }
    ],
    "default": "on (unless set to 0, false, off or no)",
@@ -26726,7 +26726,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_draw.cpp",
-     "line": 12089
+     "line": 12138
     }
    ],
    "default": "unset",
@@ -26747,7 +26747,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_draw.cpp",
-     "line": 12107
+     "line": 12156
     }
    ],
    "default": "off (unset)",
@@ -28298,7 +28298,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_draw.cpp",
-     "line": 11944
+     "line": 11993
     }
    ],
    "default": "0",
@@ -29492,7 +29492,7 @@
     },
     {
      "path": "gpu/vk/vk_draw.cpp",
-     "line": 11477
+     "line": 11516
     }
    ],
    "default": "unset",
@@ -31433,7 +31433,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2935
+     "line": 2938
     }
    ],
    "default": "unset",
@@ -31601,7 +31601,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2658
+     "line": 2660
     }
    ],
    "default": "0 (unset)",

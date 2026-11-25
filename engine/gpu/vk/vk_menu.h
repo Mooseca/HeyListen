@@ -131,7 +131,8 @@ bool hdr_forced();
 /// (after Longshot 79a34381) PsychoV35's grading as the menu has it now, in ir_opt/psychov35.h's bank order (kSetting*, kSettingCount floats)
 void psychov35_bank(float* out);
 bool resolution_auto();       // (the game's dynamic resolution: Resolution Auto)
-bool fog_runs();              // (the Volumetric fog row, RX_VK_FOG over it: lowend_rule.h; fixed at the first ask)
+bool fog_runs();              // (the Volumetric fog row, RX_VK_FOG over it: lowend_rule.h; asked at each fog dispatch: the row applies at once)
+int menu_handheld_now();      // (the Handheld profile row, 0 or 1; -1 until the options file is read: host/nn_applet.c tells the game of a change)
 void menu_first_run_lowend(uint32_t vendor_id, bool integrated, bool mesh_shader);
 bool lowend_mirror_not_wait();   // (lowend_rule.h mirror_not_wait for this device: set by menu_first_run_lowend)   // (the Minimum preset and the fog off on a low-end GPU: lowend_rule.h)
 int resolution_scale();       // (the fixed path's scale in 1/10000: the Resolution row's, as a twelfth of the output)

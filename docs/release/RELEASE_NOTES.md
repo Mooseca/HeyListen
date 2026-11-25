@@ -44,6 +44,8 @@ builds the driver's pipelines as you play, so it stutters more than usual. The s
 * **Keyboard button prompts**: *Button prompts = Keyboard* shows the keys and mouse buttons you bound, in the game's
   texts, hints and menus (movement keys as they are bound). Switching to it rebuilds the program cache once.
 * **HUD layout row**: the HUD at the screen's edges (every screen shape) or in the middle 16:9.
+* **Handheld profile and Volumetric fog apply at once**: no restart. The game is told of the dock or undock as a console
+  tells it; the size of its picture still follows the start's profile.
 * **A tidier menu**: rows that only matter with another setting on (V-Sync mode, the frame generation rows, the DLSS
   model, the HDR and PsychoV35 rows) are hidden while that setting is off; the HDR row says when your screen has no HDR
   (Windows' *Use HDR* off); *Layout preset* and *Button prompts* are on the Controls tab. Button prompts apply after a
