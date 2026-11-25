@@ -1027,8 +1027,9 @@ Row rows[] = {
     {TAB_GRAPHICS, "Low-end settings", &opts.lowend, 0, 1, 1, tx_lowend,
      "For a weak integrated GPU. On sets Render resolution to 33%, Volumetric fog to Off and the Handheld profile to On (lower shadow "
      "and fog detail, a smaller scene). The resolution changes at once; the fog and the Handheld profile from the next start. Off puts "
-     "those three rows back to what they were before On (a row you changed since keeps your value). The first start on an integrated "
-     "GPU without mesh shaders turns it On once; HL_LOWEND=0 in the environment stops that, HL_LOWEND=1 turns it on for one run.",
+     "those three rows back to what they were before On (a row you changed since keeps your value). On an integrated GPU the game "
+     "turns it On once by itself if it runs under 20 fps (measured after 15 seconds of play); HL_LOWEND=0 in the environment stops "
+     "that, HL_LOWEND=1 turns it on for one run.",
      nullptr, false, true},
     {TAB_GRAPHICS, "Ultrawide", &opts.ultrawide, 0, 1, 1, tx_ultrawide,
      "The camera's shape on a screen wider or narrower than 16:9 (4:3, 16:10). Applies after a restart.", hn_ultrawide, true},
