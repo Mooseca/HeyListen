@@ -613,6 +613,24 @@ static void load_hookshot_env(void) {
     fclose(f);
 }
 
+uint64_t hos_reserved_cpus(void);   /* hos_thread.c */
+/* (DECOUPLE3, docs/research/decouple-cross-frame.md 4.9) The order thread (RX_VK_ORDER_THREAD: the replay's submits and presents on
+   one ordered thread, the game's threads go on after the capture; PC 3050 +9.6% Kokiri, +9% Hyrule, +5% Market, matrix82) on where
+   the host keeps a core for the replay (hos_reserved_cpus: 8 or more logical processors, 4 or more of the fastest kind), the core
+   it is pinned to: it takes ~75% of one (hT2). Elsewhere it would take that share from the game's threads: off.
+   RX_VK_ORDER_THREAD=0 in hookshot_env.txt or the environment: off, =1: on anywhere. After hookshot_env.txt (its
+   HOS_RESERVE_CORE=0 counts, and hos_reserved_cpus keeps its first answer); the host's readers of the switch (nvn_native.c) and
+   the renderer's read the same variable later, so they agree */
+static void order_thread_default(void) {
+    if (getenv("RX_VK_ORDER_THREAD") || !hos_reserved_cpus()) return;
+#ifdef _WIN32
+    _putenv("RX_VK_ORDER_THREAD=1");
+#else
+    setenv("RX_VK_ORDER_THREAD", "1", 0);
+#endif
+    env_note("env: RX_VK_ORDER_THREAD=1: a core is kept for the replay, the order thread is on (RX_VK_ORDER_THREAD=0: off)");
+}
+
 #ifdef __linux__
 #include "hos_submit_thread.h"
 /* (Linux) Mesa's submit thread (hos_submit_thread.h): decided in main() after load_hookshot_env (the switch may come from
@@ -660,24 +678,6 @@ static void submit_thread_at_start(void) {
    someone set by hand, is never touched. Decided in main() beside submit_thread_at_start (the setenv is safe only while this
    is the one thread); the note goes to stderr now and to the game's log once it is open (game_main) */
 static char driver_env_said[1024];
-uint64_t hos_reserved_cpus(void);   /* hos_thread.c */
-/* (DECOUPLE3, docs/research/decouple-cross-frame.md 4.9) The order thread (RX_VK_ORDER_THREAD: the replay's submits and presents on
-   one ordered thread, the game's threads go on after the capture; PC 3050 +9.6% Kokiri, +9% Hyrule, +5% Market, matrix82) on where
-   the host keeps a core for the replay (hos_reserved_cpus: 8 or more logical processors, 4 or more of the fastest kind), the core
-   it is pinned to: it takes ~75% of one (hT2). Elsewhere it would take that share from the game's threads: off.
-   RX_VK_ORDER_THREAD=0 in hookshot_env.txt or the environment: off, =1: on anywhere. After hookshot_env.txt (its
-   HOS_RESERVE_CORE=0 counts, and hos_reserved_cpus keeps its first answer); the host's readers of the switch (nvn_native.c) and
-   the renderer's read the same variable later, so they agree */
-static void order_thread_default(void) {
-    if (getenv("RX_VK_ORDER_THREAD") || !hos_reserved_cpus()) return;
-#ifdef _WIN32
-    _putenv("RX_VK_ORDER_THREAD=1");
-#else
-    setenv("RX_VK_ORDER_THREAD", "1", 0);
-#endif
-    env_note("env: RX_VK_ORDER_THREAD=1: a core is kept for the replay, the order thread is on (RX_VK_ORDER_THREAD=0: off)");
-}
-
 static void driver_env_choose(void) {
     const char *file = getenv("RADV_FORCE_VRS_CONFIG_FILE");
     struct stat st;
