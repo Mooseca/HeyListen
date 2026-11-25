@@ -2,7 +2,7 @@
  "schema": 1,
  "generated_by": "engine/scripts/list_switches.py",
  "scope": "C, C++ and headers under engine/ (engine/tests and vendored trees other than a64-kit excluded) and the Python the builder, the lifter and the scripts run: getenv, std::getenv, _wgetenv, the code's own env helpers and table-driven reads, and os.environ.",
- "count": 1453,
+ "count": 1457,
  "switches": [
   {
    "name": "A64_",
@@ -816,12 +816,12 @@
    "files": [
     {
      "path": "gpu/vk/vk_shader.cpp",
-     "line": 2043
+     "line": 2053
     }
    ],
    "default": "unset",
    "values": "text",
-   "explanation": "undocumented: gpu/vk/vk_shader.cpp:2043 (in `translate_into()`) reads it as a text value: `Shader::Optimization::g_gm_port_this = key_listed(hex, \"EDEN_NX2_GM_PORT_PROGS\");`. No comment in the source says what it changes.",
+   "explanation": "undocumented: gpu/vk/vk_shader.cpp:2053 (in `translate_into()`) reads it as a text value: `Shader::Optimization::g_gm_port_this = key_listed(hex, \"EDEN_NX2_GM_PORT_PROGS\");`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -2251,7 +2251,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_shader.cpp",
-     "line": 2514
+     "line": 2524
     }
    ],
    "default": "unset",
@@ -2272,7 +2272,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_shader.cpp",
-     "line": 2513
+     "line": 2523
     }
    ],
    "default": "unset",
@@ -15555,7 +15555,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_shader.cpp",
-     "line": 2034
+     "line": 2044
     }
    ],
    "default": "unset",
@@ -16461,7 +16461,7 @@
     },
     {
      "path": "gpu/vk/vk_shader.cpp",
-     "line": 910
+     "line": 920
     }
    ],
    "default": "unset",
@@ -18774,7 +18774,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_shader.cpp",
-     "line": 321
+     "line": 322
     }
    ],
    "default": "unset",
@@ -18879,7 +18879,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_shader.cpp",
-     "line": 2390
+     "line": 2400
     }
    ],
    "default": "unset",
@@ -18921,7 +18921,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_shader.cpp",
-     "line": 289
+     "line": 290
     }
    ],
    "default": "unset",
@@ -19110,7 +19110,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_shader.cpp",
-     "line": 2083
+     "line": 2093
     }
    ],
    "default": "unset",
@@ -19152,7 +19152,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_shader.cpp",
-     "line": 168
+     "line": 169
     }
    ],
    "default": "unset",
@@ -19450,7 +19450,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_shader.cpp",
-     "line": 401
+     "line": 402
     }
    ],
    "default": "unset",
@@ -19863,6 +19863,90 @@
    "values": "on or off (0, false, off, no and empty are off); the description names `0`",
    "explanation": "The translator folds a constant bit-field extract or bitwise and/or/xor that carries zero/sign flags (on by default: 79% fewer foldable ops, 22% fewer mesh instructions, a smaller program cache and faster translation; no GPU time change, the drivers already folded them). `=0`: off. Covered by the program cache's stamp.",
    "comment": "(Hookshot, RX_VK_FOLD_PSEUDO=1, pseudo_fold.h) Folds an instruction of immediates whose result is a u32 and whose only pseudo-operations are the zero and sign flags: the flags take the value the back end would have made of the folded result, then the instruction folds as FoldWhenAllImmediates does. Carry and overflow are not computed here: such an instruction is left as it was.",
+   "documented_in": "development.md",
+   "source": "development.md",
+   "documented": true,
+   "set_via": "In `hookshot_env.txt`, or in the environment.",
+   "use": null
+  },
+  {
+   "name": "RX_VK_FOLD_PSEUDO_LOG",
+   "area": "logging",
+   "group": "Logs and traces",
+   "audience": "diagnostic",
+   "files": [
+    {
+     "path": "gpu/vk/vk_shader.cpp",
+     "line": 709
+    }
+   ],
+   "default": "off (unset)",
+   "values": "on or off (0, false, off, no and empty are off)",
+   "explanation": "A developer's bisection of what `RX_VK_FOLD_PSEUDO` changes in a picture. Programs are named by the key of the stage's code (16 hex digits, a prefix is enough; the keys `RX_VK_IR` and the program cache use): `_ONLY` lets just those fold, `_SKIP` keeps those as they were; `_RANGE` lets only the flagged instructions numbered `first` up to (not including) `last` of each program fold (numbered in translation order among the constant ones that carry a flag; either side may be empty). `_LOG` writes `vk: fold: code <key> took <n> of <m> flagged instructions` for every stage that has any. Every value is its own program cache (the names are under `RX_VK_FOLD`), so a run with one prepares the shaders again.",
+   "comment": "(RX_VK_FOLD_PSEUDO_LOG=1: what the fold took of each stage's flagged instructions, for the bisection and the count).",
+   "documented_in": "development.md",
+   "source": "development.md",
+   "documented": true,
+   "set_via": "In `hookshot_env.txt`, or in the environment.",
+   "use": null
+  },
+  {
+   "name": "RX_VK_FOLD_PSEUDO_ONLY",
+   "area": "renderer",
+   "group": "Rendering and GPU",
+   "audience": "developer",
+   "files": [
+    {
+     "path": "gpu/vk/eden/shader_recompiler/ir_opt/constant_propagation_pass.cpp",
+     "line": 111
+    }
+   ],
+   "default": "unset",
+   "values": "text",
+   "explanation": "A developer's bisection of what `RX_VK_FOLD_PSEUDO` changes in a picture. Programs are named by the key of the stage's code (16 hex digits, a prefix is enough; the keys `RX_VK_IR` and the program cache use): `_ONLY` lets just those fold, `_SKIP` keeps those as they were; `_RANGE` lets only the flagged instructions numbered `first` up to (not including) `last` of each program fold (numbered in translation order among the constant ones that carry a flag; either side may be empty). `_LOG` writes `vk: fold: code <key> took <n> of <m> flagged instructions` for every stage that has any. Every value is its own program cache (the names are under `RX_VK_FOLD`), so a run with one prepares the shaders again.",
+   "comment": null,
+   "documented_in": "development.md",
+   "source": "development.md",
+   "documented": true,
+   "set_via": "In `hookshot_env.txt`, or in the environment.",
+   "use": null
+  },
+  {
+   "name": "RX_VK_FOLD_PSEUDO_RANGE",
+   "area": "renderer",
+   "group": "Rendering and GPU",
+   "audience": "developer",
+   "files": [
+    {
+     "path": "gpu/vk/eden/shader_recompiler/ir_opt/constant_propagation_pass.cpp",
+     "line": 112
+    }
+   ],
+   "default": "unset",
+   "values": "text",
+   "explanation": "A developer's bisection of what `RX_VK_FOLD_PSEUDO` changes in a picture. Programs are named by the key of the stage's code (16 hex digits, a prefix is enough; the keys `RX_VK_IR` and the program cache use): `_ONLY` lets just those fold, `_SKIP` keeps those as they were; `_RANGE` lets only the flagged instructions numbered `first` up to (not including) `last` of each program fold (numbered in translation order among the constant ones that carry a flag; either side may be empty). `_LOG` writes `vk: fold: code <key> took <n> of <m> flagged instructions` for every stage that has any. Every value is its own program cache (the names are under `RX_VK_FOLD`), so a run with one prepares the shaders again.",
+   "comment": null,
+   "documented_in": "development.md",
+   "source": "development.md",
+   "documented": true,
+   "set_via": "In `hookshot_env.txt`, or in the environment.",
+   "use": null
+  },
+  {
+   "name": "RX_VK_FOLD_PSEUDO_SKIP",
+   "area": "renderer",
+   "group": "Rendering and GPU",
+   "audience": "developer",
+   "files": [
+    {
+     "path": "gpu/vk/eden/shader_recompiler/ir_opt/constant_propagation_pass.cpp",
+     "line": 111
+    }
+   ],
+   "default": "unset",
+   "values": "text",
+   "explanation": "A developer's bisection of what `RX_VK_FOLD_PSEUDO` changes in a picture. Programs are named by the key of the stage's code (16 hex digits, a prefix is enough; the keys `RX_VK_IR` and the program cache use): `_ONLY` lets just those fold, `_SKIP` keeps those as they were; `_RANGE` lets only the flagged instructions numbered `first` up to (not including) `last` of each program fold (numbered in translation order among the constant ones that carry a flag; either side may be empty). `_LOG` writes `vk: fold: code <key> took <n> of <m> flagged instructions` for every stage that has any. Every value is its own program cache (the names are under `RX_VK_FOLD`), so a run with one prepares the shaders again.",
+   "comment": null,
    "documented_in": "development.md",
    "source": "development.md",
    "documented": true,
@@ -20769,19 +20853,19 @@
    "files": [
     {
      "path": "gpu/vk/vk_shader.cpp",
-     "line": 780
+     "line": 790
     },
     {
      "path": "gpu/vk/vk_shader.cpp",
-     "line": 801
+     "line": 811
     },
     {
      "path": "gpu/vk/vk_shader.cpp",
-     "line": 911
+     "line": 921
     },
     {
      "path": "gpu/vk/vk_shader.cpp",
-     "line": 2517
+     "line": 2527
     }
    ],
    "default": "unset",
@@ -20844,7 +20928,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_shader.cpp",
-     "line": 622
+     "line": 624
     }
    ],
    "default": "unset",
@@ -21351,15 +21435,15 @@
    "files": [
     {
      "path": "gpu/vk/vk_shader.cpp",
-     "line": 1099
+     "line": 1109
     },
     {
      "path": "gpu/vk/vk_shader.cpp",
-     "line": 2059
+     "line": 2069
     },
     {
      "path": "gpu/vk/vk_shader.cpp",
-     "line": 2088
+     "line": 2098
     }
    ],
    "default": "unset",
@@ -21422,7 +21506,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_shader.cpp",
-     "line": 745
+     "line": 755
     }
    ],
    "default": "off (unset)",
@@ -23070,7 +23154,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_shader.cpp",
-     "line": 1148
+     "line": 1158
     }
    ],
    "default": "empty (unset)",
@@ -23116,7 +23200,7 @@
     },
     {
      "path": "gpu/vk/vk_shader.cpp",
-     "line": 2299
+     "line": 2309
     }
    ],
    "default": "off (unset)",
@@ -23456,11 +23540,11 @@
    "files": [
     {
      "path": "gpu/vk/vk_shader.cpp",
-     "line": 2028
+     "line": 2038
     },
     {
      "path": "gpu/vk/vk_shader.cpp",
-     "line": 2240
+     "line": 2250
     }
    ],
    "default": "unset",
@@ -23716,7 +23800,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_shader.cpp",
-     "line": 2156
+     "line": 2166
     }
    ],
    "default": "on (unless set to 0, false, off or no)",
@@ -23779,7 +23863,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_shader.cpp",
-     "line": 269
+     "line": 270
     }
    ],
    "default": "the engine's own value",
@@ -23800,7 +23884,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_shader.cpp",
-     "line": 660
+     "line": 662
     }
    ],
    "default": "off (unset)",
@@ -23829,7 +23913,7 @@
     },
     {
      "path": "gpu/vk/vk_shader.cpp",
-     "line": 2068
+     "line": 2078
     }
    ],
    "default": "off (unset)",
@@ -24105,7 +24189,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_shader.cpp",
-     "line": 552
+     "line": 554
     }
    ],
    "default": "off (unset)",
@@ -24235,7 +24319,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_shader.cpp",
-     "line": 400
+     "line": 401
     }
    ],
    "default": "unset",
@@ -24616,7 +24700,7 @@
     },
     {
      "path": "gpu/vk/vk_shader.cpp",
-     "line": 1525
+     "line": 1535
     }
    ],
    "default": "off (unset)",
@@ -24637,12 +24721,12 @@
    "files": [
     {
      "path": "gpu/vk/vk_shader.cpp",
-     "line": 1439
+     "line": 1449
     }
    ],
    "default": "unset",
    "values": "text",
-   "explanation": "undocumented: gpu/vk/vk_shader.cpp:1439 (in `disk_compact()`) reads it as a text value: `if (!pack_on() || raw_bytes < kCompactMin || getenv(\"RX_VK_NO_PROGRAM_COMPACT\")) return false;`. No comment in the source says what it changes.",
+   "explanation": "undocumented: gpu/vk/vk_shader.cpp:1449 (in `disk_compact()`) reads it as a text value: `if (!pack_on() || raw_bytes < kCompactMin || getenv(\"RX_VK_NO_PROGRAM_COMPACT\")) return false;`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -25160,7 +25244,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_shader.cpp",
-     "line": 1133
+     "line": 1143
     }
    ],
    "default": "the engine's own value",
@@ -25181,7 +25265,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_shader.cpp",
-     "line": 1130
+     "line": 1140
     }
    ],
    "default": "the engine's own value",
@@ -25202,7 +25286,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_shader.cpp",
-     "line": 1128
+     "line": 1138
     }
    ],
    "default": "off (unset)",
@@ -25839,7 +25923,7 @@
     },
     {
      "path": "gpu/vk/vk_shader.cpp",
-     "line": 2693
+     "line": 2703
     }
    ],
    "default": "off (unset)",
@@ -26816,7 +26900,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_shader.cpp",
-     "line": 1243
+     "line": 1253
     }
    ],
    "default": "unset",
@@ -26891,7 +26975,7 @@
     },
     {
      "path": "gpu/vk/vk_shader.cpp",
-     "line": 88
+     "line": 89
     }
    ],
    "default": "off (unset)",
@@ -27352,11 +27436,11 @@
     },
     {
      "path": "gpu/vk/vk_shader.cpp",
-     "line": 911
+     "line": 921
     },
     {
      "path": "gpu/vk/vk_shader.cpp",
-     "line": 2517
+     "line": 2527
     }
    ],
    "default": "off (unset)",
@@ -27377,7 +27461,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_shader.cpp",
-     "line": 244
+     "line": 245
     }
    ],
    "default": "empty (unset)",
@@ -27398,7 +27482,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_shader.cpp",
-     "line": 242
+     "line": 243
     }
    ],
    "default": "empty (unset)",
@@ -27821,7 +27905,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_shader.cpp",
-     "line": 2841
+     "line": 2851
     }
    ],
    "default": "on (unless set to 0, false, off or no)",
@@ -27930,7 +28014,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_shader.cpp",
-     "line": 538
+     "line": 540
     }
    ],
    "default": "off (unset)",
@@ -29285,7 +29369,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_shader.cpp",
-     "line": 2804
+     "line": 2814
     }
    ],
    "default": "off (unset)",
