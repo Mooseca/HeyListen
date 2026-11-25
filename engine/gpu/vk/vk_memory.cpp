@@ -5827,7 +5827,7 @@ void retire_pool(std::map<uint64_t, Pool>::iterator it) {
     shadow_free(*old);   // (its write-backs in this submission, if any, copied whole)
     guest_pages_set(old->lo, old->hi, 0);
     old->retired_value = std::max(old->last_value, rec_value_of());
-    old->retired_seq = mirror_epoch;
+    old->retired_seq = rec_epoch();
     std::erase(mirror_wanted, old);   // (the new pool gets the mirror)
     if (old->mstate == Pool::MIRROR_WANTED) old->mstate = Pool::MIRROR_NONE;
     // (EvilOOT, 11-07) what the GPU wrote into its mirror and nowhere else (the culling's bare table entries past their first
@@ -7454,7 +7454,7 @@ void reap_mirrors() {   // (pools_mu held)
         destroy_buffer(dead_mirrors.front().buffer, dead_mirrors.front().alloc);
         dead_mirrors.pop_front();
     }
-    while (!dead_imports.empty() && dead_imports.front().value <= mem_completed && mirror_epoch >= dead_imports.front().not_before) {
+    while (!dead_imports.empty() && dead_imports.front().value <= mem_completed && rec_epoch() >= dead_imports.front().not_before) {
         destroy_import_buffer(dead_imports.front().buffer);
         vkFreeMemory(dev.device, dead_imports.front().memory, nullptr);
         pinned_sub(dead_imports.front().bytes);
@@ -7729,11 +7729,11 @@ void retired_imports_give_back() {   // (pools_mu held)
         std::vector<retired_bound::Range> lr;
         for (auto& [lo, p] : imported)
             if (p.memory) lr.push_back({p.lo, p.hi});
-        for (size_t i : retired_bound::plan(bcands, lr, retired_bytes, mirror_epoch, bnd.cfg)) {
+        for (size_t i : retired_bound::plan(bcands, lr, retired_bytes, rec_epoch(), bnd.cfg)) {
             Pool& p = *bpools[i];
             DeadImport d{p.buffer, p.memory, std::max(rec_value_of(), p.last_value), p.hi - p.lo, std::move(p.pieces)};
             d.lo = p.lo;
-            d.not_before = mirror_epoch + bnd.flight;   // (a few frames after the GPU is done with it, whatever mem_completed says)
+            d.not_before = rec_epoch() + bnd.flight;   // (a few frames after the GPU is done with it, whatever mem_completed says)
             dead_imports.push_back(std::move(d));
             p.pieces.clear();
             p.buffer = VK_NULL_HANDLE, p.memory = VK_NULL_HANDLE, p.address = 0;
@@ -8325,7 +8325,7 @@ void retire_stress() {   // (pools_mu held)
     static const uint64_t every = getenv("RX_VK_RETIRE_STRESS") ? strtoull(getenv("RX_VK_RETIRE_STRESS"), nullptr, 10) : 0;
     static const size_t per = getenv("RX_VK_RETIRE_STRESS_N") ? (size_t)strtoull(getenv("RX_VK_RETIRE_STRESS_N"), nullptr, 10) : 2;
     static int64_t total = 0;
-    if (!every || mirror_epoch % every) return;
+    if (!every || rec_epoch() % every) return;
     std::vector<std::map<uint64_t, Pool>::iterator> cand;
     for (auto it = imported.begin(); it != imported.end(); ++it) {
         const Pool& p = it->second;
