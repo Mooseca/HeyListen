@@ -189,6 +189,10 @@ template <class F> void spin_before_sleep(F&&) {}
 void full_barrier(VkCommandBuffer cmd, const char* = "") {
     record(cmd, 'F');
 }
+struct MemView {};   // (REC1, SUB1: the submission's view a segment's worker reads; nothing in this model)
+MemView memory_view() { return {}; }
+void memory_recording_thread(uint64_t, const MemView&) {}
+void memory_recording_thread_end() {}
 void memory_table_begin() {}
 bool memory_table_flush() { return false; }
 bool memory_rb_refresh(VkCommandBuffer) { return false; }
