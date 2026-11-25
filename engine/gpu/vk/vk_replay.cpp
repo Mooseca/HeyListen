@@ -9373,11 +9373,14 @@ void ot_join_readback(uint64_t gpu, uint64_t size) {
     if (log_each && logged++ < 60) logf("vk: order thread: readback %#llx +%#llx waited %.2f ms for this thread's jobs", (unsigned long long)gpu, (unsigned long long)size, d / 1e6);
 }
 /// (FLASH2) the order thread, replaying a job, binds a 0x3980 range for writing (vk_memory.cpp gpu_buffer_bind): the job's place in its frame is noted
+}   // namespace
+// (declared in vk_internal.h: vk_memory.cpp calls it, so it lives outside the file-local namespace)
 void ot_note_r4_writer() {
     if (!ot_self) return;
     const uint64_t i = ot_r4_n.fetch_add(1, std::memory_order_acq_rel);
     ot_r4_since[i % 16].store(ot_cur_since.load(std::memory_order_relaxed), std::memory_order_relaxed);
 }
+namespace {
 bool ot_audit_on() {
     // (FLASH2) RX_VK_ORDER_RB_AUDIT=1 (logging only): after each CPU readback the ring does not serve, the game thread waits for every
     // job handed over before it and notes whether the range's write-back value moved (a "stale" read: the writer was another thread's
