@@ -26,7 +26,7 @@ int main() {
     using namespace rb_early;
     CHECK(parse(nullptr, nullptr, true).mode == 1 && parse(nullptr, nullptr, false).mode == 0);   // (on with the order thread only)
     CHECK(parse("0", nullptr, true).mode == 0 && parse("2", nullptr, true).mode == 2 && parse("7", nullptr, true).mode == 2);
-    CHECK(parse("1", nullptr, false).mode == 0);                                                    // (inline: nothing to serve early)
+    CHECK(parse("1", nullptr, false).mode == 0 && parse("2", nullptr, false).mode == 2);           // (inline: nothing to serve early; the check runs)
     CHECK(parse(nullptr, "5", true).wait_ms == 5.0 && parse(nullptr, nullptr, true).wait_ms == 30.0 && parse(nullptr, "-1", true).wait_ms == 30.0);
     CHECK(served_size(0x3980) && !served_size(0x40) && !served_size(0x9b040));
     Range r;

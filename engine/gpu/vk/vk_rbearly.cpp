@@ -322,11 +322,17 @@ void rbearly_check(uint64_t gpu, uint64_t size) {
         st.checks++;
         if (std::memcmp(mine, old, (size_t)size)) {
             const int64_t m = ++st.mismatches;
-            if (m <= 12) {
-                size_t first = 0;
-                while (first < size && mine[first] == old[first]) first++;
-                logf("vk: rbearly check MISMATCH %#llx +%#llx at byte %#zx (clk %lld): copy %02x, old path %02x", (unsigned long long)host->gpu_guest(gpu),
-                     (unsigned long long)size, first, (long long)rb_frame_now(), mine[first], old[first]);
+            if (m <= 40) {   // (the words that differ: how many, and the first eight with both values)
+                char b[600];
+                int n = 0, words = 0;
+                for (size_t w = 0; w + 4 <= size; w += 4) {
+                    uint32_t x, y;
+                    std::memcpy(&x, mine + w, 4), std::memcpy(&y, old + w, 4);
+                    if (x == y) continue;
+                    if (words++ < 8 && n < (int)sizeof b - 40) n += snprintf(b + n, sizeof b - n, " +%#zx %08x/%08x", w, x, y);
+                }
+                logf("vk: rbearly check MISMATCH %#llx +%#llx (clk %lld, seq %u): %d words differ, copy/old path:%s", (unsigned long long)host->gpu_guest(gpu),
+                     (unsigned long long)size, (long long)rb_frame_now(), seq, words, n ? b : "");
             }
         }
     }

@@ -27,7 +27,7 @@ constexpr unsigned kHist = 8;
 
 /// RX_VK_RB_EARLY=<0|1|2> (1 with the order thread: served; 0 off; 2 a check: the old path runs and each read is compared with the slot
 /// the rule would have handed out), RX_VK_RB_EARLY_WAIT_MS (30): how long a read waits for its slot before it takes the old path.
-/// Off without the order thread (inline, the reads find the submission replayed already)
+/// Not served without the order thread (inline, the reads find the submission replayed already); the check (2) runs there too
 struct Config {
     int mode = 0;
     double wait_ms = 30.0;
@@ -39,7 +39,7 @@ inline Config parse(const char* mode, const char* wait, bool order_thread) {
         const int m = atoi(mode);
         c.mode = m < 0 ? 0 : (m > 2 ? 2 : m);
     }
-    if (!order_thread) c.mode = 0;
+    if (!order_thread && c.mode == 1) c.mode = 0;   // (served only with the order thread; the check runs inline too: the inline value is the reference)
     if (wait && *wait) {
         const double w = atof(wait);
         if (w >= 0) c.wait_ms = w;
