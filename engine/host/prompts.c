@@ -991,7 +991,8 @@ typedef struct { uint64_t box, text, status; uint32_t len; } SeenBox;
 static SeenBox seen_box[BOXES];
 static int seen_n, seen_next;
 static SRWLOCK seen_lock = SRWLOCK_INIT;
-static volatile LONG calls_layout, calls_draw, ret_text, ret_codes, boxes_told;   /* (hook calls, boxes with no text, with no codes: said at each change) */
+static volatile LONG calls_layout, calls_draw, ret_text, ret_codes, boxes_told;
+static volatile int64_t watch_at;   /* (hos_now_ns: when to say what the hooks saw since the last change) */   /* (hook calls, boxes with no text, with no codes: said at each change) */
 
 /* the box's text and length; NULL for a box without a readable text */
 static uint8_t *box_text(uint64_t box, uint64_t *at, uint32_t *n) {
@@ -1193,6 +1194,7 @@ static int live_font(const char *dir, int face) {
                 "%d rewritten at once)", faces[face], bound, (long)InterlockedExchange(&text_seen, 0), (long)InterlockedExchange(&text_with_codes, 0),
                 (long)InterlockedExchange(&text_rewritten, 0), (long)InterlockedExchange(&calls_layout, 0), (long)InterlockedExchange(&calls_draw, 0),
                 (long)InterlockedExchange(&ret_text, 0), (long)InterlockedExchange(&ret_codes, 0), seen_n, looked, now);
+        watch_at = hos_now_ns() + 1500000000;
     } else if (q) {
         hos_log("prompts: the font is no longer where FreeType read it: the icons in texts at the next start");
     }
@@ -1306,6 +1308,11 @@ void hos_prompts_live(void) {
     const int64_t now = hos_now_ns();
     if (now - last >= 100000000) {
         last = now;
+        if (watch_at && now >= watch_at) {   /* (a change's aftermath: do the hooks see the boxes laid out again?) */
+            watch_at = 0;
+            hos_log("prompts: 1.5 s after the change: %ld layouts and %ld draws of boxes, %ld texts looked at, %ld rewritten by the hooks", (long)calls_layout,
+                    (long)calls_draw, (long)text_seen, (long)text_rewritten);
+        }
         find_layouts();
         {   /* (what the menu's row may promise: it asks for a restart when a part is not found: HL_OPT_PROMPTS_LIVE) */
             static int pushed = -1;
