@@ -172,9 +172,24 @@ Build `build/s5/bin/lowend1` = perf/lowend 7d11e1655. Slot a, logs `build/s5/l1-
 (RX_VK_FOG=0: no haze, nothing black or undefined). l1-vl: "low-end GPU ..., HL_LOWEND=1: the Minimum preset ... for this run only
 (nothing saved)". The Deku Tree / graveyard fog pictures and the compute-path check were cut by the slot lease's end (40 min).
 
-## Levers
+## Levers (measured on the laptop; fps still / turning against the line above it)
 
-(filled as measured)
+| lever | how shipped | gain | source |
+|---|---|---|---|
+| disk cache of transcoded textures (TEXCACHE) | perf/texcache, its rule | turning 6-8 -> 10-11 | TEXCACHE lists 1-3 |
+| handheld profile (the game's own low settings: 768x432, smaller shadows and fog volume) | low-end rule, from the 2nd start | 11.5 / 10.3 -> 15.4 / 13.5 | L1 H0 |
+| volumetric fog off | Volumetric fog row (RX_VK_FOG), low-end rule | GPU -9 ms docked; +1.5 / +1.9 alone; ~+1 with handheld | L1 F0, HF |
+| render 33% | Render resolution step for the game's own / Off, low-end rule | still +1.3, turning ~0 (GPU time does not follow the size there) | L2 L33 |
+| VRAM mirror in place of the wait | default on AMD no-mesh APUs | +1 turning at 33%, gaps 13-16 -> 9-11 ms | L2 L33M, L7 D0 vs D1 |
+| barrier elision (RX_VK_BARRIER_HAZARD=3) | not shipped | noise | L3 SB, SB2 |
+| upload budget 12 ms | not shipped | noise | L3 SU |
+| parallel replay off | not shipped | turning +1.3, still -0.5 to -1 | L5 |
+| indexed fallback | RX_VK_FALLBACK_INDEXED, off | noise (11.14 -> 11.10 ms) | L6 I0-I2 |
+| (bound) no mesh fallback | - | 25 / 20.7 | L3 SN |
+
+The proposed rule (shipped, lowend2 + 44e37b785): integrated GPU without mesh shaders, first start, once (lowend_rule=1): Render
+resolution 33%, Volumetric fog off, handheld profile (next start); said in the log; the Insert menu changes them back; HL_LOWEND=0
+never, =1 for one run. Picture change on those machines only: softer (33%), no haze or mist (fog), the game's handheld settings.
 
 ## List 6: lowend1 on the laptop (25 Nov 00:00-00:55)
 
@@ -201,6 +216,36 @@ mirror without the wait. All 7 runs reached play, no FATAL / device lost.
   Builder's nx2/make_game.py through shader_census.py); its program cache holds what the runs translated in play (573-746 keys).
   Not a handicap for these numbers: every run logs "0.00 waits for shaders or pipelines" and ~400 ms of translation in all
   (`L6\B1\game_log.txt`). A player's Builder install has the list and prepares at its first start.
+
+## List 7: lowend2, the rule end to end (25 Nov 01:50-02:20)
+
+`L7\<arm>`, `L7\pilot-summary.txt`, `L7\owner_options.ini`, `L7\options_after_<arm>.ini`. All 6 runs reached play at the first start.
+
+| arm | fps still | fps turning |
+|---|---|---|
+| D1: this afternoon's defaults (the wait, no mirror; 50%, docked, fog on) | 11.6-13.2 | 11.0 |
+| D0: lowend2's defaults on this laptop with HL_LOWEND=0 (mirror on, wait off) | 13.0-13.8 | 11.7 |
+| R1: first start, the rule applies (33%, fog off, mirror; not yet handheld) | 15.2-16.4 | 14.2 |
+| R2, R3: second and third start (handheld too) | 17.2-18.8, 17.2-18.1 | 16.2, 15.5 |
+| LS2: the rule's set by switches | 19.0-19.8 | 16.6 |
+
+- The options diff after R1 is the four keys only (resolution 4 -> 6, handheld_profile 0 -> 1, volumetric_fog=0 and lowend_rule=1
+  appended; microphone, frame_pacing and the order untouched), but the file came back LF from CRLF: fixed in 44e37b785 (binary
+  read, lowend_rule::ini_put_text keeps every line's ending and writes the file's own; tested with CRLF, LF, no file, a key
+  prefix). Not yet run in a build.
+- R2's picture (`L7\R2\late.png`, looked at by the coordinator): field, Link, HUD, minimap right, soft as 33% is.
+
+## lowend2 on the main PC (25 Nov 01:47-02:21, slot b)
+
+Logs `build/s5/l1-v0`, `l1-vf`, `l1-vl`, `l1-d1`, `l1-d0`, `l1-g1`, `l1-g0`; shots `E:\OOT\scratch-laptop1\shots\<tag>`.
+- Defaults (v0): play at the first try, "VRAM mirror ... on" (discrete, as before), "volumetric fog on (the Volumetric fog row)",
+  picture right (`shots\v0\vk_006000.png`).
+- HL_LOWEND=1 (vl): the rule's line for the run, "Render resolution: 33% chosen, drawn at 33% with Upscaler 0", picture right with
+  the game's own network at 33% (`shots\vl\vk_012000.png`).
+- Fog on/off side by side: Deku Tree `shots\d1\vk_012600.png` / `shots\d0\vk_018000.png`: off loses the light shafts' haze and the
+  glow around Navi, the room is darker and crisper, nothing black, flashing or undefined. Graveyard `shots\g1\vk_010800.png` /
+  `shots\g0\vk_015000.png`: off loses the mist over the graves and the archway; clean. The fog is atmosphere in these places: a
+  real look change, right for a player's option and the low-end rule, not for a default.
 
 ## Levers that need more than a night
 
