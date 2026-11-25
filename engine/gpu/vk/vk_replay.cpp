@@ -8925,6 +8925,7 @@ std::mutex ot_mu;
 std::condition_variable ot_cv, ot_done_cv;
 std::deque<Job> ot_jobs;               // (ot_mu)
 uint64_t ot_seq_pushed = 0;            // (ot_mu)
+uint64_t ot_present_seq = 0;           // (ot_mu: the sequence number of the newest present handed over: the end of the game's last whole frame)
 int ot_presents = 0;                   // (handed over, not yet shown: ot_mu)
 int ot_waiters = 0;                    // (threads in ot_done_cv: ot_mu)
 std::atomic<uint64_t> ot_seq_done{0}, ot_value_done{0};
@@ -9243,7 +9244,7 @@ void ot_push(Job&& j) {
         std::lock_guard lk(ot_mu);
         j.seq = ++ot_seq_pushed;
         if (j.kind == JOB_SUBMIT) ot_my_seq = j.seq;   // (its submits: what it replayed itself inline; registrations never waited)
-        if (j.kind == JOB_PRESENT) ot_presents++, ot_last_present_push.store(ot_now(), std::memory_order_relaxed);
+        if (j.kind == JOB_PRESENT) ot_presents++, ot_present_seq = j.seq, ot_last_present_push.store(ot_now(), std::memory_order_relaxed);
         ot_jobs.push_back(std::move(j));
     }
     ot_cv.notify_one();
@@ -9287,11 +9288,11 @@ void ot_join_all(int site) {
 }
 /// (PIPE2) a CPU readback the ring does not serve. In the replay inline, the reading thread's own submits had been replayed by now
 /// (on it), while the other threads' were being replayed beside it (OoT's main thread reads while the PT replays the frame before):
-/// so it waits for the submissions this thread handed over (RX_VK_ORDER_RB_JOIN=1; the default 4 is that, and all jobs for the 0x3980 culling results); =2: every job handed over (all threads'),
+/// so it waits for the submissions this thread handed over (RX_VK_ORDER_RB_JOIN=1; the default 5 is that, and the last whole frame's jobs for the 0x3980 culling results); =2: every job handed over (all threads'),
 /// =0: none. RX_VK_ORDER_LOG=1: the first 60 reads that waited, by range
 void ot_join_readback(uint64_t gpu, uint64_t size) {
-    // (PIPE2) RX_VK_ORDER_RB_JOIN=<0..4> (4): what a CPU readback waits for with the order thread: nothing, this thread's jobs, all jobs, all jobs for a range with write-backs (3), this thread's jobs and all jobs for the 0x3980 culling results (4)
-    static const int mode = getenv("RX_VK_ORDER_RB_JOIN") ? atoi(getenv("RX_VK_ORDER_RB_JOIN")) : 4;
+    // (PIPE2) RX_VK_ORDER_RB_JOIN=<0..5> (5): what a CPU readback waits for with the order thread: nothing, this thread's jobs, all jobs, all jobs for a range with write-backs (3), this thread's jobs and all jobs for the 0x3980 culling results (4), this thread's jobs and the last whole frame's jobs for them (5)
+    static const int mode = getenv("RX_VK_ORDER_RB_JOIN") ? atoi(getenv("RX_VK_ORDER_RB_JOIN")) : 5;
     // (PIPE2) RX_VK_ORDER_LOG=1: the order thread's joins one by one (the first 60 readbacks that waited)
     static const bool log_each = getenv("RX_VK_ORDER_LOG") && atoi(getenv("RX_VK_ORDER_LOG")) != 0;
     if (ot_self || !mode) return;
@@ -9302,6 +9303,37 @@ void ot_join_readback(uint64_t gpu, uint64_t size) {
     // (FLASH2) =4 (the default): only the 0x3980 culling results (R4, the lights and the ground fog), when the ring does not serve them, wait for every
     // job handed over: the audit named them as the one range read before a writer of another thread's submission was replayed
     if (mode == 4 && size == 0x3980) return ot_join_all(OT_READBACK);
+    // (FLASH2) =5 (the default): the 0x3980 culling results wait for what the inline replay had at this read and no more: the game alternates
+    // two buffers, so the one read in frame f was written in frame f-1 and all of f-1's jobs end with its present. The read waits until the order
+    // thread has done up to the newest present handed over (and this thread's own jobs), not for the frame in progress's submissions as =4 does
+    // (it cost the 3050 10-14 fps). The ring's R4 class (RX_VK_RB_R4=1) gave these values at a fixed lag of 3 and made the plants pop: off
+    if (mode == 5 && size == 0x3980) {
+        uint64_t want;
+        {
+            std::lock_guard lk(ot_mu);
+            want = ot_present_seq;
+        }
+        want = std::max(want, ot_my_seq);
+        static std::atomic<int64_t> reads{0}, waits{0}, wait_ns{0}, worst_ns{0};
+        int64_t d = 0;
+        if (ot_seq_done.load(std::memory_order_acquire) < want) {
+            const int64_t t0 = ot_now();
+            ot_wait_until([want] { return ot_seq_done.load(std::memory_order_acquire) >= want; }, UINT64_MAX);
+            d = ot_now() - t0;
+            ot_note(OT_READBACK, d, true);
+            waits++, wait_ns += d;
+            int64_t w = worst_ns.load();
+            while (d > w && !worst_ns.compare_exchange_weak(w, d)) {}
+        } else {
+            ot_note(OT_READBACK, 0, false);
+        }
+        if (++reads % 1200 == 0) {   // (about every 600 frames: two reads a frame)
+            const int64_t n = waits.exchange(0), ns = wait_ns.exchange(0);
+            logf("vk: order thread: the 0x3980 culling results' reads wait for the last whole frame's jobs: %lld of 1200 waited, %.2f ms each, worst %.2f ms",
+                 (long long)n, n ? ns / (double)n / 1e6 : 0.0, worst_ns.exchange(0) / 1e6);
+        }
+        return;
+    }
     if (mode == 3) {
         bool ever = false;
         memory_writeback_value(host->gpu_guest(gpu), size, &ever);

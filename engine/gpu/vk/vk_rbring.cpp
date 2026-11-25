@@ -142,9 +142,9 @@ void hash_add(int64_t frame, int cls, uint64_t h) {
     }
 }
 
-// (FLASH2) RX_VK_RB_R4=<0|1> (1): the 0x3980 culling results the CPU reads (R4) are served by the ring too, at the ring's fixed lag; 0: from guest memory as the replay left them
+// (FLASH2) RX_VK_RB_R4=<0|1> (0): the 0x3980 culling results the CPU reads (R4) are served by the ring too, at its fixed lag (3 frames old made the plants pop: off); 0: read as the replay left them, after the order thread's precise wait (RX_VK_ORDER_RB_JOIN=5)
 bool r4_on() {
-    static const bool on = !getenv("RX_VK_RB_R4") || atoi(getenv("RX_VK_RB_R4")) != 0;
+    static const bool on = getenv("RX_VK_RB_R4") && atoi(getenv("RX_VK_RB_R4")) != 0;
     return on;
 }
 const char* cname(int cls) { return cls == 1 ? "R1" : cls == 2 ? "R2" : cls == 3 ? "R3" : "R4"; }

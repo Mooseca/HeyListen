@@ -15,7 +15,7 @@ python -I -B tests/test_order_rb_join.py
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT = "4"
+DEFAULT = "5"
 
 
 def function(text, head):
@@ -40,10 +40,14 @@ def main():
     need('atoi(getenv("RX_VK_ORDER_RB_JOIN")) : ' + DEFAULT in f, "the default mode is not " + DEFAULT)
     need("if (mode == 2) return ot_join_all(OT_READBACK);" in f, "mode 2 is not the join of every job")
     need("if (mode == 4 && size == 0x3980) return ot_join_all(OT_READBACK);" in f, "mode 4 is not the join of every job for the 0x3980 range")
+    m5 = f[f.index("if (mode == 5 && size == 0x3980) {"):f.index("if (mode == 3) {")]
+    need("want = ot_present_seq;" in m5 and "std::max(want, ot_my_seq)" in m5 and "ot_wait_until" in m5 and "ot_join_all" not in m5,
+         "mode 5 does not wait for the last present's jobs and this thread's own only")
+    need("ot_present_seq = j.seq" in rp[rp.index("void ot_push("):], "ot_push does not note the newest present's sequence")
     rr = (ROOT / "gpu/vk/rb_ring.h").read_text(encoding="utf-8")
     need("size == 0x3980 ? 4 : 0" in rr, "the ring has no class for the 0x3980 culling results")
     rb = (ROOT / "gpu/vk/vk_rbring.cpp").read_text(encoding="utf-8")
-    need("if (cls == 4 && !r4_on()) return;" in rb and 'getenv("RX_VK_RB_R4")' in rb, "R4 has no switch")
+    need("if (cls == 4 && !r4_on()) return;" in rb and 'getenv("RX_VK_RB_R4") && atoi(getenv("RX_VK_RB_R4")) != 0' in rb, "R4 is not off by default")
     need("uint8_t buf[rb_ring::kMaxCopy];" in rb and "uint8_t waited[rb_ring::kMaxCopy];" in rb, "a class-4 range overflows the ring's buffers")
     need("stats[5];" in rb and "by[5]" in rb, "the per-class tables do not hold class 4")
     m3 = f[f.index("if (mode == 3) {"):]
