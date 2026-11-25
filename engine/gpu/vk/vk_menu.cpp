@@ -1039,10 +1039,11 @@ Row rows[] = {
     {TAB_GRAPHICS, "Sharpness", &opts.sharpness, 0, 100, 10, tx_percent,
      "Sharpens the picture as it goes to the window, with any filter. Too much shows halos around edges.", hn_sharpness},
     {TAB_GRAPHICS, "Handheld profile", &opts.handheld, 0, 1, 1, tx_onoff,
-     "Runs the game as if the console were undocked. Applies after a restart.", hn_handheld, true},
+     "Runs the game as if the console were undocked: the game is told, as a console tells it, and changes at once. The size of its "
+     "picture follows after a restart.", hn_handheld},
     {TAB_GRAPHICS, "Volumetric fog", &opts.fog, 0, 1, 1, tx_onoff,
      "The haze in the distance and the mist of the forests. Off is lighter on the GPU (about an eighth of the frame on integrated "
-     "graphics, a few percent on a graphics card) and shows the distance crisper. Applies after a restart.", nullptr, true},
+     "graphics, a few percent on a graphics card) and shows the distance crisper. Applies at once.", nullptr},
     {TAB_GRAPHICS, "Ultrawide", &opts.ultrawide, 0, 1, 1, tx_ultrawide,
      "The camera's shape on a screen wider or narrower than 16:9 (4:3, 16:10). Applies after a restart.", hn_ultrawide, true},
     {TAB_GRAPHICS, "HUD layout", &opts.hud_layout, 0, 1, 1, tx_hud_layout,
@@ -2546,14 +2547,15 @@ static int env_int(const char* name) {   // (-1: unset or empty)
     const char* e = getenv(name);
     return e && *e ? atoi(e) : -1;
 }
-bool fog_runs() {
-    static const bool on = [] {
-        const bool v = lowend_rule::fog_on(env_int("RX_VK_FOG"), opts.fog);
-        logf("vk: volumetric fog %s%s", v ? "on" : "off", env_int("RX_VK_FOG") >= 0 ? " (RX_VK_FOG)" : " (the Volumetric fog row)");
-        return v;
-    }();
-    return on;
+bool fog_runs() {   // (asked at each fog dispatch: the row applies at once; RX_VK_FOG, read once, stands over it)
+    static const int env = env_int("RX_VK_FOG");
+    const bool v = lowend_rule::fog_on(env, opts.fog);
+    static std::atomic<int> last{-1};
+    if (last.exchange(v) != (int)v) logf("vk: volumetric fog %s%s", v ? "on" : "off", env >= 0 ? " (RX_VK_FOG)" : " (the Volumetric fog row)");
+    return v;
 }
+static std::atomic<bool> options_read{false};   // (set at the end of menu_init: the rows hold the options file's values)
+int menu_handheld_now() { return options_read.load(std::memory_order_acquire) ? opts.handheld != 0 : -1; }
 static bool lowend_mirror;
 bool lowend_mirror_not_wait() { return lowend_mirror; }
 /// The options file with only these keys' lines rewritten (lowend_rule.h ini_put_text: every other line and the file's line
@@ -2764,6 +2766,7 @@ void menu_init() {
     if (const char* e = getenv("HOS_DYNRES")) opts.resolution = atoi(e) != 0 ? 0 : 1;
     if (const char* e = getenv("HOS_OUTPUT_RES")) opts.output_res = output_choice_text(e);
     restart_init();   // (what this run started with: the rows that take a restart differ from it once changed)
+    options_read.store(true, std::memory_order_release);
 }
 
 int menu_base_fps() {

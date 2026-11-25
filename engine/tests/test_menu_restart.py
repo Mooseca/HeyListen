@@ -76,7 +76,7 @@ def function(source, start):
 
 def sources():
     menu = (ROOT / "gpu" / "vk" / "vk_menu.cpp").read_text(encoding="utf-8")
-    for row in ('"GPU device", &opts.gpu_device', '"Output resolution", &opts.output_res', '"Handheld profile", &opts.handheld',
+    for row in ('"GPU device", &opts.gpu_device', '"Output resolution", &opts.output_res',
                 '"Ultrawide", &opts.ultrawide', '"Robust buffers", &opts.robust'):
         at = menu.find(row)
         if at < 0:
@@ -84,6 +84,19 @@ def sources():
         entry = menu[at:menu.index("},", at)]
         if not re.search(r",\s*true$", entry):
             raise SystemExit("vk_menu.cpp: %s is not marked as taking a restart" % row.split(",")[0])
+    # (rows that apply at once: out of the restart rows, and their help no longer says to restart for the part that applies)
+    for row in ('"Handheld profile", &opts.handheld', '"Volumetric fog", &opts.fog'):
+        at = menu.find(row)
+        if at < 0:
+            raise SystemExit("vk_menu.cpp: a row that applies at once is missing: " + row)
+        entry = menu[at:menu.index("},", at)]
+        if re.search(r",\s*true$", entry):
+            raise SystemExit("vk_menu.cpp: %s still takes a restart, but it applies at once" % row.split(",")[0])
+    fog = menu[menu.index('"Volumetric fog", &opts.fog'):]
+    if "Applies at once." not in fog[:fog.index("},")]:
+        raise SystemExit("vk_menu.cpp: the Volumetric fog row's help does not say it applies at once")
+    if "menu_handheld_now()" not in (ROOT / "gpu" / "vk" / "vk_replay.cpp").read_text(encoding="utf-8"):
+        raise SystemExit("vk_replay.cpp: HL_OPT_HANDHELD is not answered from the row")
     if "(restart)" in menu:
         raise SystemExit("vk_menu.cpp: a value still says (restart) whatever runs: \"(after restart)\" is added while it differs")
     if '"After restart"' not in menu or "Restart needed: " not in menu:

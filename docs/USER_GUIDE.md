@@ -179,7 +179,9 @@ not replace the builder: it runs it for you, with no window.
    more) are on the game's page in RecompLauncher; they change `hookshot_options.ini` in the game folder, the same file the
    in-game menu (Insert or F1) saves. On a screen that is not 16:9 (an ultrawide, 4:3, 16:10), set **Ultrawide** to the
    screen's shape: the HUD keeps its 16:9 size, its corners at the screen's edges, and the in-game menu's **HUD layout** row
-   (Graphics) puts it back in the middle 16:9, either in RecompLauncher or in the game. Your saves are in the game folder's
+   (Graphics) puts it back in the middle 16:9, either in RecompLauncher or in the game. Two Graphics rows apply at once, in
+   play, with no restart: **Handheld profile** (the game is told the console was undocked or docked, as a real one tells it; the
+   size of its picture, set at the start, follows after a restart) and **Volumetric fog**. Your saves are in the game folder's
    `user\save` (Windows) or `~/.local/share/heylisten/save` (Linux), and the launcher backs them up.
 
 The game is made in the `HeyListen` folder inside the folder RecompLauncher installed HeyListen in (the install folder is

@@ -21,6 +21,37 @@ inline bool fog_program(uint64_t key) {
 }
 /// Whether the fog runs: RX_VK_FOG (env: -1 unset, else 0 off / 1 on) over the row (row: opts.fog, 1 on)
 inline bool fog_on(int env, int row) { return env >= 0 ? env != 0 : row != 0; }
+/// Which of the three fog programs this is, in the order above (0 to 2), -1 for any other program
+inline int fog_program_index(uint64_t key) {
+    return key == 0x27ee9883e2a20323ull ? 0 : key == 0xee7764a6b1ef459cull ? 1 : key == 0x1e2fcee33a0c7209ull ? 2 : -1;
+}
+/// The row applies at once: what a fog program's dispatch does now. While the fog runs, Run. Once it is switched off the volume
+/// would keep the last haze it was given (frozen in the distance), so the program's next kFogClears dispatches Clear the images they
+/// write (the first and the third ping-pong two sets by frame parity, so more than two) and later ones are left out (Skip). Off
+/// from the start nothing was written: Skip at once. On again: Run, from the images as they are.
+enum class FogStep { Run, Clear, Skip };
+constexpr int kFogClears = 6;
+struct FogGate {
+    bool was_on = false;
+    int left[3] = {0, 0, 0};
+    FogStep step(bool on, int program) {
+        if (program < 0 || program > 2) return FogStep::Run;
+        if (on) {
+            was_on = true;
+            left[program] = 0;
+            return FogStep::Run;
+        }
+        if (was_on) {   // (the first dispatch since it was on: every program's clears begin)
+            was_on = false;
+            for (int& n : left) n = kFogClears;
+        }
+        if (left[program] > 0) {
+            left[program]--;
+            return FogStep::Clear;
+        }
+        return FogStep::Skip;
+    }
+};
 
 /// The GPUs the low-end preset is for: an integrated GPU that has no mesh shaders (task and mesh programs run as compute: the
 // issue 640 fallback). AMD's Vega APUs (Ryzen 2000 to 5000 U/H/G) and Intel's Xe-LP graphics; not the RDNA 2/3 APUs (680M,

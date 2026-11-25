@@ -19,9 +19,10 @@ def need(path, needles):
 def check_source():
     """The dispatch leaves the fog's programs out when the fog is off; the menu has the Lowest preset, the rule and its options-file
     line; the device setup asks the rule once the mesh shaders are known"""
-    need("gpu/vk/vk_draw.cpp", ['#include "lowend_rule.h"', "if (lowend_rule::fog_program(cp->key) && !fog_runs()) {"])
+    need("gpu/vk/vk_draw.cpp", ['#include "lowend_rule.h"', "lowend_rule::fog_program_index(cp->key)", "fog_gate.step(fog_runs(), fog_idx)",
+                                "if (step == lowend_rule::FogStep::Clear) fog_clear_images(cmd, s, *cp);", "vkCmdClearColorImage(cmd, i.first->image"])
     need("gpu/vk/vk_menu.cpp", ['{TAB_GRAPHICS, "Volumetric fog", &opts.fog, 0, 1, 1, tx_onoff,',
-                                'lowend_rule::fog_on(env_int("RX_VK_FOG"), opts.fog)',
+                                'lowend_rule::fog_on(env, opts.fog)',
                                 'lowend_rule::first_start(env_int("HL_LOWEND"), lowend_marked, integrated, untouched)',
                                 "static void lowend_probe_frame() {", "lowend_probe_frame();   // (the Lowest preset measure, while it runs)",
                                 "lowend_probe.feed(prof_now(), on) == lowend_rule::PENDING",

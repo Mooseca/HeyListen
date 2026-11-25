@@ -29,6 +29,29 @@ int main() {
     expect(fog_on(1, 0), "RX_VK_FOG=1 over the row");
     expect(!fog_on(0, 1), "RX_VK_FOG=0 over the row");
 
+    // (the row applies at once: what a fog program's dispatch does while the row is switched)
+    expect(fog_program_index(0x27ee9883e2a20323ull) == 0 && fog_program_index(0xee7764a6b1ef459cull) == 1 &&
+               fog_program_index(0x1e2fcee33a0c7209ull) == 2 && fog_program_index(0x53509044401d78d2ull) == -1,
+           "the fog programs' places");
+    {
+        FogGate g;   // (off from the start: nothing was written, nothing to clear)
+        expect(g.step(false, 0) == FogStep::Skip && g.step(false, 2) == FogStep::Skip, "off from the start: left out");
+        expect(g.step(false, -1) == FogStep::Run, "another program always runs");
+        expect(g.step(true, 1) == FogStep::Run && g.step(true, 0) == FogStep::Run, "on: runs");
+        // (switched off while it ran: every program clears its next kFogClears dispatches, then is left out)
+        for (int p = 0; p < 3; p++) {
+            for (int i = 0; i < kFogClears; i++) expect(g.step(false, p) == FogStep::Clear, "off after on: the images are cleared");
+            expect(g.step(false, p) == FogStep::Skip, "then the dispatches are left out");
+        }
+        expect(g.step(true, 2) == FogStep::Run, "on again: runs");
+        expect(g.step(false, 2) == FogStep::Clear && g.step(false, 0) == FogStep::Clear, "off again: cleared again");
+        // (switched on again before the clears were used up: that program starts clean)
+        FogGate h;
+        h.step(true, 0);
+        expect(h.step(false, 0) == FogStep::Clear, "first clear");
+        expect(h.step(true, 0) == FogStep::Run && h.left[0] == 0, "on again: a program's clears are dropped");
+    }
+
     expect(lowend_gpu(true, false), "integrated without mesh shaders (a Vega 8)");
     expect(!lowend_gpu(true, true), "integrated with mesh shaders (a 780M)");
     expect(!lowend_gpu(false, false), "discrete without mesh shaders (an RX 5700): not this rule");

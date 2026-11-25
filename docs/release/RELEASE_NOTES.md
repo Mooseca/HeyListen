@@ -49,6 +49,8 @@ builds the driver's pipelines as you play, so it stutters more than usual. The s
   Deck pad: the one that gave input last, without flipping on a resting pad's drift or a nudge of the mouse). The ocarina's
   notes show the keys you bound on the Keyboard face, not the Switch's letters.
 * **HUD layout row**: the HUD at the screen's edges (every screen shape) or in the middle 16:9.
+* **Handheld profile and Volumetric fog apply at once**: no restart. The game is told of the dock or undock as a console
+  tells it; the size of its picture still follows the start's profile.
 * **A tidier menu**: rows that only matter with another setting on (V-Sync mode, the frame generation rows, the DLSS
   model, the HDR and PsychoV35 rows) are hidden while that setting is off; the HDR row says when your screen has no HDR
   (Windows' *Use HDR* off); *Layout preset* and *Button prompts* are on the Controls tab. Button prompts apply at once, with no restart.

@@ -11393,6 +11393,45 @@ static void hdr_find_dispatch(const NvnState& s, uint64_t key) {
     if (seen.size() < 64 && seen.insert(key).second) logf("%s", line);
 }
 
+/// (the Volumetric fog row switched off while the game runs) What a fog program would write, cleared in its place: the volume is read
+/// as no haze, not as the last one. The images are the program's written storage images, as dry_mark_written finds them, all in
+/// GENERAL layout; a full barrier before and after the clears, the images marked as the GPU's.
+void fog_clear_images(VkCommandBuffer cmd, NvnState& s, const Program& p) {
+    std::vector<std::pair<Texture*, uint32_t>> images;
+    for (const Stage& st : p.stages)
+        for (const auto& d : st.info.image_descriptors) {
+            if (!d.is_written) continue;
+            const VkImageViewType vt = view_type(d.type);
+            for (uint32_t k = 0; k < d.count; k++) {
+                const uint32_t handle = handle_of(s, st, d, k);
+                Texture* tex = nullptr;
+                uint32_t level = 0;
+                if (!handle || !texture_view_of(handle, vt, ViewUse::Storage, image_format(d.format), &tex, &level) || !tex ||
+                    tex->sparse || !(tex->usage & VK_IMAGE_USAGE_TRANSFER_DST_BIT) || !(tex->aspect & VK_IMAGE_ASPECT_COLOR_BIT))
+                    continue;
+                bool seen = false;
+                for (const auto& i : images) seen = seen || (i.first == tex && i.second == level);
+                if (!seen) images.push_back({tex, level});
+            }
+        }
+    if (images.empty()) return;
+    VkMemoryBarrier2 mb{VK_STRUCTURE_TYPE_MEMORY_BARRIER_2};
+    mb.srcStageMask = mb.dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+    mb.srcAccessMask = mb.dstAccessMask = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT;
+    VkDependencyInfo dep{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
+    dep.memoryBarrierCount = 1, dep.pMemoryBarriers = &mb;
+    vkCmdPipelineBarrier2(cmd, &dep);
+    const VkClearColorValue zero{};
+    for (const auto& i : images) {
+        const VkImageSubresourceRange r{VK_IMAGE_ASPECT_COLOR_BIT, i.second, 1, 0, VK_REMAINING_ARRAY_LAYERS};
+        vkCmdClearColorImage(cmd, i.first->image, VK_IMAGE_LAYOUT_GENERAL, &zero, 1, &r);
+    }
+    vkCmdPipelineBarrier2(cmd, &dep);
+    for (const auto& i : images) {
+        ParLock lk;
+        texture_written(i.first);   // (the fog volume cleared: the Volumetric fog row Off; no reason: it is no virtual-pool texture)
+    }
+}
 void dispatch(VkCommandBuffer cmd, NvnState& s, uint32_t x, uint32_t y, uint32_t z, uint64_t indirect) {
     if (par_stats_on) par_stats_draw();
     PROF(PROF_DISPATCH);
@@ -11486,10 +11525,20 @@ void dispatch(VkCommandBuffer cmd, NvnState& s, uint32_t x, uint32_t y, uint32_t
             }
         }
     }
-    if (lowend_rule::fog_program(cp->key) && !fog_runs()) {   // (the Volumetric fog row Off, or RX_VK_FOG=0: lowend_rule.h)
-        static std::atomic<int> told{0};
-        if (!told++) logf("vk: volumetric fog off (the Volumetric fog row, RX_VK_FOG): its three programs' dispatches left out");
-        return;
+    if (const int fog_idx = lowend_rule::fog_program_index(cp->key); fog_idx >= 0) {   // (the Volumetric fog row, RX_VK_FOG: lowend_rule.h)
+        static std::mutex fog_mu;
+        static lowend_rule::FogGate fog_gate;
+        lowend_rule::FogStep step;
+        {
+            std::lock_guard lk(fog_mu);
+            step = fog_gate.step(fog_runs(), fog_idx);
+        }
+        if (step != lowend_rule::FogStep::Run) {   // (Off: its images cleared for the first dispatches, then the dispatch left out)
+            static std::atomic<int> told{0};
+            if (!told++) logf("vk: volumetric fog off (the Volumetric fog row, RX_VK_FOG): its three programs' dispatches left out");
+            if (step == lowend_rule::FogStep::Clear) fog_clear_images(cmd, s, *cp);
+            return;
+        }
     }
     dclock.key = cp->key;
     texture_watch_prog(cp->key);

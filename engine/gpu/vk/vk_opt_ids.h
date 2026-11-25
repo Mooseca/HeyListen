@@ -65,3 +65,6 @@ enum { HL_PROMPTS_LIVE_TEXTURES = 1, HL_PROMPTS_LIVE_LAYOUTS = 2, HL_PROMPTS_LIV
    prompts/ folder (the Builder did not make it: no fontTools or Pillow), so the row changes nothing and the game shows its own
    icons. 96 is free here. */
 #define HL_OPT_PROMPTS_MISSING 96
+/* The Graphics tab's Handheld profile row (host/nn_applet.c asks at each poll for notifications, gpu/vk/vk_replay.cpp answers 0 docked
+   or 1 handheld, -1 while the options are not read yet): a change of the row is told to the game as an undock or a dock. */
+#define HL_OPT_HANDHELD 101
