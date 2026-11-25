@@ -39,10 +39,12 @@ inline bool mirror_not_wait(uint32_t vendor_id, bool integrated, bool mesh_shade
     return vendor_id == 0x1002 && lowend_gpu(integrated, mesh_shader);
 }
 
-/// The options file's text with these keys' lines set to these values, every other line kept as it is, in its place and with its
-/// own line ending; keys not there yet added at the end. The file's line ending (CRLF if any line has one, else LF) is used for the
-/// lines written: an options file edited on Windows kept CRLF (the laptop's) and the rule's first version turned all of it to LF
-inline std::string ini_put_text(const std::string& in, const std::vector<std::pair<std::string, int>>& keys) {
+/// The options file's text with these keys' lines set to these values and these keys' lines taken out, every other line kept as it
+/// is, in its place and with its own line ending; keys not there yet added at the end. The file's line ending (CRLF if any line has
+/// one, else LF) is used for the lines written: an options file edited on Windows kept CRLF (the laptop's) and the rule's first
+/// version turned all of it to LF
+inline std::string ini_edit_text(const std::string& in, const std::vector<std::pair<std::string, int>>& keys,
+                                 const std::vector<std::string>& drop = {}) {
     const std::string eol = in.find("\r\n") != std::string::npos ? "\r\n" : "\n";
     std::string out;
     std::vector<bool> done(keys.size());
@@ -52,13 +54,15 @@ inline std::string ini_put_text(const std::string& in, const std::vector<std::pa
         std::string body = in.substr(at, (end == std::string::npos ? in.size() : end) - at);
         if (!body.empty() && body.back() == '\r') body.pop_back();
         const size_t eq = body.find('=');
-        bool replaced = false;
+        bool replaced = false, dropped = false;
         for (size_t i = 0; eq != std::string::npos && i < keys.size(); i++)
             if (!done[i] && eq == keys[i].first.size() && body.compare(0, eq, keys[i].first) == 0) {
                 out += keys[i].first + "=" + std::to_string(keys[i].second) + eol;
                 done[i] = replaced = true;
             }
-        if (!replaced) {
+        for (size_t i = 0; eq != std::string::npos && !replaced && i < drop.size(); i++)
+            if (eq == drop[i].size() && body.compare(0, eq, drop[i]) == 0) dropped = true;
+        if (!replaced && !dropped) {
             out.append(in, at, next - at);
             if (end == std::string::npos) out += eol;
         }
@@ -68,15 +72,29 @@ inline std::string ini_put_text(const std::string& in, const std::vector<std::pa
         if (!done[i]) out += keys[i].first + "=" + std::to_string(keys[i].second) + eol;
     return out;
 }
+inline std::string ini_put_text(const std::string& in, const std::vector<std::pair<std::string, int>>& keys) {
+    return ini_edit_text(in, keys);
+}
 
-enum Apply { NONE, APPLY_AND_SAVE, APPLY_THIS_RUN };
-/// The first-start rule: env is HL_LOWEND (-1 unset; 0 never; 1 as if the GPU were one, for this run only: nothing saved),
-/// marked whether the options file already has the rule's line (lowend_rule=: once applied or declined, never again: the
-/// player's choices stay theirs), gpu lowend_gpu's answer
-inline Apply first_start(int env, bool marked, bool gpu) {
+/// The Low-end settings row (opts.lowend, the options file's lowend_settings): On sets the three rows (kResolution, kHandheld, kFog) and
+/// remembers their values from before in the options file, one line each (kPrevPrefix + the row's key); Off puts them back. The
+/// first start on a low-end GPU turns it On once (lowend_rule=1 stays in the file after that: never again by itself)
+constexpr int kOff = 0, kOn = 1;
+constexpr const char* kPrevPrefix = "lowend_prev_";
+/// Off puts a row back only if it still holds the value the rule gave it: a row the player changed by hand since is his
+inline int restore_value(int current, int rule_value, int previous) { return current == rule_value ? previous : current; }
+
+enum Apply { NONE, PROBE, APPLY_THIS_RUN };
+/// The first-start question (HeyListen: not "integrated and no mesh shaders": a Steam Deck or a Radeon 780M is integrated and strong).
+/// env is HL_LOWEND (-1 unset; 0 never; 1 the rule's settings now, for this run only: nothing saved), marked whether the options file
+/// already has the rule's line (lowend_rule=: the question was asked once, by the measure or by this rule, and is never asked again),
+/// integrated the GPU's kind (a discrete GPU is never asked), untouched that the player has not set the Low-end settings row or the
+/// three rows (Render resolution, Volumetric fog, Handheld profile) or the Quality preset. PROBE: measure the frames of play
+/// (lowend_measure.h) and turn the row On if they are too slow
+inline Apply first_start(int env, bool marked, bool integrated, bool untouched) {
     if (env == 0) return NONE;
     if (env > 0) return APPLY_THIS_RUN;
-    return gpu && !marked ? APPLY_AND_SAVE : NONE;
+    return integrated && !marked && untouched ? PROBE : NONE;
 }
 
 }  // namespace lowend_rule

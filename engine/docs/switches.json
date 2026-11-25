@@ -2,7 +2,7 @@
  "schema": 1,
  "generated_by": "engine/scripts/list_switches.py",
  "scope": "C, C++ and headers under engine/ (engine/tests and vendored trees other than a64-kit excluded) and the Python the builder, the lifter and the scripts run: getenv, std::getenv, _wgetenv, the code's own env helpers and table-driven reads, and os.environ.",
- "count": 1514,
+ "count": 1516,
  "switches": [
   {
    "name": "A64_",
@@ -1550,12 +1550,58 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2538
+     "line": 2616
+    },
+    {
+     "path": "gpu/vk/vk_menu.cpp",
+     "line": 2620
     }
    ],
    "default": "off (unset)",
-   "values": "on or off (0, false, off, no and empty are off)",
-   "explanation": "undocumented: gpu/vk/vk_menu.cpp:2538 (in `menu_first_run_lowend()`) reads it as an on/off switch: `const lowend_rule::Apply a = lowend_rule::first_start(env_int(\"HL_LOWEND\"), lowend_marked, gpu);`. No comment in the source says what it changes.",
+   "values": "on or off (0, false, off, no and empty are off); the description names `0`, `1`",
+   "explanation": "Not asked if you changed the row, the three rows or the Quality preset. `HL_LOWEND=0` never measures, `HL_LOWEND=1` turns the row On for one run, `HL_LOWEND_FPS` changes the 20.",
+   "comment": "(HL_LOWEND=1: the row's settings for this run only, on any GPU; nothing saved).",
+   "documented_in": "readme.md",
+   "source": "readme.md",
+   "documented": true,
+   "set_via": "In `hookshot_env.txt`, or in the environment.",
+   "use": null
+  },
+  {
+   "name": "HL_LOWEND_FPS",
+   "area": "native",
+   "group": "Timing and frame rate",
+   "audience": "developer",
+   "files": [
+    {
+     "path": "gpu/vk/vk_menu.cpp",
+     "line": 2611
+    }
+   ],
+   "default": "0 (unset)",
+   "values": "a whole number (`0`, `1` in the description)",
+   "explanation": "Not asked if you changed the row, the three rows or the Quality preset. `HL_LOWEND=0` never measures, `HL_LOWEND=1` turns the row On for one run, `HL_LOWEND_FPS` changes the 20.",
+   "comment": null,
+   "documented_in": "readme.md",
+   "source": "readme.md",
+   "documented": true,
+   "set_via": "In `hookshot_env.txt`, or in the environment.",
+   "use": null
+  },
+  {
+   "name": "HL_LOWEND_TEST",
+   "area": "native",
+   "group": "Native engine",
+   "audience": "developer",
+   "files": [
+    {
+     "path": "gpu/vk/vk_menu.cpp",
+     "line": 2600
+    }
+   ],
+   "default": "unset",
+   "values": "text",
+   "explanation": "undocumented: gpu/vk/vk_menu.cpp:2600 (in `menu_first_run_lowend()`) reads it as a text value: `const char* test = getenv(\"HL_LOWEND_TEST\"); \"fps[,skip s,window s]\": the measure runs on any GPU, with this rate in ...`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -5176,7 +5222,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2662
+     "line": 2768
     }
    ],
    "default": "0 (unset)",
@@ -5323,11 +5369,11 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2670
+     "line": 2776
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2678
+     "line": 2784
     },
     {
      "path": "host/nn_vi.c",
@@ -5402,11 +5448,11 @@
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2670
+     "line": 2776
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2678
+     "line": 2784
     },
     {
      "path": "host/nn_vi.c",
@@ -5729,7 +5775,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2765
+     "line": 2872
     },
     {
      "path": "host/display.c",
@@ -7911,7 +7957,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2578
+     "line": 2677
     }
    ],
    "default": "unset",
@@ -7932,7 +7978,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2581
+     "line": 2680
     },
     {
      "path": "host/hos_main.c",
@@ -8041,7 +8087,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2663
+     "line": 2769
     },
     {
      "path": "host/nn_applet.c",
@@ -8590,7 +8636,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2661
+     "line": 2767
     }
    ],
    "default": "0 (unset)",
@@ -8653,11 +8699,11 @@
    "files": [
     {
      "path": "host/rx_backend.c",
-     "line": 612
+     "line": 613
     },
     {
      "path": "host/rx_backend.c",
-     "line": 705
+     "line": 706
     }
    ],
    "default": "off (unset)",
@@ -9327,7 +9373,7 @@
    "files": [
     {
      "path": "host/rx_backend.c",
-     "line": 601
+     "line": 602
     }
    ],
    "default": "off (unset)",
@@ -9839,7 +9885,7 @@
    "files": [
     {
      "path": "host/rx_backend.c",
-     "line": 472
+     "line": 473
     }
    ],
    "default": "unset",
@@ -10011,11 +10057,11 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 477
+     "line": 478
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 512
+     "line": 513
     },
     {
      "path": "host/hos_wide_ui.c",
@@ -10768,7 +10814,7 @@
     },
     {
      "path": "host/rx_backend.c",
-     "line": 456
+     "line": 457
     }
    ],
    "default": "unset",
@@ -18694,7 +18740,7 @@
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 315
+     "line": 316
     }
    ],
    "default": "unset",
@@ -18736,11 +18782,11 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 351
+     "line": 352
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2657
+     "line": 2763
     }
    ],
    "default": "unset",
@@ -20086,15 +20132,15 @@
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 469
+     "line": 470
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 536
+     "line": 537
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 566
+     "line": 567
     }
    ],
    "default": "off (unset)",
@@ -20304,16 +20350,16 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2515
+     "line": 2560
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2516
+     "line": 2561
     }
    ],
    "default": "off (unset)",
    "values": "on or off (0, false, off, no and empty are off)",
-   "explanation": "undocumented: gpu/vk/vk_menu.cpp:2515 (in `fog_runs()`) reads it as an on/off switch: `const bool v = lowend_rule::fog_on(env_int(\"RX_VK_FOG\"), opts.fog);`. No comment in the source says what it changes.",
+   "explanation": "undocumented: gpu/vk/vk_menu.cpp:2560 (in `fog_runs()`) reads it as an on/off switch: `const bool v = lowend_rule::fog_on(env_int(\"RX_VK_FOG\"), opts.fog);`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -20685,7 +20731,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2651
+     "line": 2757
     }
    ],
    "default": "0 (unset)",
@@ -21175,7 +21221,7 @@
     },
     {
      "path": "host/rx_backend.c",
-     "line": 426
+     "line": 427
     }
    ],
    "default": "off (unset)",
@@ -21569,7 +21615,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2653
+     "line": 2759
     }
    ],
    "default": "unset",
@@ -21791,15 +21837,15 @@
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 469
+     "line": 470
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 536
+     "line": 537
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 566
+     "line": 567
     }
    ],
    "default": "off (unset)",
@@ -23572,7 +23618,7 @@
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2645
+     "line": 2751
     }
    ],
    "default": "2",
@@ -23656,7 +23702,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2963
+     "line": 3070
     }
    ],
    "default": "unset",
@@ -26219,7 +26265,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2652
+     "line": 2758
     }
    ],
    "default": "0 (unset)",
@@ -26240,7 +26286,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 356
+     "line": 357
     },
     {
      "path": "gpu/vk/vk_replay.cpp",
@@ -31433,7 +31479,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2935
+     "line": 3042
     }
    ],
    "default": "unset",
@@ -31601,7 +31647,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2658
+     "line": 2764
     }
    ],
    "default": "0 (unset)",

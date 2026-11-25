@@ -47,6 +47,7 @@ struct Options {
                           // alone), 1 30, 2 40, 3 45, 4 48, 5 50, 6 60, 7 72, 8 75, 9 90, 10 120. On: the game runs at it, the frames shown are it times the
                           // multiplier, and the Frame rate limit holds nothing back (menu_fps_limit). Saved as base_frame_rate_limit (host/nn_vi.c; HL_OPT_BASE_LIMIT)
     int realtime = 1;     // game time follows the clock (host/nn_vi.c); 0: per frame (slower frames, slower game)
+    int lowend = 0;       // the Low-end settings row: 0 Auto (the low-end rule applies once on a low-end GPU), 1 Off (never; what it set goes back): lowend_rule.h
     int fog = 1;          // the volumetric fog: 1 on, 0 off (its programs left out: lowend_rule.h); read once, at the first dispatch. RX_VK_FOG over it
     int handheld = 0;     // the game's handheld profile: ~4 fps, softer; read once, at the start (host/nn_applet.c)
     int ultrawide = 0;    // the camera at the monitor's shape when it is wider than 16:9; read once, at the start (host/hos_main.c)

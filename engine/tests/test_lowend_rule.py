@@ -22,18 +22,31 @@ def check_source():
     need("gpu/vk/vk_draw.cpp", ['#include "lowend_rule.h"', "if (lowend_rule::fog_program(cp->key) && !fog_runs()) {"])
     need("gpu/vk/vk_menu.cpp", ['{TAB_GRAPHICS, "Volumetric fog", &opts.fog, 0, 1, 1, tx_onoff,',
                                 'lowend_rule::fog_on(env_int("RX_VK_FOG"), opts.fog)',
-                                'lowend_rule::first_start(env_int("HL_LOWEND"), lowend_marked, gpu)',
+                                'lowend_rule::first_start(env_int("HL_LOWEND"), lowend_marked, integrated, untouched)',
+                                "static void lowend_probe_frame() {", "lowend_probe_frame();   // (the Low-end settings measure, while it runs)",
+                                "lowend_probe.feed(prof_now(), on) == lowend_rule::PENDING",
+                                'getenv("HL_LOWEND_TEST")', 'getenv("HL_LOWEND_FPS")',
+                                "this integrated GPU keeps its settings:",
                                 'if (!strcmp(line, "lowend_rule")) lowend_marked = true;',
-                                'key == "lowend_rule";', 'if (lowend_marked) put("lowend_rule=1\\n");',
+                                '{TAB_GRAPHICS, "Low-end settings", &opts.lowend, 0, 1, 1, tx_lowend,',
+                                'if (r.value == &opts.lowend) return "lowend_settings";',
+                                "if (r.value == &opts.lowend) lowend_row_changed();",
+                                "lowend_rule::restore_value(opts.resolution, rule_res, lowend_prev[0]);",
+                                "lowend_rule::kPrevPrefix", "the Low-end settings row (Graphics tab) turned On",
+                                "Low-end settings row Off:",
+                                'key == "lowend_rule" ||', 'if (lowend_marked) put("lowend_rule=1\\n");',
                                 "opts.resolution = ur::snap(upscaler(), lowend_rule::kResolution);",
                                 "opts.handheld = lowend_rule::kHandheld;\n    opts.fog = lowend_rule::kFog;",
-                                "static void ini_put_only(", 'fopen(ini_path().c_str(), "rb")', "lowend_rule::ini_put_text(in, keys);", "{\"volumetric_fog\", opts.fog}, {\"lowend_rule\", 1}});",
+                                "r.value == &opts.fog || r.value == &opts.preset)\n        lowend_touched = true;",
+                                "static void ini_put_only(", 'fopen(ini_path().c_str(), "rb")', "lowend_rule::ini_put_text(in, keys);", "{pre + lowend_keys[0], before[0]}, {pre + lowend_keys[1], before[1]}, {pre + lowend_keys[2], before[2]}});",
                                 "lowend_mirror = lowend_rule::mirror_not_wait(vendor_id, integrated, mesh_shader);"])
     src = (ROOT / "gpu/vk/vk_menu.cpp").read_text(encoding="utf-8")
     body = src[src.index("void menu_first_run_lowend("):]
     body = body[:body.index("\n}\n")]
     if "apply_preset" in body or "save();" in body:
         raise SystemExit("the low-end rule must write its own rows only (no preset, no whole save)")
+    need("gpu/vk/vk_api.h", ["int (*play_on)(void);", "#define MKWVK_API_VERSION 20"])
+    need("host/rx_backend.c", ["hos_profile_threads, hos_oot_player_seen,"])
     need("gpu/vk/vk_memory.cpp", ["discrete || lowend_mirror_not_wait();"])
     need("gpu/vk/vk_replay.cpp", ["!lowend_mirror_not_wait());   // (LAPTOP1: the mirror in its place there)"])
     src = (ROOT / "gpu/vk/vk_main.cpp").read_text(encoding="utf-8")

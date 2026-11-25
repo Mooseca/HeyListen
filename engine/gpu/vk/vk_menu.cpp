@@ -57,7 +57,8 @@
 #include "menu_rows.h"   // (which dependent rows show: row_shown)
 #include "menu_restart.h"
 #include "present_mode.h"
-#include "lowend_rule.h"   // (the Volumetric fog row and the first-start rule for low-end GPUs)
+#include "lowend_rule.h"
+#include "lowend_measure.h"   // (the measure that decides whether an integrated GPU is too weak)   // (the Volumetric fog row and the first-start rule for low-end GPUs)
 #ifndef HOOKSHOT_VERSION   // (nx2/build.py gives it to this file: nx2/version.py)
 #define HOOKSHOT_VERSION "unknown"
 #endif
@@ -864,6 +865,14 @@ const char* hn_sharpness(int v, int variant) {
     if (variant > 1) return nullptr;
     return with_dlss ? dlss : v == 0 ? "Off: the picture as it is." : nullptr;
 }
+// (HeyListen) the Low-end settings row (lowend_rule.h): whether the first start turned it on once (the options file's lowend_rule=1, kept
+// by save(), read by menu_init) and the three rows' values from before it was turned on
+static bool lowend_marked;
+static bool lowend_touched;     // the player set the row, one of its three rows or the Quality preset in this run
+static bool lowend_integrated;  // an integrated GPU (the measure runs only on one)
+static bool lowend_prev_ok;     // lowend_prev[] hold them: resolution, handheld, fog
+static int lowend_prev[3];
+const char* tx_lowend(int v) { return v ? "On" : "Off"; }
 MENU_HINTS(hn_handheld, 0, "Docked: the Output resolution's size.", "Lower resolutions, lighter on the GPU.")
 MENU_HINTS(hn_ultrawide, 0, "The game's own shape.",
            "The camera takes the screen's shape, wider or narrower. The HUD keeps its 16:9 size, its corners at the "
@@ -1015,6 +1024,12 @@ Row rows[] = {
     {TAB_GRAPHICS, "Volumetric fog", &opts.fog, 0, 1, 1, tx_onoff,
      "The haze in the distance and the mist of the forests. Off is lighter on the GPU (about an eighth of the frame on integrated "
      "graphics, a few percent on a graphics card) and shows the distance crisper. Applies after a restart.", nullptr, true},
+    {TAB_GRAPHICS, "Low-end settings", &opts.lowend, 0, 1, 1, tx_lowend,
+     "For a weak integrated GPU. On sets Render resolution to 33%, Volumetric fog to Off and the Handheld profile to On (lower shadow "
+     "and fog detail, a smaller scene). The resolution changes at once; the fog and the Handheld profile from the next start. Off puts "
+     "those three rows back to what they were before On (a row you changed since keeps your value). The first start on an integrated "
+     "GPU without mesh shaders turns it On once; HL_LOWEND=0 in the environment stops that, HL_LOWEND=1 turns it on for one run.",
+     nullptr, false, true},
     {TAB_GRAPHICS, "Ultrawide", &opts.ultrawide, 0, 1, 1, tx_ultrawide,
      "The camera's shape on a screen wider or narrower than 16:9 (4:3, 16:10). Applies after a restart.", hn_ultrawide, true},
     {TAB_GRAPHICS, "HUD layout", &opts.hud_layout, 0, 1, 1, tx_hud_layout,
@@ -1423,6 +1438,7 @@ const char* ini_key(const Row& r) {
     if (r.value == &opts.dlss_pre_bloom) return "dlss_pre_bloom";   // (as RX_VK_DLSS_PRE_BLOOM)
     if (r.value == &opts.send_perf) return "send_performance_stats";   // (host/hos_telemetry.h reads both of these)
     if (r.value == &opts.send_crash) return "send_crash_reports";
+    if (r.value == &opts.lowend) return "lowend_settings";   // (lowend_rule.h)
     if (r.value == &opts.vsync) return "vsync";
     if (r.value == &opts.vsync_mode) return "vsync_mode";
     if (r.value == &opts.vrr) return "vrr";
@@ -1520,7 +1536,6 @@ void mic_chosen() {
 }
 // (HeyListen) the options file's lowend_rule line: the low-end rule was applied once (menu_first_run_lowend), never again: the
 // player's choices stay theirs. Kept by save()
-[[maybe_unused]] static bool lowend_marked;   // (unused where a test cuts save() out alone)
 void save() {
     // (hookshot) the lines that are not the menu's are kept: the controls, pad_ and key_ (host/nn_hid.c)
     // (and every other line the menu does not write, such as discord_app_id=: they were dropped at the next save)
@@ -1535,7 +1550,8 @@ void save() {
             const char* eq = strchr(line, '=');
             if (!eq || eq == line) continue;
             const std::string key(line, (size_t)(eq - line));
-            bool mine = key == "microphone_device" || key == "options_version" || key == "lowend_rule";
+            bool mine = key == "microphone_device" || key == "options_version" || key == "lowend_rule" ||
+                        !key.compare(0, strlen(lowend_rule::kPrevPrefix), lowend_rule::kPrevPrefix);
             for (const Row& r : rows)
                 if (!mine && r.value && key == ini_key(r)) mine = true;
             if (!mine) others += line, others += others.back() == '\n' ? "" : "\n";
@@ -1557,7 +1573,9 @@ void save() {
         // (2: game_speed below 2 was only ever the old default, see menu_init; 3: the mouse's buttons are bindings, see
         // host/nn_hid.c binds_load)
         put("options_version=3\n");
-        if (lowend_marked) put("lowend_rule=1\n");   // (menu_first_run_lowend)
+        if (lowend_marked) put("lowend_rule=1\n");   // (menu_first_run_lowend: the first start did it once)
+        static const char* const lowend_keys[3] = {"resolution", "handheld_profile", "volumetric_fog"};   // (the rows' values from before the row went On)
+        for (int i = 0; lowend_prev_ok && opts.lowend && i < 3; i++) put("%s%s=%d\n", lowend_rule::kPrevPrefix, lowend_keys[i], lowend_prev[i]);
         out += others;
         if (!can_bind()) out += kept;
         for (int i = 0; i < HOS_KEY_N && can_bind(); i++) {   // (the keys-only controls, HOS_KEY_*, have no pad_ line)
@@ -1572,6 +1590,30 @@ void save() {
 
 /// A row's new value v, as the arrows set it (dir: 1 up, -1 down, for the rows that skip or wrap), saved unless !keep
 /// (a slider's drag: saved once it is let go)
+/// (HeyListen) The Low-end settings row changed (the caller saves). On: the three rows are set, their values from before kept. Off: each
+/// goes back to its value from before, only if it still holds the rule's value (a row the player changed since keeps his)
+void lowend_row_changed() {
+    if (opts.lowend == lowend_rule::kOn) {
+        if (lowend_prev_ok) return;
+        lowend_prev[0] = opts.resolution, lowend_prev[1] = opts.handheld, lowend_prev[2] = opts.fog;
+        lowend_prev_ok = true;
+        opts.resolution = ur::snap(upscaler(), lowend_rule::kResolution);
+        opts.handheld = lowend_rule::kHandheld;
+        opts.fog = lowend_rule::kFog;
+        logf("vk: Low-end settings row On: Render resolution %d%% now, Volumetric fog Off and the Handheld profile from the next start; Off puts "
+             "the rows back", ur::percent(opts.resolution));
+        return;
+    }
+    if (!lowend_prev_ok) return;
+    const int rule_res = opts.resolution == lowend_rule::kResolution ? lowend_rule::kResolution : ur::snap(upscaler(), lowend_rule::kResolution);
+    opts.resolution = lowend_rule::restore_value(opts.resolution, rule_res, lowend_prev[0]);
+    opts.handheld = lowend_rule::restore_value(opts.handheld, lowend_rule::kHandheld, lowend_prev[1]);
+    opts.fog = lowend_rule::restore_value(opts.fog, lowend_rule::kFog, lowend_prev[2]);
+    lowend_prev_ok = false;
+    logf("vk: Low-end settings row Off: Render resolution %d%%, Handheld profile %d and Volumetric fog %d back to before it was On (a row you "
+         "had changed keeps your value); the fog and the handheld profile change at the next start",
+         ur::percent(opts.resolution), opts.handheld, opts.fog);
+}
 void set_row(Row& r, int v, int dir, bool keep = true) {
     // (nothing else to choose: no change, no save. A saved choice that cannot run here is kept)
     if (row_fixed(r.value)) return;
@@ -1617,6 +1659,9 @@ void set_row(Row& r, int v, int dir, bool keep = true) {
     // becomes 6x, AMD FSR 3.1 2x, Auto with either 2x)
     if (r.value == &opts.framegen_by) opts.framegen = fgr::on_mode_change(framegen_by_now(), dlss_fg_most(), opts.framegen);
     if (r.value == &opts.mic && can_mic()) mic_chosen();   // (hookshot)
+    if (r.value == &opts.lowend || r.value == &opts.resolution || r.value == &opts.handheld || r.value == &opts.fog || r.value == &opts.preset)
+        lowend_touched = true;   // (the measure leaves the player's choices alone)
+    if (r.value == &opts.lowend) lowend_row_changed();
     {   // (a row that takes a restart, or a preset that sets one: asked again at the next close)
         int now[mr::kMax];
         restart_values(now);
@@ -2532,32 +2577,86 @@ static void ini_put_only(const std::vector<std::pair<std::string, int>>& keys) {
     const std::string out = lowend_rule::ini_put_text(in, keys);
     hos_atomic_write(ini_path().c_str(), out.data(), out.size());
 }
-void menu_first_run_lowend(uint32_t vendor_id, bool integrated, bool mesh_shader) {
-    const bool gpu = lowend_rule::lowend_gpu(integrated, mesh_shader);
-    lowend_mirror = lowend_rule::mirror_not_wait(vendor_id, integrated, mesh_shader);
-    const lowend_rule::Apply a = lowend_rule::first_start(env_int("HL_LOWEND"), lowend_marked, gpu);
-    if (a == lowend_rule::NONE) {
-        if (gpu) logf("vk: low-end GPU (integrated, no mesh shaders): %s",
-                      lowend_marked ? "the low-end settings were applied once (lowend_rule=1 in the options file): the rows stay as set"
-                                    : "the rows stay as set (HL_LOWEND=0)");
-        return;
-    }
-    // (only the three rows, as the player would set them; the Quality preset row and every other row stay as they are)
+static lowend_rule::Probe lowend_probe;
+static std::atomic<bool> lowend_probing{false};
+static double lowend_fake_fps = -1;   // (HL_LOWEND_TEST: a test hook)
+static const char* const lowend_keys[3] = {"resolution", "handheld_profile", "volumetric_fog"};
+/// The three rows and the row On, now, and the file written in place (those lines only, with the three rows' values from before)
+static void lowend_turn_on(bool save_it) {
+    const int before[3] = {opts.resolution, opts.handheld, opts.fog};
+    opts.lowend = lowend_rule::kOn;
     opts.resolution = ur::snap(upscaler(), lowend_rule::kResolution);
     opts.handheld = lowend_rule::kHandheld;
     opts.fog = lowend_rule::kFog;
-    if (a == lowend_rule::APPLY_AND_SAVE) {
-        lowend_marked = true;
-        Row* res = nullptr;
-        for (Row& r : rows)
-            if (r.value == &opts.resolution) res = &r;
-        ini_put_only({{res ? ini_key(*res) : "resolution", opts.resolution}, {"handheld_profile", opts.handheld},
-                      {"volumetric_fog", opts.fog}, {"lowend_rule", 1}});
+    if (!save_it) return;
+    lowend_marked = lowend_prev_ok = true;
+    for (int i = 0; i < 3; i++) lowend_prev[i] = before[i];
+    const std::string pre = lowend_rule::kPrevPrefix;
+    ini_put_only({{lowend_keys[0], opts.resolution}, {lowend_keys[1], opts.handheld}, {lowend_keys[2], opts.fog}, {"lowend_settings", 1},
+                  {"lowend_rule", 1}, {pre + lowend_keys[0], before[0]}, {pre + lowend_keys[1], before[1]}, {pre + lowend_keys[2], before[2]}});
+}
+void menu_first_run_lowend(uint32_t vendor_id, bool integrated, bool mesh_shader) {
+    lowend_mirror = lowend_rule::mirror_not_wait(vendor_id, integrated, mesh_shader);
+    const char* test = getenv("HL_LOWEND_TEST");   // (test hook: "fps[,skip s,window s]": the measure runs on any GPU, with this rate in place of the measured one)
+    if (test && *test) {
+        double skip = lowend_probe.skip_s, win = lowend_probe.window_s;
+        lowend_fake_fps = atof(test);
+        if (const char* c = strchr(test, ',')) {
+            skip = atof(c + 1);
+            if (const char* d = strchr(c + 1, ',')) win = atof(d + 1);
+        }
+        lowend_probe.skip_s = skip, lowend_probe.window_s = win;
+        integrated = true;
     }
-    logf("vk: low-end GPU (integrated, no mesh shaders)%s: Render resolution %d%%, Volumetric fog off, the handheld profile (from "
-         "the next start: the game asks for it before the GPU is known)%s; nothing else changed, the Insert menu changes them back",
-         a == lowend_rule::APPLY_THIS_RUN ? ", HL_LOWEND=1" : "", ur::percent(opts.resolution),
-         a == lowend_rule::APPLY_AND_SAVE ? "; saved to the options file (those rows only)" : "; for this run only (nothing saved)");
+    if (const char* t = getenv("HL_LOWEND_FPS"); t && atof(t) > 0) lowend_probe.threshold = atof(t);   // (the threshold, frames a second)
+    lowend_integrated = integrated;
+    const Options dflt;
+    const bool untouched = !opts.lowend && opts.resolution == dflt.resolution && opts.handheld == dflt.handheld && opts.fog == dflt.fog &&
+                           opts.preset == dflt.preset;
+    const lowend_rule::Apply a = lowend_rule::first_start(env_int("HL_LOWEND"), lowend_marked, integrated, untouched);
+    const char* why = mesh_shader ? "with mesh shaders" : "no mesh shaders";
+    if (a == lowend_rule::NONE) {
+        if (integrated) logf("vk: integrated GPU (%s): Low-end settings: %s", why,
+                             env_int("HL_LOWEND") == 0 ? "not measured (HL_LOWEND=0)"
+                             : lowend_marked ? "asked once already (lowend_rule=1 in the options file): the rows stay as set"
+                                             : "the row or its settings are the player's: not measured");
+        return;
+    }
+    if (a == lowend_rule::PROBE) {
+        lowend_probing.store(true, std::memory_order_relaxed);
+        logf("vk: integrated GPU (%s): the frames of play are measured (%.0f s after play begins, over %.0f s, under %.0f fps the Low-end "
+             "settings row turns On)%s", why, lowend_probe.skip_s, lowend_probe.window_s, lowend_probe.threshold,
+             lowend_fake_fps >= 0 ? "; HL_LOWEND_TEST gives it a rate" : "");
+        return;
+    }
+    // (HL_LOWEND=1: the row's settings for this run only, on any GPU; nothing saved)
+    lowend_turn_on(false);
+    logf("vk: HL_LOWEND=1: the Low-end settings row (Graphics tab) turned On for this run only: Render resolution %d%%, Volumetric fog off, the "
+         "handheld profile (from the next start: the game asks for it before the GPU is known); nothing saved", ur::percent(opts.resolution));
+}
+/// A frame was shown (menu_note_frame): feeds the measure while it runs; at its end the row turns On or the question is closed
+static void lowend_probe_frame() {
+    if (!lowend_probing.load(std::memory_order_relaxed)) return;
+    const bool on = host && host->play_on && host->play_on();
+    if (lowend_probe.feed(prof_now(), on) == lowend_rule::PENDING) return;
+    lowend_probing.store(false, std::memory_order_relaxed);
+    const double fps = lowend_fake_fps >= 0 ? lowend_fake_fps : lowend_probe.fps;
+    if (lowend_rule::weak(fps, lowend_probe.threshold) && !lowend_touched && !opts.lowend) {
+        lowend_turn_on(true);
+        logf("vk: integrated GPU measured at %.1f fps over %.0f s of play, under %.0f: the Low-end settings row (Graphics tab) turned On: "
+             "Render resolution %d%% now, Volumetric fog off and the handheld profile from the next start; saved to the options file (those rows "
+             "only, with their values from before); the row Off puts them back", fps, lowend_probe.window_s, lowend_probe.threshold,
+             ur::percent(opts.resolution));
+    } else {
+        lowend_marked = true;
+        ini_put_only({{"lowend_rule", 1}});
+        if (lowend_rule::weak(fps, lowend_probe.threshold))
+            logf("vk: integrated GPU measured at %.1f fps, under %.0f, but the row or its settings were set by the player: left as they are", fps,
+                 lowend_probe.threshold);
+        else
+            logf("vk: this integrated GPU keeps its settings: %.1f fps over %.0f s of play (at least %.0f); asked once, never again (lowend_rule=1)",
+                 fps, lowend_probe.window_s, lowend_probe.threshold);
+    }
 }
 static bool dlss_model_saved;   // (hookshot_options.ini has a dlss_model line)
 void menu_first_run_model(uint32_t vendor_id, uint32_t device_id) {
@@ -2585,6 +2684,7 @@ void menu_init() {
         has_options = true;
         char line[80];
         bool has_resolution = false;
+        int prev_seen = 0;   // (bits: the lowend_prev_ lines the file has)
         bool v2 = false;
         int old_dynres = -1;   // (the row before Resolution: 0, the full scale, is its 100%; 1 is Auto)
         int saved_vsync = -1;  // (the last vsync= line: 2 was the old Adaptive, now On with FIFO (triple buffering))
@@ -2605,6 +2705,11 @@ void menu_init() {
             v2 |= !strcmp(line, "options_version");
             if (!strcmp(line, "dynamic_resolution")) old_dynres = atoi(eq + 1);
             if (!strcmp(line, "lowend_rule")) lowend_marked = true;   // (menu_first_run_lowend: applied once, never again)
+            if (!strncmp(line, lowend_rule::kPrevPrefix, strlen(lowend_rule::kPrevPrefix))) {   // (the rows' values from before it)
+                const char* k = line + strlen(lowend_rule::kPrevPrefix);
+                const int i = !strcmp(k, "resolution") ? 0 : !strcmp(k, "handheld_profile") ? 1 : !strcmp(k, "volumetric_fog") ? 2 : -1;
+                if (i >= 0) lowend_prev[i] = atoi(eq + 1), prev_seen |= 1 << i;
+            }
             if (!strcmp(line, "vsync")) saved_vsync = atoi(eq + 1);
             if (!strcmp(line, "vsync_mode")) has_vsync_mode = true;
             if (!strcmp(line, "microphone_device")) {   // (hookshot: the microphone, by its name)
@@ -2613,6 +2718,7 @@ void menu_init() {
             }
         }
         fclose(f);
+        lowend_prev_ok = opts.lowend && prev_seen == 7;   // (the row On and all three lines, or the memory is not trusted)
         // (an options file from the branch that had Adaptive (vsync=2): V-Sync On with FIFO (triple buffering), today's On. The
         // V-Sync mode row is new, so nothing else can contradict it; a saved mode of its own wins)
         if (saved_vsync >= 2 && !has_vsync_mode) opts.vsync_mode = present_mode::kFifoTriple;
@@ -2751,6 +2857,7 @@ void menu_note_present_sizes(uint32_t picture_w, uint32_t picture_h, uint32_t wi
 void menu_note_frame(bool game_frame, int shown) {
     if (shown) {
         shown_frames.fetch_add(shown, std::memory_order_relaxed);
+        lowend_probe_frame();   // (the Low-end settings measure, while it runs)
         perf_frame_shown();   // (the performance summary's frame, when it is on: perf_report.cpp)
         if (opts.show_fps) perf_note_frame();   // (the overlay's frame times: vk_perf.cpp)
     }

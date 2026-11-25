@@ -262,6 +262,7 @@ they apply at once, with no new translation.
 | | Window scaling filter | Off, Catmull-Rom, Lanczos | Off |
 | | Sharpness | 0 to 100%, in steps of 10 | 0% |
 | | Handheld profile | Off, On (after a restart) | Off |
+| | Low-end settings | Off, On. On sets Render resolution 33% (at once), Volumetric fog Off and the Handheld profile On (from the next start); Off puts the three rows back to what they were before On, any that you changed since keeps your value. Turned On once by itself when an integrated GPU runs the game under 20 fps (see Low-end settings below) | Off |
 | | Ultrawide | 16:9, Monitor's shape: wider than 16:9, or narrower down to 5:4 (after a restart) | 16:9 |
 | | HUD layout | Screen's edges, Middle 16:9 (on a screen that is not 16:9) | Screen's edges |
 | | Robust buffers | Auto, Off, On (after a restart) | Auto |
@@ -329,11 +330,22 @@ they apply at once, with no new translation.
 - **NVIDIA Reflex** Off is the game as without it. `RX_VK_REFLEX_LOG=1` logs the driver's latency timings every 300
   frames while it is on.
 - **Handheld profile** runs the game as if the console were undocked: lower resolution, lighter on the GPU.
+- **Low-end settings** is a preset of three rows for a weak GPU: On sets Render resolution 33%, Volumetric fog Off and the Handheld
+  profile On (the resolution changes at once, the fog and the Handheld profile from the next start), and remembers what they were;
+  Off puts them back, except a row you changed since. It can be turned On by hand on any GPU. On an integrated GPU, once, the game
+  measures its own frames: from 15 seconds into play it times 10 seconds, and under 20 frames a second (the reference laptop's Ryzen 7
+  5700U runs 11 to 13) it turns the row On by itself, saved in the options file (`lowend_settings`, `lowend_prev_*`, `lowend_rule`)
+  and said in the log; at 20 or more (a Steam Deck, a ROG Ally, a Radeon 780M) it leaves everything as it is and never asks again.
+  Not asked if you changed the row, the three rows or the Quality preset. `HL_LOWEND=0` never measures, `HL_LOWEND=1` turns the row On
+  for one run, `HL_LOWEND_FPS` changes the 20.
 - **Robust buffers:** a read past a buffer's end is dropped instead of stopping the GPU. Auto is on, on every card; Off
   can be faster on some NVIDIA cards.
 - **Game speed:** with Per frame, the game runs slower whenever it is below 60 fps. Real time keeps it at normal speed
   down to 15 fps.
 - **FPS counter** shows in the top right corner. With frame generation on, it also shows the game's own rate.
+  The full panel (F10 twice) adds the **1% low** and **0.1% low**: the benchmark's numbers, 1000 over the mean frame time of the
+  slowest 1% (0.1%) of the frames of the last 10 seconds or the last 1000 frames, whichever is longer; with frame generation they
+  count the frames shown. `-` until 100 frames are in.
 - **Audio output** is the speakers the game mixes its sound for. Auto is 5.1 when your default output device has 5.1
   or more speakers, else stereo; Stereo or 5.1 chooses one whatever the device has (5.1 on stereo speakers is mixed
   down). For one run, `HOS_AUDIO_CHANNELS=2` or `6` chooses stereo or 5.1 and wins over the menu. In a 5.1 mix the centre

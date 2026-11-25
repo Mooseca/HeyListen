@@ -20,6 +20,7 @@
 #include "vk_framegen.h"  // (framegen_on, framegen_now: the Frame limit line)
 #include "framegen_rows.h"  // (base_plan: the Base frame rate limit's line)
 #include "vk_perf.h"
+#include "perf_lows.h"   // (the 1% and 0.1% low lines)
 #include "vk_fsr3.h"      // (fsr3_wanted: the Scaling line names the upscaler)
 #include "vk_temporal.h"  // (temporal_mode)
 #include "upscaler_rows.h"
@@ -227,6 +228,35 @@ void perf_picture(uint32_t w, uint32_t h, const ImVec4& c) {
     ImGui::EndTable();
 }
 
+// (HeyListen) The 1% low and 0.1% low lines under the graph: the benchmark's definition over the last 10 s or 1000 frames (perf_lows.h),
+// worked out twice a second, never while the overlay is hidden or compact. With frame generation they count the frames shown
+void perf_lows_draw(const ImVec4& c) {
+    static uint64_t at;
+    static char v[2][24], l1[40], l01[40];
+    const uint64_t now = (uint64_t)prof_now();
+    if (!at || now - at >= 500000000ull) {
+        at = now;
+        double a = 0, b = 0;
+        int n = 0;
+        perf_lows(&a, &b, &n);
+        perf_lows::text(v[0], sizeof v[0], a, n);
+        perf_lows::text(v[1], sizeof v[1], b, n);
+        const bool fg = framegen_on() && framegen_now() >= 2;
+        snprintf(l1, sizeof l1, "%s", fg ? "1% low (shown frames)" : "1% low");
+        snprintf(l01, sizeof l01, "%s", fg ? "0.1% low (shown frames)" : "0.1% low");
+    }
+    if (!ImGui::BeginTable("##perfl", 2, ImGuiTableFlags_SizingFixedFit)) return;
+    ImGui::TableSetupColumn("##l0", ImGuiTableColumnFlags_WidthStretch);
+    ImGui::TableSetupColumn("##l1", ImGuiTableColumnFlags_WidthFixed, perf_text_w("%.0f FPS", 888));
+    perf_label(l1, c);
+    ImGui::TableNextColumn();
+    perf_right(v[0], v[0][0] == '-');
+    perf_label(l01, c);
+    ImGui::TableNextColumn();
+    perf_right(v[1], v[1][0] == '-');
+    ImGui::EndTable();
+}
+
 // the waits of the render thread, per frame, averaged over the last half second; -1 reads "-" (the counters are not kept here)
 PerfWaits waits_now() {
     PerfWaits w;
@@ -288,6 +318,7 @@ void perf_full_draw(uint32_t width, uint32_t height, float scale, bool menu_open
     const float max_x = win->DC.CursorMaxPos.x;
     ImGui::PlotLines("##ft", s.frame_ms, kPerfHistory, 0, nullptr, 0, top, ImVec2(-FLT_MIN, 48 * scale));
     win->DC.CursorMaxPos.x = max_x;
+    perf_lows_draw(fps_c);
     // per frame, averaged over the last half second; the labels' column stretches, so the numbers end at the panel's right
     // edge, and the table still asks for no more than its widest label and number
     if (ImGui::BeginTable("##perfw", 2, ImGuiTableFlags_SizingFixedFit)) {

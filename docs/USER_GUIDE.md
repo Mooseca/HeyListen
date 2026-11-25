@@ -105,6 +105,30 @@ shows 144. Frame generation gets an even rate to work from, with Auto too (it fi
 Frame rate limit then holds nothing back, and the FPS counter's **Frame limit** line says `144 fps (game 48 x 3)`. With Frame
 generation Off it does what the Frame rate limit does with the same number. Needs Game speed on Real time.
 
+### Low-end settings
+
+The Graphics tab's **Low-end settings** row (Off by default; `lowend_settings` in the options file) is one switch for the three rows that
+help a weak GPU most: **On** sets Render resolution to 33% (at once), Volumetric fog to Off and the Handheld profile to On (a smaller
+scene with lower shadow and fog detail; both from the next start), and remembers what they were (`lowend_prev_resolution`,
+`lowend_prev_handheld_profile`, `lowend_prev_volumetric_fog`). **Off** puts each back to what it was before, unless you changed that row
+yourself since: then it keeps your value. You can turn it On on any GPU.
+
+On an integrated GPU the game also decides by itself, once: after 15 seconds of play it times the frames of the next 10 seconds (the
+title and the load screens do not count). Under 20 frames a second at your own settings (a Ryzen 7 5700U's Vega 8 runs 11 to 13) it turns
+the row On and says so in the log (`the Low-end settings row (Graphics tab) turned On`); at 20 or more (a Steam Deck, a ROG Ally, a
+Radeon 780M) it leaves everything as it is and never asks again (`lowend_rule=1`, which also stops it after it turned the row On: turning
+the row Off later is final). It does not ask if you had set the row, Render resolution, Volumetric fog, the Handheld profile or the
+Quality preset yourself. `HL_LOWEND=0` stops it, `HL_LOWEND=1` turns the row On for one run, `HL_LOWEND_FPS=<n>` changes the 20.
+
+### FPS counter: 1% low and 0.1% low
+
+The full FPS counter (F10 until the panel shows) has two lines under its graph, **1% low** and **0.1% low**, in frames a second, the
+way the benchmark counts them: 1000 over the mean frame time of the slowest 1% (0.1%) of the frames of the window, at least one frame.
+A stall counts for its length, not as one frame in a hundred. The window is the last 10 seconds or the last 1000 frames, whichever is
+longer, and the lines read `-` until 100 frames are in. With frame generation on they count the frames shown, the made ones too, as
+the counter's own rate does (the lines then say "shown frames"). The compact FPS box has no such lines, and nothing is computed while
+the counter is off or compact.
+
 ### HDR
 
 The Graphics tab's **HDR** row sends HDR10 to an HDR screen (Windows: turn on **Use HDR** in the display settings). **Off** is the
