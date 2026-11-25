@@ -465,6 +465,8 @@ bool create_device() {
     if (const char* c = getenv("RX_VK_CHECKPOINTS"); !dev.checkpoints && c && strcmp(c, "0") != 0 && strcmp(c, "ext") != 0)
         optional(VK_AMD_BUFFER_MARKER_EXTENSION_NAME, dev.buffer_marker);
     optional(VK_EXT_DEVICE_FAULT_EXTENSION_NAME, dev.device_fault);
+    // (MESH1, RX_VK_FALLBACK_STATS=1, off by default: asked for only then, so nothing changes for anyone else)
+    if (const char* e = getenv("RX_VK_FALLBACK_STATS"); e && atoi(e) != 0) optional(VK_AMD_SHADER_INFO_EXTENSION_NAME, dev.amd_shader_info);
     optional(VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME, dev.coop_matrix);
     // (longshot #2306) the GPU's own float add on storage buffers: the game's RED/ATOM.ADD.F32 become one OpAtomicFAddEXT instead
     // of a compare-exchange loop, which gives up after CAS_LOOP_MAX_TRIES attempts and loses that add (eden

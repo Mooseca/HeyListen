@@ -79,6 +79,7 @@ struct Device {
          checkpoints = false,   // (RX_VK_CHECKPOINTS: VK_NV_device_diagnostic_checkpoints)
          buffer_marker = false, // (RX_VK_CHECKPOINTS=1 without the NV extension: VK_AMD_buffer_marker, AMD and Intel)
          device_fault = false,  // (VK_EXT_device_fault: what a lost device faulted on)
+         amd_shader_info = false, // (MESH1, RX_VK_FALLBACK_STATS=1 only: VK_AMD_shader_info, the fallback stages' registers)
          sparse_images = false, // (sparse resident 2D images on the queue: the terrain's huge arrays)
          sparse_buffers = false, // (sparse-bound buffers on the queue: a pool imported as several dma-bufs)
          view_2d_of_3d = false, // (VK_EXT_image_2d_view_of_3d: a 3D texture a 2D sample instruction reads)
