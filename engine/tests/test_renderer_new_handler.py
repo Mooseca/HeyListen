@@ -49,7 +49,7 @@ def block(text, head):
 
 def check_sites():
     api = (ROOT / "gpu/vk/vk_api.h").read_text(encoding="utf-8")
-    if not re.search(r"#define MKWVK_API_VERSION 1[5-9]\b", api) or "void (*out_of_memory)(const char *what);" not in api:
+    if not re.search(r"#define MKWVK_API_VERSION (1[5-9]|[2-9][0-9])\b", api) or "void (*out_of_memory)(const char *what);" not in api:
         raise SystemExit("FAIL: vk_api.h has no out_of_memory in its host table at version 15")
     main = (ROOT / "gpu/vk/vk_main.cpp").read_text(encoding="utf-8")
     init = block(main, "const MkwVkRenderer* mkwvk_init(const MkwVkHost* h)")
