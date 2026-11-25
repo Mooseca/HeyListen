@@ -9287,11 +9287,11 @@ void ot_join_all(int site) {
 }
 /// (PIPE2) a CPU readback the ring does not serve. In the replay inline, the reading thread's own submits had been replayed by now
 /// (on it), while the other threads' were being replayed beside it (OoT's main thread reads while the PT replays the frame before):
-/// so it waits for the submissions this thread handed over (RX_VK_ORDER_RB_JOIN=1, the default); =2: every job handed over (all threads'),
+/// so it waits for the submissions this thread handed over (RX_VK_ORDER_RB_JOIN=1; the default 4 is that, and all jobs for the 0x3980 culling results); =2: every job handed over (all threads'),
 /// =0: none. RX_VK_ORDER_LOG=1: the first 60 reads that waited, by range
 void ot_join_readback(uint64_t gpu, uint64_t size) {
-    // (PIPE2) RX_VK_ORDER_RB_JOIN=<0..3> (1): what a CPU readback waits for with the order thread: nothing, this thread's jobs, all jobs, all jobs for a range with write-backs (3)
-    static const int mode = getenv("RX_VK_ORDER_RB_JOIN") ? atoi(getenv("RX_VK_ORDER_RB_JOIN")) : 1;
+    // (PIPE2) RX_VK_ORDER_RB_JOIN=<0..4> (4): what a CPU readback waits for with the order thread: nothing, this thread's jobs, all jobs, all jobs for a range with write-backs (3), this thread's jobs and all jobs for the 0x3980 culling results (4)
+    static const int mode = getenv("RX_VK_ORDER_RB_JOIN") ? atoi(getenv("RX_VK_ORDER_RB_JOIN")) : 4;
     // (PIPE2) RX_VK_ORDER_LOG=1: the order thread's joins one by one (the first 60 readbacks that waited)
     static const bool log_each = getenv("RX_VK_ORDER_LOG") && atoi(getenv("RX_VK_ORDER_LOG")) != 0;
     if (ot_self || !mode) return;
@@ -9299,6 +9299,9 @@ void ot_join_readback(uint64_t gpu, uint64_t size) {
     // (FLASH2) =3: a range the GPU's write-backs have covered before (any page of it) waits for every job handed over, as =2: its
     // writer may be a submission of another thread, whose write-back is registered only when the order thread replays it. The ranges
     // no write-back ever covered wait for this thread's jobs only, as =1
+    // (FLASH2) =4 (the default): only the 0x3980 culling results (R4, the lights and the ground fog), when the ring does not serve them, wait for every
+    // job handed over: the audit named them as the one range read before a writer of another thread's submission was replayed
+    if (mode == 4 && size == 0x3980) return ot_join_all(OT_READBACK);
     if (mode == 3) {
         bool ever = false;
         memory_writeback_value(host->gpu_guest(gpu), size, &ever);

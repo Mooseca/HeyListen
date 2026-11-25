@@ -74,7 +74,7 @@ struct Stats {
     std::atomic<int64_t> chk_new{0}, chk_equal{0}, chk_differ{0}, chk_zero{0}, chk_nonzero{0}, chk_notdone{0}, chk_old{0};
     std::atomic<int64_t> age[4] = {};
     std::atomic<int64_t> got[5] = {};   // (serve mode) the age in frames of the entries handed out: 1, 2, 3, 4, more
-} stats[4];
+} stats[5];
 std::atomic<int64_t> st_staged{0}, st_staged_bytes{0}, st_direct{0};
 std::atomic<int64_t> st_kept_wb{0}, st_retaken{0};   // (EXPO1: written bindings of a tainted range given their write-back; ranges taken over again)
 std::atomic<uint64_t> learned_lo{~0ull}, learned_hi{0};   // (the span of the learned ranges: a written binding outside it is not looked up)
@@ -125,7 +125,7 @@ bool ring_init() {   // (mu held)
 
 // ---- the served-values hash, one row a frame (HL_RB_LAG_LOG=1) ----
 std::mutex hmu;
-struct FrameHash { uint64_t sum = 0, by[4] = {}; uint32_t reads = 0; };
+struct FrameHash { uint64_t sum = 0, by[5] = {}; uint32_t reads = 0; };
 std::map<int64_t, FrameHash> frame_hash;   // frame -> sum of the reads' hashes (and by class), reads
 uint64_t run_hash = 0;
 void hash_add(int64_t frame, int cls, uint64_t h) {
@@ -142,7 +142,12 @@ void hash_add(int64_t frame, int cls, uint64_t h) {
     }
 }
 
-const char* cname(int cls) { return cls == 1 ? "R1" : cls == 2 ? "R2" : "R3"; }
+// (FLASH2) RX_VK_RB_R4=<0|1> (1): the 0x3980 culling results the CPU reads (R4) are served by the ring too, at the ring's fixed lag; 0: from guest memory as the replay left them
+bool r4_on() {
+    static const bool on = !getenv("RX_VK_RB_R4") || atoi(getenv("RX_VK_RB_R4")) != 0;
+    return on;
+}
+const char* cname(int cls) { return cls == 1 ? "R1" : cls == 2 ? "R2" : cls == 3 ? "R3" : "R4"; }
 
 }   // namespace
 
@@ -155,6 +160,7 @@ void rbring_note_read(uint64_t guest, uint64_t size) {
     if (!rb_ring::class_of(size)) return;
     const int cls = rb_ring::class_of(size);
     if (!cls) return;
+    if (cls == 4 && !r4_on()) return;
     std::lock_guard lk(mu);
     if (table.size() > 4096) {
         if (meter_log_rows() > 0) logf("vk: rbring: the table of learned ranges cleared (4096 ranges) at frame %lld", (long long)rb_frame_now());
@@ -390,7 +396,7 @@ void rbring_apply(uint64_t gpu, uint64_t size) {
             return;
         }
     }
-    uint8_t buf[0x2000];
+    uint8_t buf[rb_ring::kMaxCopy];
     std::memcpy(buf, ring_map + e.at, n);
     host->gpu_write(gpu, buf, n);
     stats[cls].applied++;
@@ -440,7 +446,7 @@ void rbring_check(uint64_t gpu, uint64_t size) {
     st.reads++;
     if (age >= 0) st.age[age]++;
     const uint64_t n = rb_ring::copy_bytes(cls, size);
-    uint8_t waited[0x2000];
+    uint8_t waited[rb_ring::kMaxCopy];
     host->gpu_read(gpu, waited, n);
     hash_add(c, cls, rb_ring::hash_read(cls, guest, waited, n));   // (HL_RB_LAG_LOG=1: what the old path's waits gave the game, as the control of the ring's hashes)
     if (have) {
