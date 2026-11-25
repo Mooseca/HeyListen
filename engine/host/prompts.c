@@ -899,6 +899,8 @@ static uint8_t *font_bound(const char *dir, int face, long *n, uint32_t *key, in
    this start's face and controls */
 #define BIND_BASE 0xF000
 static volatile LONG font_changes;
+static volatile LONG text_seen, text_with_codes, text_rewritten;   /* (boxes drawn or laid out, with codes of the private use area, rewritten: said at each change) */
+static volatile LONG text_codes_told;
 
 /* each format 4 subtable of the decrypted font (otf, n bytes): code's own segment pointed at the glyph of code to; 0 when it has
    no glyph there (or code no segment of its own) */
@@ -993,17 +995,24 @@ static int text_rewrite(uint64_t box) {
     if (!text || !len || !*text || *len < 3 || *len > 65536) return 0;
     uint8_t *s = (uint8_t *)hos_guest_range(*text, *len);
     if (!s) return 0;
-    int changed = 0;
+    int changed = 0, with = 0;
+    InterlockedIncrement(&text_seen);
     for (uint32_t i = 0; i + 2 < *len; i++) {   /* (UTF-8: the codes here are 3 bytes, 1110xxxx 10xxxxxx 10xxxxxx) */
         if ((s[i] != 0xEE && s[i] != 0xEF) || (s[i + 1] & 0xC0) != 0x80 || (s[i + 2] & 0xC0) != 0x80) continue;
         const unsigned code = (unsigned)(s[i] & 0x0F) << 12 | (unsigned)(s[i + 1] & 0x3F) << 6 | (s[i + 2] & 0x3F);
         const int c = text_code(code, face, bind);
+        if (!with++) InterlockedIncrement(&text_with_codes);
+        if (text_codes_told < 24) {   /* (the first codes texts have: which of them the table knows, for a text that never changes) */
+            InterlockedIncrement(&text_codes_told);
+            hos_log("prompts: a text has the code U+%04X: %s", code, c < 0 ? "not a button's" : (unsigned)c == code ? "a button's, as it is shown now" : "a button's, now another code");
+        }
         if (c >= 0 && (unsigned)c != code) {
             s[i] = (uint8_t)(0xE0 | c >> 12), s[i + 1] = (uint8_t)(0x80 | (c >> 6 & 0x3F)), s[i + 2] = (uint8_t)(0x80 | (c & 0x3F));
             changed = 1;
         }
         i += 2;
     }
+    if (changed) InterlockedIncrement(&text_rewritten);
     return changed;
 }
 
@@ -1022,6 +1031,8 @@ void hos_prompts_text_layout(uint64_t box) {
 /* nx2/oot_patches.py, as the game draws a text box (f_8152b670, each time it shows it): a box rewritten is laid out again at
    the next update (its status) */
 void hos_prompts_text_draw(uint64_t box) {
+    static int first = 1;
+    if (first) first = 0, hos_log("prompts: the first text box drawn since the start (box %#llx)", (unsigned long long)box);
     if (text_rewrite(box)) mark_box(box, 0x20000 | 0x100000);
 }
 
@@ -1038,13 +1049,28 @@ void hos_prompts_glyph(uint64_t slot) {
     const uint64_t *base = st ? (const uint64_t *)hos_guest_range(*st, 16) : NULL;
     if (!base) return;   /* (not readable yet: looked at again) */
     if (base[1] != font.n && base[1] != font.n - 8) {
+        static uint64_t told[16];   /* (one line for each font the glyphs are of: what to look at in a game whose text never finds the served one) */
+        int k = 0;
+        while (k < 16 && told[k] && told[k] != face) k++;
+        if (k < 16 && !told[k]) {
+            told[k] = face;
+            hos_log("prompts: glyphs of a font of %llu bytes (face %#llx), not the served one (%u bytes)", (unsigned long long)base[1],
+                    (unsigned long long)face, font.n);
+        }
         last = face;   /* (another font: not looked at again while its glyphs follow each other) */
         return;
     }
-    const uint64_t at = base[0] + (base[1] == font.n ? 8 : 0);   /* (kept with its 8-byte header, or without) */
-    const uint8_t *q = (const uint8_t *)hos_guest_range(at, font.n - 8);
-    if (!q) return;
-    if (memcmp(q, font.head, sizeof font.head)) {
+    /* (where the font's own bytes start: at the stream's base, or 8 bytes on when the stream holds the file with its header; the
+        one whose first bytes are the served font's) */
+    uint64_t at = 0;
+    for (int k = 0; k < 2 && !at; k++) {
+        const uint64_t cand = base[0] + 8 * (uint64_t)k;
+        const uint8_t *q = (const uint8_t *)hos_guest_range(cand, font.n - 8);
+        if (q && !memcmp(q, font.head, sizeof font.head)) at = cand;
+    }
+    if (!at) {
+        hos_log("prompts: a font of the served size (%u bytes, base %#llx): its first bytes are not the served font's", font.n,
+                (unsigned long long)base[0]);
         last = face;   /* (another font of that size) */
         return;
     }
@@ -1065,7 +1091,9 @@ static int live_font(const char *dir, int face) {
         memcpy(q, b + 8, (size_t)n - 8);
         ReleaseSRWLockExclusive(&slot_lock);
         InterlockedIncrement(&font_changes);
-        hos_log("prompts: now the %s icons in texts, %d buttons on these controls", faces[face], bound);
+        hos_log("prompts: now the %s icons in texts, %d buttons on these controls (since the change before: %ld texts looked at, %ld with codes, "
+                "%ld rewritten)", faces[face], bound, (long)InterlockedExchange(&text_seen, 0), (long)InterlockedExchange(&text_with_codes, 0),
+                (long)InterlockedExchange(&text_rewritten, 0));
     } else if (q) {
         hos_log("prompts: the font is no longer where FreeType read it: the icons in texts at the next start");
     }

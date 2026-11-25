@@ -256,6 +256,66 @@ int main(void) {
 }
 '''
 
+GLYPH = r'''
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+static int logs;
+static void hos_log(const char *fmt, ...) { (void)fmt; logs++; }
+enum { WINDOW = 1 << 20 };
+static uint8_t window[WINDOW];   /* (guest addresses: offsets into it, from 0x1000) */
+static void *hos_guest_range(uint64_t a, uint64_t n) {
+    return a >= 0x1000 && a < WINDOW && n <= WINDOW - a ? window + a : NULL;
+}
+static struct { volatile uint64_t at; uint32_t n; uint8_t head[64]; } font;
+%(glyph)s
+#define CHECK(x) do { if (!(x)) { fprintf(stderr, "FAIL:%%d %%s\n", __LINE__, #x); return 1; } } while (0)
+/* a glyph slot at 0x1000 (its face at +8), the face at 0x2000 (its stream pointer at +192), the stream at 0x3000 (base, size) */
+static void stream(uint64_t face, uint64_t base, uint64_t size) {
+    *(uint64_t *)(window + 0x1008) = face;
+    *(uint64_t *)(window + face + 192) = 0x3000;
+    *(uint64_t *)(window + 0x3000) = base, *(uint64_t *)(window + 0x3008) = size;
+}
+int main(void) {
+    enum { N = 4096 };
+    font.n = N;
+    for (int i = 0; i < 64; i++) font.head[i] = (uint8_t)(0x40 + i);
+    /* FreeType reading the font from its OpenType start (the game's buffer + 8, the file's size given): the font is at the base */
+    memcpy(window + 0x5000, font.head, 64);
+    stream(0x2000, 0x5000, N);
+    hos_prompts_glyph(0x1000);
+    CHECK(font.at == 0x5000);
+    /* the stream's base at the file's header: the font 8 bytes on */
+    font.at = 0;
+    memset(window + 0x5000, 0, 64);
+    memcpy(window + 0x6008, font.head, 64);
+    stream(0x2800, 0x6000, N);
+    hos_prompts_glyph(0x1000);
+    CHECK(font.at == 0x6008);
+    /* another font (another size): not it, said once for the face, and not looked at again */
+    font.at = 0, logs = 0;
+    stream(0x2400, 0x5000, N + 100);
+    hos_prompts_glyph(0x1000);
+    hos_prompts_glyph(0x1000);
+    CHECK(font.at == 0 && logs == 1);
+    /* the size of the font but other bytes: not it */
+    memset(window + 0x7000, 0x11, 64);
+    stream(0x2c00, 0x7000, N);
+    hos_prompts_glyph(0x1000);
+    CHECK(font.at == 0);
+    puts("ok");
+    return 0;
+}
+'''
+
+
+def font_find(cc, src, tmp):
+    c, exe = Path(tmp) / "glyph.c", Path(tmp) / "glyph"
+    c.write_text(GLYPH % {"glyph": block(src, "void hos_prompts_glyph(")}, encoding="utf-8")
+    subprocess.run([cc, "-std=gnu11", "-Wall", "-Wextra", "-Werror", "-Wno-unused-function", str(c), "-o", str(exe)], check=True)
+    r = subprocess.run([str(exe)], capture_output=True, text=True)
+    check(r.returncode == 0 and r.stdout.strip() == "ok", "hos_prompts_glyph: %s%s" % (r.stdout, r.stderr))
+
 
 def texts(cc, src, tmp):
     consts = ["PAD_BASE", "FACE_CODES", "STATIC_AT", "BIND_BASE", "KEY_BASE", "SLOT_BASE", "SLOTS", "STICK_KEYS", "STICK_GAME",
@@ -317,9 +377,10 @@ def main():
         pool_gone(a.cc, src, tmp)
         texts(a.cc, src, tmp)
         auto(a.cc, src, tmp)
+        font_find(a.cc, src, tmp)
     check(out.returncode == 0 and out.stdout.strip() == "ok", "exit %d: %s%s" % (out.returncode, out.stdout, out.stderr))
     print("ok: text codes follow the face and the controls; Auto's device in use has its hysteresis; put_runs puts the game's bytes back, writes the runs in order, leaves one past the range; guarded, never over "
-          "bytes the game changed; the textures' pool finalized is not written, under its lock")
+          "bytes the game changed; the textures' pool finalized is not written, under its lock; the font is found from FreeType's glyph at the stream's base or 8 bytes on")
 
 
 if __name__ == "__main__":
