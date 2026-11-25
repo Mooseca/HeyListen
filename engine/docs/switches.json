@@ -6842,12 +6842,12 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 627
+     "line": 645
     }
    ],
    "default": "unset",
    "values": "text",
-   "explanation": "undocumented: host/hos_main.c:627 (in `submit_thread_at_start()`) reads it as a text value: `const char *user = hos_submit_thread_user_value(mesa, getenv(HOS_SUBMIT_THREAD_MARK));`. No comment in the source says what it changes.",
+   "explanation": "undocumented: host/hos_main.c:645 (in `submit_thread_at_start()`) reads it as a text value: `const char *user = hos_submit_thread_user_value(mesa, getenv(HOS_SUBMIT_THREAD_MARK));`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -10282,12 +10282,12 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 626
+     "line": 644
     }
    ],
    "default": "unset",
    "values": "text",
-   "explanation": "undocumented: host/hos_main.c:626 (in `submit_thread_at_start()`) reads it as a text value: `const char *mesa = getenv(\"MESA_VK_ENABLE_SUBMIT_THREAD\");`. No comment in the source says what it changes.",
+   "explanation": "undocumented: host/hos_main.c:644 (in `submit_thread_at_start()`) reads it as a text value: `const char *mesa = getenv(\"MESA_VK_ENABLE_SUBMIT_THREAD\");`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -26035,7 +26035,7 @@
     },
     {
      "path": "host/hos_main.c",
-     "line": 672
+     "line": 625
     },
     {
      "path": "host/nvn_native.c",
@@ -27900,7 +27900,7 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 633
+     "line": 651
     },
     {
      "path": "host/hos_submit_thread.h",

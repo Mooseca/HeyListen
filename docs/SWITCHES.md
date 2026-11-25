@@ -3935,7 +3935,7 @@ The log says which rule decided after its first line, `env: Mesa's submit thread
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_main.c:633` and 1 more place.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_main.c:651` and 1 more place.
 
 #### `RX_VK_RB_PROF` - developer
 
@@ -9921,13 +9921,13 @@ At the Market, ~15 actor calcs are level-0 jobs pushed in one burst, Link's last
 
 #### `HOS_MESA_SUBMIT_THREAD_SET` - developer
 
-undocumented: host/hos_main.c:627 (in `submit_thread_at_start()`) reads it as a text value: `const char *user = hos_submit_thread_user_value(mesa, getenv(HOS_SUBMIT_THREAD_MARK));`. No comment in the source says what it changes.
+undocumented: host/hos_main.c:645 (in `submit_thread_at_start()`) reads it as a text value: `const char *user = hos_submit_thread_user_value(mesa, getenv(HOS_SUBMIT_THREAD_MARK));`. No comment in the source says what it changes.
 
 **Values:** text. **Default:** unset.
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_main.c:627`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_main.c:645`.
 
 #### `HOS_PIN_BY_CORE` - developer
 
@@ -10111,13 +10111,13 @@ The web has no high-resolution timer, and its clock is a call into JavaScript: s
 
 #### `MESA_VK_ENABLE_SUBMIT_THREAD` - developer
 
-undocumented: host/hos_main.c:626 (in `submit_thread_at_start()`) reads it as a text value: `const char *mesa = getenv("MESA_VK_ENABLE_SUBMIT_THREAD");`. No comment in the source says what it changes.
+undocumented: host/hos_main.c:644 (in `submit_thread_at_start()`) reads it as a text value: `const char *mesa = getenv("MESA_VK_ENABLE_SUBMIT_THREAD");`. No comment in the source says what it changes.
 
 **Values:** text. **Default:** unset.
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In the process environment (or in a file named by `HOS_ENV_FILE`); `hookshot_env.txt` refuses this one. **Read at:** `host/hos_main.c:626`.
+**Set it:** In the process environment (or in a file named by `HOS_ENV_FILE`); `hookshot_env.txt` refuses this one. **Read at:** `host/hos_main.c:644`.
 
 ### Files, paths and folders
 
