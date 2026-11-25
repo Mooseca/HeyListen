@@ -60,6 +60,8 @@ namespace mr { constexpr int kMax = 8; }
 void restart_values(int*) {}
 struct { void note(const int*) {} } restart_state;
 bool can_mic() { return false; }
+bool can_out() { return false; }
+void out_chosen() {}
 /* FRAMEGEN_ROWS */
 namespace fgr = mkwvk::framegen_rows;
 /* (the mode that makes the frames and DLSS-G's runtime: the test sets them; the row is in a build with DLSS unless it says not) */

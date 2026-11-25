@@ -397,7 +397,7 @@ def main():
         # (the menu's side: the row's choice by name, gpu/vk/vk_menu.cpp)
         menu = (ROOT / 'gpu' / 'vk' / 'vk_menu.cpp').read_text(encoding='utf-8')
         fixture = MENU_FIXTURE.replace('@TEXT@', through_function(menu, 'constexpr int kMaxMics', 'const char* tx_mic('))
-        fixture = fixture.replace('@REFRESH@', block(menu, 'void mic_tell_host()', 'void save()'))
+        fixture = fixture.replace('@REFRESH@', block(menu, 'void mic_tell_host()', "// (heylisten) the Output device row's choice to the host"))
         (folder / 'menu.cpp').write_text(fixture, encoding='utf-8')
         menu_exe = folder / 'menu'
         subprocess.run([a.cxx, '-std=c++17', '-Wall', '-Wextra', '-Werror', str(folder / 'menu.cpp'), '-o', str(menu_exe)],

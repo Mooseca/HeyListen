@@ -1550,12 +1550,12 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2627
+     "line": 2633
     }
    ],
    "default": "off (unset)",
    "values": "on or off (0, false, off, no and empty are off)",
-   "explanation": "undocumented: gpu/vk/vk_menu.cpp:2627 (in `menu_first_run_lowend()`) reads it as an on/off switch: `const lowend_rule::Apply a = lowend_rule::first_start(env_int(\"HL_LOWEND\"), lowend_marked, gpu);`. No comment in the source says what it changes.",
+   "explanation": "undocumented: gpu/vk/vk_menu.cpp:2633 (in `menu_first_run_lowend()`) reads it as an on/off switch: `const lowend_rule::Apply a = lowend_rule::first_start(env_int(\"HL_LOWEND\"), lowend_marked, gpu);`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -4517,7 +4517,7 @@
    "files": [
     {
      "path": "host/nn_audio.c",
-     "line": 1126
+     "line": 1131
     }
    ],
    "default": "off (unset)",
@@ -4538,7 +4538,7 @@
    "files": [
     {
      "path": "host/nn_audio.c",
-     "line": 1063
+     "line": 1068
     }
    ],
    "default": "unset",
@@ -4580,11 +4580,11 @@
    "files": [
     {
      "path": "host/nn_audio.c",
-     "line": 946
+     "line": 951
     },
     {
      "path": "host/nn_audio.c",
-     "line": 1084
+     "line": 1089
     }
    ],
    "default": "unset",
@@ -4605,7 +4605,7 @@
    "files": [
     {
      "path": "host/nn_audio.c",
-     "line": 1116
+     "line": 1121
     }
    ],
    "default": "unset",
@@ -4626,7 +4626,7 @@
    "files": [
     {
      "path": "host/nn_audio.c",
-     "line": 1405
+     "line": 1410
     }
    ],
    "default": "off (unset)",
@@ -4752,7 +4752,7 @@
    "files": [
     {
      "path": "host/nn_audio.c",
-     "line": 1887
+     "line": 1892
     }
    ],
    "default": "unset",
@@ -5180,7 +5180,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2758
+     "line": 2764
     }
    ],
    "default": "0 (unset)",
@@ -5327,11 +5327,11 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2766
+     "line": 2772
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2774
+     "line": 2780
     },
     {
      "path": "host/nn_vi.c",
@@ -5406,11 +5406,11 @@
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2766
+     "line": 2772
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2774
+     "line": 2780
     },
     {
      "path": "host/nn_vi.c",
@@ -5733,7 +5733,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2861
+     "line": 2867
     },
     {
      "path": "host/display.c",
@@ -7915,7 +7915,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2667
+     "line": 2673
     }
    ],
    "default": "unset",
@@ -7936,7 +7936,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2670
+     "line": 2676
     },
     {
      "path": "host/hos_main.c",
@@ -8045,7 +8045,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2759
+     "line": 2765
     },
     {
      "path": "host/nn_applet.c",
@@ -8594,7 +8594,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2757
+     "line": 2763
     }
    ],
    "default": "0 (unset)",
@@ -18744,7 +18744,7 @@
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2753
+     "line": 2759
     }
    ],
    "default": "unset",
@@ -20308,16 +20308,16 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2604
+     "line": 2610
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2605
+     "line": 2611
     }
    ],
    "default": "off (unset)",
    "values": "on or off (0, false, off, no and empty are off)",
-   "explanation": "undocumented: gpu/vk/vk_menu.cpp:2604 (in `fog_runs()`) reads it as an on/off switch: `const bool v = lowend_rule::fog_on(env_int(\"RX_VK_FOG\"), opts.fog);`. No comment in the source says what it changes.",
+   "explanation": "undocumented: gpu/vk/vk_menu.cpp:2610 (in `fog_runs()`) reads it as an on/off switch: `const bool v = lowend_rule::fog_on(env_int(\"RX_VK_FOG\"), opts.fog);`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -20689,7 +20689,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2747
+     "line": 2753
     }
    ],
    "default": "0 (unset)",
@@ -21573,7 +21573,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2749
+     "line": 2755
     }
    ],
    "default": "unset",
@@ -23576,7 +23576,7 @@
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2741
+     "line": 2747
     }
    ],
    "default": "2",
@@ -23660,7 +23660,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 3059
+     "line": 3065
     }
    ],
    "default": "unset",
@@ -26223,7 +26223,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2748
+     "line": 2754
     }
    ],
    "default": "0 (unset)",
@@ -31437,7 +31437,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 3031
+     "line": 3037
     }
    ],
    "default": "unset",
@@ -31605,7 +31605,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2754
+     "line": 2760
     }
    ],
    "default": "0 (unset)",

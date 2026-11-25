@@ -127,7 +127,7 @@ def wiring():
     check("THREAD_PRIORITY_ABOVE_NORMAL" in run and "QueryThreadCycleTime(" in run, "the sampler samples a thread for each share of its CPU time, above normal priority")
     check("pf::sample_hz(getenv(\"HL_PROFILE_HZ\"))" in cpp, "the rate is HL_PROFILE_HZ")
     api = source("gpu/vk/vk_api.h")
-    check(re.search(r"#define MKWVK_API_VERSION 1[89]\b", api) and "profile_pc" in api and "build_id" in api and "profile_threads" in api, "the host's profile_pc and build_id are in the API")
+    check(re.search(r"#define MKWVK_API_VERSION (1[89]|[2-9][0-9])\b", api) and "profile_pc" in api and "build_id" in api and "profile_threads" in api, "the host's profile_pc and build_id are in the API")
     check("hos_profile_pc" in source("host/rx_backend.c"), "rx_backend.c fills profile_pc")
     dialog = source("host/hos_crash_dialog.c")
     sender = function(dialog, "int hos_profile_send_run(const char *dir) {")
