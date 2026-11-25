@@ -71,6 +71,11 @@ int main() {
         for (uint64_t s : fixed) { if (s >= 10) break; sent_max = std::max(sent_max, s); }
         CHECK(sent_max < 13);                  // while held, 13 reads "not sent yet": no fix is deferred for it
     }
+    // (FLASH1) the late fix's last resort: the order thread's only, and only once the GPU stood still for the limit; a slow GPU that
+    // is still moving (inline at 10 fps, or the order thread's) keeps waiting
+    CHECK(!late_fix_gives_up(false, 5000000000ll, 2000000000ll));
+    CHECK(!late_fix_gives_up(true, 1500000000ll, 2000000000ll));
+    CHECK(late_fix_gives_up(true, 2500000000ll, 2000000000ll));
     if (!fails) std::printf("PASS the rule\n");
     return fails;
 }
@@ -122,8 +127,10 @@ def main():
     ns = function(rp, "void note_signal_sent(uint64_t v) {")
     need("the timeline went back" in ns, "a signal that goes back is not said")
     lf = function(rp, "bool late_fix_wait_unlocked() {")
-    need("std::chrono::seconds(2)" in lf and "memory_late_fix_apply(lv);" in lf and "not reached in 2 s" in lf,
-         "a late fix's wait has no last-resort bound")
+    need("timeline_order::late_fix_gives_up(order_thread_on()," in lf and "memory_late_fix_apply(lv);" in lf
+         and "no GPU progress in 2 s" in lf, "a late fix's wait has no last-resort bound")
+    need("if (done_now != done0) done0 = done_now, w0 = std::chrono::steady_clock::now();" in lf,
+         "a late fix's last resort counts wall time, not the GPU's progress (FLASH1: the laptop's inline replay)")
     need("uint64_t vk_timeline_held_present() { return ot_held_present.load(" in rp, "the held present is not told to the captures")
     tk = function(mem, "bool take_capture(std::unique_ptr<Capture> c, uint64_t value, uint64_t completed) {")
     need("const bool behind_held = held && c->late_value >= held && c->late_value > vk_timeline_signal_sent();" in tk

@@ -693,18 +693,27 @@ void vk_timeline_wait_sent(uint64_t v) {
 // flush under it does not wait there and hold up the threads that only hold their recordings back meanwhile (the Presentation
 // Thread's submits; a poll of the main thread's waited 7.5 ms under it in the first try). A poll does not wait at all
 thread_local bool tl_poll = false;
+namespace {
+bool order_thread_on();   // (PIPE2: RX_VK_ORDER_THREAD; FLASH1: the late fix's last resort is the order thread's alone)
+}
 bool late_fix_wait_unlocked() {
     WaitScope wait_scope(WS_LATE_FIX);   // (DECOUPLE: the stall watch's site)
-    const auto w0 = std::chrono::steady_clock::now();
+    auto w0 = std::chrono::steady_clock::now();
+    uint64_t done0 = completed();
     for (uint64_t lv; (lv = memory_late_fix_pending()) && completed() < lv;) {
         if (tl_poll) return false;   // (a poll: what is held is not done anyway; the fix thread sends it)
         // (DECOUPLE3, a last resort: the cause of the load hang is fixed in timeline_order.h) a fix whose value the timeline has not
-        // reached in 2 s is applied as it is, as late_fix_flush_locked does after its own 2 s, and said: a value nothing will reach
-        // again (the timeline gone back) held every recording behind it for good
-        if (std::chrono::steady_clock::now() - w0 > std::chrono::seconds(2)) {
+        // reached is applied as it is, as late_fix_flush_locked does after its own 2 s, and said: a value nothing will reach
+        // again (the timeline gone back) held every recording behind it for good. (FLASH1) Only with the order thread, and only once
+        // the GPU has made no progress for 2 s (timeline_order::late_fix_gives_up): the laptop's 10 fps inline replay applied fixes
+        // "as it is" 3-8 times a run while its GPU was still working towards them
+        const uint64_t done_now = completed();
+        if (done_now != done0) done0 = done_now, w0 = std::chrono::steady_clock::now();
+        if (timeline_order::late_fix_gives_up(order_thread_on(), std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                                                     std::chrono::steady_clock::now() - w0).count(), 2000000000ll)) {
             static std::atomic<int> logged{0};
             if (logged++ < 8)
-                logf("vk: a late fix's value %llu not reached in 2 s (done %llu, the highest signal sent %llu): applied as it is",
+                logf("vk: a late fix's value %llu not reached, no GPU progress in 2 s (done %llu, the highest signal sent %llu): applied as it is",
                      (unsigned long long)lv, (unsigned long long)completed(), (unsigned long long)tl_signal_sent.load());
             memory_late_fix_apply(lv);
             break;
