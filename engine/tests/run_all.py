@@ -128,6 +128,7 @@ ARGS = {
     "tests/test_pass_sample_mask.py": ["--cxx", "{cxx}"],
     "tests/test_write_history.py": ["--cxx", "{cxx}"],
     "tests/test_posix_cv_wake.py": ["--cc", "cc"],
+    "tests/test_posix_thread_cycle_time.py": ["--cc", "cc"],
     "tests/test_parallel_rb_refresh.py": ["--cxx", "{cxx}"],
     "tests/test_prof_sampling.py": ["--cxx", "{cxx}"],
     "tests/test_present_geometry_trace.py": ["--cxx", "{cxx}"],
@@ -300,6 +301,7 @@ SKIP = {
     "tests/test_jt_mark_export.py": ({"windows"}, "the Linux exe's dynamic exports (on Windows the mark is a DLL export)"),
     "tests/test_sdl_audio_reopen.py": ({"windows"}, "Linux's waveOut on SDL (host/posix): Windows plays through its own"),
     "tests/test_posix_cv_wake.py": ({"windows"}, "tests the Linux futex implementation (host/posix)"),
+    "tests/test_posix_thread_cycle_time.py": ({"windows"}, "tests the Linux implementation in host/posix"),
 }
 # (spirv-val: SPIRV-Tools comes with the Linux runner's packages, not on Windows)
 for _name in ("nx2/test_texture_phi_dominance.py", "nx2/test_unsigned_image_types.py", "nx2/test_depth_sample_types.py", "nx2/test_default_point_size.py", "nx2/test_draw_parameters.py", "nx2/test_coop_spirv.py",
