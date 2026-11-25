@@ -33,6 +33,12 @@ other value that depends on another frame, so that nothing waits and frames can 
   that reached play; matrix97 on the 3050 caught 5 in 20. **Next**: suite and build of dec3e (`build rc=0`, `DONE`), tell the
   coordinator "list ready: dec3e"; on the main PC a loop of 40 starts on dec3e (`BINNAME=dec3e N=40 AFF=FFF0 TAG=ok`, `loop3.sh`)
   for function (no fps); read `matrix98` (list 3) when it comes; then the default-on proposal as one last commit (section 4.9).
+  **Status 01:35 (25 Nov)**: dec3e built (`build rc=0` 01:23; suite 512 passed / 5 failed: the known three, plus test_wb_defer
+  and the switch lists, both fixed in `5b2269dae`, which changes no code). "list ready: dec3e" sent 01:28. The 40-start loop
+  runs from 01:28 (`chain-dec3e.sh`, log `loop-dec3e-ok.log`, `STOP-loop3` stops it). **The default-on proposal is the last
+  commit, `6372b041f`** (host/hos_main.c `order_thread_default`: RX_VK_ORDER_THREAD=1 when unset and hos_reserved_cpus()
+  keeps a core for the replay; =0 off; tests/test_order_thread_default.py); the whole suite on the tip queued under a build
+  lease (`suite-tip3.sh`, log `suite-tip3.log`, `tests-tip3.log`). The coordinator takes or leaves `6372b041f` alone.
   Scratch: `aff.py` (a run under a CPU affinity: `FFF0` = 6 of the 7800X3D's cores with the replay's reserved one), `loop3.sh`
   (as `loop.sh`, plus `AFF=`, `EXTRA=`, `hang-<tag>.txt` per start with a watch line, `STOP-loop3` file to stop).
 
