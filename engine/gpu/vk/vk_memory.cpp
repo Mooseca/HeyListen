@@ -8827,15 +8827,7 @@ struct WbdPipe {
 bool wbd_pipe_ready() {
     if (wbd_pipe.tried) return wbd_pipe.pipe != VK_NULL_HANDLE;
     wbd_pipe.tried = true;
-    // (the pass votes across a subgroup (shaders/wb_diff.comp): a GPU without votes in compute keeps the whole copies)
-    VkPhysicalDeviceSubgroupProperties sg{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES};
-    VkPhysicalDeviceProperties2 p2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
-    p2.pNext = &sg;
-    vkGetPhysicalDeviceProperties2(dev.physical, &p2);
-    if (!(sg.supportedOperations & VK_SUBGROUP_FEATURE_VOTE_BIT) || !(sg.supportedStages & VK_SHADER_STAGE_COMPUTE_BIT)) {
-        logf("vk: write-back diff off: the GPU has no subgroup votes in compute shaders");
-        return false;
-    }
+    // (issue 89: the pass no longer votes across a subgroup (shaders/wb_diff.comp), it writes the vectors that differ and no others)
     const VkPushConstantRange pr{VK_SHADER_STAGE_COMPUTE_BIT, 0, 16};
     VkPipelineLayoutCreateInfo li{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
     li.pushConstantRangeCount = 1;
