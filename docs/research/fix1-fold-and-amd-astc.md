@@ -46,6 +46,26 @@ Decision: the fold was wrong in three cases (step 1), so it is fixed and stays o
 INTEGRATED_GPU (the two Ryzen desktop ids 0x164E and 0x13C0 stay named); `RX_VK_ASTC_CPU` set always wins (0 keeps the GPU path).
 Test: `tests/test_astc_cpu_policy.py`; `tests/test_astc_cpu.py` updated (a 780M and an 890M now take the CPU decode).
 
+## Black leaves (#97): the cause (FIX2, 25 Nov 2026)
+
+Short: the leaves were black because dead code elimination removed a VoteAny that the fold had left without a reader.
+
+- Bisect (build fix1leaves, save black-leaves, fold of BitFieldUExtract only): program 7650519f88e59b19 (a 64x1x1 compute shader with
+  ballots and shuffles; translated four times). Folds are numbered per translation: 728 flagged instructions, the 104 R2P groups of
+  seven. RANGE 0-189 green, 189-378 black; 216-243 black, 216-217, 217-224, 224-231, 231-238, 238-243 each green (several folds
+  are needed at once: four consecutive R2P groups).
+- What those folds are: `R2P P, mask 0x40` (PR mode, byte 0) = P6 from bit 6 of the register, P0..P5 unchanged. The guest wrote
+  P6 with `VOTE.ANY P6, PT` just before, then the lane election (ballot, lowest set lane, shuffle).
+  R2P's IR is `P6 = Select(zero(BitFieldUExtract(0x40, 6, 1)), old P6, not zero(extract(src)))`. With the fold the condition is
+  the immediate false, FoldSelect keeps the source arm and the old value (the VoteAny, uses 1) has no reader.
+- IR diff of the same translation with RANGE 216-243 against RANGE 0-0 (scratch fix2/ir/f2-i1.txt and f2-i2.txt): the only
+  differences are the folded extracts, their selects, and the two VoteAny instructions (and nothing else) that dead code
+  elimination then removed. Votes, ballots and shuffles are not "side effects" in Inst::MayHaveSideEffects.
+- Why it matters: a VOTE is a convergence point of the guest program; with the vote gone the ballot and shuffle after it see fewer
+  lanes on NVIDIA and the vegetation compute produces zero lighting data.
+- The fold values are right (test_pseudo_fold_semantics); the fix is in dead code elimination: VoteAll/Any/Equal, SubgroupBallot and
+  the shuffles count as side effects (microinstruction.cpp). Test: tests/test_dce_convergent_ops.py (fails without the change).
+
 ## State (black leaves, branch fix/black-leaves; paused 24 Nov by the owner, work in progress)
 
 Reproduced on the RTX 5070 from build/s5/savelib/black-leaves (Kakariko, bushes behind a house), build fix1leaves (main + the bisect
