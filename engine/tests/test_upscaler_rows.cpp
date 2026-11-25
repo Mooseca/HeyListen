@@ -258,5 +258,23 @@ int main() {
                     CHECK("the row never stops at DLAA or native AA", next != DLAA && next != ur::FSR4_AA && next >= 0 && next < ur::kUpscalers);
                 }
     }
+    // (issue 130) what the game says of its build: the log lines at the start, and the Upscaler help's way out
+    CHECK("the log says DLSS is not in the build and why", std::strstr(ur::dlss_build_line(false), "DLSS: not in this build") &&
+                                                           std::strstr(ur::dlss_build_line(false), "NVIDIA DLSS box was off"));
+    CHECK("the log says DLSS is in the build", std::strstr(ur::dlss_build_line(true), "DLSS: in this build") &&
+                                               !std::strstr(ur::dlss_build_line(true), "not in"));
+    CHECK("the log says FSR 4's state", std::strstr(ur::fsr4_build_line(false), "FSR 4: not in this build") &&
+                                        std::strstr(ur::fsr4_build_line(true), "FSR 4: in this build"));
+    CHECK("an RTX card is NVIDIA and says RTX", ur::nvidia_rtx(0x10DE, "NVIDIA GeForce RTX 3090") && !ur::nvidia_rtx(0x10DE, "NVIDIA GeForce GTX 1080") &&
+                                                !ur::nvidia_rtx(0x1002, "AMD RTX-like") && !ur::nvidia_rtx(0x10DE, nullptr));
+    CHECK("the DLSS hint: no DLSS in the build, an RTX card, NVIDIA's runtime beside", ur::dlss_rebuild_hint_wanted(false, true, true));
+    CHECK("no DLSS hint with DLSS in the build, another card, or no runtime", !ur::dlss_rebuild_hint_wanted(true, true, true) &&
+                                                                              !ur::dlss_rebuild_hint_wanted(false, false, true) &&
+                                                                              !ur::dlss_rebuild_hint_wanted(false, true, false));
+    CHECK("the FSR 4 hint, the same way", ur::fsr4_rebuild_hint_wanted(false, ur::amd_gpu(0x1002), true) &&
+                                          !ur::fsr4_rebuild_hint_wanted(true, true, true) && !ur::fsr4_rebuild_hint_wanted(false, ur::amd_gpu(0x10DE), true));
+    CHECK("the hints say to run the Builder again with the box ticked", std::strstr(ur::dlss_rebuild_hint(), "Run the Builder again") &&
+                                                                         std::strstr(ur::dlss_rebuild_hint(), "NVIDIA DLSS box ticked") &&
+                                                                         std::strstr(ur::fsr4_rebuild_hint(), "AMD FSR 4 box ticked"));
     std::puts("upscaler rows: all checks passed");
 }

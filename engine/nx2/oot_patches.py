@@ -18,6 +18,10 @@ Each is a runtime switch where it can be, so the game's own path stays reachable
   before any recompute. So the fixed path kept the dynamic path's last scale (0.75 docked: 1536x864 at every setting). Flag 1 now
   also asks for the recompute, and on the fixed path the flags +0xe20 bits 3/4 (a hardcoded 0.75 / 0.5 in place of the scale)
   are not looked at.
+- Sprint with L3 (host/oot_sprint.c; original change by llun, Longshot #1929 and #2038): two places load Link's input flags, whose
+  bit 4 is the dash input, the game's own run after a roll: his movement update (f_804caa80, at 0x804ce798, for the sprint's start
+  and keep tests) and his stance and camera update (f_80c225d0, at 0x80c27f3c). A call right after each load (hos_sprint_link,
+  hos_sprint_stance) ORs the bit in while the row is on and the left stick is pressed. A and the game's buttons are left alone.
 - The Voice Language option kept after a restart (host/oot_voice.c): the voice resource's update (f_80a9ca30) asks
   GameDataMgr whether the option was written (f_80a9d1c0) and applies it only then; option.sav's value replaces the
   option without a write, so a saved choice was never applied (issue 430). The call goes through hos_oot_voice_option,
@@ -333,7 +337,55 @@ WHERE = {"dynamic resolution branch": " (the branch at 0x8082640c, label %s)" % 
          "player heart protection": " (the player's life)", "player flight": " (the player's movement)",
          "player flight rotation": " (the player's flight rotation)", "free camera": " (the free camera)",
          "mouse camera": " (the mouse camera)", "voice option check": " (the Voice Language option)",
-         "scene format": " (the scene buffer's format, found by name)"}
+         "scene format": " (the scene buffer's format, found by name)",
+         "sprint link": " (f_804caa80, Link's movement update, at 0x804ce798)",
+         "sprint stance": " (f_80c225d0, Link's stance and camera update, at 0x80c27f3c)"}
+
+
+# Sprint with L3 (host/oot_sprint.c): the flags' loads. f_804caa80 loads Link's input flags into x10 at 0x804ce798 (Link in x19);
+# f_80c225d0 loads their low byte into x8 at 0x80c27f3c. The sites are matched as patterns, the named group ending at the load
+# whose result the host hook changes. Both functions are named here, so nx2/guest_locals.py keeps them in the c->x form.
+SPRINT_LINK_HEAD = "void f_804caa80(Ctx *__restrict A64_NOESC c) {\n"
+_SPRINT_LOAD = r"c->x\[%d\]\s*=\s*recomp_load%d\(c,\s*c->x\[%d\]\s*\+\s*%d\);\s*"
+SPRINT_LINK_AT = (r"L_804ce790:;\s*" + _SPRINT_LOAD % (10, 64, 19, 80) + _SPRINT_LOAD % (9, 32, 19, 44) +
+                  r"(?P<site>" + _SPRINT_LOAD % (10, 64, 10, 0) + r")")
+SPRINT_LINK_CALL = "    hos_sprint_link(c);   /* (nx2/oot_patches.py: Sprint with L3) */\n"
+SPRINT_STANCE_HEAD = "void f_80c225d0(Ctx *__restrict A64_NOESC c) {\n"
+SPRINT_STANCE_AT = (_SPRINT_LOAD % (8, 64, 19, 80) + r"(?P<site>" + _SPRINT_LOAD % (8, 8, 8, 0) + r")" +
+                    r"if\s*\(\(\(c->x\[8\]\s*>>\s*4\)\s*&\s*1\)\)\s*\{\s*goto\s+L_80c27f54;\s*\}")
+SPRINT_STANCE_CALL = "    hos_sprint_stance(c);   /* (nx2/oot_patches.py: Sprint with L3) */\n"
+SPRINT_DECL = "extern void hos_sprint_link(Ctx *c);\nextern void hos_sprint_stance(Ctx *c);\n"
+
+
+def _sprint_hook(source, head, pattern, call):
+    """The call after the one matching site of the function: (source, 1), or (source, 0) when the function is not here or its
+    code differs (nothing is changed then); a second run changes nothing and says 1"""
+    start = source.find(head)
+    if start < 0:
+        return source, 0
+    end = source.find("\nvoid f_", start + len(head))
+    end = end if end >= 0 else len(source)
+    body = source[start:end]
+    if call in body:
+        return source, 1
+    matches = list(re.finditer(pattern, body))
+    if len(matches) != 1:
+        return source, 0
+    at = matches[0].end("site")
+    source = source[:start] + body[:at] + call + body[at:] + source[end:]
+    if SPRINT_DECL not in source:
+        source = source.replace('#include "a64.h"\n', '#include "a64.h"\n' + SPRINT_DECL, 1)
+    return source, 1
+
+
+def patch_sprint_link(source):
+    """f_804caa80 calls hos_sprint_link right after it loads Link's input flags into x10 (0x804ce798): (source, found)"""
+    return _sprint_hook(source, SPRINT_LINK_HEAD, SPRINT_LINK_AT, SPRINT_LINK_CALL)
+
+
+def patch_sprint_stance(source):
+    """f_80c225d0 calls hos_sprint_stance right after it loads the flags' low byte into x8 (0x80c27f3c): (source, found)"""
+    return _sprint_hook(source, SPRINT_STANCE_HEAD, SPRINT_STANCE_AT, SPRINT_STANCE_CALL)
 
 
 def searched(gen):
@@ -365,6 +417,8 @@ def apply(gen, *, protect_hearts=False, required=False):
         done["mouse camera"] = 0
         done["voice option check"] = 0
         done["scene format"] = 0
+        done["sprint link"] = 0
+        done["sprint stance"] = 0
     for path in sorted(glob.glob(os.path.join(gen, "code_*.c"))):
         with open(path, encoding="utf-8", newline="") as f:
             s = f.read()
@@ -425,6 +479,13 @@ def apply(gen, *, protect_hearts=False, required=False):
             if scene != out:
                 print("oot_patches: the scene buffer's format for native HDR in", os.path.basename(path))
             out = scene
+        if protect_hearts:
+            for what, patch in (("sprint link", patch_sprint_link), ("sprint stance", patch_sprint_stance)):
+                sprint, n = patch(out)
+                done[what] += n
+                if sprint != out:
+                    print("oot_patches: Sprint with L3's %s site in %s" % (what.split()[1], os.path.basename(path)))
+                out = sprint
         if out != s:
             whole_write.write_whole(path, out, newline="")
     for what, n in done.items():

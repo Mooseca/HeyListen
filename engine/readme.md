@@ -272,6 +272,8 @@ they apply at once, with no new translation.
 | | Skip title screen | Off, On (after a restart) | Off |
 | | Microphone | Off, Default, or each microphone by name | Default |
 | Controls | Controller in background | Off, On | Off |
+| | Sprint with L3 | Off, On | Off |
+| | Touchpad opens menu | Off, On | On |
 | | Mouse camera | As the stick, Native | As the stick |
 | | Mouse sensitivity | 0.10 to 5.00 | 1.00 |
 | | Invert mouse vertical | Off, On | Off |
@@ -347,6 +349,19 @@ they apply at once, with no new translation.
   (Settings, Privacy & security, Microphone). `HOS_MIC_LOG=1` logs what the game reads, a line a second.
 - **Controller in background:** On keeps the controller working while another window has the focus. The keyboard and
   mouse still need the game's window.
+- **Sprint with L3:** On makes the left stick's press run Link with the game's own fast run, the one that follows a roll while A
+  stays held, without the roll: it goes on until he stops, rolls, targets (ZL) or a cutscene takes over. The speed, animation
+  and camera are the game's, not a multiplier. Off (the default) leaves the press as the game's LS button. How it works with the
+  game's input: the left stick's press is the game's LS button (whatever pad input or key is bound to LS: L3 and the keyboard's
+  LS key by default), and with the row on the game no longer gets it as LS, since it is Sprint's. A press that begins in a
+  conversation or a cutscene, or while Link is not being updated, goes to the game as LS as before (it hides the text box) and
+  starts no sprint. A is never touched: tapping it while sprinting rolls. A DualSense or any other pad is the same, as L3 is the
+  left stick's press on every pad; a scripted test run presses it with `LS`. Ported from Longshot's Sprint (llun's #1929 and
+  kendowashere's #2038, after thegrandao's #196), held only, without its Toggle or its own binding.
+- **Touchpad opens menu:** On (the default): the click of a DualSense or DualShock 4 touchpad opens and closes this menu, as
+  before. Off: the click does nothing, so it cannot open the menu in the middle of a fight (issue 120). Nothing else changes: the
+  menu opens with <kbd>Insert</kbd> or <kbd>F1</kbd>, Home, Select and Start together (every pad has those two buttons), and the
+  **Open menu** control. Saved as `touchpad_opens_menu`, next to `sprint_with_l3`, in `hookshot_options.ini`.
 - **Mouse camera:** Native turns the camera with the mouse one to one, as in a PC game. As the stick uses the mouse in
   place of the right stick. The <kbd>-</kbd> and <kbd>=</kbd> keys change the sensitivity in game too.
 - **Stick dead zone:** how far a stick moves before it counts, on each axis. Default is XInput's (about 24%); lower suits
