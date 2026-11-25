@@ -226,7 +226,7 @@
    "files": [
     {
      "path": "nx2/make_game.py",
-     "line": 1700
+     "line": 1724
     },
     {
      "path": "third_party/a64-kit/lift/a64_lift.py",
@@ -235,7 +235,7 @@
    ],
    "default": "unset",
    "values": "text",
-   "explanation": "undocumented: nx2/make_game.py:1700 reads it as a path: `env[\"A64_HOT_FUNCS\"] = os.path.join(work, \"hot_funcs.txt\")`. No comment in the source says what it changes.",
+   "explanation": "undocumented: nx2/make_game.py:1724 reads it as a path: `env[\"A64_HOT_FUNCS\"] = os.path.join(work, \"hot_funcs.txt\")`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -3472,11 +3472,11 @@
     },
     {
      "path": "nx2/make_game.py",
-     "line": 1952
+     "line": 1976
     },
     {
      "path": "nx2/make_game.py",
-     "line": 1953
+     "line": 1977
     }
    ],
    "default": "unset",
@@ -3501,11 +3501,11 @@
     },
     {
      "path": "nx2/make_game.py",
-     "line": 1949
+     "line": 1973
     },
     {
      "path": "nx2/make_game.py",
-     "line": 1950
+     "line": 1974
     }
    ],
    "default": "unset",
@@ -3598,7 +3598,7 @@
    ],
    "default": "unset",
    "values": "text",
-   "explanation": "**Or fetched for you (Windows):** `make_game.py --fsr --fetch-fsr-runtime --accept-amd-license` downloads those two DLLs and AMD's license from AMD's FidelityFX SDK repository at the v2.4.0 tag, checks each against its SHA-256, and puts them in the game folder (`HOOKSHOT_FFX_SDK=<folder>` keeps them between builds, default `work fx-sdk`). `python -I scripts/ffx_sdk.py --accept-amd-license --game <game folder>` does the same for a game built already. Without `--accept-amd-license` nothing is downloaded (the script asks when run by hand), as with NVIDIA's license for DLSS. AMD DLLs already in the game folder that are not v2.4.0's (a newer SDK put there by hand) are left alone, and the build says so.",
+   "explanation": "**Or fetched for you (Windows):** `make_game.py --fsr --fetch-fsr-runtime --accept-amd-license` downloads those three DLLs and AMD's license from AMD's FidelityFX SDK repository at the v2.4.0 tag, checks each against its SHA-256, and puts them in the game folder (`HOOKSHOT_FFX_SDK=<folder>` keeps them between builds, default `work fx-sdk`). `python -I scripts/ffx_sdk.py --accept-amd-license --game <game folder>` does the same for a game built already. Without `--accept-amd-license` nothing is downloaded (the script asks when run by hand), as with NVIDIA's license for DLSS. AMD DLLs already in the game folder that are not v2.4.0's (a newer SDK put there by hand) are left alone, and the build says so.",
    "comment": null,
    "documented_in": "readme.md",
    "source": "readme.md",
@@ -3618,7 +3618,7 @@
     },
     {
      "path": "nx2/make_game.py",
-     "line": 1593
+     "line": 1617
     }
    ],
    "default": "",
@@ -3672,7 +3672,7 @@
     },
     {
      "path": "nx2/make_game.py",
-     "line": 1964
+     "line": 1988
     }
    ],
    "default": "",
@@ -3892,23 +3892,23 @@
     },
     {
      "path": "nx2/make_game.py",
-     "line": 1366
+     "line": 1385
     },
     {
      "path": "nx2/make_game.py",
-     "line": 1551
+     "line": 1573
     },
     {
      "path": "nx2/make_game.py",
-     "line": 1552
+     "line": 1574
     },
     {
      "path": "nx2/make_game.py",
-     "line": 1553
+     "line": 1575
     },
     {
      "path": "nx2/make_game.py",
-     "line": 1554
+     "line": 1576
     }
    ],
    "default": "unset",
@@ -4288,7 +4288,7 @@
     },
     {
      "path": "nx2/make_game.py",
-     "line": 1768
+     "line": 1792
     }
    ],
    "default": "unset",
@@ -4321,7 +4321,7 @@
     },
     {
      "path": "nx2/make_game.py",
-     "line": 1846
+     "line": 1870
     }
    ],
    "default": "unset",
@@ -4412,7 +4412,7 @@
     },
     {
      "path": "nx2/make_game.py",
-     "line": 1600
+     "line": 1624
     }
    ],
    "default": "",
@@ -10203,12 +10203,12 @@
    "files": [
     {
      "path": "nx2/make_game.py",
-     "line": 1505
+     "line": 1527
     }
    ],
    "default": "",
    "values": "text",
-   "explanation": "undocumented: nx2/make_game.py:1505 reads it as a text value: `name = (locale.getlocale()[0] or os.environ.get(\"LANG\", \"\")).split(\".\")[0]`. No comment in the source says what it changes.",
+   "explanation": "undocumented: nx2/make_game.py:1527 reads it as a text value: `name = (locale.getlocale()[0] or os.environ.get(\"LANG\", \"\")).split(\".\")[0]`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -10257,11 +10257,11 @@
     },
     {
      "path": "nx2/make_game.py",
-     "line": 1431
+     "line": 1450
     },
     {
      "path": "nx2/make_game.py",
-     "line": 1540
+     "line": 1562
     },
     {
      "path": "scripts/oot_saves.py",
@@ -14195,7 +14195,7 @@
     },
     {
      "path": "nx2/make_game.py",
-     "line": 1702
+     "line": 1726
     }
    ],
    "default": "",
@@ -33288,12 +33288,12 @@
    "files": [
     {
      "path": "nx2/make_game.py",
-     "line": 1429
+     "line": 1448
     }
    ],
    "default": "unset",
    "values": "a path (text)",
-   "explanation": "undocumented: nx2/make_game.py:1429 reads it as a path: `p.add_argument(\"--work\", default=os.path.join(os.environ.get(\"XDG_CACHE_HOME\") or os.path.expanduser(\"~/.cache\"),`. No comment in the source says what it changes.",
+   "explanation": "undocumented: nx2/make_game.py:1448 reads it as a path: `p.add_argument(\"--work\", default=os.path.join(os.environ.get(\"XDG_CACHE_HOME\") or os.path.expanduser(\"~/.cache\"),`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
