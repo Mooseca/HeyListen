@@ -11429,7 +11429,7 @@ void fog_clear_images(VkCommandBuffer cmd, NvnState& s, const Program& p) {
     vkCmdPipelineBarrier2(cmd, &dep);
     for (const auto& i : images) {
         ParLock lk;
-        texture_written(i.first, "the fog volume cleared (the Volumetric fog row Off)");
+        texture_written(i.first);   // (the fog volume cleared: the Volumetric fog row Off; no reason: it is no virtual-pool texture)
     }
 }
 void dispatch(VkCommandBuffer cmd, NvnState& s, uint32_t x, uint32_t y, uint32_t z, uint64_t indirect) {
