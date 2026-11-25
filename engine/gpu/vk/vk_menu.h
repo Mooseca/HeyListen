@@ -60,7 +60,7 @@ struct Options {
     int vsync_mode = 1;   // V-Sync mode (present_mode.h), with V-Sync On: 0 FIFO (double buffering) (2 images: less delay, a missed refresh waits a whole one), 1 FIFO (triple buffering) (3: the default, today's On), 2 Mailbox (triple buffering) (MAILBOX, 3 or 4 with frame generation, where the surface lists it); saved as vsync_mode
     int vrr = 0;   // VRR (G-Sync / FreeSync): 0 Off (the default: nothing changes), 1 On, 2 Auto (On in fullscreen when the display lists a variable refresh range): FIFO, a borderless popup window that can flip, the frame rate limit at the refresh - 3 (present_mode.h vrr_resolve)
     int pad_background = 0;   // the controllers count while another window has the focus (host/nn_hid.c; HOS_INPUT_BACKGROUND)
-    int sprint = 0;   // (longshot #1929, #2038) "Sprint with L3": the left stick's press runs Link with the game's own dash input (host/oot_sprint.c); 0 off (the default)
+    int sprint = 0;   // (longshot #1929, #2038) "Sprint with L3": the left stick's press runs Link with the game's own dash input (host/oot_sprint.c); 0 off (the default), 1 hold, 2 toggle
     int touchpad_menu = 1;   // (heylisten, issue 120) "Touchpad opens menu": 1 the DualSense / DualShock 4 touchpad click opens and closes this menu (the default), 0 it does not
     int mouse_native = 0; // the mouse turns the camera's own angles (host/mouse_native.c); 0: as the right stick
     int mouse_sens = 100; // the mouse's sensitivity in percent: 0.1 degrees a count at 100 with native look (host/nn_hid.c)
@@ -83,7 +83,7 @@ struct Options {
     int sampler_cache = 0;     // sampler ids answer their parameters without the registrations' lock (gpu/vk/vk_draw.cpp; RX_VK_SAMPLER_CACHE)
     int intel_compiles = 0;    // (longshot #252) Intel's shader compiler on Windows: 0 one thread at a time, 1 side by side (gpu/vk/vk_internal.h
                                // IntelDriverGate, vk_draw.cpp intel_compiles_side_by_side; RX_VK_NO_INTEL_SERIAL=1 over it). Read once, at the start
-    int preset = 0;       // quality preset: 0 Custom, 1 Minimum (4GB), 2 Low (6GB), 3 Balanced (8GB), 4 High (12GB), 5 Ultra (16GB+)
+    int preset = 0;       // quality preset: 0 Custom, 1 Lowest (integrated GPU), 2 Minimum (4GB), 3 Low (6GB), 4 Balanced (8GB), 5 High (12GB), 6 Ultra (16GB+)
     int vram_mb = 0;      // dynamic texture cache budget limit in MB
     int mirror_mb = 0;    // staging mirror limit in MB
     int audio_output = 0; // (hookshot) the speakers the game mixes for: 0 Auto (the default output's), 1 Stereo, 2 5.1; read once, at the start (host/nn_audio.c; HOS_AUDIO_CHANNELS)
@@ -131,7 +131,8 @@ bool hdr_forced();
 /// (after Longshot 79a34381) PsychoV35's grading as the menu has it now, in ir_opt/psychov35.h's bank order (kSetting*, kSettingCount floats)
 void psychov35_bank(float* out);
 bool resolution_auto();       // (the game's dynamic resolution: Resolution Auto)
-bool fog_runs();              // (the Volumetric fog row, RX_VK_FOG over it: lowend_rule.h; fixed at the first ask)
+bool fog_runs();              // (the Volumetric fog row, RX_VK_FOG over it: lowend_rule.h; asked at each fog dispatch: the row applies at once)
+int menu_handheld_now();      // (the Handheld profile row, 0 or 1; -1 until the options file is read: host/nn_applet.c tells the game of a change)
 void menu_first_run_lowend(uint32_t vendor_id, bool integrated, bool mesh_shader);
 bool lowend_mirror_not_wait();   // (lowend_rule.h mirror_not_wait for this device: set by menu_first_run_lowend)   // (the Minimum preset and the fog off on a low-end GPU: lowend_rule.h)
 int resolution_scale();       // (the fixed path's scale in 1/10000: the Resolution row's, as a twelfth of the output)

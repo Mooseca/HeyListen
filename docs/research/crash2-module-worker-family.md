@@ -153,3 +153,24 @@ docs/research/crash1-triage-2026-11-24.md (branch docs/crash1). Only function na
   slot b restored first (dll md5 equal to crash3-bak-c3h; main12 copied its own exe at 14:02:48). run_all on the final
   code: 507 passed, 4 failed (the three known + test_switches_documented, regenerated in b48fc265e, --check up to date).
   No lease held, no loop or game of mine running. Done.
+
+## FOLIAGE2 (2026-11-25): the checked write-back made foliage vanish; the check moved onto the GPU
+
+- Owner's hand tests: leaves and grass vanish and come back while Link moves since main13 (c79bee6f6, this merge); night1c
+  with RX_VK_WB_GUESS_CHECKED=0 shows none (build/s5/w8e-guess0).
+- Mechanism (code): since 26ab8203a a bare entry's guessed head reached guest memory from the CPU at a LATER
+  memory_end_submission (guess_apply), while wb_pages_note marked its page done at the part's own timeline value. The head's page
+  is always stamped written (vk_draw.cpp memory_stamp_gpu over the bare range), so the next part's mirror sync copied the
+  import's older words over the GPU's culling counts and records in the mirror, and the captures' late fix and the CPU's
+  invalidate waits saw the value done and read the older bytes too: the next culling pass read old counts. The snapshot of the
+  next binding, read before that late write, also took the late write for a CPU write (c3-fix4: 110820 words "left to the CPU").
+- Fix (branch fix/guessed-writeback-timely, 793f27c15): for a pool with an import the check runs on the GPU in the part's own
+  command buffer, where the whole copy was (shaders/wb_guess.comp): a word is written only when the mirror's differs from the
+  snapshot at the binding and guest memory still holds the snapshot or this pass's own last write there (a 4 MB table keyed by
+  guest address). A stale entry's words are never changed by the GPU, so never written. Pools without an import keep CRASH3's
+  staged form. RX_VK_WB_GUESS_GPU=0: CRASH3's form. tests/test_wb_guess_gpu.py.
+- Verified: build fol2a; its log "46049 words written (0 of them over this pass's own last write), 26 left to the CPU; 0 runs
+  staged" (build/s5/f2-fix2/game_log.txt); the owner's eye on fol2a in Kakariko (w9a-fol2a): no vanishing foliage.
+- Not verified on the main PC (it went to FLASH2): HL_TRACE_WB on fol2a (0 write-backs into live heap blocks expected): list
+  for the 3050 E:\OOT\scratch-foliage2\list-3050-trace.txt; the cost: E:\OOT\scratch-foliage2\list-3050.txt. The scripted
+  picture detector did not separate yes from no (the f2/f4 runs were also invalid: the pause menu took the window's keys).

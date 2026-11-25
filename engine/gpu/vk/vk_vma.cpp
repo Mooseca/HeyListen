@@ -629,6 +629,23 @@ void log_alloc_where(const char* what, VmaAllocation allocation) {
          (f & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) ? " device-local" : "", (f & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) ? " host-visible" : "",
          (f & VK_MEMORY_PROPERTY_HOST_CACHED_BIT) ? " cached" : "");
 }
+/// (issue 135) A buffer the CPU reads back that landed in a host-visible type without HOST_CACHED (write-combined system
+/// memory: ordinary loads from it run at ~260 MB/s, 20-75 ms stalls of the replay thread on an RTX 5070 Ti laptop under Linux).
+/// Logs it (the first 12, with the running count); false for a cached one. Cheap: once per buffer made.
+bool log_alloc_uncached(const char* what, VmaAllocation allocation) {
+    if (!allocation) return false;
+    VmaAllocationInfo info{};
+    vmaGetAllocationInfo(vma, allocation, &info);
+    const VkMemoryType& t = dev.memory.memoryTypes[info.memoryType];
+    const VkMemoryPropertyFlags f = t.propertyFlags;
+    if (!(f & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) || (f & VK_MEMORY_PROPERTY_HOST_CACHED_BIT)) return false;
+    static std::atomic<int> n{0};
+    const int k = n.fetch_add(1, std::memory_order_relaxed) + 1;
+    if (k <= 12)
+        logf("vk: %s landed in an uncached type: %llu KB in memory type %u, flags 0x%x (the CPU's reads of it are slow; RX_VK_CAP_READ_STREAM reads it with streaming loads), %d so far", what,
+             (unsigned long long)(info.size >> 10), info.memoryType, (unsigned)f, k);
+    return true;
+}
 /// The image pools: their blocks, the images in them, and the free ranges between them (every 600 presents, with the heaps)
 void vma_log_image_blocks() {
     if (image_generations_on()) {   // (RX_VK_IMAGE_GENERATIONS: the live generations, their blocks and images)

@@ -321,6 +321,12 @@ static void live_input(void) {
                 if (!strncmp(line, "!flasharm", 9)) rx_flash_dark_arm();
                 extern volatile int hos_oot_live_action;   /* host/hos_main.c: "!cheat <action>", as the Cheats page sends */
                 if (!strncmp(line, "!cheat ", 7)) __atomic_store_n(&hos_oot_live_action, atoi(line + 7), __ATOMIC_RELAXED);
+                void hos_bind(int set, int button, int slot, int code);
+                int bind_b = -1, bind_pad = -2;   /* "!bind <HOS_SW_*> <HOS_PAD_*>", as the Controls page binds it (button prompts tests) */
+                if (!strncmp(line, "!bind ", 6) && sscanf(line + 6, "%d %d", &bind_b, &bind_pad) == 2 && bind_b >= 0 && bind_b < HOS_SW_N)
+                    hos_bind(HOS_BIND_PAD, bind_b, 0, bind_pad);
+                extern volatile int hos_prompts_row;   /* host/prompts.c: "!prompts <0 Auto, HOS_PROMPT_* + 1>", as the Button prompts row */
+                if (!strncmp(line, "!prompts ", 9)) __atomic_store_n(&hos_prompts_row, atoi(line + 9), __ATOMIC_RELAXED);
                 hos_log("hid: live command at %.1f s: %.*s", at / 1000.0, (int)(n > 1 ? n - 1 : 0), line);
                 continue;
             }
@@ -585,6 +591,16 @@ int32_t hos_stick_axis(int16_t v, int zone) {
 static volatile int xinput_pads_now;   /* (pads_read: the controllers XInput has, while it is polled) */
 int hos_xinput_pads(void) { return xinput_pads_now; }   /* (host/prompts.c: Auto's face) */
 
+/* (host/prompts.c: Auto follows the device in use) when a gamepad and the keyboard last gave input, hos_now_ns, 0 never. A
+   gamepad's: a button down or a stick pushed more than halfway (a resting pad's noise and drift are none). The keyboard's: a key
+   down that is bound to a control or the camera and the movement, or a mouse button (not the mouse's motion). A scripted press
+   (HOS_INPUT_SCRIPT, HOS_INPUT_LIVE) is neither */
+static volatile int64_t input_pad_ns, input_key_ns;
+void hos_input_last(int64_t *pad_ns, int64_t *key_ns) {
+    *pad_ns = __atomic_load_n(&input_pad_ns, __ATOMIC_RELAXED);
+    *key_ns = __atomic_load_n(&input_key_ns, __ATOMIC_RELAXED);
+}
+
 static void pads_read(uint64_t *buttons, int32_t stick[4]) {
     static int64_t next_read, retry[XUSER_MAX_COUNT];
     static int was_connected[XUSER_MAX_COUNT];
@@ -661,6 +677,12 @@ static void pads_read(uint64_t *buttons, int32_t stick[4]) {
         stick_max(s, v);
     }
     InterlockedExchange(&pad_raw_now, (LONG)raw);
+    {   /* (Auto's device in use: a button, or a stick past halfway) */
+        const uint64_t pressed = raw & ((1ULL << HOS_PAD_N) - 1);   /* (the touchpad's click is the menu's, not a play) */
+        int strong = 0;
+        for (int i = 0; i < 4; i++) strong |= s[i] > 16384 || s[i] < -16384;
+        if (pressed || strong) __atomic_store_n(&input_pad_ns, now, __ATOMIC_RELAXED);
+    }
     /* Back and Start together open the Insert menu (gpu/vk/vk_menu.cpp, for pads whose Home button the system
        keeps): they reach the game only one at a time */
     const uint64_t chord = 1ULL << HOS_PAD_BACK | 1ULL << HOS_PAD_START;
@@ -803,8 +825,9 @@ static void read_input(uint64_t *buttons, int32_t stick[4]) {
         }
     }
     binds_load();   /* (the keys: key_default's, or hookshot_options.ini's; the mouse's buttons once its capture is known) */
+    int key_input = 0;   /* (Auto's device in use: a bound key down) */
     for (int i = 0; i < HOS_SW_N; i++)
-        if (bound_down(i, 0)) *buttons |= 1ULL << i;
+        if (bound_down(i, 0)) *buttons |= 1ULL << i, key_input = 1;
     int32_t mouse[4] = {0};
     /* the mouse's motion: the camera itself (mouse_native.c) with the menu's Mouse camera on Native, else the right
        stick; also the stick while the player camera does not run (the pause menu, other cameras: mouse_native.c) */
@@ -827,7 +850,7 @@ static void read_input(uint64_t *buttons, int32_t stick[4]) {
     mouse_buttons_arm(captured);
     if (captured)
         for (int i = 0; i < HOS_SW_N; i++)
-            if (bound_down(i, 1)) *buttons |= 1ULL << i;
+            if (bound_down(i, 1)) *buttons |= 1ULL << i, key_input = 1;
     /* (the left stick's and the camera's keys: WASD and the arrows or IJKL by default) */
     const int cx = bound_down(HOS_KEY_CAM_RIGHT, captured) - bound_down(HOS_KEY_CAM_LEFT, captured),
               cy = bound_down(HOS_KEY_CAM_UP, captured) - bound_down(HOS_KEY_CAM_DOWN, captured);
@@ -835,6 +858,7 @@ static void read_input(uint64_t *buttons, int32_t stick[4]) {
                              (bound_down(HOS_KEY_MOVE_UP, captured) - bound_down(HOS_KEY_MOVE_DOWN, captured)) * 32767,
                              cx * 32767, cy * 32767};
     stick_max(stick, keys);
+    if (key_input || keys[0] || keys[1] || keys[2] || keys[3]) __atomic_store_n(&input_key_ns, hos_now_ns(), __ATOMIC_RELAXED);
 }
 
 static void vibration_send(uint64_t handle, uint64_t value);
@@ -857,6 +881,8 @@ static void npad_states(Ctx *c) {
             hos_log("hid: the game read no controller for %.1f s (lr %#llx)", (now - last_read) / 1e9,
                     (unsigned long long)c->x[30]);
         if (connected) last_read = hos_hid_last_read = now;
+        void hos_prompts_live(void);   /* (host/prompts.c: a new face or new controls shown at once, looked at every 100 ms) */
+        if (connected) hos_prompts_live();
         int known = 0;
         for (int i = 0; i < nseen; i++) known |= seen_ids[i] == id;
         if (!known && nseen < 16) {
@@ -888,8 +914,10 @@ static void npad_states(Ctx *c) {
         }
         /* Sprint with L3 (the Controls row, host/oot_sprint.c): with it on the left stick's press (the game's LS) is Sprint's, not the
            game's, except for one that begins outside gameplay. Off: the buttons as they are. */
-        uint64_t hos_sprint_input(uint64_t buttons, int on, int blocked);   /* host/oot_sprint.c */
-        buttons = hos_sprint_input(buttons, rx_option(HL_OPT_SPRINT, 0), menu_open);
+        uint64_t hos_sprint_input(uint64_t buttons, int on, int blocked, int moving);   /* host/oot_sprint.c */
+        const int zone = rx_option(11, 0);   /* (the menu's Stick dead zone: the left stick at rest for Sprint's Toggle) */
+        const int moving = hos_stick_axis((int16_t)stick[0], zone) || hos_stick_axis((int16_t)stick[1], zone);
+        buttons = hos_sprint_input(buttons, rx_option(HL_OPT_SPRINT, 0), menu_open, moving);
         __atomic_store_n(&flight_input, flight, __ATOMIC_RELAXED);
         __atomic_store_n(&free_camera_axes, axes, __ATOMIC_RELAXED);
         __atomic_store_n(&free_camera_height, height, __ATOMIC_RELAXED);

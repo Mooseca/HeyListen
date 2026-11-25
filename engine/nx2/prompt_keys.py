@@ -2,7 +2,7 @@
 (nx2/prompt_draw.py draws them, from Kenney's Input Prompts Keyboard & Mouse font, CC0, third_party/kenney_input_keyboard: the
 keys whose names are words and the mouse's buttons drawn there).
 
-The font (nx2/prompt_assets.py face_font) has, beside the game's own icons, the icon of each key at KEY_BASE + its key code. On the
+The font (nx2/prompt_assets.py faces_font) has, beside the game's own icons, the icon of each key at KEY_BASE + its key code. On the
 keyboard face host/prompts.c points each Switch button's code point at the icon of the first key bound to it
 (hookshot_options.ini key_<button>, the Controls page), as the pad faces point them at their pad input's; the sticks' code points
 are pointed at the keys that move and the mouse that turns the camera.
@@ -10,7 +10,8 @@ are pointed at the keys that move and the mouse that turns the camera.
 Data alone: the standard library imports it (the prompt packages are for nx2/prompt_assets.py and nx2/prompt_draw.py, CONTRIBUTING).
 """
 
-KEY_BASE = 0xF7C0   # (host/prompts.c: past the pad icons at U+F700 + HOS_PAD_*, before the sticks' codes at U+F8C0)
+KEY_BASE = 0xF7C0   # (host/prompts.c: PAD_BASE + FACE_CODES x HOS_PROMPT_N, before the sticks' codes at U+F8C0)
+SLOT_BASE, SLOTS = 0xEEC0, 320   # (host/prompts.c: a text's code for a Switch button on a key, given out as they come while the game runs; U+EEC0..U+EFFF: in none of the game's fonts, below nx2/prompt_assets.py BIND_BASE's)
 FONT = "kenney_input_keyboard_&_mouse.otf"   # (in third_party/kenney_input_keyboard: nx2/prompt_assets.py KENNEY_KEYBOARD)
 
 # Windows virtual-key codes (learn.microsoft.com/windows/win32/inputdev/virtual-key-codes) -> Kenney's glyph name after "keyboard_"

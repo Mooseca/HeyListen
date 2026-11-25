@@ -182,8 +182,9 @@ uint64_t hos_rt_pool_size(uint64_t game) {
     if (!logged++) hos_log("applet: render target pool %llu MB (the game's %llu MB)", (unsigned long long)(v >> 20), (unsigned long long)(game >> 20));
     return v;
 }
-HLE(_ZN2nn2oe16GetOperationModeEv) { RET(handheld() ? 0 : 1); }     /* OperationMode_Handheld / _Console (docked) */
-HLE(_ZN2nn2oe18GetPerformanceModeEv) { RET(handheld() ? 0 : 1); }   /* PerformanceMode_Normal / _Boost (docked) */
+static int handheld_live(void);
+HLE(_ZN2nn2oe16GetOperationModeEv) { RET(handheld_live() ? 0 : 1); }     /* OperationMode_Handheld / _Console (docked) */
+HLE(_ZN2nn2oe18GetPerformanceModeEv) { RET(handheld_live() ? 0 : 1); }   /* PerformanceMode_Normal / _Boost (docked) */
 HLE(_ZN2nn2oe20GetCurrentFocusStateEv) { RET(1); }    /* FocusState_InFocus */
 HLE(_ZN2nn2oe25GetProgramTotalActiveTimeEv) { RET(hos_now_ns() - boot_ns); }
 HLE(_ZN2nn2oe24GetExpectedVolumeBalanceEPfS1_) {
@@ -199,9 +200,57 @@ HLE(_ZN2nn2oe42SetOperationModeChangedNotificationEnabledEb) {}
 HLE(_ZN2nn2oe44SetPerformanceModeChangedNotificationEnabledEb) {}
 HLE(_ZN2nn2oe28SetResumeNotificationEnabledEb) {}
 HLE(_ZN2nn2oe38SetUserInactivityDetectionTimeExtendedEb) {}
-/* No system notifications ever arrive: TryPop says none, Pop waits forever (as it would on a quiet console). */
-HLE(_ZN2nn2oe25TryPopNotificationMessageEPj) { RET(0); }
-HLE(_ZN2nn2oe22PopNotificationMessageEv) { for (;;) hos_sleep_ns(1000000000LL); }
+/* (the Handheld profile row applies at once) The profile the game is in now: the options file's at the start (HOS_HANDHELD over
+   it, and then for good), the Insert menu's row after (HL_OPT_HANDHELD, asked at each notification poll). A change is told to the
+   game as a console tells a dock or an undock: the operation mode and the performance mode changed messages, which the game's
+   per-frame notification loop answers by asking GetOperationMode and GetPerformanceMode again. */
+#include "../gpu/vk/vk_opt_ids.h"   /* (HL_OPT_HANDHELD) */
+int rx_option(int id, int otherwise);
+enum { OE_MSG_OPERATION_MODE = 30, OE_MSG_PERFORMANCE_MODE = 31 };
+static volatile LONG handheld_now = -1;
+static int handheld_pending[4], handheld_pending_n;   /* (messages not yet popped; only the game's polling thread touches them) */
+static int handheld_live(void) {
+    if (handheld_now < 0) InterlockedCompareExchange(&handheld_now, handheld(), -1);
+    return (int)handheld_now;
+}
+/* (the row's value now, from the menu: -1 while it is not known, or while HOS_HANDHELD decides) -> the change of profile queued
+   as its two messages; returns the number of messages waiting */
+static int hos_handheld_poll(int row_value) {
+    (void)handheld_live();
+    if (row_value >= 0 && !getenv("HOS_HANDHELD") && row_value != (int)handheld_now) {
+        InterlockedExchange(&handheld_now, row_value);
+        handheld_pending[0] = OE_MSG_OPERATION_MODE, handheld_pending[1] = OE_MSG_PERFORMANCE_MODE, handheld_pending_n = 2;
+        hos_log("oe: the Handheld profile row changed: the game is told the console is %s (operation and performance mode changed)",
+                row_value ? "undocked" : "docked");
+    }
+    return handheld_pending_n;
+}
+/* the oldest waiting message, 0 when none */
+static unsigned hos_handheld_take(void) {
+    if (!handheld_pending_n) return 0;
+    const unsigned m = (unsigned)handheld_pending[0];
+    for (int i = 1; i < handheld_pending_n; i++) handheld_pending[i - 1] = handheld_pending[i];
+    handheld_pending_n--;
+    return m;
+}
+/* The only system notifications are the Handheld profile row's (TryPop says none otherwise, Pop waits, as on a quiet console). */
+HLE(_ZN2nn2oe25TryPopNotificationMessageEPj) {
+    hos_handheld_poll(rx_option(HL_OPT_HANDHELD, -1));
+    const unsigned m = hos_handheld_take();
+    if (m && ARG(0)) *(uint32_t *)GP(ARG(0)) = m;
+    RET(m ? 1 : 0);
+}
+HLE(_ZN2nn2oe22PopNotificationMessageEv) {
+    for (;;) {   /* (waits as on a quiet console, and wakes for a dock or an undock) */
+        hos_handheld_poll(rx_option(HL_OPT_HANDHELD, -1));
+        const unsigned m = hos_handheld_take();
+        if (m) {
+            RET(m);
+            return;
+        }
+        hos_sleep_ns(50000000LL);
+    }
+}
 
 /* ---- nn::account: one user ------------------------------------------------------------------------------------ */
 static const uint64_t user_uid[2] = {0x0000000000000001ULL, 0x5a3c9e1f0b7d2468ULL};

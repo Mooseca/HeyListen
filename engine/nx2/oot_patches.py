@@ -186,6 +186,51 @@ def patch_mouse_camera(source):
     source = source[:at] + "    hos_mouse_camera(c->x[0]);   /* (nx2/oot_patches.py: native mouse look) */\n" + source[at:]
     return source.replace('#include "a64.h"\n', '#include "a64.h"\nextern void hos_mouse_camera(uint64_t camera);\n', 1)
 
+# The button prompts while the game runs (host/prompts.c; after Longshot #2366, Gabriel Moisan Matte): a text's button codes are
+# rewritten to the face's and the controls' as the game lays a text box out or draws it, and the font's place found from
+# FreeType's glyph render
+TEXT_DRAW_HEAD = "void f_8152b670(Ctx *__restrict A64_NOESC c) {\n"
+TEXT_LAYOUT_HEAD = "void f_8152aec0(Ctx *__restrict A64_NOESC c) {\n"
+GLYPH_HEAD = "void f_81680c60(Ctx *__restrict A64_NOESC c) {\n"
+
+
+def _hook_head(source, head, call, decl):
+    """call put first in the function that starts with head, once, and decl declared; None without the function"""
+    start = source.find(head)
+    if start < 0:
+        return None
+    if call.split("(")[0] + "(" in source:   # (made before: a lift patched again)
+        return source
+    at = start + len(head)
+    return (source[:at] + call + source[at:]).replace('#include "a64.h"\n', '#include "a64.h"\n' + decl, 1)
+
+
+def patch_text_draw(source):
+    """f_8152b670, a text box's draw (x0 the box: each time the game shows it), calls hos_prompts_text_draw first with the box: the
+    button prompts changed while the game runs, the box's codes for them rewritten and the box marked to be laid out again
+    (host/prompts.c)"""
+    return _hook_head(source, TEXT_DRAW_HEAD,
+                      "    hos_prompts_text_draw(c->x[0]);   /* (nx2/oot_patches.py: the button prompts changed) */\n",
+                      "extern void hos_prompts_text_draw(uint64_t box);\n")
+
+
+def patch_text_layout(source):
+    """f_8152aec0, a text box's layout (x0 the box: it lays its text out again when its status says so, at +8: bit 0x20000),
+    calls hos_prompts_text_layout first with the box: the button prompts changed while the game runs, the box's codes for them
+    rewritten and the box laid out again (host/prompts.c)"""
+    return _hook_head(source, TEXT_LAYOUT_HEAD,
+                      "    hos_prompts_text_layout(c->x[0]);   /* (nx2/oot_patches.py: the button prompts changed) */\n",
+                      "extern void hos_prompts_text_layout(uint64_t box);\n")
+
+
+def patch_glyph(source):
+    """f_81680c60, FreeType's ft_smooth_render (x1 the glyph slot), calls hos_prompts_glyph first with the slot: where the game
+    keeps the button prompts' font, for a change while it runs (host/prompts.c)"""
+    return _hook_head(source, GLYPH_HEAD,
+                      "    hos_prompts_glyph(c->x[1]);   /* (nx2/oot_patches.py: where the button prompts' font is) */\n",
+                      "extern void hos_prompts_glyph(uint64_t slot);\n")
+
+
 TEXT_HEAD = "void f_80b1e140(Ctx *__restrict A64_NOESC c) {"
 # (the letters' block: past the early returns, the auto-advance timer and the hidden / no-text checks; reached once a call)
 TEXT_OLD = ("L_80b1e1b4:;\n"
@@ -338,6 +383,8 @@ WHERE = {"dynamic resolution branch": " (the branch at 0x8082640c, label %s)" % 
          "player flight rotation": " (the player's flight rotation)", "free camera": " (the free camera)",
          "mouse camera": " (the mouse camera)", "voice option check": " (the Voice Language option)",
          "scene format": " (the scene buffer's format, found by name)",
+         "text draw hook": " (f_8152b670, a text box's draw)", "glyph hook": " (f_81680c60, FreeType's glyph render)",
+         "text layout hook": " (f_8152aec0, a text box's layout)",
          "sprint link": " (f_804caa80, Link's movement update, at 0x804ce798)",
          "sprint stance": " (f_80c225d0, Link's stance and camera update, at 0x80c27f3c)"}
 
@@ -417,6 +464,9 @@ def apply(gen, *, protect_hearts=False, required=False):
         done["mouse camera"] = 0
         done["voice option check"] = 0
         done["scene format"] = 0
+        done["text draw hook"] = 0
+        done["glyph hook"] = 0
+        done["text layout hook"] = 0
         done["sprint link"] = 0
         done["sprint stance"] = 0
     for path in sorted(glob.glob(os.path.join(gen, "code_*.c"))):
@@ -463,6 +513,12 @@ def apply(gen, *, protect_hearts=False, required=False):
             out = mouse
             done["mouse camera"] += 1
             print("oot_patches: native mouse camera in", os.path.basename(path))
+        for what, patch in (("text draw hook", patch_text_draw), ("glyph hook", patch_glyph), ("text layout hook", patch_text_layout)):
+            hooked = patch(out) if protect_hearts else None
+            if hooked is not None:
+                out = hooked
+                done[what] += 1
+                print("oot_patches: the button prompts' %s in" % what, os.path.basename(path))
         jo = patch_job_order(out) if job_order else None
         if jo is not None:
             out, n = jo

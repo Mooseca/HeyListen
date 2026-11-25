@@ -23,5 +23,13 @@ inline uint64_t signal_at(uint64_t done_max, uint64_t oldest_stopped, uint64_t h
 }
 /// Whether a signal of `at` moves the timeline on: only a value above the last one sent (a timeline never goes back)
 inline bool signal_moves(uint64_t at, uint64_t signaled) { return at > signaled; }
+/// (FLASH1) The last resort of a late fix's wait (vk_replay.cpp late_fix_wait_unlocked): apply the fix as it is, its value not reached.
+/// Only with the order thread (the only replay whose timeline could stop below a value already sent: section 4.9) and only once the
+/// GPU's progress (the timeline's completed value) has stood still for `limit_ns`: a slow GPU that is still working through the
+/// values before it (the 5700U at 10 fps: 2 s is 20 frames) keeps waiting, as before the net, and its fix lands whole. Inline the
+/// wait goes on as it did before DECOUPLE3 (applied "as it is", the fix's late slots kept the submit's copy: a wrong frame)
+inline bool late_fix_gives_up(bool order_thread, int64_t ns_without_progress, int64_t limit_ns) {
+    return order_thread && ns_without_progress > limit_ns;
+}
 
 }   // namespace timeline_order

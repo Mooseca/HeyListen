@@ -47,7 +47,7 @@ static struct {
     uint8_t hd_sent[HD_RUMBLE_PACKET_SIZE];
     int64_t hd_ns;
     int motion, motion_on;
-    int64_t motion_retry_ns, used_ns;
+    int64_t motion_retry_ns, used_ns, real_ns;   /* (real_ns: the last button down or stick past halfway: host/prompts.c Auto) */
     uint64_t input_sig;
     uint32_t serial;
     float bias[3], bias_t;
@@ -59,6 +59,7 @@ static uint64_t state_buttons;
 static int32_t state_stick[4];
 static int state_count;
 static char state_name[128];   /* the first controller's name (host/prompts.c: the button prompts' Auto) */
+static char state_last_name[128];   /* the name of the controller that had real input last (a button down, a stick past halfway) */
 static volatile LONG rumble_low, rumble_high;   /* 0..65535, set by the vibration HLE */
 /* the game's own vibration values per side (0 left, 1 right: {amp_low, freq_low, amp_high, freq_high}), for the pads
    that play HD rumble; silence until the game sends one */
@@ -343,7 +344,7 @@ static void pads_poll(void) {
                 pads[slot].motion = hos_sdl_pad_has_sensor(gc, HOS_SDL_SENSOR_GYRO) && hos_sdl_pad_has_sensor(gc, HOS_SDL_SENSOR_ACCEL);
                 pads[slot].motion_on = 0;
                 pads[slot].motion_retry_ns = 0;
-                pads[slot].used_ns = now, pads[slot].input_sig = 0;   /* (just connected: the one about to be used) */
+                pads[slot].used_ns = now, pads[slot].input_sig = 0, pads[slot].real_ns = 0;   /* (just connected: the one about to be used) */
                 pads[slot].serial = ++pads_opened;
                 pads[slot].has_bias = 0;
                 hos_log("hid: controller \"%s\" connected (SDL)%s", hos_sdl_pad_name(gc),
@@ -398,6 +399,9 @@ static void pads_poll(void) {
                     if (hos_sdl_pad_button(gc, k)) sig |= 1ULL << k;
                 for (int k = 0; k < 4; k++) sig |= (uint64_t)(v[k] > 0 ? 1 : v[k] < 0 ? 2 : 0) << (32 + 2 * k);
                 if (sig != pads[i].input_sig) pads[i].input_sig = sig, pads[i].used_ns = now;
+                int real = (int)(sig & 0xFFFFFFFFull) != 0 || hos_sdl_pad_axis(gc, AX_LT) > 8000 || hos_sdl_pad_axis(gc, AX_RT) > 8000;
+                for (int k = 0; k < 4; k++) real |= v[k] > 16384 || v[k] < -16384;
+                if (real) pads[i].real_ns = now;
             }
             if (hd_poll(i, side, now)) continue;
             if (rumble_due(lo, hi, pads[i].rumble_lo, pads[i].rumble_hi, now, pads[i].rumble_ns)) {
@@ -412,6 +416,16 @@ static void pads_poll(void) {
         state_buttons = b;
         memcpy(state_stick, s, sizeof s);
         state_count = count;
+        state_last_name[0] = 0;
+        {
+            int last = -1;
+            for (int i = 0; i < MAX_PADS; i++)
+                if (pads[i].gc && pads[i].real_ns && (last < 0 || pads[i].real_ns > pads[last].real_ns)) last = i;
+            if (last >= 0) {
+                const char *name = hos_sdl_pad_name(pads[last].gc);
+                snprintf(state_last_name, sizeof state_last_name, "%s", name ? name : "");
+            }
+        }
         state_name[0] = 0;
         for (int i = 0; i < MAX_PADS; i++)
             if (pads[i].gc) {
@@ -488,6 +502,14 @@ int hos_sdl_gyro_status(void) { return (int)gyro_status; }
 void hos_sdl_pad_first_name(char *out, size_t cap) {
     AcquireSRWLockShared(&state_lock);
     snprintf(out, cap, "%s", state_name);
+    ReleaseSRWLockShared(&state_lock);
+}
+
+/* The name of the controller that had real input last ("" none yet): a button down or a stick past halfway, not the noise of a
+   resting pad (host/prompts.c: Auto's face follows the controller in use) */
+void hos_sdl_pad_last_name(char *out, size_t cap) {
+    AcquireSRWLockShared(&state_lock);
+    snprintf(out, cap, "%s", state_last_name);
     ReleaseSRWLockShared(&state_lock);
 }
 

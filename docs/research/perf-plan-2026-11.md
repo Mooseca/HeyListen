@@ -122,3 +122,30 @@ Scene market-spin with three saves, each build at its own defaults, 3 interleave
 | Kokiri Forest | 54.42 (54.56 54.88 53.82) | 73.68 (+35.4%) | 66.70 (+22.6%) |
 
 Every night1b run is above every v0.4.3 run. Frames over 16.7 ms: Market 94% -> 48%, Hyrule 65% -> 11-15%, Kokiri 51% -> 15-16%. 1% low: Market ~10 -> 14-16 fps, Hyrule 6-8 -> 10-13, Kokiri 7-8 -> 12-14. Target +30%: reached in Kokiri, not in the Market (+26%) nor Hyrule Field (+20%). Not in night1b yet: the black-leaves fix, the compile threads off the replay's core (+5.7% on a cold start), LIFT3's L1 + L2 (+3.2%). Open on the order thread: brightness spikes of one or two frames seen by the owner on the 5070 (FLASH1).
+
+## 25 November, evening: the order thread's flashes, and three worksites
+
+The order thread (on by default from 8 logical processors) shows one-frame brightness steps in play. Cause: the game's CPU
+reads a block the GPU wrote in the frame before (0x3980 bytes, two alternating buffers; a camera / view block written by
+eight compute programs, read four times a frame), and with the replay a frame behind it reads a stale one.
+
+| What | State | Numbers (RTX 3050, 1440p, camera turning, fps) |
+|---|---|---|
+| Old read (stale, flashes) | on main | Market 58.1, Hyrule Field 67.7 |
+| Order thread off | switch | Market 55.7 (-4%), Hyrule Field 64.7 (-4%) |
+| Wait for the frame's last submission before the read (integ/combo1 5623156cf) | right by eye, too dear: not merged | Market 49.3 (-15%), Hyrule Field 62.5 (-8%); one read in four waits 4.4 to 5.5 ms |
+| The same with one present ahead | not merged | Market 50.0, Hyrule Field 61.5 |
+| Ring at a fixed lag for this block (lag 3, lag 2) | NO-GO | lag 3: plants blink (14 luma steps a minute); lag 2 serves the same write as lag 3 (the buffers alternate) |
+| Stage the block right behind its last writer, the read waits for that slot only (perf/order-readback-decouple) | in work | on the main PC the block's writers are recorded 0.6 to 2.8 ms into a 3.9 ms job, and the value reached guest memory only at the submission's end |
+
+Merged on 25 November (main 05c9e3578): the foliage fix (a guessed head's checked write-back on the GPU), streaming loads for
+capture-buffer reads (a no-op on Windows where the buffers are cached; for Linux hosts with write-combined memory), the late
+fix's last resort for the order thread only, and the lock-on ring's write-back fixes.
+
+Worksites opened the same evening, one machine each:
+
+| Worksite | Machine | Question |
+|---|---|---|
+| Readbacks decoupled from the replay's progress | main PC | keep the order thread's gain with no stale read: within 2 to 3 percent of the old read |
+| Stutters (issue 139: first visit of an area; zone changes; frames over 100 ms in play) | RTX 3050 | each hitch over 50 ms with its cause, in a player's state (shipped pipeline-state list, empty caches), then the fixes by size |
+| The path without mesh shaders | Ryzen 5700U laptop (Vega 8) | the mesh stages run as compute cost about 11 ms a frame; target 25 to 30 fps in Hyrule Field on the Lowest preset (16 to 19 today) |

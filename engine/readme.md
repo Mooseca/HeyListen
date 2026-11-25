@@ -233,7 +233,7 @@ they apply at once, with no new translation.
 
 | Tab | Option | Choices | Default |
 |---|---|---|---|
-| Graphics | Quality preset | Custom, Minimum (4GB), Low (6GB), Balanced (8GB), High (12GB), Ultra (16GB+) | Custom |
+| Graphics | Quality preset | Custom, Lowest (integrated GPU), Minimum (4GB), Low (6GB), Balanced (8GB), High (12GB), Ultra (16GB+) | Custom |
 | | Fullscreen | Off, On (the same as <kbd>F11</kbd>) | Off |
 | | GPU device | Auto, or each graphics card by name (after a restart) | Auto |
 | | Upscaler | Game's own, NVIDIA DLSS (only in builds with NVIDIA's DLSS SDK, below; on RTX GPUs), AMD FSR 3.1 (every build, on GPUs it runs on, below), AMD FSR 4 (only in builds with FSR 4, below), Off (every build and GPU, `dlss=6`: no upscaling network, the 3D at the Render resolution stretched to the output, no anti-aliasing; Render resolution steps as for the game's own, Sharpness applies) | Game's own |
@@ -273,7 +273,7 @@ they apply at once, with no new translation.
 | | Skip title screen | Off, On (after a restart) | Off |
 | | Microphone | Off, Default, or each microphone by name | Default |
 | Controls | Controller in background | Off, On | Off |
-| | Sprint with L3 | Off, On | Off |
+| | Sprint with L3 | Off, Hold, Toggle | Off |
 | | Touchpad opens menu | Off, On | On |
 | | Mouse camera | As the stick, Native | As the stick |
 | | Mouse sensitivity | 0.10 to 5.00 | 1.00 |
@@ -329,11 +329,23 @@ they apply at once, with no new translation.
 - **NVIDIA Reflex** Off is the game as without it. `RX_VK_REFLEX_LOG=1` logs the driver's latency timings every 300
   frames while it is on.
 - **Handheld profile** runs the game as if the console were undocked: lower resolution, lighter on the GPU.
+- **Lowest (integrated GPU)**, the Quality preset's first entry, is for a weak GPU: Render resolution 33%, Volumetric fog Off and the
+  Handheld profile On (the resolution changes at once, the fog and the Handheld profile from the next start), with Minimum's other rows
+  (Lanczos, Sharpness 30%, frame pacing, Real time, the smallest memory limits). Every preset sets the fog (On except Lowest), so another preset undoes it. On an
+  integrated GPU, once, the game measures its own frames: from 15 seconds into play it times 10 seconds, and under 20 frames a second (the
+  reference laptop's Ryzen 7 5700U runs 11 to 13) it selects the preset by itself, saved in the options file (`quality_preset`, the rows
+  it sets, `lowend_rule`) and said in the log; at 20 or more (a Steam Deck, a ROG Ally, a Radeon 780M) it leaves everything as it is and
+  never asks again. Not asked if you had set the Quality preset or the rows it sets. `HL_LOWEND=0` never measures, `HL_LOWEND=1` chooses
+  the preset for one run, `HL_LOWEND_FPS` changes the 20. An options file with the old Low-end settings row On (`lowend_settings=1`)
+  reads as this preset.
 - **Robust buffers:** a read past a buffer's end is dropped instead of stopping the GPU. Auto is on, on every card; Off
   can be faster on some NVIDIA cards.
 - **Game speed:** with Per frame, the game runs slower whenever it is below 60 fps. Real time keeps it at normal speed
   down to 15 fps.
 - **FPS counter** shows in the top right corner. With frame generation on, it also shows the game's own rate.
+  The full panel (F10 twice) adds the **1% low** and **0.1% low**: the benchmark's numbers, 1000 over the mean frame time of the
+  slowest 1% (0.1%) of the frames of the last 10 seconds or the last 1000 frames, whichever is longer; with frame generation they
+  count the frames shown. `-` until 100 frames are in.
 - **Audio output** is the speakers the game mixes its sound for. Auto is 5.1 when your default output device has 5.1
   or more speakers, else stereo; Stereo or 5.1 chooses one whatever the device has (5.1 on stereo speakers is mixed
   down). For one run, `HOS_AUDIO_CHANNELS=2` or `6` chooses stereo or 5.1 and wins over the menu. In a 5.1 mix the centre
@@ -350,15 +362,19 @@ they apply at once, with no new translation.
   (Settings, Privacy & security, Microphone). `HOS_MIC_LOG=1` logs what the game reads, a line a second.
 - **Controller in background:** On keeps the controller working while another window has the focus. The keyboard and
   mouse still need the game's window.
-- **Sprint with L3:** On makes the left stick's press run Link with the game's own fast run, the one that follows a roll while A
-  stays held, without the roll: it goes on until he stops, rolls, targets (ZL) or a cutscene takes over. The speed, animation
+- **Sprint with L3:** Hold makes the left stick's press run Link with the game's own fast run, the one that follows a roll while A
+  stays held, without the roll: it goes on while L3 is held, until he stops, rolls, targets (ZL) or a cutscene takes over.
+  Toggle: one click of L3 (with the left stick out of its dead zone, the Stick dead zone row's) starts the run, which goes on
+  without holding and ends when the stick has been at rest for a few reads, on a second click, on ZL, an attack or another
+  state Hold ends the run in, a conversation, a cutscene, a zone change, the game's pause menu or the Insert menu; a roll keeps it.
+  The saved value is 0 Off, 1 Hold, 2 Toggle (an options file from before, with 1, keeps Hold). The speed, animation
   and camera are the game's, not a multiplier. Off (the default) leaves the press as the game's LS button. How it works with the
   game's input: the left stick's press is the game's LS button (whatever pad input or key is bound to LS: L3 and the keyboard's
   LS key by default), and with the row on the game no longer gets it as LS, since it is Sprint's. A press that begins in a
   conversation or a cutscene, or while Link is not being updated, goes to the game as LS as before (it hides the text box) and
   starts no sprint. A is never touched: tapping it while sprinting rolls. A DualSense or any other pad is the same, as L3 is the
   left stick's press on every pad; a scripted test run presses it with `LS`. Ported from Longshot's Sprint (llun's #1929 and
-  kendowashere's #2038, after thegrandao's #196), held only, without its Toggle or its own binding.
+  kendowashere's #2038, after thegrandao's #196), with a Toggle of this project's own rules and no binding of its own.
 - **Touchpad opens menu:** On (the default): the click of a DualSense or DualShock 4 touchpad opens and closes this menu, as
   before. Off: the click does nothing, so it cannot open the menu in the middle of a fight (issue 120). Nothing else changes: the
   menu opens with <kbd>Insert</kbd> or <kbd>F1</kbd>, Home, Select and Start together (every pad has those two buttons), and the

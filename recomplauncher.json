@@ -131,7 +131,7 @@
     {
       "id": "preset",
       "label": "Quality preset",
-      "help": "Sets the scaling rows and the video memory limits for a card with that much memory. Choose Custom to keep your own.",
+      "help": "Sets the scaling rows and the video memory limits for a card with that much memory (Lowest is for a weak integrated GPU). Choose Custom to keep your own.",
       "group": "Video",
       "choices": [
         {
@@ -141,33 +141,39 @@
           }
         },
         {
-          "label": "Minimum (4 GB)",
+          "label": "Lowest (integrated GPU)",
           "set": {
             "quality_preset": "1"
           }
         },
         {
-          "label": "Low (6 GB)",
+          "label": "Minimum (4 GB)",
           "set": {
             "quality_preset": "2"
           }
         },
         {
-          "label": "Balanced (8 GB)",
+          "label": "Low (6 GB)",
           "set": {
             "quality_preset": "3"
           }
         },
         {
-          "label": "High (12 GB)",
+          "label": "Balanced (8 GB)",
           "set": {
             "quality_preset": "4"
           }
         },
         {
-          "label": "Ultra (16 GB or more)",
+          "label": "High (12 GB)",
           "set": {
             "quality_preset": "5"
+          }
+        },
+        {
+          "label": "Ultra (16 GB or more)",
+          "set": {
+            "quality_preset": "6"
           }
         }
       ],
