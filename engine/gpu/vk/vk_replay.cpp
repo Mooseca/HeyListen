@@ -7748,17 +7748,6 @@ void do_present(const nvn_tex* t, const int crop[4]) {
         auto take = [&](uint64_t at_value, int64_t at_present) {
             auto px = pending.on && pending.presents == at_present && pending.pixels
                           ? std::move(pending.pixels) : shot_pixels(at_value, at_present);
-            if (meter_trace_on()) {   // (FLASH1, HL_METER_TRACE=1 with RX_VK_SHOT_EVERY=1: every shown frame's mean luminance, 0-255)
-                const uint8_t* q0 = px->data();
-                uint64_t sum = 0, n = 0;
-                for (uint32_t y = 0; y < kShotH; y += 2)
-                    for (uint32_t x = 0; x < kShotW; x += 2, n++) {
-                        const uint8_t* q = q0 + ((size_t)y * kShotW + x) * 4;
-                        sum += 54u * q[0] + 183u * q[1] + 19u * q[2];
-                    }
-                logf("vk: mtrace luma p %lld f %lld: %.2f (now p %lld, held present %llu)", (long long)at_present, (long long)rb_frame_now(),
-                     n ? sum / 256.0 / n : 0.0, (long long)presents_now, (unsigned long long)vk_timeline_held_present());
-            }
             // (RX_VK_DUMP_BLACK=<n>: a shot with 12-90% pure black pixels in a lit picture, or a green cast over it,
             // dumps the next frame, n times at most: the glitches some scenes show now and then)
             static int black_left = getenv("RX_VK_DUMP_BLACK") ? atoi(getenv("RX_VK_DUMP_BLACK")) : 0;
@@ -7791,6 +7780,17 @@ void do_present(const nvn_tex* t, const int crop[4]) {
                          (unsigned long long)(ch[1] / n), (unsigned long long)(ch[2] / n));
                     dump_request(presents + 1);
                 }
+            }
+            if (meter_trace_on()) {   // (FLASH1, HL_METER_TRACE=1 with RX_VK_SHOT_EVERY=1: every shown frame's mean luminance, 0-255)
+                const uint8_t* q0 = px->data();
+                uint64_t sum = 0, n = 0;
+                for (uint32_t y = 0; y < kShotH; y += 2)
+                    for (uint32_t x = 0; x < kShotW; x += 2, n++) {
+                        const uint8_t* q = q0 + ((size_t)y * kShotW + x) * 4;
+                        sum += 54u * q[0] + 183u * q[1] + 19u * q[2];
+                    }
+                logf("vk: mtrace luma p %lld f %lld: %.2f (now p %lld, held present %llu)", (long long)at_present, (long long)rb_frame_now(),
+                     n ? sum / 256.0 / n : 0.0, (long long)presents_now, (unsigned long long)vk_timeline_held_present());
             }
             // (RX_VK_FLASH=1, with RX_VK_SHOT_EVERY=1: a frame that differs from both its neighbours in a part of the
             // picture where they agree is a one-frame flash: the three are written as flash_<present>_{a,b,c}.png and
