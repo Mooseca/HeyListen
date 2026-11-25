@@ -227,6 +227,13 @@ on CachyOS with a Radeon RX 9070 XT (Mesa's RADV driver). Expect problems and re
   `echo 1024 | sudo tee /sys/module/udmabuf/parameters/size_limit_mb` before you start the game, or for good with a file
   `/etc/modprobe.d/udmabuf.conf` holding the line `options udmabuf size_limit_mb=1024` (then reboot). The log then says
   `dma-bufs of at most 1024 MB`.
+- **Short stutters of 20 to 60 ms while walking in Hyrule Field** (reported on a Core Ultra 9 and an RTX 5070 Ti laptop): the game's memory is a
+  shared-memory file, and where the kernel gives that file only 4 KB pages (the default of most distributions) loading
+  and map changes cause hundreds of thousands of page faults. One player cut them about 30 times, and the frames over
+  22 ms from 15 to 35 per 5 seconds to 44 in a whole session, by letting the kernel use 64 KB pages for shared memory:
+  `echo within_size | sudo tee /sys/kernel/mm/transparent_hugepage/hugepages-64kB/shmem_enabled` before you start the game
+  (it lasts until the next reboot; the file exists on kernels with multi-size transparent huge pages, 6.8 or newer, and
+  `cat` shows the current setting in square brackets). One report, one machine.
 - **Stutter**: programs that use a lot of CPU or GPU while you play (a local AI model, a big compile) make the game
   stutter much more than on a quiet PC.
 - **Building it yourself** instead of using the AppImage: `engine/CONTRIBUTING.md` (Linux) has the tools to install
