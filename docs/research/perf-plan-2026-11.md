@@ -110,3 +110,15 @@ The owner's order (22 Nov, evening): keep going until fps rises by **30% or more
 | AMD2 retired imports bounded on AMD and Intel (issues 131, 121) | merged 8d35f672d | issue 131 reproduced on the laptop by a stress hook (414 retired imports, 6.7 GB, the driver refuses, 0 draws) and gone with the bound (about 1000 give-backs, 0 refusals). The RX 6750 XT device loss stays unexplained |
 | INPUT1 Sprint with L3, Touchpad opens menu | merged 8d35f672d | both off / unchanged by default |
 | FG2 Base frame rate limit, AMD FSR 4 FG (feat/fg-fsr4-cap 269843d7a) | to merge | base 48 at 3x = 48.0 and 144.4 fps shown on the 5070; FSR 4 FG untested on real hardware |
+
+## 25 November: v0.4.3 against tonight's integration (RTX 3050, camera turning)
+
+Scene market-spin with three saves, each build at its own defaults, 3 interleaved rounds, fps from play (matrix104).
+
+| Zone | v0.4.3 | night1b (order thread on) | night1b, order thread off |
+|---|---|---|---|
+| Market | 44.28 (44.98 43.99 43.86) | 55.75 (+25.9%) | 52.86 (+19.4%) |
+| Hyrule Field | 53.30 (53.61 53.79 52.50) | 64.08 (+20.2%) | 60.33 (+13.2%) |
+| Kokiri Forest | 54.42 (54.56 54.88 53.82) | 73.68 (+35.4%) | 66.70 (+22.6%) |
+
+Every night1b run is above every v0.4.3 run. Frames over 16.7 ms: Market 94% -> 48%, Hyrule 65% -> 11-15%, Kokiri 51% -> 15-16%. 1% low: Market ~10 -> 14-16 fps, Hyrule 6-8 -> 10-13, Kokiri 7-8 -> 12-14. Target +30%: reached in Kokiri, not in the Market (+26%) nor Hyrule Field (+20%). Not in night1b yet: the black-leaves fix, the compile threads off the replay's core (+5.7% on a cold start), LIFT3's L1 + L2 (+3.2%). Open on the order thread: brightness spikes of one or two frames seen by the owner on the 5070 (FLASH1).
