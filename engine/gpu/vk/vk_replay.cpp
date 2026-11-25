@@ -8861,9 +8861,9 @@ std::mutex& submit_order_mu_ref() { return submit_order_mu; }
 // HOS_PRESENT_NOWAIT, on with this switch) and the readback ring serves entries 3 frames old (vk_rbring.cpp, as FIF1's).
 // RX_VK_ORDER_AHEAD=<n> (2): presents handed over and not yet shown before the present call waits; RX_VK_ORDER_POLL_JOIN=1: a
 // poll waits for its submission's job too; RX_VK_ORDER_SIGNAL_MS=<ms> (2000): how long a present waits for the CPU's signal its
-// frame's stopped work waits for (PIPE4: and for no queue stopped before it; the next present forces it); RX_VK_ORDER_PRIO=<0|1|2> (1): the thread's priority. Off by default.
+// frame's stopped work waits for (PIPE4: and for no queue stopped before it; the next present forces it); RX_VK_ORDER_PRIO=<0|1|2> (1): the thread's priority. On by default where the host keeps a core for the replay (host/hos_main.c order_thread_default).
 bool order_thread_on() {
-    // (PIPE2) RX_VK_ORDER_THREAD=1 (off by default): the replay on an order thread, the submitting threads return after the capture
+    // (PIPE2) RX_VK_ORDER_THREAD=1 (on by default where the host keeps a core for the replay: hos_main.c; =0 off): the replay on an order thread, the submitting threads return after the capture
     static const bool v = getenv("RX_VK_ORDER_THREAD") && atoi(getenv("RX_VK_ORDER_THREAD")) != 0 && sync_waits_on();
     return v;
 }

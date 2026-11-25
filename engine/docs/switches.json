@@ -3983,7 +3983,7 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 1527
+     "line": 1545
     }
    ],
    "default": "unset",
@@ -4454,7 +4454,7 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 1850
+     "line": 1869
     }
    ],
    "default": "unset",
@@ -5113,7 +5113,7 @@
     },
     {
      "path": "host/hos_main.c",
-     "line": 1679
+     "line": 1698
     }
    ],
    "default": "off (unset)",
@@ -5218,7 +5218,7 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 1874
+     "line": 1893
     }
    ],
    "default": "unset",
@@ -5955,15 +5955,15 @@
     },
     {
      "path": "host/hos_main.c",
-     "line": 1565
+     "line": 1583
     },
     {
      "path": "host/hos_main.c",
-     "line": 1603
+     "line": 1621
     },
     {
      "path": "host/hos_main.c",
-     "line": 1636
+     "line": 1654
     },
     {
      "path": "host/mkw_glue.c",
@@ -7886,7 +7886,7 @@
     },
     {
      "path": "host/hos_main.c",
-     "line": 1671
+     "line": 1690
     }
    ],
    "default": "unset",
@@ -7907,12 +7907,12 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 1084
+     "line": 1102
     }
    ],
    "default": "unset",
    "values": "text",
-   "explanation": "undocumented: host/hos_main.c:1084 (in `oot_teleport()`) reads it as a text value: `const char *event_env = getenv(\"HOS_OOT_TELEPORT_EVENT\");`. No comment in the source says what it changes.",
+   "explanation": "undocumented: host/hos_main.c:1102 (in `oot_teleport()`) reads it as a text value: `const char *event_env = getenv(\"HOS_OOT_TELEPORT_EVENT\");`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -7928,12 +7928,12 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 1086
+     "line": 1104
     }
    ],
    "default": "unset",
    "values": "text",
-   "explanation": "undocumented: host/hos_main.c:1086 (in `oot_teleport()`) reads it as a text value: `const char *starter_env = getenv(\"HOS_OOT_TELEPORT_STARTER\");`. No comment in the source says what it changes.",
+   "explanation": "undocumented: host/hos_main.c:1104 (in `oot_teleport()`) reads it as a text value: `const char *starter_env = getenv(\"HOS_OOT_TELEPORT_STARTER\");`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -8649,7 +8649,7 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 1687
+     "line": 1706
     }
    ],
    "default": "unset",
@@ -8716,7 +8716,7 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 1599
+     "line": 1617
     }
    ],
    "default": "unset",
@@ -8875,7 +8875,7 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 1873
+     "line": 1892
     }
    ],
    "default": "off (unset)",
@@ -9453,7 +9453,7 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 1804
+     "line": 1823
     }
    ],
    "default": "off (unset)",
@@ -10433,7 +10433,7 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 664
+     "line": 682
     }
    ],
    "default": "unset",
@@ -20995,7 +20995,7 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 667
+     "line": 685
     }
    ],
    "default": "unset",
@@ -25682,6 +25682,10 @@
      "line": 8867
     },
     {
+     "path": "host/hos_main.c",
+     "line": 672
+    },
+    {
      "path": "host/nvn_native.c",
      "line": 1377
     },
@@ -25692,8 +25696,8 @@
    ],
    "default": "unset",
    "values": "text (`1` named)",
-   "explanation": "(PIPE2) RX_VK_ORDER_THREAD=1 (off by default; vk_replay.cpp): the replay on an order thread, the submitting threads return after the capture, a frame behind the game's CPU as frames in flight are: the ring serves at lag 3.",
-   "comment": "(PIPE2) RX_VK_ORDER_THREAD=1 (off by default; vk_replay.cpp): the replay on an order thread, the submitting threads return after the capture, a frame behind the game's CPU as frames in flight are: the ring serves at lag 3.",
+   "explanation": "(PIPE2) RX_VK_ORDER_THREAD=1 (on by default where the host keeps a core for the replay, hos_main.c; vk_replay.cpp): the replay on an order thread, the submitting threads return after the capture, a frame behind the game's CPU as frames in flight are: the ring serves at lag 3.",
+   "comment": "(PIPE2) RX_VK_ORDER_THREAD=1 (on by default where the host keeps a core for the replay, hos_main.c; vk_replay.cpp): the replay on an order thread, the submitting threads return after the capture, a frame behind the game's CPU as frames in flight are: the ring serves at lag 3.",
    "documented_in": null,
    "source": "comment at gpu/vk/vk_rbring.cpp",
    "documented": true,

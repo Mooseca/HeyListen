@@ -29,7 +29,7 @@ const rb_ring::Config& config() {
         const char* fk = getenv("RX_VK_FRAMES_IN_FLIGHT");
         if (k.lag && !(getenv("HL_RB_LAG") && *getenv("HL_RB_LAG")) && fk && atoi(fk) > 1)
             k.lag = std::min<unsigned>(rb_ring::kMaxLag, 2u + (unsigned)std::min(atoi(fk), 3) - 1u);
-        // (PIPE2) RX_VK_ORDER_THREAD=1 (off by default; vk_replay.cpp): the replay on an order thread, the submitting threads return
+        // (PIPE2) RX_VK_ORDER_THREAD=1 (on by default where the host keeps a core for the replay, hos_main.c; vk_replay.cpp): the replay on an order thread, the submitting threads return
         // after the capture, a frame behind the game's CPU as frames in flight are: the ring serves at lag 3
         const char* ot = getenv("RX_VK_ORDER_THREAD");
         if (k.lag && !(getenv("HL_RB_LAG") && *getenv("HL_RB_LAG")) && ot && atoi(ot) != 0) k.lag = std::max(k.lag, std::min<unsigned>(rb_ring::kMaxLag, 3u));
