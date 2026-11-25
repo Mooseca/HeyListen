@@ -117,7 +117,10 @@ def main():
     check('"Button prompts", &opts.prompts' in menu, "the menu has no Button prompts row on opts.prompts")
 
     # 4. no prompts/ folder: the log says so
-    check("prompts: no prompts folder" in src, "prompts.c is silent when the game folder has no prompts/")
+    check("prompts: NO PROMPTS FOLDER" in src, "prompts.c is silent when the game folder has no prompts/")
+    check("rx_option_set(HL_OPT_PROMPTS_MISSING, 1)" in src, "prompts.c does not tell the menu the prompts folder is missing")
+    check("HL_OPT_PROMPTS_MISSING" in menu and "prompts_missing.load" in menu, "the Button prompts row's hint does not say the folder is missing")
+    check(mg.count("prompts_warning(") == 3, "make_game.py does not say loudly that the icon sets were not generated (both ways)")
 
     # 5. the faces' fonts: free to ship, credited
     kenney = ENGINE / "third_party" / "kenney_input"

@@ -60,3 +60,8 @@ enum { HL_PROMPTS_LIVE_TEXTURES = 1, HL_PROMPTS_LIVE_LAYOUTS = 2, HL_PROMPTS_LIV
 /* The Controls tab's Sprint with L3 row (host/nn_hid.c asks at each read of the controllers, host/oot_sprint.c acts;
    gpu/vk/vk_replay.cpp answers 0 or 1). 97 is Longshot's id for its Sprint row (HOS_OPT_SPRINT in its vk_api.h); free here. */
 #define HL_OPT_SPRINT 97
+
+/* The Controls tab's Button prompts row (host/prompts.c tells at the start, gpu/vk/vk_menu.cpp shows): 1 when the game folder has no
+   prompts/ folder (the Builder did not make it: no fontTools or Pillow), so the row changes nothing and the game shows its own
+   icons. 96 is free here. */
+#define HL_OPT_PROMPTS_MISSING 96

@@ -29,7 +29,7 @@
 #include <vector>
 
 #include "vk_paths.h"
-#include "vk_opt_ids.h"   // (HL_OPT_PROMPTS_LIVE: what a new Button prompts face reaches at once)
+#include "vk_opt_ids.h"   // (HL_OPT_PROMPTS_LIVE, HL_OPT_PROMPTS_MISSING)
 #include "../../host/hos_atomic_file.h"   // (the options file is written whole or not at all)
 #include "vk_menu.h"
 #include "vk_perf.h"
@@ -891,7 +891,16 @@ MENU_HINTS(hn_pad_layout, 0, "The Switch's order: A on the right, B at the botto
            "A at the bottom (action and talk), B on the right, X on the left, Y at the top.",
            "A at the bottom, B on the right; X and Y as on the Switch.",
            "Bindings of your own, from the Controls page.")
-MENU_HINTS(hn_prompts, 0,
+std::atomic<int> prompts_missing{0};   // (HL_OPT_PROMPTS_MISSING, pushed by host/prompts.c: the game folder has no prompts/ folder)
+const char* hn_prompts_text(int v, int variant);
+const char* hn_prompts(int v, int variant) {
+    // (no prompts/ folder: the row can change nothing, and the hint says why)
+    if (prompts_missing.load(std::memory_order_relaxed) && variant <= 0)
+        return "Changes nothing here: this game folder has no prompts folder (the Builder could not make it: it needs fontTools and "
+               "Pillow), so the game shows its own icons. Run the Builder again with them installed.";
+    return hn_prompts_text(v, variant);
+}
+MENU_HINTS(hn_prompts_text, 0,
            "Follows what you play with: a controller's (from its name, SDL's), or the keyboard's once you use its keys. "
            "At the start, the first controller's; with none, the keyboard's (an Xbox's with XInput alone).",
            "The Switch's buttons.", "An Xbox controller's.", "A PlayStation 4 controller's.", "A PlayStation 5 controller's.",
@@ -2785,6 +2794,10 @@ void menu_option_set(int id, int value) {
     if (id >= OOT_CHEAT_ITEM_BASE && id < OOT_CHEAT_ITEM_BASE + kItems) {   // (the game side's inventory counts)
         if (item_counts[id - OOT_CHEAT_ITEM_BASE].exchange(value, std::memory_order_relaxed) != value && page == 4)
             menu_refresh = true;
+        return;
+    }
+    if (id == HL_OPT_PROMPTS_MISSING) {   // (host/prompts.c: no prompts/ folder in the game's)
+        prompts_missing.store(value, std::memory_order_relaxed);
         return;
     }
     if (id == perf_parts::kOptPace) {   // (the frame's pacing sleep, host/nvn_native.c's push: the summary's pace part)

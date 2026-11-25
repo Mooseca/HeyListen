@@ -35,6 +35,8 @@
 #include <string.h>
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include "../gpu/vk/vk_opt_ids.h"   /* (HL_OPT_PROMPTS_MISSING) */
+void rx_option_set(int id, int value);   /* rx_backend.c */
 #include "../gpu/vk/vk_api.h"   /* (HOS_SW_*, HOS_PAD_*, HOS_BIND_PAD) */
 #include "../gpu/vk/vk_opt_ids.h"   /* (HL_OPT_PROMPTS, HL_PROMPTS_LIVE_*) */
 
@@ -347,8 +349,12 @@ static int setup(char *dir, size_t cap, int *face) {
         }
         if (ok) f = choose_face(d);
         else if (d[0])   /* (the build draws prompts/ with fontTools: nx2/make_game.py; without it nothing here changes) */
-            hos_log("prompts: no prompts folder in %s: the game's own icons, whatever the Button prompts row says "
-                    "(the build makes it with fontTools and Pillow: nx2/prompt_requirements.txt)", d);
+        {
+            hos_log("prompts: NO PROMPTS FOLDER in %s: the game shows its own (Switch) icons whatever the Button prompts row says. "
+                    "The Builder makes the folder with fontTools and Pillow (nx2/prompt_requirements.txt): its output says "
+                    "\"the button prompts of other controllers were not made\" when it could not", d);
+            rx_option_set(HL_OPT_PROMPTS_MISSING, 1);   /* (the menu's row says so in its hint) */
+        }
         InterlockedExchange(&setup_state, ok ? 2 : 3);
     }
     while (setup_state == 1) Sleep(1);
