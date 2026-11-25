@@ -40,6 +40,7 @@
 #include "mesh_mode.h"
 #include "vk_tl_clock.h"   // (RX_VK_TL: the timeline's host time domain)
 #include "vk_push_fix.h"
+#include "vk_vrs.h"
 
 namespace vkx {
 #define VKX_DEFINE(f) PFN_##f f;
@@ -451,6 +452,7 @@ bool create_device() {
     optional(VK_EXT_SHADER_STENCIL_EXPORT_EXTENSION_NAME, dev.stencil_export);
     optional(VK_EXT_MEMORY_BUDGET_EXTENSION_NAME, dev.memory_budget);
     optional(VK_EXT_IMAGE_2D_VIEW_OF_3D_EXTENSION_NAME, dev.view_2d_of_3d);
+    if (vrs::wanted()) optional(VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME, dev.frag_shading_rate);   // (RX_VK_VRS: off by default, nothing asked of the driver)
     dev.pci_bus_info = has_extension(exts, VK_EXT_PCI_BUS_INFO_EXTENSION_NAME);   // (properties only: nothing to enable)
     // (hookshot) on by default: with a marker before each draw and dispatch the device has not been lost (five
     // runs); without them it was, every run, shortly after OoT's first gameplay frames (nvlddmkm event 153; the
@@ -600,7 +602,9 @@ bool create_device() {
     VkPhysicalDeviceConditionalRenderingFeaturesEXT cond{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CONDITIONAL_RENDERING_FEATURES_EXT};
     VkPhysicalDeviceProvokingVertexFeaturesEXT pv{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROVOKING_VERTEX_FEATURES_EXT};
     VkPhysicalDeviceGraphicsPipelineLibraryFeaturesEXT gpl{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_GRAPHICS_PIPELINE_LIBRARY_FEATURES_EXT};
+    VkPhysicalDeviceFragmentShadingRateFeaturesKHR fsr_feat{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_FEATURES_KHR};
     void** tail = &f13.pNext;
+    if (dev.frag_shading_rate) *tail = &fsr_feat, tail = &fsr_feat.pNext;
     if (dev.mesh_shader) *tail = &mesh, tail = &mesh.pNext;
     if (dev.null_descriptor) *tail = &robust2, tail = &robust2.pNext;
     if (dev.index_uint8) *tail = &u8, tail = &u8.pNext;
@@ -625,6 +629,22 @@ bool create_device() {
     reflex_device_features(tail);   // (present ids, when NVIDIA Reflex's extensions are there)
     vkGetPhysicalDeviceFeatures2(dev.physical, &f);
     descriptor_buffer.descriptorBufferCaptureReplay = VK_FALSE;
+    if (dev.frag_shading_rate) {   // (the pipeline rate alone; the attachment and primitive rates stay off, and 2x2 must be one of the device's rates)
+        fsr_feat.attachmentFragmentShadingRate = VK_FALSE, fsr_feat.primitiveFragmentShadingRate = VK_FALSE;
+        bool two = false;
+        if (fsr_feat.pipelineFragmentShadingRate) {
+            const auto get = (PFN_vkGetPhysicalDeviceFragmentShadingRatesKHR)instance_proc()(
+                dev.instance, "vkGetPhysicalDeviceFragmentShadingRatesKHR");
+            uint32_t rn = 0;
+            if (get && get(dev.physical, &rn, nullptr) == VK_SUCCESS) {
+                std::vector<VkPhysicalDeviceFragmentShadingRateKHR> rates(rn, {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_KHR});
+                get(dev.physical, &rn, rates.data());
+                for (const auto& r : rates) two |= r.fragmentSize.width == 2 && r.fragmentSize.height == 2 && (r.sampleCounts & VK_SAMPLE_COUNT_1_BIT);
+            }
+        }
+        dev.frag_shading_rate = fsr_feat.pipelineFragmentShadingRate && two;
+        logf("vk: fragment shading rate (RX_VK_VRS): %s", dev.frag_shading_rate ? "pipeline rate 2x2 usable" : "not usable here (feature or 2x2 missing)");
+    }
     dev.view_2d_of_3d = dev.view_2d_of_3d && v2d3d.sampler2DViewOf3D;
     coop.cooperativeMatrixRobustBufferAccess = VK_FALSE;
     dev.coop_matrix = dev.coop_matrix && coop.cooperativeMatrix &&
@@ -752,6 +772,8 @@ bool create_device() {
     // that write their vertices to buffers, drawn through an ordinary graphics pipeline. It needs buffer device addresses.
     dev.mesh_fallback = !dev.mesh_shader && f12.bufferDeviceAddress && !getenv("RX_VK_NO_MESH_FALLBACK");
     if (dev.mesh_fallback) logf("vk: no mesh shaders: task and mesh programs run as compute shaders (issue 640 fallback)");
+    // (HeyListen) an integrated GPU without mesh shaders: the Minimum preset and the fog off, once (lowend_rule.h; HL_LOWEND)
+    menu_first_run_lowend(dev.props.vendorID, dev.props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU, dev.mesh_shader);
     // (hookshot, issue 996 and HeyListen issue 57; Hookshot d1d6caa7) a GPU with mesh shaders whose draws with a task stage run as
     // compute: the default on AMD's Windows driver for RDNA 2 (Navi 21 to 23, mesh_mode.h's device list; the RX 6700 XT drew the Market
     // dog as a flat pale silhouette), RX_VK_TASK_MESH_FALLBACK=0/1 decides over it, and Native (RX_VK_MESH_SHADERS=native) turns the

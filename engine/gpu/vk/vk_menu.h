@@ -44,6 +44,7 @@ struct Options {
     int fps_limit = 0;    // the rate presented, the game's frames and the made ones (Real time only): 0 60, 1 90, 2 120, 3 144, 4 165, 5 240, 6 Unlimited
                           // (framegen_rows.h; host/nn_vi.c; HOS_FPS_LIMIT)
     int realtime = 1;     // game time follows the clock (host/nn_vi.c); 0: per frame (slower frames, slower game)
+    int fog = 1;          // the volumetric fog: 1 on, 0 off (its programs left out: lowend_rule.h); read once, at the first dispatch. RX_VK_FOG over it
     int handheld = 0;     // the game's handheld profile: ~4 fps, softer; read once, at the start (host/nn_applet.c)
     int ultrawide = 0;    // the camera at the monitor's shape when it is wider than 16:9; read once, at the start (host/hos_main.c)
     int hud_layout = 0;   // on a screen that is not 16:9: 0 the HUD's corners at the screen's edges (the default), 1 in the middle 16:9 (HL_OPT_HUD_LAYOUT; host/hos_wide_ui.c)
@@ -124,6 +125,9 @@ bool hdr_forced();
 /// (after Longshot 79a34381) PsychoV35's grading as the menu has it now, in ir_opt/psychov35.h's bank order (kSetting*, kSettingCount floats)
 void psychov35_bank(float* out);
 bool resolution_auto();       // (the game's dynamic resolution: Resolution Auto)
+bool fog_runs();              // (the Volumetric fog row, RX_VK_FOG over it: lowend_rule.h; fixed at the first ask)
+void menu_first_run_lowend(uint32_t vendor_id, bool integrated, bool mesh_shader);
+bool lowend_mirror_not_wait();   // (lowend_rule.h mirror_not_wait for this device: set by menu_first_run_lowend)   // (the Minimum preset and the fog off on a low-end GPU: lowend_rule.h)
 int resolution_scale();       // (the fixed path's scale in 1/10000: the Resolution row's, as a twelfth of the output)
 void menu_option_set(int id, int value);   // (from the game's side: 7 the mouse's sensitivity, the - and = keys)
 int menu_heart_protection();

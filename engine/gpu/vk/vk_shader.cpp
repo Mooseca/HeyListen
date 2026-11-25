@@ -1339,6 +1339,18 @@ void idx_write(const std::string& path, uint64_t stamp, const std::vector<std::p
     else remove(path.c_str());   // (a short one would only be read as far as it goes, but the next start makes it again anyway)
 }
 
+/// (LAPTOP1) RX_VK_FALLBACK_INDEXED=1: the no-mesh fallback writes a record a vertex and draws indexed (emit_spirv.h
+/// MESH_FALLBACK_INDEX_WORDS) for the mesh programs it can (triangles, no per-primitive lines). Off by default; in the program
+/// cache's stamp when on
+bool fallback_indexed_on() {
+    static const bool on = [] {
+        const char* e = getenv("RX_VK_FALLBACK_INDEXED");
+        const bool v = e && *e && atoi(e) != 0;
+        if (v) logf("vk: the no-mesh fallback writes a record a vertex and draws indexed (RX_VK_FALLBACK_INDEXED)");
+        return v;
+    }();
+    return on;
+}
 uint64_t disk_stamp() {
     uint64_t h = 0xCBF29CE484222325ull;
     const auto add = [&h](const void* d, size_t n) {
@@ -1355,6 +1367,10 @@ uint64_t disk_stamp() {
     // is no use to it, and only a fallback GPU wrote one)
     const uint32_t mesh = (dev.mesh_shader ? 1u : 0u) | (dev.mesh_fallback ? 0x12u : 0u) | (dev.task_mesh_fallback ? 4u : 0u) | (dev.mesh_only_fallback ? 8u : 0u);
     add(&mesh, sizeof mesh);
+    if (dev.mesh_fallback && fallback_indexed_on()) {   // (LAPTOP1: only then, so every other stamp is what it was)
+        const uint32_t indexed = 0x66696478u;   // ("fidx")
+        add(&indexed, sizeof indexed);
+    }
     // (the records keep Shader::Info as it lies in memory: a cache written by another C++ library (the MSVC build's, then the
     // llvm-mingw one's libc++) has other layouts, and reading it crashed at start. The library and the sizes, so it starts again)
     const uint32_t abi[] = {(uint32_t)sizeof(Shader::Info), (uint32_t)sizeof(Program), (uint32_t)sizeof(std::vector<uint32_t>),
@@ -1760,7 +1776,8 @@ struct Reader {
 /// program_cache_each read the same fields. program_cache_each read only the first ones and took the mesh fallback's five words
 /// for the stage count: no kept program reached the prediction (vk_predict.cpp, "predicted 0 pipelines")
 void put_head(std::vector<uint8_t>& o, const Program& p) {
-    put(o, (uint32_t)((p.compute ? 1 : 0) | (p.mesh ? 2 : 0) | (p.fallback ? 4 : 0) | (p.fallback_task ? 8 : 0)));
+    put(o, (uint32_t)((p.compute ? 1 : 0) | (p.mesh ? 2 : 0) | (p.fallback ? 4 : 0) | (p.fallback_task ? 8 : 0) |
+                      (p.fallback_indexed ? 16 : 0)));
     put_list(o, p.answers);
     put_list(o, p.questions);
     put(o, p.workgroup);
@@ -1774,6 +1791,7 @@ void put_head(std::vector<uint8_t>& o, const Program& p) {
 void get_head(Reader& r, Program& p) {
     const uint32_t kind = r.get<uint32_t>();
     p.compute = (kind & 1) != 0, p.mesh = (kind & 2) != 0, p.fallback = (kind & 4) != 0, p.fallback_task = (kind & 8) != 0;
+    p.fallback_indexed = (kind & 16) != 0;
     r.list(p.answers);
     r.list(p.questions);
     p.workgroup = r.get<std::array<uint32_t, 3>>();
@@ -2294,6 +2312,10 @@ void translate_mesh_into(Program& p, const NvnState& s, const Code* task, const 
         mrt.mesh_fallback = fallback;
         mrt.mesh_fallback_capacity = Shader::Backend::SPIRV::MESH_FALLBACK_CAPACITY;
         mrt.mesh_fallback_task = task_t != nullptr;
+        // (LAPTOP1) the indexed form: triangles with no per-primitive lines only (their values would need a record a corner)
+        const bool fb_indexed = fallback && fallback_indexed_on() && mesh_t->program.mesh.primitive_lines.empty() &&
+                                mesh_t->program.mesh.Corners() == 3;
+        mrt.mesh_fallback_indexed = fb_indexed;
         mrt.mesh_fallback_task_threads = task_t ? task_t->program.workgroup_size[0] : 0;
         const std::vector<uint32_t> mspirv = Shader::Backend::SPIRV::EmitSPIRV(profile(fallback ? VK_SHADER_STAGE_COMPUTE_BIT : VK_SHADER_STAGE_MESH_BIT_EXT), mrt, mesh_t->program, bindings);
         if (getenv("RX_VK_MESH_NOINLINE_ABOVE")) {   // (stream P5: the IR size the threshold is read against, with the SPIR-V's)
@@ -2350,6 +2372,7 @@ void translate_mesh_into(Program& p, const NvnState& s, const Code* task, const 
             p.fallback_record_words = 1 + static_cast<u32>(mi.vertex_lines.size()) +
                                       static_cast<u32>(mi.primitive_lines.size());
             p.fallback_payload_words = mi.payload_words;
+            p.fallback_indexed = fb_indexed;
         }
         if (fsc) {
             Env fenv{s, *fsc, Shader::Stage::Fragment};

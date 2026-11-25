@@ -4673,8 +4673,10 @@ bool mirror_on() {
     static const int on = [] {
         const char* e = getenv("RX_VK_MIRROR");
         const bool discrete = dev.props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU;
-        const int v = e ? atoi(e) != 0 : discrete;
-        logf("vk: VRAM mirror of buffer pools %s", v ? "on" : "off");
+        // (LAPTOP1: and on an AMD integrated GPU without mesh shaders, in place of the present's wait: lowend_rule.h mirror_not_wait)
+        const int v = e ? atoi(e) != 0 : discrete || lowend_mirror_not_wait();
+        logf("vk: VRAM mirror of buffer pools %s%s", v ? "on" : "off",
+             !e && !discrete && v ? " (an AMD integrated GPU without mesh shaders: in place of the present's wait)" : "");
         return v;
     }();
     return on != 0;
