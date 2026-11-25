@@ -108,8 +108,9 @@ def main():
     rp = (ROOT / "gpu/vk/vk_replay.cpp").read_text(encoding="utf-8")
     inv = rp[rp.index("void invalidate(uint64_t gpu, uint64_t size) {"):]
     assert "rbring_serves(host->gpu_guest(gpu), size)" in inv, "the serve decision is missing"
-    assert "if (size && !expo_skip && !ring_serve) {" in inv, "the old wait is not skipped for a served range only"
-    assert inv.index("if (ring_serve) rbring_apply(gpu, size);") > inv.index("if (size && !expo_skip && !ring_serve) {"), "the answer comes before the wait's place"
+    assert "const bool skip_old = ring_serve || early_served;" in inv, "a ring-served read is not one that skips the old waits"
+    assert "if (size && !expo_skip && !skip_old) {" in inv, "the old wait is not skipped for a served range only"
+    assert inv.index("if (ring_serve) rbring_apply(gpu, size);") > inv.index("if (size && !expo_skip && !skip_old) {"), "the answer comes before the wait's place"
     assert "rbring_check(gpu, size)" in inv, "the check is not called"
     mem = (ROOT / "gpu/vk/vk_memory.cpp").read_text(encoding="utf-8")
     assert "!rbring_stage_bind(guest, size, p->mirror, off, lists().rb))\n            lists().writebacks.push_back" in mem, "a staged binding still queues its write-back"

@@ -7455,6 +7455,7 @@ BufferRef gpu_buffer_bind(uint64_t gpu, uint64_t size, bool written) {
         // (CRASH3) a guessed range: guest memory as the mirror's sync just took it, for its checked write-back
         if (tl_bind_guess && wb_guess_checked_on()) guess_snap_take(p, off, std::min(off + size, p->hi - p->lo));
         // (STEP1, HL_RB_LAG) a range the CPU reads back that the readback ring stages: no write-back, the submission's end copies it
+        rbearly_bind(guest, size, p->mirror, off);   // (ORDER2, RX_VK_RB_EARLY: a served range's copy behind this binding's dispatch)
         if ((!wb_max || size <= wb_max) && !rbring_stage_bind(guest, size, p->mirror, off, lists().rb))
             lists().writebacks.push_back({p, off, std::min(off + size, p->hi - p->lo), tl_bind_guess && wb_guess_checked_on()});
         diff_gpu_wrote(p->lo + off, std::min(off + size, p->hi - p->lo) - off);   // (TICK-048)

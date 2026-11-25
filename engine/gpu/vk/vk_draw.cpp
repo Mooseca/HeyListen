@@ -11888,6 +11888,7 @@ void dispatch(VkCommandBuffer cmd, NvnState& s, uint32_t x, uint32_t y, uint32_t
             vkCmdDispatch(cmd, x, y, z);
         }
         last_dispatch_cmd = cmd, last_dispatch_epoch = work_epoch.load(std::memory_order_relaxed);
+        rbearly_after_dispatch(cmd);   // (ORDER2, RX_VK_RB_EARLY: the culling results this dispatch wrote, copied for the CPU's read)
         // (EXPO1, HL_EXPO_GPU) the meter's sums into the engine's ring, for the game's CPU (vk_expo.cpp)
         if ((p.key == 0x435a0138b9013040ull || p.key == 0x592079442d7129daull) && meter_out.buffer && meter_out.size >= 16 && !(meter_out.offset & 3))
             expo_record(cmd, meter_out.buffer, meter_out.offset, meter_out.guest);

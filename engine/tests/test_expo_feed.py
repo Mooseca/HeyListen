@@ -57,8 +57,8 @@ def main():
     rp = (ROOT / "gpu/vk/vk_replay.cpp").read_text(encoding="utf-8")
     inv = rp[rp.index("void invalidate(uint64_t gpu, uint64_t size) {"):]
     assert "expo_mode() == 1 && expo_serves(host->gpu_guest(gpu))" in inv, "the skip is not for a fed block in mode 1"
-    assert "if (size && !expo_skip && !ring_serve) {" in inv, "the old wait is not skipped for a fed block only"
-    assert inv.index("if (expo_skip) {\n            expo_answer(gpu);") > inv.index("if (size && !expo_skip && !ring_serve) {"), "the answer comes before the wait's place"
+    assert "if (size && !expo_skip && !skip_old) {" in inv, "the old wait is not skipped for a fed block only"
+    assert inv.index("if (expo_skip) {\n            expo_answer(gpu);") > inv.index("if (size && !expo_skip && !skip_old) {"), "the answer comes before the wait's place"
     assert "expo_check(gpu)" in inv, "the check is not called"
     dr = (ROOT / "gpu/vk/vk_draw.cpp").read_text(encoding="utf-8")
     assert dr.index("vkCmdDispatch(cmd, x, y, z);") < dr.index("expo_record(cmd, meter_out.buffer"), "the ring is fed before the dispatch"

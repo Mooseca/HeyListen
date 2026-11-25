@@ -1,0 +1,270 @@
+// Copyright (C) 2026 Sacrappy
+// RX_VK_RB_EARLY (ORDER2, docs/research/order-readback-decouple.md): with the order thread, the culling / camera results (R4, 0x3980) reach
+// the game's CPU from a copy recorded right behind each program that writes them, not from the write-back at the end of their submission.
+// The eight programs that write the block run at the head of the frame's last submission, whose replay takes ~4 ms; its write-backs land
+// after the whole of it and of its GPU work, and the culling job of the next frame read it first and waited (flash2f: a quarter of the
+// reads, 1.6 ms on the main PC, 4.4-5.5 ms on the PC 3050). The rules are in rb_early.h; RX_VK_RB_EARLY=2 runs the old path and compares.
+#include <chrono>
+#include <cstdio>
+#include <cstring>
+#include <mutex>
+#include <thread>
+#include <vector>
+
+#include "vk_internal.h"
+#include "rb_early.h"
+
+namespace mkwvk {
+namespace {
+
+const rb_early::Config& config() {
+    // (ORDER2) RX_VK_RB_EARLY=<0|1|2> (1 with the order thread, else 0): the 0x3980 culling results the CPU reads come from a copy recorded right behind each program that writes them, the read waiting only for its own frame's copy (1); 0: as before (the order thread's wait for the frame's last submission, RX_VK_ORDER_RB_JOIN=5); 2: the old path runs and each read is compared with the copy the rule would have handed out. RX_VK_RB_EARLY_WAIT_MS=<ms> (30): how long a read waits for its copy before it takes the old path
+    static const rb_early::Config c = [] {
+        const rb_early::Config k = rb_early::parse(getenv("RX_VK_RB_EARLY"), getenv("RX_VK_RB_EARLY_WAIT_MS"), ot_on());
+        if (k.mode) logf("vk: RX_VK_RB_EARLY=%d: the 0x3980 culling results are %s from a copy right behind each program that writes them (wait %.0f ms at most)",
+                         k.mode, k.mode == 1 ? "served" : "checked", k.wait_ms);
+        return k;
+    }();
+    return c;
+}
+
+std::mutex mu;
+rb_early::Range ranges[rb_early::kRanges];
+unsigned nranges = 0;
+uint64_t last_final_job = 0;   // (mu: the newest job that finished writing some served range)
+VkBuffer ring_buffer = VK_NULL_HANDLE;
+uint8_t* ring_map = nullptr;
+bool ring_failed = false;
+constexpr VkDeviceSize kBytes = (VkDeviceSize)rb_early::kRanges * rb_early::kSlots * rb_early::kSlotBytes;
+
+bool ring_init() {   // (mu held)
+    if (ring_map) return true;
+    if (ring_failed) return false;
+    ring_failed = true;
+    VkBufferCreateInfo bi{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+    bi.size = kBytes;
+    bi.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    VkBuffer buffer{};
+    if (vkCreateBuffer(dev.device, &bi, nullptr, &buffer) != VK_SUCCESS) return false;
+    VkMemoryRequirements req;
+    vkGetBufferMemoryRequirements(dev.device, buffer, &req);
+    const VkMemoryPropertyFlags want = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+    uint32_t type = UINT32_MAX;
+    for (int pass = 0; pass < 2 && type == UINT32_MAX; pass++)   // (system memory first: the host reads it every frame)
+        for (uint32_t i = 0; i < dev.memory.memoryTypeCount && type == UINT32_MAX; i++) {
+            const VkMemoryPropertyFlags f = dev.memory.memoryTypes[i].propertyFlags;
+            if ((req.memoryTypeBits >> i & 1) && (f & want) == want && (pass || !(f & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT))) type = i;
+        }
+    VkMemoryAllocateInfo ai{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+    ai.allocationSize = req.size;
+    ai.memoryTypeIndex = type;
+    VkDeviceMemory memory{};
+    void* words = nullptr;
+    if (type == UINT32_MAX || vkAllocateMemory(dev.device, &ai, nullptr, &memory) != VK_SUCCESS ||
+        vkBindBufferMemory(dev.device, buffer, memory, 0) != VK_SUCCESS || vkMapMemory(dev.device, memory, 0, kBytes, 0, &words) != VK_SUCCESS) {
+        logf("vk: RX_VK_RB_EARLY: no host memory for the copies: the old path stays");
+        vkDestroyBuffer(dev.device, buffer, nullptr);
+        return false;
+    }
+    std::memset(words, 0, kBytes);
+    ring_buffer = buffer;
+    ring_map = (uint8_t*)words;
+    ring_failed = false;
+    return true;
+}
+VkDeviceSize slot_at(unsigned range, unsigned slot) { return ((VkDeviceSize)range * rb_early::kSlots + slot) * rb_early::kSlotBytes; }
+uint32_t stamp_of(unsigned range, unsigned slot) {
+    return *(const volatile uint32_t*)(ring_map + slot_at(range, slot) + rb_early::kStampOffset);
+}
+int find_locked(uint64_t guest, uint64_t size) {
+    for (unsigned i = 0; i < nranges; i++)
+        if (ranges[i].guest == guest && ranges[i].size == size) return (int)i;
+    return -1;
+}
+
+// (the copies a thread's bindings asked for, recorded behind its next dispatch)
+struct Pending {
+    VkBuffer src;
+    VkDeviceSize offset, size, dst;
+    uint32_t seq;
+};
+thread_local std::vector<Pending> tl_pending;
+
+struct Stats {
+    std::atomic<int64_t> reads{0}, final_ok{0}, newest{0}, rec_waits{0}, rec_ns{0}, rec_worst{0}, gpu_waits{0}, gpu_ns{0}, gpu_worst{0},
+        fb_rec{0}, fb_gpu{0}, fb_none{0}, binds{0}, finals{0}, left{0}, checks{0}, mismatches{0};
+} st;
+void note_max(std::atomic<int64_t>& m, int64_t v) {
+    int64_t w = m.load();
+    while (v > w && !m.compare_exchange_weak(w, v)) {}
+}
+int64_t now_ns() { return std::chrono::steady_clock::now().time_since_epoch().count(); }
+
+/// The slot a read of range `ri` is answered with (waits for the order thread's recording and the GPU's copy, wait_ms at most):
+/// false = none in time (the old path). out gets the bytes
+bool fetch(unsigned ri, uint64_t size, uint8_t* out, bool count) {
+    const uint64_t target = ot_rb_target();
+    const int64_t t0 = now_ns(), cap = (int64_t)(config().wait_ms * 1e6);
+    rb_early::Pick p;
+    bool rec_waited = false;
+    for (;;) {
+        {
+            std::lock_guard lk(mu);
+            p = rb_early::pick(ranges[ri], target, ot_rb_done(), last_final_job);
+        }
+        if (p.kind != rb_early::kWait) break;
+        rec_waited = true;
+        if (now_ns() - t0 > cap) {
+            if (count) st.fb_rec++;
+            return false;
+        }
+        std::this_thread::yield();
+    }
+    const int64_t t1 = now_ns();
+    if (count && rec_waited) st.rec_waits++, st.rec_ns += t1 - t0, note_max(st.rec_worst, t1 - t0);
+    if (p.kind == rb_early::kNone) {
+        if (count) st.fb_none++;
+        return false;
+    }
+    bool gpu_waited = false;
+    while (stamp_of(ri, p.slot) != p.seq) {
+        gpu_waited = true;
+        if (stamp_of(ri, p.slot) > p.seq || now_ns() - t1 > cap) {   // (overwritten already, or not done in time)
+            if (count) st.fb_gpu++;
+            return false;
+        }
+        std::this_thread::yield();
+    }
+    const int64_t t2 = now_ns();
+    if (count && gpu_waited) st.gpu_waits++, st.gpu_ns += t2 - t1, note_max(st.gpu_worst, t2 - t1);
+    std::memcpy(out, ring_map + slot_at(ri, p.slot), (size_t)size);
+    if (stamp_of(ri, p.slot) != p.seq) {   // (the slot went round while it was copied)
+        if (count) st.fb_gpu++;
+        return false;
+    }
+    if (count) (p.kind == rb_early::kSlotFinal ? st.final_ok : st.newest)++;
+    return true;
+}
+void log_stats() {
+    const int64_t r = ++st.reads;
+    if (r % 1200) return;
+    auto ms = [](int64_t ns, int64_t n) { return n ? ns / (double)n / 1e6 : 0.0; };
+    const int64_t rw = st.rec_waits.exchange(0), gw = st.gpu_waits.exchange(0);
+    logf("vk: rbearly: 1200 reads of the 0x3980 culling results: %lld from their job's last copy, %lld from the newest copy (the job wrote "
+         "the other range); %lld waited for the order thread's recording (%.2f ms each, worst %.2f), %lld for the GPU's copy (%.2f ms each, "
+         "worst %.2f); fell back to the old path: %lld recording not in time, %lld GPU not in time, %lld no copy; bindings copied %lld (%lld "
+         "final), %lld left with no dispatch behind them; check: %lld compared, %lld mismatches",
+         (long long)st.final_ok.exchange(0), (long long)st.newest.exchange(0), (long long)rw, ms(st.rec_ns.exchange(0), rw),
+         st.rec_worst.exchange(0) / 1e6, (long long)gw, ms(st.gpu_ns.exchange(0), gw), st.gpu_worst.exchange(0) / 1e6,
+         (long long)st.fb_rec.exchange(0), (long long)st.fb_gpu.exchange(0), (long long)st.fb_none.exchange(0), (long long)st.binds.exchange(0),
+         (long long)st.finals.exchange(0), (long long)st.left.exchange(0), (long long)st.checks.exchange(0), (long long)st.mismatches.exchange(0));
+}
+
+}   // namespace
+
+int rbearly_mode() { return config().mode; }
+
+/// The CPU reads (guest, size): a served size becomes a range the copies are made for
+void rbearly_note_read(uint64_t guest, uint64_t size) {
+    if (!config().mode || !rb_early::served_size(size) || size > rb_early::kMaxBytes) return;
+    std::lock_guard lk(mu);
+    if (find_locked(guest, size) >= 0 || nranges >= rb_early::kRanges) return;
+    rb_early::Range& r = ranges[nranges];
+    r = rb_early::Range{};
+    r.guest = guest, r.size = size;
+    nranges++;
+    logf("vk: rbearly: %#llx +%#llx is served from copies behind its writers (%u ranges)", (unsigned long long)guest, (unsigned long long)size, nranges);
+}
+
+/// A program's binding for writing in a mirror (vk_memory.cpp gpu_buffer_bind, pools_mu held), on the thread recording it: a served
+/// range takes a slot, and the copy is recorded behind the thread's next dispatch (rbearly_after_dispatch)
+void rbearly_bind(uint64_t guest, uint64_t size, VkBuffer buffer, VkDeviceSize offset) {
+    if (!config().mode || !buffer || !rb_early::served_size(size)) return;
+    std::lock_guard lk(mu);
+    const int ri = find_locked(guest, size);
+    if (ri < 0 || !ring_init()) return;
+    const rb_early::Issue is = rb_early::issue(ranges[ri], ot_current_job());
+    if (is.final) last_final_job = std::max(last_final_job, ranges[ri].cur_job), st.finals++;
+    st.binds++;
+    for (Pending& p : tl_pending)   // (bound twice before one dispatch: the copy goes to the newer slot)
+        if (p.src == buffer && p.offset == offset && p.size == size) {
+            p.dst = slot_at((unsigned)ri, is.slot), p.seq = is.seq;
+            return;
+        }
+    if (tl_pending.size() >= 16) {
+        st.left++;
+        return;
+    }
+    tl_pending.push_back({buffer, offset, size, slot_at((unsigned)ri, is.slot), is.seq});
+}
+
+/// Right after a compute dispatch is recorded (vk_draw.cpp), on its command buffer: the served ranges it wrote, copied into their slots
+/// and stamped. A slot left behind by a binding with no dispatch after it (a draw's) is never stamped, and its reads fall back
+void rbearly_after_dispatch(VkCommandBuffer cmd) {
+    if (tl_pending.empty()) return;
+    if (!ring_buffer) {
+        tl_pending.clear();
+        return;
+    }
+    auto barrier = [&](VkPipelineStageFlags2 s, VkAccessFlags2 sa, VkPipelineStageFlags2 d, VkAccessFlags2 da) {
+        VkMemoryBarrier2 b{VK_STRUCTURE_TYPE_MEMORY_BARRIER_2};
+        b.srcStageMask = s, b.srcAccessMask = sa, b.dstStageMask = d, b.dstAccessMask = da;
+        VkDependencyInfo di{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
+        di.memoryBarrierCount = 1, di.pMemoryBarriers = &b;
+        vkCmdPipelineBarrier2(cmd, &di);
+    };
+    barrier(VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT, VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_READ_BIT);
+    for (const Pending& p : tl_pending) {
+        const VkBufferCopy c{p.offset, p.dst, p.size};
+        vkCmdCopyBuffer(cmd, p.src, ring_buffer, 1, &c);
+    }
+    barrier(VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_2_CLEAR_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT);
+    for (const Pending& p : tl_pending) vkCmdFillBuffer(cmd, ring_buffer, p.dst + rb_early::kStampOffset, 4, p.seq);
+    barrier(VK_PIPELINE_STAGE_2_CLEAR_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_2_HOST_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+            VK_ACCESS_2_HOST_READ_BIT | VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT);
+    tl_pending.clear();
+}
+
+/// RX_VK_RB_EARLY=1: the read of a served range answered from its copy (into guest memory). false: not served (the old path runs)
+bool rbearly_answer(uint64_t gpu, uint64_t size) {
+    if (config().mode != 1 || !rb_early::served_size(size)) return false;
+    int ri;
+    {
+        std::lock_guard lk(mu);
+        ri = find_locked(host->gpu_guest(gpu), size);
+        if (ri < 0 || !ring_map || !ranges[ri].next_seq) return false;
+    }
+    uint8_t buf[rb_early::kMaxBytes];
+    const bool ok = fetch((unsigned)ri, size, buf, true);
+    if (ok) host->gpu_write(gpu, buf, (size_t)size);
+    log_stats();
+    return ok;
+}
+
+/// RX_VK_RB_EARLY=2, after the old path's waits: the copy the rule picks against what guest memory holds now
+void rbearly_check(uint64_t gpu, uint64_t size) {
+    if (config().mode != 2 || !rb_early::served_size(size)) return;
+    int ri;
+    {
+        std::lock_guard lk(mu);
+        ri = find_locked(host->gpu_guest(gpu), size);
+        if (ri < 0 || !ring_map || !ranges[ri].next_seq) return;
+    }
+    uint8_t mine[rb_early::kMaxBytes], old[rb_early::kMaxBytes];
+    if (fetch((unsigned)ri, size, mine, true)) {
+        host->gpu_read(gpu, old, (size_t)size);
+        st.checks++;
+        if (std::memcmp(mine, old, (size_t)size)) {
+            const int64_t m = ++st.mismatches;
+            if (m <= 12) {
+                size_t first = 0;
+                while (first < size && mine[first] == old[first]) first++;
+                logf("vk: rbearly check MISMATCH %#llx +%#llx at byte %#zx (clk %lld): copy %02x, old path %02x", (unsigned long long)host->gpu_guest(gpu),
+                     (unsigned long long)size, first, (long long)rb_frame_now(), mine[first], old[first]);
+            }
+        }
+    }
+    log_stats();
+}
+
+}   // namespace mkwvk
