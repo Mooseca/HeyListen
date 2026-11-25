@@ -515,6 +515,10 @@ bool rbring_check_on();
 void rbring_note_read(uint64_t guest, uint64_t size);
 void rbring_note_written(uint64_t guest, uint64_t size);
 void ot_note_r4_writer();   // (FLASH2, vk_replay.cpp) a 0x3980 range bound for writing on the order thread: the job's place in its frame
+void r4map_note_write(uint64_t guest, uint64_t size);   // (ORDER2, vk_replay.cpp, RX_VK_ORDER_R4_MAP: a written binding of a readback class R4/R5/R6 size, logged in the window)
+void r4map_read(uint64_t gpu, uint64_t size, int64_t t_enter);   // (ORDER2: a CPU read of those ranges, after invalidate's waits)
+void r4map_job(int kind, uint64_t value, uint64_t queue, uint64_t seq, uint64_t since, int64_t queued_ns, int64_t t0, int64_t t1);   // (ORDER2: an order-thread job run)
+extern std::atomic<int64_t> r4map_job_t0;   // (ORDER2: the start of the order thread's current job, steady clock ns)
 /// (stream SUB1) the readback ring's staged ranges of one submission: its own list, so a submission that ends after the next began flushes its own
 struct RbPending {
     struct Req {

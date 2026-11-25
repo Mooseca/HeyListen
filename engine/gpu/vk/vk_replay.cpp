@@ -6342,6 +6342,11 @@ void invalidate(uint64_t gpu, uint64_t size) {
     static const bool rb_prof = getenv("RX_VK_RB_PROF") != nullptr || getenv("RX_VK_TL") != nullptr || getenv("RX_VK_TL_S") != nullptr;
     RbScope rbs(rb_prof, gpu, size);
     struct RbWhoPost { uint64_t g, n; ~RbWhoPost() { if (n && rbwho_on()) rbwho_content(g, n); } } rbwho_post{gpu, size};
+    struct R4MapPost {   // (ORDER2, RX_VK_ORDER_R4_MAP: the read logged after the waits; declared after rbwho_post, so it runs first)
+        uint64_t g, n;
+        int64_t t;
+        ~R4MapPost() { if (n) r4map_read(g, n, t); }
+    } r4map_post{gpu, size, std::chrono::steady_clock::now().time_since_epoch().count()};
     // (READB2, HL_RB_R2 / HL_RB_R3, readbacks-r2-r3.md) the class of this read, whether it is read late (no wait: what guest memory holds),
     // and for the CHECK switch the value it holds at entry, compared with the value after the waits when the read is done
     // (STEP1, HL_RB_LAG) the range is learned as one to stage; one already staged is answered by the ring below and waits for nothing
@@ -9135,9 +9140,12 @@ void ot_main() {
             // (DECOUPLE3) its value, until it is recorded: the recordings of the jobs run behind it while it is held signal below it
             // (finish_recording: timeline_order::signal_at), so its own signal rises; before, it went back on the timeline (4.9)
             ot_held_present.store(j.value, std::memory_order_release);
+            const int64_t map_p0 = ot_now();
             if (ot_present_run(j, ms == 0)) {
                 ot_held_present.store(0, std::memory_order_release);
                 finish(j);
+                r4map_job((int)j.kind, j.value, j.queue, j.seq, j.since,
+                          std::chrono::duration_cast<std::chrono::nanoseconds>(j.queued.time_since_epoch()).count(), map_p0, ot_now());   // (ORDER2)
             } else {
                 ot_sig_waits++;
                 held = std::move(j), holding = true, held_until = ot_now() + (int64_t)ms * 1000000;
@@ -9147,8 +9155,12 @@ void ot_main() {
             continue;
         }
         if (got) {
+            const int64_t map_t0 = ot_now();
+            r4map_job_t0.store(map_t0, std::memory_order_relaxed);   // (ORDER2, RX_VK_ORDER_R4_MAP)
             ot_run(j);
             finish(j);
+            r4map_job((int)j.kind, j.value, j.queue, j.seq, j.since,
+                      std::chrono::duration_cast<std::chrono::nanoseconds>(j.queued.time_since_epoch()).count(), map_t0, ot_now());
             if (holding && j.kind == JOB_SUBMIT) {
                 held_jobs++, held_last = j.value;
                 if (!held_first) held_first = j.value;
@@ -9170,6 +9182,8 @@ void ot_main() {
                          (unsigned long long)held_first, (unsigned long long)held_last, force ? ", forced" : "");
                 ot_held_present.store(0, std::memory_order_release);
                 finish(held);
+                r4map_job(100 + (int)held.kind, held.value, held.queue, held.seq, held.since,   // (ORDER2: kind + 100 = a held present let go)
+                          std::chrono::duration_cast<std::chrono::nanoseconds>(held.queued.time_since_epoch()).count(), held_since, ot_now());
                 holding = false;
                 ot_holding.store(false, std::memory_order_release);
             }
@@ -9382,6 +9396,74 @@ void ot_note_r4_writer() {
     if (!ot_self) return;
     const uint64_t i = ot_r4_n.fetch_add(1, std::memory_order_acq_rel);
     ot_r4_since[i % 16].store(ot_cur_since.load(std::memory_order_relaxed), std::memory_order_relaxed);
+}
+// ---- (ORDER2) RX_VK_ORDER_R4_MAP=<first game frame>:<frames> (logging only, default off): where the readbacks' writers sit in the
+// order thread's work and when the game reads them, for a window of game frames (rb_clock): each order-thread job (kind, value, queue,
+// place in its frame, when it was handed over and run), each written binding of an R4/R5/R6-sized range (the program, the job it was
+// recorded in, the thread, how far into the job), each CPU read of those ranges (the order thread's progress, the first words). With
+// RX_VK_ORDER_R4_DUMP=<dir>: every R4 read's 0x3980 bytes in the window to <dir>/r4_<frame>_<guest>_<n>.bin
+std::atomic<int64_t> r4map_job_t0{0};
+static bool r4map_window(int64_t* lo, int64_t* hi) {
+    static int64_t a = -1, b = -1;
+    static const bool on = [] {
+        // (ORDER2) RX_VK_ORDER_R4_MAP=<first game frame>:<frames> (off; frames 30): logging only, the readbacks' writers in the order thread's jobs and the CPU's reads of them, for that window
+        const char* e = getenv("RX_VK_ORDER_R4_MAP");
+        if (!e || !*e) return false;
+        long long x = 0, y = 30;
+        if (sscanf(e, "%lld:%lld", &x, &y) < 1) return false;
+        a = x, b = x + y;
+        logf("vk: RX_VK_ORDER_R4_MAP: the readbacks' writers and reads logged for game frames %lld-%lld", (long long)a, (long long)b);
+        return true;
+    }();
+    if (lo) *lo = a;
+    if (hi) *hi = b;
+    return on;
+}
+static bool r4map_now() {
+    int64_t lo, hi;
+    if (!r4map_window(&lo, &hi)) return false;
+    const int64_t c = rb_clock.load(std::memory_order_relaxed);
+    return c >= lo && c < hi;
+}
+void r4map_note_write(uint64_t guest, uint64_t size) {
+    if (!r4map_now()) return;
+    const int64_t t0 = r4map_job_t0.load(std::memory_order_relaxed);
+    logf("vk: r4map write %#llx +%#llx prog %016llx clk %lld p %lld job v %llu since %llu %s at %.3f ms into the job (t %.3f)",
+         (unsigned long long)guest, (unsigned long long)size, (unsigned long long)rbwho_prog, (long long)rb_clock.load(),
+         (long long)presents_now, (unsigned long long)ot_cur_value.load(), (unsigned long long)ot_cur_since.load(),
+         ot_self ? "order thread" : "other thread", t0 ? (ot_now() - t0) / 1e6 : -1.0, ot_now() / 1e6);
+}
+void r4map_job(int kind, uint64_t value, uint64_t queue, uint64_t seq, uint64_t since, int64_t queued_ns, int64_t t0, int64_t t1) {
+    if (!r4map_now()) return;
+    logf("vk: r4map job kind %d v %llu q %#llx seq %llu since %llu clk %lld p %lld: handed over t %.3f, run %.3f-%.3f (%.3f ms)", kind,
+         (unsigned long long)value, (unsigned long long)queue, (unsigned long long)seq, (unsigned long long)since,
+         (long long)rb_clock.load(), (long long)presents_now, queued_ns / 1e6, t0 / 1e6, t1 / 1e6, (t1 - t0) / 1e6);
+}
+void r4map_read(uint64_t gpu, uint64_t size, int64_t t_enter) {
+    if (!r4map_now()) return;
+    if (size != 0x3980 && size != 0x9b040 && size != 0x8b040 && size != 0x44b040 && size != 0x1b580) return;
+    uint32_t w[8] = {};
+    host->gpu_read(gpu, w, sizeof w);
+    uint64_t pushed, psub;
+    {
+        std::lock_guard lk(ot_mu);
+        pushed = ot_seq_pushed, psub = ot_present_sub;
+    }
+    const int64_t c = rb_clock.load();
+    logf("vk: r4map read %#llx +%#llx clk %lld p %lld: done %llu pushed %llu present_sub %llu, %.3f ms in invalidate (t %.3f): %08x %08x %08x %08x %08x %08x %08x %08x",
+         (unsigned long long)host->gpu_guest(gpu), (unsigned long long)size, (long long)c, (long long)presents_now,
+         (unsigned long long)ot_seq_done.load(), (unsigned long long)pushed, (unsigned long long)psub, (ot_now() - t_enter) / 1e6, ot_now() / 1e6,
+         w[0], w[1], w[2], w[3], w[4], w[5], w[6], w[7]);
+    // (ORDER2) RX_VK_ORDER_R4_DUMP=<dir> (off): with RX_VK_ORDER_R4_MAP, every 0x3980 read's bytes in the window written to <dir>/r4_<frame>_<guest>_<n>.bin
+    static const char* dir = getenv("RX_VK_ORDER_R4_DUMP");
+    if (dir && *dir && size == 0x3980) {
+        static std::atomic<int> n{0};
+        std::vector<uint8_t> b(size);
+        host->gpu_read(gpu, b.data(), size);
+        char path[512];
+        snprintf(path, sizeof path, "%s/r4_%lld_%llx_%d.bin", dir, (long long)c, (unsigned long long)host->gpu_guest(gpu), n++);
+        if (FILE* f = fopen(path, "wb")) fwrite(b.data(), 1, b.size(), f), fclose(f);
+    }
 }
 namespace {
 bool ot_audit_on() {
