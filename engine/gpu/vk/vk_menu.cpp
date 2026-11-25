@@ -2609,9 +2609,9 @@ void menu_first_run_lowend(uint32_t vendor_id, bool integrated, bool mesh_shader
     const lowend_rule::Apply a = lowend_rule::first_start(env_int("HL_LOWEND"), lowend_marked, integrated, untouched);
     const char* why = mesh_shader ? "with mesh shaders" : "no mesh shaders";
     if (a == lowend_rule::NONE) {
-        if (integrated) logf("vk: integrated GPU (%s): Low-end settings: %s", why,
+        if (integrated) logf("vk: integrated GPU (%s): the Lowest preset's measure: %s", why,
                              env_int("HL_LOWEND") == 0 ? "not measured (HL_LOWEND=0)"
-                             : lowend_marked ? "asked once already (lowend_rule=1 in the options file): the rows stay as set"
+                             : lowend_marked ? "made once already (lowend_rule=1 in the options file): the Quality preset stays as set"
                                              : "the Quality preset or the rows it sets are the player's: not measured");
         return;
     }
