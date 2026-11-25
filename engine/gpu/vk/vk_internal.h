@@ -644,6 +644,7 @@ bool vram_usage_now(uint64_t* used, uint64_t* budget);
 void vma_log_heaps();
 /// (TICK-019) one log line: which memory type and heap an allocation landed in (device-local / host-visible / cached)
 void log_alloc_where(const char* what, VmaAllocation allocation);
+bool log_alloc_uncached(const char* what, VmaAllocation allocation);   // (issue 135: logs a host-visible buffer without HOST_CACHED)
 /// (TICK-019) GPU reads straight from imported guest memory outside the buffer bindings' count: texel buffer views, GPU unswizzles
 extern std::atomic<int64_t> st_import_texel_views, st_import_texel_bytes, st_import_unswizzle_bytes;
 /// (longshot #404, vk_draw.cpp) the pipelines the driver refused for want of memory so far (VK_ERROR_OUT_OF_DEVICE_MEMORY or

@@ -1651,6 +1651,7 @@ bool cap_buf_get(uint64_t need, VkBuffer& buffer, VmaAllocation& alloc, void*& m
     }
     static int logged;   // (TICK-019: the mirror syncs copy from these)
     if (ok && logged++ < 1) log_alloc_where("a capture buffer (the mirror syncs' source)", alloc);
+    if (ok) log_alloc_uncached("a capture buffer", alloc);   // (issue 135: the later ones may not be cached either)
     return ok;
 }
 std::vector<std::pair<uint64_t, uint64_t>> cap_ranges;   // (the mirrored pools the captures take, as of the last one)
@@ -1824,6 +1825,52 @@ int64_t st_tk_shadow_fast;   // (TICK-061: takes whose shadow block took RX_VK_S
 std::atomic<int64_t> st_tr_late_ns{0}, st_tr_late_n{0};   // (TICK-051: the same, never reset, for the frame trace)
 int64_t st_tk_late_n;   // (the takes that waited for the GPU for their late pages)   // (a capture was ever made: the replay thread's; without it nothing owns pages)
 
+// ---- reads of the capture buffers with streaming loads ----
+// The CPU reads the capture buffers back (the texture shadow's 4 KB copies, the uploads' reads of a page as submitted, a
+// pre-copy grown into a larger buffer). Those buffers are host-visible system memory that VMA puts in a cached type when the
+// driver takes it, else (NVIDIA 620.73 on Linux refused most of them in play, VK_ERROR_OUT_OF_DEVICE_MEMORY, though a process
+// of its own got 23 GB) in the uncached, write-combined one, where ordinary loads read a line at a time: 15.8 us a 4 KB page
+// (259 MB/s) on an RTX 5070 Ti laptop's Core Ultra 9 275HX, 20-70 ms stalls of the replay thread in Hyrule Field. VMOVNTDQA
+// reads a whole line into the streaming-load buffers: 0.40 us a page (10 GB/s) there, and on cached memory it is an ordinary
+// load (0.23 against memcpy's 0.35 us). The fence first: the buffer was written by other threads (streaming stores among
+// them), and loads from write-combined memory are weakly ordered. RX_VK_CAP_READ_STREAM=0: memcpy, as before.
+bool cap_read_stream_on() {
+    static const bool v = !getenv("RX_VK_CAP_READ_STREAM") || atoi(getenv("RX_VK_CAP_READ_STREAM")) != 0;
+    return v;
+}
+#if defined(__AVX2__)
+__attribute__((noinline)) void cap_read_copy(void* dst, const void* src, size_t n, bool stream_store = false) {
+    if (!cap_read_stream_on() || ((uintptr_t)src & 31) || (stream_store && ((uintptr_t)dst & 31))) {
+        std::memcpy(dst, src, n);
+        return;
+    }
+    _mm_mfence();
+    uint8_t* d = static_cast<uint8_t*>(dst);
+    const uint8_t* s = static_cast<const uint8_t*>(src);
+    size_t o = 0;
+    for (; o + 128 <= n; o += 128) {
+        const __m256i a = _mm256_stream_load_si256(reinterpret_cast<const __m256i*>(s + o));
+        const __m256i b = _mm256_stream_load_si256(reinterpret_cast<const __m256i*>(s + o + 32));
+        const __m256i c = _mm256_stream_load_si256(reinterpret_cast<const __m256i*>(s + o + 64));
+        const __m256i e = _mm256_stream_load_si256(reinterpret_cast<const __m256i*>(s + o + 96));
+        if (stream_store) {
+            _mm256_stream_si256(reinterpret_cast<__m256i*>(d + o), a);
+            _mm256_stream_si256(reinterpret_cast<__m256i*>(d + o + 32), b);
+            _mm256_stream_si256(reinterpret_cast<__m256i*>(d + o + 64), c);
+            _mm256_stream_si256(reinterpret_cast<__m256i*>(d + o + 96), e);
+        } else {
+            _mm256_storeu_si256(reinterpret_cast<__m256i*>(d + o), a);
+            _mm256_storeu_si256(reinterpret_cast<__m256i*>(d + o + 32), b);
+            _mm256_storeu_si256(reinterpret_cast<__m256i*>(d + o + 64), c);
+            _mm256_storeu_si256(reinterpret_cast<__m256i*>(d + o + 96), e);
+        }
+    }
+    if (o < n) std::memcpy(d + o, s + o, n - o);
+}
+#else
+void cap_read_copy(void* dst, const void* src, size_t n, bool = false) { std::memcpy(dst, src, n); }
+#endif
+
 // ---- texture storage in the capture ----
 // The textures' storage the replay uploads from joins the capture, and what the capture took of it is kept (the
 // shadow) for the uploads to read instead of guest memory: the storage as it was at its submit. MKW writes its terrain's
@@ -1957,7 +2004,7 @@ bool shadow_take_fast(const uint32_t* pages, size_t n, const uint32_t* copied, c
             shadow_n++;
         }
         slot.seq = shadow_seq;
-        std::memcpy(slot.b.get(), map + (uint64_t)slots[j] * 4096, 4096);
+        cap_read_copy(slot.b.get(), map + (uint64_t)slots[j] * 4096, 4096);
     }
     return true;
 }
@@ -2245,14 +2292,14 @@ bool memory_read_as_submitted(uint64_t gpu, void* dst, uint64_t n) {
                     if (!(gm >> k & 1)) continue;
                     const uint64_t g0 = (page << kPageShift) + (uint64_t)k * 512, a2 = std::max(a, g0), z2 = std::min(z, g0 + 512);
                     if (a2 < z2)
-                        std::memcpy((uint8_t*)dst + (a2 - guest), (const uint8_t*)b->second.map + (uint64_t)e.slot * 4096 + (a2 - (page << kPageShift)), z2 - a2);
+                        cap_read_copy((uint8_t*)dst + (a2 - guest), (const uint8_t*)b->second.map + (uint64_t)e.slot * 4096 + (a2 - (page << kPageShift)), z2 - a2);
                 }
                 if (PageX* x = pagex(page, true); x && !x->full) x->full = 1, st_gran_made_full.fetch_add(1, std::memory_order_relaxed);
                 late_read = true;   // (not kept as the page's whole copy below)
                 from++;
                 continue;
             }
-            std::memcpy((uint8_t*)dst + (a - guest), (const uint8_t*)b->second.map + (uint64_t)e.slot * 4096 + (a - (page << kPageShift)), z - a);
+            cap_read_copy((uint8_t*)dst + (a - guest), (const uint8_t*)b->second.map + (uint64_t)e.slot * 4096 + (a - (page << kPageShift)), z - a);
             from++;
         }
         if (stale) {   // (PIPE3: a page of it was written after the copy the read took: guest memory as it is now)
@@ -3079,7 +3126,8 @@ bool precopy_grow(std::unique_lock<std::mutex>& lk) {
             return false;
         }
         const size_t k = std::min<size_t>(256, pre.pages.size() - o);
-        stream_memcpy((uint8_t*)m + o * 4096, (const uint8_t*)pre.map + o * 4096, k * 4096);
+        if (stream_on()) cap_read_copy((uint8_t*)m + o * 4096, (const uint8_t*)pre.map + o * 4096, k * 4096, true);
+        else stream_memcpy((uint8_t*)m + o * 4096, (const uint8_t*)pre.map + o * 4096, k * 4096);
     }
     stream_fence();
     cap_buf_free(pre.buffer, pre.alloc, pre.map, pre.bsize);
@@ -4263,7 +4311,7 @@ bool take_capture(std::unique_ptr<Capture> c, uint64_t value, uint64_t completed
                     shadow_n++;
                 }
                 slot.seq = shadow_seq;
-                std::memcpy(slot.b.get(), (const uint8_t*)c->map + (uint64_t)c->slots[i] * 4096, 4096);
+                cap_read_copy(slot.b.get(), (const uint8_t*)c->map + (uint64_t)c->slots[i] * 4096, 4096);
             }
         }
         st_tk_shadow += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - tsh0).count();
