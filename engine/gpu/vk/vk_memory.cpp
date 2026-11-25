@@ -60,6 +60,7 @@
 #include <unistd.h>
 #endif
 #include "shaders/wb_diff_comp_spv.h"
+#include "shaders/wb_guess_comp_spv.h"   // (FOLIAGE2: the guessed heads' checked write-back on the GPU)
 #include "vk_work.h"   // (after the others: counts the commands that do GPU work, for full_barrier)
 #include "linux_pressure.h"   // (Longshot f1b17d59: the idle imports under Linux memory pressure)
 
@@ -8876,6 +8877,159 @@ WbdTable* wbd_table_get(uint64_t bytes) {
     return &t;
 }
 
+// ---- (FOLIAGE2) the guessed heads' checked write-back on the GPU, at the part's end (shaders/wb_guess.comp) ----
+// CRASH3's checked write-back (RX_VK_WB_GUESS_CHECKED) staged a bare entry's head and wrote its words from the CPU at a later
+// memory_end_submission (guess_apply), while wb_pages_note promised them done at the part's own timeline value. The culling
+// chains' counts and records there (OoT's foliage) then reached guest memory one part or more late: the next part's mirror
+// sync (the head's page is always stamped written, vk_draw.cpp memory_stamp_gpu) and the captures' late fix read the import
+// without them and put the older words back over the GPU's in the mirror; the next pass read old counts and plants vanished
+// for a frame while the camera moved (owner, 25 Nov; RX_VK_WB_GUESS_CHECKED=0 showed none). And the next binding's snapshot,
+// taken before that late write, then took it for a CPU write: the following part's words were left out. Here, for a pool with
+// an import, the check runs on the GPU in the part's own command buffer, where the whole copy was (the old timing): a word goes
+// into guest memory only when the mirror's differs from the snapshot at the binding (the GPU changed it) and guest memory still
+// holds the snapshot or the value this pass wrote there last (the "ours" table, keyed by the word's guest address): never over
+// a CPU write but for the pass's own read-then-write window, and only for words the GPU changed, which a stale entry's never are
+// (CRASH3's heap blocks). The CPU-staged path stays for pools without an import. RX_VK_WB_GUESS_GPU=0: CRASH3's staged form.
+bool wb_guess_gpu_on() {
+    static const bool v = [] {
+        const char* e = getenv("RX_VK_WB_GUESS_GPU");
+        const bool on = !e || atoi(e) != 0;
+        logf("vk: a guessed head's checked write-back %s (RX_VK_WB_GUESS_GPU)",
+             on ? "runs on the GPU at its part's end (pools with an import)" : "is staged and written by the CPU later, as CRASH3's");
+        return on;
+    }();
+    return v;
+}
+struct GgChunk {   // (shaders/wb_guess.comp's Chunk)
+    uint64_t mirror, snap, guest, gaddr;
+    uint32_t count, pad;
+};
+static_assert(sizeof(GgChunk) == 40);
+constexpr uint32_t kGgOursEntries = 1u << 18;   // (16 bytes each: 4 MB)
+struct GgPipe {
+    bool tried = false, ours_filled = false;
+    VkPipelineLayout layout = VK_NULL_HANDLE;
+    VkPipeline pipe = VK_NULL_HANDLE;
+    VkBuffer ours = VK_NULL_HANDLE;
+    VmaAllocation ours_alloc = nullptr;
+    VkDeviceAddress ours_address = 0;
+} gg_pipe;
+bool gg_pipe_ready() {
+    if (gg_pipe.tried) return gg_pipe.pipe != VK_NULL_HANDLE;
+    gg_pipe.tried = true;
+    if (!create_buffer((uint64_t)kGgOursEntries * 16, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                       VK_BUFFER_USAGE_TRANSFER_DST_BIT, false, gg_pipe.ours, gg_pipe.ours_alloc, nullptr)) {
+        logf("vk: guessed heads on the GPU: off, no buffer for its table");
+        return false;
+    }
+    VkBufferDeviceAddressInfo da{VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO};
+    da.buffer = gg_pipe.ours;
+    gg_pipe.ours_address = vkGetBufferDeviceAddress(dev.device, &da);
+    const VkPushConstantRange pr{VK_SHADER_STAGE_COMPUTE_BIT, 0, 40};
+    VkPipelineLayoutCreateInfo li{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+    li.pushConstantRangeCount = 1;
+    li.pPushConstantRanges = &pr;
+    VkShaderModule m = VK_NULL_HANDLE;
+    if (vkCreatePipelineLayout(dev.device, &li, nullptr, &gg_pipe.layout) == VK_SUCCESS) {
+        VkShaderModuleCreateInfo mi{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
+        mi.codeSize = sizeof WB_GUESS_COMP_SPV;
+        mi.pCode = WB_GUESS_COMP_SPV;
+        IntelDriverGate gate;
+        if (extern_guarded_shader_module(&mi, &m) == VK_SUCCESS) {
+            VkComputePipelineCreateInfo ci{VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};
+            ci.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+            ci.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+            ci.stage.module = m;
+            ci.stage.pName = "main";
+            ci.layout = gg_pipe.layout;
+            if (extern_guarded_compute(VK_NULL_HANDLE, &ci, &gg_pipe.pipe) != VK_SUCCESS) gg_pipe.pipe = VK_NULL_HANDLE;
+            vkDestroyShaderModule(dev.device, m, nullptr);
+        }
+    }
+    const bool ok = gg_pipe.pipe != VK_NULL_HANDLE;
+    logf("vk: guessed heads on the GPU: %s", ok ? "pipeline made" : "off, its pipeline was not made (CRASH3's staged form)");
+    return ok;
+}
+// (a part's table, host-visible, a ring as wbd_tables: the chunks, the snapshots' bytes, then the log the pass writes)
+struct GgTable {
+    VkBuffer buf = VK_NULL_HANDLE;
+    VmaAllocation alloc = nullptr;
+    uint8_t* map = nullptr;
+    VkDeviceAddress address = 0;
+    uint64_t bytes = 0, value = 0, log_at = 0;
+    uint32_t log_cap = 0;
+    bool pending = false;   // (its log not read yet)
+};
+GgTable gg_tables[64];
+int gg_table_next = 0;
+int64_t st_gg_runs = 0, st_gg_words = 0, st_gg_written = 0, st_gg_cpu = 0, st_gg_ours = 0, st_gg_staged = 0;
+uint32_t gg_log_cap() {
+    static const uint32_t v = [] { const char* e = getenv("HL_TRACE_WB"); return e && atoi(e) != 0 ? 16384u : 0u; }();
+    return v;
+}
+/// The logs of the parts the GPU has done: counts, and (HL_TRACE_WB) the words written, traced where they landed. pools_mu held
+void gg_logs_read(uint64_t done) {
+    for (GgTable& t : gg_tables) {
+        if (!t.pending || t.value > done) continue;
+        t.pending = false;
+        invalidate_mapped(t.alloc, t.bytes);
+        uint32_t head[4];
+        std::memcpy(head, t.map + t.log_at, sizeof head);
+        st_gg_written += head[0], st_gg_cpu += head[1], st_gg_ours += head[2];
+        const uint32_t n = std::min(head[3], t.log_cap);
+        if (n) {   // (sorted and merged into spans, as the trace's watch reads write-backs)
+            static thread_local std::vector<uint64_t> at;
+            at.resize(n);
+            for (uint32_t k = 0; k < n; k++) {
+                uint32_t w[2];
+                std::memcpy(w, t.map + t.log_at + 16 + 8ull * k, 8);
+                at[k] = (uint64_t)w[1] << 32 | w[0];
+            }
+            std::sort(at.begin(), at.end());
+            for (uint32_t k = 0; k < n;) {
+                uint32_t e = k + 1;
+                while (e < n && at[e] <= at[e - 1] + 4) e++;
+                trace_gpu(MKWVK_TRACE_WRITEBACK, at[k], at[e - 1] + 4 - at[k], 0, t.value);
+                k = e;
+            }
+        }
+    }
+    static int64_t told_at;
+    if (st_gg_runs - told_at >= 20000) {
+        told_at = st_gg_runs;
+        logf("vk: guessed write-backs on the GPU (bare storage entries' heads): %lld runs, %lld words checked; %lld words written "
+             "(%lld of them over this pass's own last write), %lld left to the CPU; %lld runs staged (no import)",
+             (long long)st_gg_runs, (long long)st_gg_words, (long long)st_gg_written, (long long)st_gg_ours, (long long)st_gg_cpu,
+             (long long)st_gg_staged);
+    }
+}
+GgTable* gg_table_get(uint64_t bytes) {
+    GgTable& t = gg_tables[gg_table_next];
+    if (t.value > mem_completed) return nullptr;   // (still read by a part the GPU has not done)
+    if (t.pending) gg_logs_read(mem_completed);
+    if (t.bytes < bytes) {
+        if (t.buf) destroy_buffer(t.buf, t.alloc);
+        t = {};
+        const uint64_t n = std::max<uint64_t>(64u << 10, (bytes + 65535) & ~65535ull);
+        void* map = nullptr;
+        MemKindScope mem_kind_(MemKind::Staging);
+        if (!create_buffer(n, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true, t.buf, t.alloc, &map) ||
+            !map) {
+            if (t.buf) destroy_buffer(t.buf, t.alloc);
+            t = {};
+            return nullptr;
+        }
+        VkBufferDeviceAddressInfo da{VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO};
+        da.buffer = t.buf;
+        t.address = vkGetBufferDeviceAddress(dev.device, &da);
+        t.map = (uint8_t*)map;
+        t.bytes = n;
+    }
+    gg_table_next = (gg_table_next + 1) % 64;
+    t.value = rec_value_of();
+    return &t;
+}
+
 // ---- (WBL1, ProjectReLink's RX_VK_WB_LAZY by pixl27) the write-back put off to the frame's end: see wbl_on, above ----
 namespace {   // (with wbl_sync_flush's declaration before mirror_sync)
 /// (pools_mu held; memory_note_readback) The CPU reads [guest, guest + size) of GPU results (invalidate): its pages are shared from now
@@ -9501,6 +9655,9 @@ void end_submission_impl(VkCommandBuffer cmd, MemSub& sub) {
         const bool diff = wb_diff_on() && wbd_pipe_ready();
         if (diff) shadows_forget_written(), shadows_reap(), shadows_check_room();
         static thread_local std::vector<WbdChunk> chunks;
+        static thread_local std::vector<GgChunk> gg_chunks;   // (FOLIAGE2: the guessed heads checked on the GPU; snap: offset in gg_snap)
+        static thread_local std::vector<uint8_t> gg_snap;
+        gg_chunks.clear(), gg_snap.clear();
         struct ChunkSrc { Pool* p; uint64_t at, len; };
         static thread_local std::vector<ChunkSrc> chunk_src;   // (for the whole copy, when no table is free)
         static thread_local std::vector<VkBufferCopy> fills, odd;
@@ -9634,6 +9791,16 @@ void end_submission_impl(VkCommandBuffer cmd, MemSub& sub) {
                 }
                 cut_cpu_words(*p, runs);
                 if (runs.empty() || !p->mirror || p->mstate != Pool::MIRROR_ON) continue;
+                // (FOLIAGE2) a pool with an import: checked on the GPU in this part (wb_guess.comp), as the whole copy was timed
+                const bool on_gpu = wb_guess_gpu_on() && gg_pipe_ready() &&
+                                    (p->memory || (!p->never_imported && import_again(*p, kAgainWb))) && p->address;
+                VkDeviceAddress gg_mirror = 0;
+                if (on_gpu) {
+                    VkBufferDeviceAddressInfo mda{VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO};
+                    mda.buffer = p->mirror;
+                    gg_mirror = vkGetBufferDeviceAddress(dev.device, &mda);
+                }
+                bool any_staged = false;
                 for (const VkBufferCopy& r : runs) {
                     // (the run's snapshot from its bindings' ones; a byte none of them took is not known: never written)
                     const uint64_t so = staged.snaps.size();
@@ -9645,13 +9812,41 @@ void end_submission_impl(VkCommandBuffer cmd, MemSub& sub) {
                         std::memcpy(staged.snaps.data() + so + (x - r.dstOffset), it->second.data() + (x - lo), y - x);
                         std::memset(staged.snaps.data() + so + r.size + (x - r.dstOffset), 1, y - x);
                     }
+                    if (on_gpu && !(r.dstOffset & 3)) {   // (FOLIAGE2: the known whole words as chunks, the snapshot into the part's table)
+                        const uint8_t* snap = staged.snaps.data() + so;
+                        const uint8_t* known = snap + r.size;
+                        for (uint64_t w = 0; w + 4 <= r.size;) {
+                            if (!(known[w] && known[w + 1] && known[w + 2] && known[w + 3])) {
+                                w += 4;
+                                continue;
+                            }
+                            uint64_t e = w + 4;
+                            while (e + 4 <= r.size && e - w < (16u << 10) && known[e] && known[e + 1] && known[e + 2] && known[e + 3]) e += 4;
+                            const uint64_t at = r.dstOffset + w;
+                            gg_chunks.push_back({gg_mirror + at, gg_snap.size(), p->address + at, p->lo + at, (uint32_t)((e - w) / 4), 0});
+                            gg_snap.insert(gg_snap.end(), snap + w, snap + e);
+                            st_gg_words += (int64_t)((e - w) / 4);
+                            wb_pages_note(p->lo + at, p->lo + r.dstOffset + e, rec_value_of(), false);   // (traced where it lands)
+                            w = e;
+                        }
+                        staged.snaps.resize(so);
+                        st_gg_runs++;
+                        continue;
+                    }
+                    any_staged = true;
+                    st_gg_staged++;
                     staged.runs.push_back({p->lo + r.dstOffset, staged.bytes, r.size, kStagedChecked | so});
                     staged.bytes += r.size;
                     wb_pages_note(p->lo + r.dstOffset, p->lo + r.dstOffset + r.size, rec_value_of(), false);   // (EvilBoyce)
                     std::lock_guard sk(staged_mu);
                     st_gw_runs++;
                 }
-                staged_pools.push_back({p, runs});
+                if (any_staged) {   // (the staged runs only: the copy into staging takes them in this order)
+                    std::vector<VkBufferCopy> rs;
+                    for (const VkBufferCopy& r : runs)
+                        if (!on_gpu || (r.dstOffset & 3)) rs.push_back(r);
+                    staged_pools.push_back({p, std::move(rs)});
+                }
             }
         }
         if (!chunks.empty()) {
@@ -9679,6 +9874,45 @@ void end_submission_impl(VkCommandBuffer cmd, MemSub& sub) {
                 // device-lost logs of an RTX 5060 and a GTX 1660 Ti, issues 899 and 1008)
                 checkpoint_mark(cmd, n, 'w');
                 vkCmdDispatch(cmd, std::min<uint32_t>(n, 65535u), (n + 65534u) / 65535u, 1);
+            }
+        }
+        if (!gg_chunks.empty()) {   // (FOLIAGE2: the guessed heads' checked write-back, one dispatch, in this part)
+            gg_logs_read(mem_completed);
+            const uint64_t snap_at = (gg_chunks.size() * sizeof(GgChunk) + 15) & ~15ull;
+            const uint64_t log_at = (snap_at + gg_snap.size() + 15) & ~15ull;
+            const uint32_t cap = gg_log_cap();
+            GgTable* t = gg_table_get(log_at + 16 + 8ull * cap);
+            if (!t) {   // (no table free: left out this time, the mirror keeps the GPU's words; counted)
+                static int logged;
+                if (logged++ < 8) logf("vk: guessed heads on the GPU: no table free (%zu chunks): left out this part", gg_chunks.size());
+            } else {
+                for (GgChunk& c : gg_chunks) c.snap += t->address + snap_at;
+                std::memcpy(t->map, gg_chunks.data(), gg_chunks.size() * sizeof(GgChunk));
+                std::memcpy(t->map + snap_at, gg_snap.data(), gg_snap.size());
+                std::memset(t->map + log_at, 0, 16);
+                flush_mapped(t->alloc, log_at + 16);
+                t->log_at = log_at, t->log_cap = cap, t->pending = true;
+                if (!gg_pipe.ours_filled) {   // (the "ours" table empty: nothing written by the pass yet)
+                    vkCmdFillBuffer(cmd, gg_pipe.ours, 0, VK_WHOLE_SIZE, 0);
+                    gg_pipe.ours_filled = true;
+                }
+                full_barrier(cmd, "barrier (write-back or sync)");   // (after the copies and the diff pass over the same memory)
+                GprofSpan gg(cmd, "wb guessed heads (mirror -> guest memory, the GPU's words the CPU did not write)");
+                gg.items = (int)gg_chunks.size();
+                vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, gg_pipe.pipe);
+                const struct { uint64_t table, ours, log; uint32_t count, mask, cap, pad; } pc{
+                    t->address, gg_pipe.ours_address, t->address + log_at, (uint32_t)gg_chunks.size(), kGgOursEntries - 1, cap, 0};
+                static_assert(sizeof pc == 40);
+                vkCmdPushConstants(cmd, gg_pipe.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof pc, &pc);
+                const uint32_t n = (uint32_t)gg_chunks.size();
+                checkpoint_mark(cmd, n, 'h');
+                vkCmdDispatch(cmd, std::min<uint32_t>(n, 65535u), (n + 65534u) / 65535u, 1);
+                VkMemoryBarrier2 hb{VK_STRUCTURE_TYPE_MEMORY_BARRIER_2};   // (the pass's writes before the host reads guest memory and the log)
+                hb.srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, hb.srcAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT;
+                hb.dstStageMask = VK_PIPELINE_STAGE_2_HOST_BIT, hb.dstAccessMask = VK_ACCESS_2_HOST_READ_BIT;
+                VkDependencyInfo hd{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
+                hd.memoryBarrierCount = 1, hd.pMemoryBarriers = &hb;
+                vkCmdPipelineBarrier2(cmd, &hd);
             }
         }
         if (staged.bytes) {   // (RX_VK_POOL_MIRROR: the never-imported pools' runs into one host-cached staging buffer)
