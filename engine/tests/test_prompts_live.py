@@ -336,6 +336,81 @@ def texts(cc, src, tmp):
     r = subprocess.run([str(exe)], capture_output=True, text=True)
     check(r.returncode == 0 and r.stdout.strip() == "ok", "text_code: %s%s" % (r.stdout, r.stderr))
 
+BOXES = r"""
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+typedef long LONG;
+typedef int SRWLOCK;
+#define SRWLOCK_INIT 0
+#define HOS_PROMPT_N 6
+#define BINDS 32
+static LONG InterlockedIncrement(volatile LONG *p) { return ++*p; }
+static void AcquireSRWLockExclusive(SRWLOCK *l) { (void)l; }
+static void ReleaseSRWLockExclusive(SRWLOCK *l) { (void)l; }
+static int logs;
+static void hos_log(const char *fmt, ...) { (void)fmt; logs++; }
+enum { WINDOW = 1 << 20 };
+static uint8_t window[WINDOW];   /* (guest addresses: offsets into it, from 0x1000) */
+static void *hos_guest_range(uint64_t a, uint64_t n) { return a >= 0x1000 && a < WINDOW && n <= WINDOW - a ? window + a : NULL; }
+static volatile LONG font_changes, text_seen, text_with_codes, text_rewritten, text_codes_told;
+static int live_face_now = 2, live_bind_now[BINDS];
+static int text_code(unsigned c, int face, const int *bind) { (void)face; (void)bind; return c == 0xE040 ? 0xF123 : c == 0xF123 ? 0xE040 : -1; }
+%(code)s
+#define CHECK(x) do { if (!(x)) { fprintf(stderr, "FAIL:%%d %%s\n", __LINE__, #x); return 1; } } while (0)
+/* a box at 0x2000: its status pointer at +8 (0x3000, the word 0 and the allowed bits after it), its text at +0xf0 (0x4000), its length at +0x124 */
+static void make(uint64_t box, uint64_t status, uint64_t text, const char *s, uint32_t n) {
+    *(uint64_t *)(window + box + 8) = status;
+    *(uint32_t *)(window + status + 4) = 0xFFFFFFFF;
+    *(uint64_t *)(window + box + 0xf0) = text;
+    *(uint32_t *)(window + box + 0x124) = n;
+    memcpy(window + text, s, n);
+}
+int main(void) {
+    /* "Back \xEE\x81\x80" (U+E040) seen before any change: noted, not rewritten, laid out as it was */
+    make(0x2000, 0x3000, 0x4000, "Back \xEE\x81\x80", 8);
+    make(0x2400, 0x3100, 0x4100, "no icon here", 12);
+    CHECK(text_rewrite(0x2000) == 0 && seen_n == 1);
+    CHECK(text_rewrite(0x2400) == 0 && seen_n == 1 && ret_codes == 1);
+    CHECK(text_rewrite(0x2000) == 0 && seen_n == 1);   /* (the same box: one entry) */
+    CHECK(!memcmp(window + 0x4000, "Back \xEE\x81\x80", 8));
+    /* the change: the hook is not called again, the table reaches the box at once and marks it to be laid out again */
+    font_changes = 1;
+    int looked = 0;
+    CHECK(boxes_rewrite(&looked) == 1 && looked == 1);
+    CHECK(!memcmp(window + 0x4000, "Back \xEF\x84\xA3", 8));   /* (U+F123) */
+    CHECK((*(uint32_t *)(window + 0x3000) & 0x120000) == 0x120000);
+    /* the next change finds it as it is, and puts the text's code back */
+    *(uint32_t *)(window + 0x3000) = 0;
+    CHECK(boxes_rewrite(&looked) == 1 && !memcmp(window + 0x4000, "Back \xEE\x81\x80", 8));
+    /* a box gone (its text pointer or its status another): let be, not even looked at */
+    *(uint64_t *)(window + 0x2000 + 0xf0) = 0x4800;
+    memcpy(window + 0x4800, "x \xEE\x81\x80", 6);
+    *(uint32_t *)(window + 0x2000 + 0x124) = 6;
+    *(uint32_t *)(window + 0x3000) = 0;
+    CHECK(boxes_rewrite(&looked) == 0 && looked == 0 && !memcmp(window + 0x4800, "x \xEE\x81\x80", 6) && *(uint32_t *)(window + 0x3000) == 0);
+    /* more boxes than the table holds: the oldest entry's place is taken, the table never grows past it */
+    for (int i = 0; i < BOXES + 5; i++) {
+        make(0x10000 + (uint64_t)i * 0x200, 0x3200, 0x7000 + (uint64_t)i * 0x10, "a \xEE\x81\x80", 6);
+        text_rewrite(0x10000 + (uint64_t)i * 0x200);
+    }
+    CHECK(seen_n == BOXES);
+    puts("ok");
+    return 0;
+}
+"""
+
+
+def boxes(cc, src, tmp):
+    code = src[src.index("#define BOXES"):src.index("/* nx2/oot_patches.py, as the game lays a text box out")]
+    c, exe = Path(tmp) / "boxes.c", Path(tmp) / "boxes"
+    c.write_text(BOXES % {"code": code}, encoding="utf-8")
+    subprocess.run([cc, "-std=gnu11", "-Wall", "-Wextra", "-Werror", "-Wno-unused-function", "-Wno-unused-variable",
+                    "-Wno-unused-but-set-global", str(c), "-o", str(exe)], check=True)
+    r = subprocess.run([str(exe)], capture_output=True, text=True)
+    check(r.returncode == 0 and r.stdout.strip() == "ok", "the boxes seen: %s%s" % (r.stdout, r.stderr))
+
+
 
 def auto(cc, src, tmp):
     defs = [m.group(0).split("/*")[0].rstrip() for m in re.finditer(r"#define AUTO_\w+ .*", src)]
@@ -377,10 +452,11 @@ def main():
         pool_gone(a.cc, src, tmp)
         texts(a.cc, src, tmp)
         auto(a.cc, src, tmp)
+        boxes(a.cc, src, tmp)
         font_find(a.cc, src, tmp)
     check(out.returncode == 0 and out.stdout.strip() == "ok", "exit %d: %s%s" % (out.returncode, out.stdout, out.stderr))
     print("ok: text codes follow the face and the controls; Auto's device in use has its hysteresis; put_runs puts the game's bytes back, writes the runs in order, leaves one past the range; guarded, never over "
-          "bytes the game changed; the textures' pool finalized is not written, under its lock; the font is found from FreeType's glyph at the stream's base or 8 bytes on")
+          "bytes the game changed; the textures' pool finalized is not written, under its lock; the font is found from FreeType's glyph at the stream's base or 8 bytes on; the boxes seen with button codes are rewritten and laid out again at a change, one gone left be")
 
 
 if __name__ == "__main__":

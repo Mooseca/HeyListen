@@ -983,22 +983,87 @@ static int text_code(unsigned c, int face, const int *bind) {   /* the code that
     return BIND_BASE + (face * HOS_SW_N + b) * HOS_PAD_ART_N + pad;
 }
 
-/* the box's codes for the buttons as they are now; 1 when it changed them */
-static int text_rewrite(uint64_t box) {
+/* the boxes seen with button codes in their text, by the hooks below: the game does not lay out or draw a box that stays on
+   screen again (a hint bar, a menu's tabs), so a change while it is shown reaches them from this table: each is looked at
+   again (its text, its length and its status pointer as they were: a box gone is let be) and laid out anew */
+#define BOXES 256
+typedef struct { uint64_t box, text, status; uint32_t len; } SeenBox;
+static SeenBox seen_box[BOXES];
+static int seen_n, seen_next;
+static SRWLOCK seen_lock = SRWLOCK_INIT;
+static volatile LONG calls_layout, calls_draw, ret_text, ret_codes, boxes_told;   /* (hook calls, boxes with no text, with no codes: said at each change) */
+
+/* the box's text and length; NULL for a box without a readable text */
+static uint8_t *box_text(uint64_t box, uint64_t *at, uint32_t *n) {
+    const uint64_t *text = (const uint64_t *)hos_guest_range(box + 0xf0, 8);
+    const uint32_t *len = (const uint32_t *)hos_guest_range(box + 0x124, 4);
+    if (!text || !len || !*text || *len < 3 || *len > 65536) return NULL;
+    *at = *text, *n = *len;
+    return (uint8_t *)hos_guest_range(*text, *len);
+}
+
+static int is_code_at(const uint8_t *s) {   /* a 3-byte code of the private use area (UTF-8 1110xxxx 10xxxxxx 10xxxxxx) at s? */
+    return (s[0] == 0xEE || s[0] == 0xEF) && (s[1] & 0xC0) == 0x80 && (s[2] & 0xC0) == 0x80;
+}
+
+static int has_code(const uint8_t *s, uint32_t n) {
+    for (uint32_t i = 0; i + 2 < n; i++)
+        if (is_code_at(s + i)) return 1;
+    return 0;
+}
+
+static void box_note(uint64_t box, uint64_t text, uint32_t len, const uint8_t *s) {
+    const uint64_t *st = (const uint64_t *)hos_guest_range(box + 8, 8);
+    const uint64_t status = st ? *st : 0;
+    int fresh = 0;
+    AcquireSRWLockExclusive(&seen_lock);
+    int k = 0;
+    while (k < seen_n && seen_box[k].box != box) k++;
+    if (k == seen_n) {
+        k = seen_n < BOXES ? seen_n++ : (seen_next++ % BOXES);
+        fresh = 1;
+    }
+    seen_box[k].box = box, seen_box[k].text = text, seen_box[k].len = len, seen_box[k].status = status;
+    ReleaseSRWLockExclusive(&seen_lock);
+    if (fresh && boxes_told < 60) {   /* (what has button codes: the first boxes, for a bar that never follows) */
+        InterlockedIncrement(&boxes_told);
+        char codes[48] = "";
+        int m = 0;
+        for (uint32_t i = 0; i + 2 < len && m < 5; i++)
+            if (is_code_at(s + i)) {
+                const size_t at = strlen(codes);
+                snprintf(codes + at, sizeof codes - at, " U+%04X", (unsigned)(s[i] & 0x0F) << 12 | (unsigned)(s[i + 1] & 0x3F) << 6 | (s[i + 2] & 0x3F));
+                m++, i += 2;
+            }
+        const uint64_t *vt = (const uint64_t *)hos_guest_range(box, 8);
+        hos_log("prompts: a box with button codes:%s (box %#llx, class %#llx, %u bytes, %s)", codes, (unsigned long long)box,
+                (unsigned long long)(vt ? *vt : 0), len, font_changes ? "after a change" : "at the start's face");
+    }
+}
+
+/* the box's codes for the buttons as they are now; 1 when it changed them. note: the box is put in the table of boxes seen */
+static int box_rewrite(uint64_t box, int note) {
+    uint64_t at;
+    uint32_t n;
+    uint8_t *s = box_text(box, &at, &n);
+    if (!s) {
+        InterlockedIncrement(&ret_text);
+        return 0;
+    }
+    if (!has_code(s, n)) {
+        InterlockedIncrement(&ret_codes);
+        return 0;
+    }
+    if (note) box_note(box, at, n, s);
     if (!font_changes) return 0;
     const int face = live_face_now;
     if (face < 0 || face >= HOS_PROMPT_N) return 0;
     int bind[BINDS];
     memcpy(bind, live_bind_now, sizeof bind);
-    const uint64_t *text = (const uint64_t *)hos_guest_range(box + 0xf0, 8);
-    const uint32_t *len = (const uint32_t *)hos_guest_range(box + 0x124, 4);
-    if (!text || !len || !*text || *len < 3 || *len > 65536) return 0;
-    uint8_t *s = (uint8_t *)hos_guest_range(*text, *len);
-    if (!s) return 0;
     int changed = 0, with = 0;
     InterlockedIncrement(&text_seen);
-    for (uint32_t i = 0; i + 2 < *len; i++) {   /* (UTF-8: the codes here are 3 bytes, 1110xxxx 10xxxxxx 10xxxxxx) */
-        if ((s[i] != 0xEE && s[i] != 0xEF) || (s[i + 1] & 0xC0) != 0x80 || (s[i + 2] & 0xC0) != 0x80) continue;
+    for (uint32_t i = 0; i + 2 < n; i++) {   /* (UTF-8: the codes here are 3 bytes, 1110xxxx 10xxxxxx 10xxxxxx) */
+        if (!is_code_at(s + i)) continue;
         const unsigned code = (unsigned)(s[i] & 0x0F) << 12 | (unsigned)(s[i + 1] & 0x3F) << 6 | (s[i + 2] & 0x3F);
         const int c = text_code(code, face, bind);
         if (!with++) InterlockedIncrement(&text_with_codes);
@@ -1016,6 +1081,10 @@ static int text_rewrite(uint64_t box) {
     return changed;
 }
 
+static int text_rewrite(uint64_t box) {
+    return box_rewrite(box, 1);
+}
+
 /* the box's status bits set (as the word after them allows) */
 static void mark_box(uint64_t box, uint32_t bits) {
     const uint64_t *status = (const uint64_t *)hos_guest_range(box + 8, 8);
@@ -1023,8 +1092,33 @@ static void mark_box(uint64_t box, uint32_t bits) {
     if (word) *word |= bits & word[1];
 }
 
+/* a change while the game runs (live_font, the font and the codes' tables already changed): every box seen and still as it was
+   is rewritten and laid out anew; returns how many it rewrote, and in *looked how many were still there */
+static int boxes_rewrite(int *looked) {
+    SeenBox copy[BOXES];
+    int n, done = 0;
+    AcquireSRWLockExclusive(&seen_lock);
+    n = seen_n;
+    memcpy(copy, seen_box, sizeof(seen_box[0]) * (size_t)n);
+    ReleaseSRWLockExclusive(&seen_lock);
+    *looked = 0;
+    for (int k = 0; k < n; k++) {
+        uint64_t at;
+        uint32_t len;
+        const uint64_t *st = (const uint64_t *)hos_guest_range(copy[k].box + 8, 8);
+        if (!box_text(copy[k].box, &at, &len) || at != copy[k].text || len != copy[k].len || !st || *st != copy[k].status) continue;   /* (gone, or another) */
+        (*looked)++;
+        if (box_rewrite(copy[k].box, 0)) {
+            mark_box(copy[k].box, 0x20000 | 0x100000);
+            done++;
+        }
+    }
+    return done;
+}
+
 /* nx2/oot_patches.py, as the game lays a text box out (f_8152aec0, before it looks at the box's status: laid out now) */
 void hos_prompts_text_layout(uint64_t box) {
+    InterlockedIncrement(&calls_layout);
     if (text_rewrite(box)) mark_box(box, 0x20000);
 }
 
@@ -1033,6 +1127,7 @@ void hos_prompts_text_layout(uint64_t box) {
 void hos_prompts_text_draw(uint64_t box) {
     static int first = 1;
     if (first) first = 0, hos_log("prompts: the first text box drawn since the start (box %#llx)", (unsigned long long)box);
+    InterlockedIncrement(&calls_draw);
     if (text_rewrite(box)) mark_box(box, 0x20000 | 0x100000);
 }
 
@@ -1091,9 +1186,13 @@ static int live_font(const char *dir, int face) {
         memcpy(q, b + 8, (size_t)n - 8);
         ReleaseSRWLockExclusive(&slot_lock);
         InterlockedIncrement(&font_changes);
+        int looked = 0;
+        const int now = boxes_rewrite(&looked);
         hos_log("prompts: now the %s icons in texts, %d buttons on these controls (since the change before: %ld texts looked at, %ld with codes, "
-                "%ld rewritten)", faces[face], bound, (long)InterlockedExchange(&text_seen, 0), (long)InterlockedExchange(&text_with_codes, 0),
-                (long)InterlockedExchange(&text_rewritten, 0));
+                "%ld rewritten; %ld layouts and %ld draws of boxes, %ld without a text, %ld without codes; the %d boxes known: %d still there, "
+                "%d rewritten at once)", faces[face], bound, (long)InterlockedExchange(&text_seen, 0), (long)InterlockedExchange(&text_with_codes, 0),
+                (long)InterlockedExchange(&text_rewritten, 0), (long)InterlockedExchange(&calls_layout, 0), (long)InterlockedExchange(&calls_draw, 0),
+                (long)InterlockedExchange(&ret_text, 0), (long)InterlockedExchange(&ret_codes, 0), seen_n, looked, now);
     } else if (q) {
         hos_log("prompts: the font is no longer where FreeType read it: the icons in texts at the next start");
     }
