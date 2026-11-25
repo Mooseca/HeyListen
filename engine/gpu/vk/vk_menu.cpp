@@ -113,6 +113,7 @@ const char* tx_framegen(int v) {
     return t[std::clamp(fgr::clamp(framegen_by_now(), dlss_fg_most(), std::clamp(v, 0, 8)), 0, 8)];
 }
 const char* tx_onoff(int v) { return v ? "On" : "Off"; }
+const char* tx_sprint(int v) { return v == 1 ? "Hold" : v == 2 ? "Toggle" : "Off"; }   // (Sprint with L3: 0 Off, 1 Hold, 2 Toggle)
 const char* tx_framegen_by(int v) {
     static const char* t[fgr::kBy] = {"Built-in / AMD FSR 3.1", "NVIDIA DLSS FG", "AMD FSR 3.1 FG", "AMD FSR 4 FG"};
     return t[std::clamp(v, 0, fgr::kBy - 1)];
@@ -1076,9 +1077,11 @@ Row rows[] = {
      "put each action on.", hn_prompts, true, true},
     {TAB_CONTROLS, "Controller in background", &opts.pad_background, 0, 1, 1, tx_onoff,
      "Whether the controller plays the game while another window has the focus.", hn_background},
-    {TAB_CONTROLS, "Sprint with L3", &opts.sprint, 0, 1, 1, tx_onoff,   // (HL_OPT_SPRINT, vk_opt_ids.h, host/oot_sprint.c; saved as sprint_with_l3)
-     "Off (the default): the left stick's press is the game's own LS. On: while it is pressed Link runs with the game's own fast "
-     "run, the one that follows a roll while A is held, without the roll, until he stops, rolls or targets. Any input bound to the "
+    {TAB_CONTROLS, "Sprint with L3", &opts.sprint, 0, 2, 1, tx_sprint,   // (HL_OPT_SPRINT, vk_opt_ids.h, host/oot_sprint.c; saved as sprint_with_l3)
+     "Off (the default): the left stick's press is the game's own LS. Hold: while it is pressed Link runs with the game's own fast "
+     "run, the one that follows a roll while A is held, without the roll, until he stops, rolls or targets. Toggle: one click "
+     "starts that run, which goes on without holding and ends when the left stick is back at rest, on another click, or when "
+     "he targets, a menu or a cutscene opens, or he does something else. Any input bound to the "
      "game's LS counts, the keyboard's too. The game no longer gets that press as LS, except one that begins in a conversation or "
      "a cutscene, which still hides the text box. A is untouched: tapping it still rolls. Ported from Longshot (llun, kendowashere).",
      nullptr, false, true},

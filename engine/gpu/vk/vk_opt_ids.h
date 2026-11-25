@@ -44,5 +44,5 @@
 #define HL_OPT_HDR_TONEMAP 47
 
 /* The Controls tab's Sprint with L3 row (host/nn_hid.c asks at each read of the controllers, host/oot_sprint.c acts;
-   gpu/vk/vk_replay.cpp answers 0 or 1). 97 is Longshot's id for its Sprint row (HOS_OPT_SPRINT in its vk_api.h); free here. */
+   gpu/vk/vk_replay.cpp answers 0 off, 1 hold, 2 toggle). 97 is Longshot's id for its Sprint row (HOS_OPT_SPRINT in its vk_api.h); free here. */
 #define HL_OPT_SPRINT 97

@@ -55,6 +55,8 @@ the **Open menu** row takes one gamepad button, or two pressed together (L3 + R3
 the ways above keep working. A combination held does not reach the game. When a controller is opened the game's log
 (`hookshot_log.txt`) says what it is and which buttons open the menu. Frame generation is off by default.
 
+**Controls → Sprint with L3** (off by default) makes a press of the left stick (L3) run Link with the game's own fast run. **Hold** runs while L3 is held; **Toggle** starts the run with one click of L3, keeps it going without holding, and ends it when the left stick is back at rest or when L3 is clicked again.
+
 ### Graphics: Upscaler, Render resolution and frame generation
 
 The Graphics tab has these rows together, in this order (the Quality preset, Fullscreen and GPU device first, the picture's output

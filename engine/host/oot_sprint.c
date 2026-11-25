@@ -3,7 +3,16 @@
    Sprint with L3 (the Controls tab's "Sprint with L3" row, off by default; host/nn_hid.c's npad_states calls hos_sprint_input).
 
    Original change by llun and kendowashere (Longshot #1929 and #2038, after thegrandao's #196); reduced here to a held
-   left stick press, with no Toggle and no rebinding.
+   left stick press and a toggle of this project's own rules, with no rebinding.
+
+   The row's three values: 0 Off, 1 Hold (the press runs Link while it is held), 2 Toggle (a click starts the run, which goes on
+   without holding). Toggle's rules, all in hos_sprint_input and hos_sprint_link, no new gameplay: a click that begins in gameplay
+   (the same test as Hold's) with the left stick out of its dead zone starts it; a click while it runs ends it; it also ends when
+   the stick has been in its dead zone for NEUTRAL_READS reads in a row (the Stick dead zone row's own cut, host/nn_hid.c
+   hos_stick_axis), when gameplay stops (a conversation or a cutscene, a zone change or a loading screen, the game's pause
+   menu: Link's update does not run), when the Insert menu opens, when ZL is held, when Link is in a state Hold ends the run in
+   (an attack, an item, swimming, climbing), and when the row is changed. A click with the stick at rest starts nothing. A
+   rolling Link keeps it, as in Hold.
 
    Link sprints while his input flags hold the dash input (bit 4 of the word at *(Link +0x50)), the flag the game sets itself for
    the run that follows a roll while A stays held. Two places load those flags (nx2/oot_patches.py patch_sprint_link and
@@ -35,6 +44,7 @@
 #define ACTOR_MGR_CLASS 0x84bffe68ull
 #define CONTROLLED_CLASS 0x84b69698ull
 #define EVENT_MGR 0x84c9e090ull       /* the pointer to the event manager pointer */
+#define NEUTRAL_READS 6              /* Toggle: this many reads in a row with the stick at rest end the run */
 #define GAMEPLAY_POLLS 8              /* a press is Sprint's while Link's update ran within this many reads */
 
 enum { MOVE, KEEP, STOP };
@@ -51,7 +61,8 @@ static const struct { int32_t id; uint8_t kind; } states[] = {
     {40, KEEP},    /* Wait */
 };
 
-static volatile int enabled;   /* the row on */
+static volatile int enabled;   /* the row's value: 0 off, 1 hold, 2 toggle */
+static volatile int toggled;   /* Toggle: the run is on */
 static volatile int held;      /* the left stick pressed at the last read */
 static volatile int latched;   /* the press now held began in gameplay: Sprint's */
 static volatile int zl_held;   /* ZL (targeting) held at the last read */
@@ -97,13 +108,15 @@ static int state_kind(Ctx *c, uint64_t link) {
 }
 
 /* host/nn_hid.c npad_states, the game's thread: each read of the controllers. buttons: what the game would get; on: the row;
-   blocked: no press is Sprint's or the game's now (the Insert menu open, the ocarina waiting for a note). Returns the buttons
+   blocked: no press is Sprint's or the game's now (the Insert menu open, the ocarina waiting for a note); moving: the left
+   stick is out of its dead zone. Returns the buttons
    with the left stick's press taken out while the row is on, and put back for a press that began outside gameplay (Link's
    update has not run within the last few reads, or an event is running). */
-uint64_t hos_sprint_input(uint64_t buttons, int on, int blocked) {
-    static int was_down, passing;
+uint64_t hos_sprint_input(uint64_t buttons, int on, int blocked, int moving) {
+    static int was_down, passing, neutral;
     const int down = (buttons & BIT_LS) != 0;
     STORE(enabled, on);
+    if (on != 2) STORE(toggled, 0);
     if (!on) {
         STORE(latched, 0), STORE(held, 0), STORE(active, 0);
         STORE(polls, GAMEPLAY_POLLS);
@@ -119,11 +132,19 @@ uint64_t hos_sprint_input(uint64_t buttons, int on, int blocked) {
         const int mine = gameplay && !blocked;
         STORE(latched, mine);
         passing = !mine && !blocked;
+        if (on == 2 && mine) {   /* a click: ends the run, or starts it with the stick out of its dead zone */
+            if (LOAD(toggled)) STORE(toggled, 0);
+            else if (moving) STORE(toggled, 1), neutral = 0;
+        }
     } else if (!down) {
         STORE(latched, 0);
         passing = 0;
     }
     if (blocked) STORE(latched, 0), STORE(active, 0), passing = 0;
+    if (LOAD(toggled)) {
+        neutral = moving ? 0 : neutral + 1;
+        if (neutral >= NEUTRAL_READS || !gameplay || blocked) STORE(toggled, 0), STORE(active, 0);
+    }
     was_down = down;
     STORE(held, down);
     STORE(zl_held, (buttons & BIT_ZL) != 0);
@@ -136,7 +157,9 @@ void hos_sprint_link(Ctx *c) {
     if (!LOAD(enabled)) return;
     if (!is_link(c, c->x[19])) return;
     STORE(polls, 0);
-    const int on = LOAD(held) && LOAD(latched) && !LOAD(zl_held) && state_kind(c, c->x[19]) != STOP;
+    const int ok = !LOAD(zl_held) && state_kind(c, c->x[19]) != STOP;
+    if (LOAD(enabled) == 2 && !ok) STORE(toggled, 0);   /* Toggle: what ends Hold's run for a moment ends this one */
+    const int on = LOAD(enabled) == 2 ? LOAD(toggled) && ok : LOAD(held) && LOAD(latched) && ok;
     STORE(active, on);
     /* a line a few times a second while the row is on, for a test run: Link's update count, the dash, his state and where he is
        (the actor's position, floats at +796: the debug tools' Mark position reads the same) */
