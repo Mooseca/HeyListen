@@ -929,7 +929,7 @@ Row rows[] = {
     {TAB_GRAPHICS, "Frame generation by", &opts.framegen_by, 0, fgr::kBy - 1, 1, tx_framegen_by,
      "Who makes the made frames, and so how many the Frame generation row offers. NVIDIA DLSS Frame Generation (RTX 40 and newer, "
      "with a temporal Upscaler) is off unless chosen here. AMD FSR 4 FG (a Radeon RX 9000, 2x) is a choice only where AMD's own runtime "
-     "says it runs on this GPU, and is not tested on real hardware yet. Changing it keeps the multiplier within what the new mode makes.",
+     "says it runs on this GPU (the Builder's AMD FSR 4 box fetches it: if it is missing, run the Builder again with the box ticked), and is not tested on real hardware yet. Changing it keeps the multiplier within what the new mode makes.",
      hn_framegen_by, false, true},
     {TAB_GRAPHICS, "Frame generation", &opts.framegen, 0, 8, 1, tx_framegen,
      "Makes frames between the game's own, for smoother motion, at a little input delay. Fast motion or camera cuts can "

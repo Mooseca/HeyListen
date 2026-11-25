@@ -76,7 +76,7 @@ and window settings after):
 4. **Frame generation by**: who makes the made frames: **Built-in / AMD FSR 3.1** (the game's own interpolation, and AMD FSR 3.1's at 2x
    where it runs), **NVIDIA DLSS FG** (RTX 40 and newer, with a temporal upscaler, DLSS or FSR 4, and NVIDIA's runtime files) or
    **AMD FSR 3.1 FG**, or, on a Radeon RX 9000 only, **AMD FSR 4 FG** (2x; the row offers it only where AMD's own runtime says it runs;
-   not tested on real hardware yet; AMD's `amd_fidelityfx_framegeneration_vk.dll` goes beside the other two AMD files). In
+   not tested on real hardware yet; AMD's `amd_fidelityfx_framegeneration_vk.dll` goes beside the other two AMD files, and the Builder's **AMD FSR 4** tick fetches it with them: a game built with that tick before this file was added shows **Get the file** in the Builder, which downloads it without building the game again). In
    `hookshot_options.ini` it is `frame_generation_by` (0, 1, 2, 3).
 5. **Frame generation**, directly under it: Off, Auto and 2x to 8x, but only what the mode above makes. **NVIDIA DLSS FG** goes up to
    what NVIDIA's runtime makes on your GPU (**6x on an RTX 50, 2x on an RTX 40**) and has no Auto. **AMD FSR 3.1 FG** makes 2x only.
