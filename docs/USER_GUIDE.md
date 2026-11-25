@@ -55,6 +55,8 @@ the **Open menu** row takes one gamepad button, or two pressed together (L3 + R3
 the ways above keep working. A combination held does not reach the game. When a controller is opened the game's log
 (`hookshot_log.txt`) says what it is and which buttons open the menu. Frame generation is off by default.
 
+**Controls → Sprint with L3** (off by default) makes a press of the left stick (L3) run Link with the game's own fast run. **Hold** runs while L3 is held; **Toggle** starts the run with one click of L3, keeps it going without holding, and ends it when the left stick is back at rest or when L3 is clicked again.
+
 ### Graphics: Upscaler, Render resolution and frame generation
 
 The Graphics tab has these rows together, in this order (the Quality preset, Fullscreen and GPU device first, the picture's output
@@ -105,6 +107,34 @@ shows 144. Frame generation gets an even rate to work from, with Auto too (it fi
 Frame rate limit then holds nothing back, and the FPS counter's **Frame limit** line says `144 fps (game 48 x 3)`. With Frame
 generation Off it does what the Frame rate limit does with the same number. Needs Game speed on Real time.
 
+### Lowest quality preset (weak integrated GPU)
+
+The Graphics tab's **Quality preset** row has an entry before Minimum (4GB): **Lowest (integrated GPU)**. It sets Render resolution to 33%
+(at once), Volumetric fog to Off and the Handheld profile to On (a smaller scene with lower shadow and fog detail; both from the next
+start, and the menu asks to restart for them), plus what Minimum sets: the Lanczos window filter, Sharpness 30%, the frame pacing, Game
+speed on Real time and the smallest memory limits. Every preset sets the Volumetric fog too (On, except Lowest), so choosing another preset after Lowest
+puts the fog and the Handheld profile back as that preset says (from the next start); nothing else is remembered.
+
+On an integrated GPU the game also chooses it by itself, once: after 15 seconds of play it times the frames of the next 10 seconds (the
+title and the load screens do not count). Under 20 frames a second at your own settings (a Ryzen 7 5700U's Vega 8 runs 11 to 13) it
+selects the preset and says so in the log (`turned to Lowest (integrated GPU)`); at 20 or more (a Steam Deck, a ROG Ally, a Radeon 780M)
+it leaves everything as it is and never asks again (`lowend_rule=1`). It does not ask if you had set the Quality preset, Render
+resolution, Volumetric fog, the Handheld profile, the Window scaling filter, Sharpness, the frame pacing or Game speed yourself. A
+discrete GPU is never asked. `HL_LOWEND=0` stops it, `HL_LOWEND=1` chooses the preset for one run, `HL_LOWEND_FPS=<n>` changes the 20.
+
+An options file from a build that had the separate **Low-end settings** row On (`lowend_settings=1`) reads as this preset, its rows as
+they were saved; the old `lowend_settings` and `lowend_prev_*` lines go at the next save. The preset list gained an entry, so the saved
+`quality_preset` numbers moved up by one (`options_version=4`); a file from before that is moved once when it is read.
+
+### FPS counter: 1% low and 0.1% low
+
+The full FPS counter (F10 until the panel shows) has two lines under its graph, **1% low** and **0.1% low**, in frames a second, the
+way the benchmark counts them: 1000 over the mean frame time of the slowest 1% (0.1%) of the frames of the window, at least one frame.
+A stall counts for its length, not as one frame in a hundred. The window is the last 10 seconds or the last 1000 frames, whichever is
+longer, and the lines read `-` until 100 frames are in. With frame generation on they count the frames shown, the made ones too, as
+the counter's own rate does (the lines then say "shown frames"). The compact FPS box has no such lines, and nothing is computed while
+the counter is off or compact.
+
 ### HDR
 
 The Graphics tab's **HDR** row sends HDR10 to an HDR screen (Windows: turn on **Use HDR** in the display settings). **Off** is the
@@ -149,7 +179,9 @@ not replace the builder: it runs it for you, with no window.
    more) are on the game's page in RecompLauncher; they change `hookshot_options.ini` in the game folder, the same file the
    in-game menu (Insert or F1) saves. On a screen that is not 16:9 (an ultrawide, 4:3, 16:10), set **Ultrawide** to the
    screen's shape: the HUD keeps its 16:9 size, its corners at the screen's edges, and the in-game menu's **HUD layout** row
-   (Graphics) puts it back in the middle 16:9, either in RecompLauncher or in the game. Your saves are in the game folder's
+   (Graphics) puts it back in the middle 16:9, either in RecompLauncher or in the game. Two Graphics rows apply at once, in
+   play, with no restart: **Handheld profile** (the game is told the console was undocked or docked, as a real one tells it; the
+   size of its picture, set at the start, follows after a restart) and **Volumetric fog**. Your saves are in the game folder's
    `user\save` (Windows) or `~/.local/share/heylisten/save` (Linux), and the launcher backs them up.
 
 The game is made in the `HeyListen` folder inside the folder RecompLauncher installed HeyListen in (the install folder is
@@ -227,6 +259,13 @@ on CachyOS with a Radeon RX 9070 XT (Mesa's RADV driver). Expect problems and re
   `echo 1024 | sudo tee /sys/module/udmabuf/parameters/size_limit_mb` before you start the game, or for good with a file
   `/etc/modprobe.d/udmabuf.conf` holding the line `options udmabuf size_limit_mb=1024` (then reboot). The log then says
   `dma-bufs of at most 1024 MB`.
+- **Short stutters of 20 to 60 ms while walking in Hyrule Field** (reported on a Core Ultra 9 and an RTX 5070 Ti laptop): the game's memory is a
+  shared-memory file, and where the kernel gives that file only 4 KB pages (the default of most distributions) loading
+  and map changes cause hundreds of thousands of page faults. One player cut them about 30 times, and the frames over
+  22 ms from 15 to 35 per 5 seconds to 44 in a whole session, by letting the kernel use 64 KB pages for shared memory:
+  `echo within_size | sudo tee /sys/kernel/mm/transparent_hugepage/hugepages-64kB/shmem_enabled` before you start the game
+  (it lasts until the next reboot; the file exists on kernels with multi-size transparent huge pages, 6.8 or newer, and
+  `cat` shows the current setting in square brackets). One report, one machine.
 - **Stutter**: programs that use a lot of CPU or GPU while you play (a local AI model, a big compile) make the game
   stutter much more than on a quiet PC.
 - **Building it yourself** instead of using the AppImage: `engine/CONTRIBUTING.md` (Linux) has the tools to install
@@ -371,15 +410,22 @@ release. On Linux the AppImage's `--play` starts the game, and the game asks as 
 
 ## Button prompts
 
-The **Button prompts** row (Insert menu, Controls page) chooses which controller's icons the game shows in its texts and menus:
-Auto follows the controller you plug in, and is the **Keyboard**'s when none is connected (through SDL or XInput); or pick Xbox,
-PlayStation 4, PlayStation 5, Steam Deck, Switch or Keyboard. Keyboard shows the key or mouse button your controls put each action
-on (the first of its two keys), WASD for the left stick's ways (or the movement keys you bound) and the mouse for the camera; the
-ocarina's notes and the pause menu's controller picture keep the Switch's buttons. A new choice shows the
-next time you start the game. The icons are drawn when the builder makes your game folder, from your own game files and
+The **Button prompts** row (Insert menu, Controls page) chooses which controller's icons the game shows in its texts and menus,
+on the ocarina's staff and in its hint, and on the Talk ring: **Auto** follows what you play with, or pick Xbox, PlayStation 4,
+PlayStation 5, Steam Deck, Switch or Keyboard. Auto starts with the first controller's icons (the Keyboard's when none is connected,
+through SDL or XInput), then follows the device that gave input last: the keyboard once you use its keys or the mouse's buttons,
+a controller once you press a button or push a stick over halfway on it (a Switch pad, an Xbox-type pad and a DualSense each show
+their own). It does not flip every second: the other device must be used for a few tenths of a second while the one in use has
+been quiet for a second, and a resting pad's drift or a nudge of the mouse count for nothing. Keyboard shows the key or mouse
+button your controls put each action on (the first of its two keys), including the ocarina's notes, WASD for the left stick's ways
+(or the movement keys you bound) and the mouse for the camera; the pause menu's controller picture keeps the Switch's buttons.
+A new choice, and a new binding on the Controls page, **show at once**: no restart, no reload, the textures and layouts changed in
+place within a frame and the texts that are on screen, the pause menu's hint bar and tabs, the song-score bar, the item labels, at the
+next frame. The row never asks for a restart. Where a mod replaces the game's font, textures or layouts, the mod's own files stay as they are. The choice is saved in `hookshot_options.ini` (`button_prompts=`: 0 Auto, 1 Switch,
+2 Xbox, 3 PlayStation 4, 4 PlayStation 5, 5 Steam Deck, 6 Keyboard). The icons are drawn when the builder makes your game folder, from your own game files and
 [Kenney's](https://kenney.nl/assets/input-prompts) CC0 Input Prompts, into the `prompts` folder there; they are not downloaded or
 copied from anywhere, so a folder from another build is not needed. No `prompts` folder in your game folder (a game built by a release up to 0.4.2,
-whose builder could not draw them): update to a newer release and build again to make it; the game's log says `prompts: no prompts folder` while it is missing.
+whose builder could not draw them): update to a newer release and build again to make it; the game's log says `prompts: NO PROMPTS FOLDER` while it is missing, the Button prompts row's help says it changes nothing, and the builder prints a boxed WARNING when it could not draw them (it needs the packages of `nx2/prompt_requirements.txt`).
 
 ## Known issues
 

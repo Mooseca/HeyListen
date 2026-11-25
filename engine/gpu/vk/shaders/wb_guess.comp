@@ -1,0 +1,62 @@
+#version 460
+// Copyright (C) 2026 Sacrappy
+// (FOLIAGE2) The guessed heads' checked write-back on the GPU, at the part's end (vk_memory.cpp, "the guessed heads on the GPU"):
+// a bare storage entry's first 64 bytes, guessed written (vk_draw.cpp). A word goes from the mirror into guest memory (the pool's
+// import) only when the GPU changed it (the mirror's differs from the snapshot taken at the binding) and the CPU did not (guest
+// memory still holds the snapshot, or the value this pass itself wrote there last: the "ours" table). One workgroup a chunk.
+// glslangValidator -V --target-env vulkan1.3 --vn WB_GUESS_COMP_SPV -o wb_guess_comp_spv.h wb_guess.comp
+#extension GL_EXT_buffer_reference : require
+#extension GL_EXT_buffer_reference_uvec2 : require
+layout(local_size_x = 64) in;
+layout(buffer_reference, std430, buffer_reference_align = 4) buffer Words { uint w[]; };
+struct Chunk {
+    uvec2 mirror;   // (device addresses of the chunk's first word: the mirror, the snapshot and guest memory's import)
+    uvec2 snap;
+    uvec2 guest;
+    uvec2 gaddr;    // (its guest address, the "ours" table's key)
+    uint count;     // (words)
+    uint pad;
+};
+layout(buffer_reference, std430, buffer_reference_align = 8) readonly buffer Table { Chunk c[]; };
+layout(buffer_reference, std430, buffer_reference_align = 16) buffer Ours { uvec4 e[]; };   // (address lo, hi, value, 1)
+// (the log, host-visible: words written, words left to the CPU, words found by "ours", addresses kept, then the addresses)
+layout(buffer_reference, std430, buffer_reference_align = 8) buffer Log { uint written; uint cpu; uint ours; uint n; uvec2 at[]; };
+layout(push_constant) uniform P {
+    Table table;
+    Ours ours;
+    Log log;
+    uint count;
+    uint ours_mask;
+    uint log_cap;
+} pc;
+void main() {
+    const uint ci = gl_WorkGroupID.x + gl_WorkGroupID.y * 65535u;
+    if (ci >= pc.count) return;
+    const Chunk c = pc.table.c[ci];
+    Words m = Words(c.mirror), s = Words(c.snap), g = Words(c.guest);
+    for (uint i = gl_LocalInvocationID.x; i < c.count; i += 64u) {
+        const uint mv = m.w[i], sv = s.w[i], gv = g.w[i];
+        if (mv == sv || mv == gv) continue;   // (the GPU did not change it, or guest memory has it already)
+        // (the word's guest address, 64-bit add with carry)
+        uint lo = c.gaddr.x + 4u * i;
+        const uint hi = c.gaddr.y + (lo < c.gaddr.x ? 1u : 0u);
+        const uint h = ((lo >> 2) * 0x9E3779B1u ^ hi * 0x85EBCA77u) & pc.ours_mask;
+        bool untouched = gv == sv;
+        bool by_ours = false;
+        if (!untouched) {
+            const uvec4 e = pc.ours.e[h];
+            by_ours = e.w == 1u && e.x == lo && e.y == hi && e.z == gv;
+            untouched = by_ours;
+        }
+        if (!untouched) {
+            atomicAdd(pc.log.cpu, 1u);
+            continue;
+        }
+        g.w[i] = mv;
+        pc.ours.e[h] = uvec4(lo, hi, mv, 1u);
+        atomicAdd(pc.log.written, 1u);
+        if (by_ours) atomicAdd(pc.log.ours, 1u);
+        const uint k = atomicAdd(pc.log.n, 1u);
+        if (k < pc.log_cap) pc.log.at[k] = uvec2(lo, hi);
+    }
+}

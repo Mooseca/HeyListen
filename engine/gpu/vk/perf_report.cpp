@@ -304,8 +304,8 @@ const char* upscaler_name(int v) {
     return v >= 0 && v < upscaler_rows::kUpscalers ? t[v] : "other";
 }
 const char* preset_name(int v) {
-    static const char* const t[] = {"Custom", "Minimum", "Low", "Balanced", "High", "Ultra"};
-    return v >= 0 && v < 6 ? t[v] : "Auto";
+    static const char* const t[] = {"Custom", "Lowest", "Minimum", "Low", "Balanced", "High", "Ultra"};
+    return v >= 0 && v < 7 ? t[v] : "Auto";
 }
 /// The Frame rate cap row's value (host/nn_vi.c: 0 60, 90, 120, 144, 165, 240), HOS_FPS_MAX over it
 int fps_cap_now() {

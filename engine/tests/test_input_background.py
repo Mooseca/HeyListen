@@ -62,6 +62,7 @@ def main():
     constants = block(hid, "enum { B_A") + ";\n" + block(api, "enum { HOS_SW_A") + ";\n"
     constants += block(api, "enum { HOS_KEY_MOVE_UP") + ";\n"   # (the keys-only controls)
     constants += block(api, "enum { HOS_OPT_CHEAT_HEARTS") + ";\n"
+    constants += block(api, "enum { HOS_BIND_PAD") + ";\n"   # (the live input's !bind)
     ids = (ROOT / "gpu/vk/vk_opt_ids.h").read_text(encoding="utf-8")
     constants += re.search(r"^#define HL_OPT_SPRINT\s+\d+", ids, re.M).group(0) + "\n"   # (Sprint with L3's id)
     for name in ("STATE_SIZE", "NPAD_NO1", "ATTR_CONNECTED"):

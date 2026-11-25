@@ -2,6 +2,7 @@
 
 // See vk_perf.h.
 #include "vk_perf.h"
+#include "perf_lows.h"
 
 #include <windows.h>
 
@@ -29,6 +30,8 @@ int64_t ring_at[kPerfHistory];
 int ring_n = 0, ring_pos = 0;
 int64_t last_frame_ns = 0;
 PerfWaits waits;
+perflows::Ring lows_ring;   // (static: 192 KB, no allocation while frames are noted)
+float lows_scratch[perflows::kCap];   // (the overlay's thread)
 
 int64_t now_ns() {
     return std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
@@ -253,6 +256,9 @@ void perf_note_frame() {
         ring_at[ring_pos] = now;
         ring_pos = (ring_pos + 1) % kPerfHistory;
         if (ring_n < kPerfHistory) ring_n++;
+        lows_ring.add((float)((now - last_frame_ns) / 1e6), now);
+    } else {
+        lows_ring.clear();   // (the first frame, or after a stall or a stretch with the counter off: a new window)
     }
     last_frame_ns = now;
 }
@@ -277,6 +283,17 @@ void perf_snapshot(PerfStats* out) {
         const int age = kPerfHistory - 1 - i;
         out->frame_ms[i] = age < ring_n ? ring[(ring_pos - 1 - age + 2 * kPerfHistory) % kPerfHistory] : 0;
     }
+}
+
+void perf_lows(double* low1, double* low01, int* frames) {
+    int n;
+    {
+        const int64_t now = now_ns();
+        std::lock_guard lk(mu);
+        n = lows_ring.window(now, lows_scratch);
+    }
+    *frames = n;
+    perflows::lows(lows_scratch, n, low1, low01);   // (a partial selection, outside the lock)
 }
 
 } // namespace mkwvk

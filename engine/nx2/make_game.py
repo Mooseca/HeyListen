@@ -64,6 +64,19 @@ LANGUAGES = [("en-US", "English (US)"), ("en-GB", "English (UK)"), ("fr", "Frenc
              ("zh-Hant", "Chinese (Traditional)")]
 
 
+def prompts_warning(why):
+    """(hookshot) The Button prompts row of the menu does nothing without the prompts folder: said loudly, as a player who built from
+    source finds out only by playing (the game's log and the row's hint say it too)"""
+    bar = "=" * 78
+    print()
+    print(bar)
+    print("WARNING: the button icon sets (PlayStation, Xbox, Steam Deck, Keyboard) were NOT generated: " + why + ".")
+    print("The game will show the Switch's icons whatever the Button prompts row says.")
+    print("To make them: pip install -r nx2/prompt_requirements.txt (with the Python that runs this build), then build again.")
+    print(bar)
+    print(flush=True)
+
+
 def no_throttle(handle=None):
     """(issue 87) Windows' power throttling (EcoQoS) slows a background window's processes to almost nothing on some machines: the
     build sat at 0% CPU. Turned off for this process, or the one whose handle this is"""
@@ -1901,9 +1914,9 @@ def main(a=None):
     prompts = os.path.join(out, "prompts")
     shutil.rmtree(prompts, ignore_errors=True)
     if importlib.util.find_spec("fontTools") is None:
-        print("the button prompts of other controllers were not made (no fontTools): the game shows its own", flush=True)
+        prompts_warning("fontTools is not installed")
     elif run(PY + [os.path.join(HERE, "prompt_assets.py"), "--romfs", romfs, "--out", prompts], check=False, output=sys.stderr):
-        print("the button prompts of other controllers were not made: the game shows its own", flush=True)
+        prompts_warning("nx2/prompt_assets.py failed (see its output above: it needs fontTools, Pillow, astc-encoder-py and texture2ddecoder)")
         shutil.rmtree(prompts, ignore_errors=True)
     icon = os.path.join(ROOT, "assets", "heylisten.png")
     if LINUX and os.path.exists(icon):   # (the window's icon: host/posix/display_sdl.c)

@@ -319,6 +319,7 @@ NV(nvnMemoryPoolInitialize) {
     rx_nvn_pool_flags(o->gpu, o->size, o->flags);   /* (TICK-015, host/rx_backend.c) */
     rx_nvn_pool_created(o->gpu, o->size);
     { void hos_memsplit_pool(uint64_t, uint64_t, uint32_t, int); hos_memsplit_pool(o->gpu, o->size, o->flags, 1); }   /* (HOS_MEM_SPLIT) */
+    { void hos_prompts_pool(uint64_t mem, uint64_t size); hos_prompts_pool(o->mem, o->size); }   /* (host/prompts.c: the button prompts' textures, changed in place) */
     OLOG("pool %#llx size %#llx flags %#x", (unsigned long long)o->gpu, (unsigned long long)o->size, o->flags);
     RET(1);
 }
@@ -358,6 +359,7 @@ NV(nvnMemoryPoolFinalize) {
         hos_gpu_track(o->gpu, o->size, 0);
         { void hos_memsplit_pool(uint64_t, uint64_t, uint32_t, int); hos_memsplit_pool(o->gpu, o->size, o->flags, 0); }
         { void rx_nvn_pool_finalized(uint64_t, uint64_t); rx_nvn_pool_finalized(o->gpu, o->size); }   /* (RX_VK_POOL_FINALIZE) */
+        { void hos_prompts_pool_gone(uint64_t mem); hos_prompts_pool_gone(o->mem); }   /* (host/prompts.c: no longer written there) */
     } else if (o->mem) {
         /* (HeyListen, 2026-11-14) a pool object finalized again (its magic gone with the first Finalize): its range was untracked
            then, and untracking it again took the counted entry of a newer live pool made over the same memory since (the

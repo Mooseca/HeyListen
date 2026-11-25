@@ -329,10 +329,21 @@ bool rbring_serves(uint64_t guest, uint64_t size) {
     return served(it->second, settle);   // (a settle set again meanwhile is above the value reached)
 }
 
+namespace {
+thread_local RbApplyNote tl_apply_note;   // (FLASH1, HL_METER_TRACE: what this thread's last rbring_apply did)
+}
+RbApplyNote rbring_take_note() {
+    const RbApplyNote n = tl_apply_note;
+    tl_apply_note = RbApplyNote{};
+    return n;
+}
+
 /// The read of a served range: the newest unapplied entry `lag` frames old into guest memory
 void rbring_apply(uint64_t gpu, uint64_t size) {
     const uint64_t guest = host->gpu_guest(gpu);
     const int64_t c = rb_frame_now();
+    tl_apply_note = RbApplyNote{};
+    tl_apply_note.c = c;
     rb_wait_staged(c, config().lag);   // (frames in flight: the replay stages a frame's entries before it shows it)
     rb_ring::Entry e;
     int cls;
@@ -358,11 +369,13 @@ void rbring_apply(uint64_t gpu, uint64_t size) {
                     if (a.ents[i].seq == a.applied) { again = (int)i; break; }
             if (again < 0) {
                 stats[cls].none++;
+                tl_apply_note.kind = 3;
                 hash_add(c, cls, rb_ring::hash_read(cls, guest, nullptr, 0));
                 return;
             }
             stats[cls].again++;
             e = a.ents[again];
+            tl_apply_note.kind = 2;
         } else {
             e = a.ents[k];
         }
@@ -373,6 +386,7 @@ void rbring_apply(uint64_t gpu, uint64_t size) {
         stats[cls].waited++;
         if (!rbring_wait_value(e.value, config().wait_ms)) {
             stats[cls].late++;
+            tl_apply_note.kind = 4, tl_apply_note.tag = e.tag, tl_apply_note.value = e.value;
             return;
         }
     }
@@ -380,6 +394,8 @@ void rbring_apply(uint64_t gpu, uint64_t size) {
     std::memcpy(buf, ring_map + e.at, n);
     host->gpu_write(gpu, buf, n);
     stats[cls].applied++;
+    if (!tl_apply_note.kind) tl_apply_note.kind = 1;
+    tl_apply_note.tag = e.tag, tl_apply_note.value = e.value;
     stats[cls].got[std::min<int64_t>(4, std::max<int64_t>(1, c - e.tag)) - 1]++;
     {
         std::lock_guard lk(mu);

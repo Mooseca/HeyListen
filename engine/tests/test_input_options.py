@@ -108,7 +108,7 @@ void hos_log(const char *fmt, ...) { (void)fmt; logs++; }
 #define EVT 0x84b17000ull
 static void st64(uint64_t a, uint64_t v) { memcpy(GP(a), &v, 8); }
 static void st32(uint64_t a, uint32_t v) { memcpy(GP(a), &v, 4); }
-uint64_t hos_sprint_input(uint64_t buttons, int on, int blocked);
+uint64_t hos_sprint_input(uint64_t buttons, int on, int blocked, int moving);
 void f_804caa80(Ctx *c);
 void f_80c225d0(Ctx *c);
 void hos_sprint_link(Ctx *c);
@@ -141,9 +141,10 @@ static uint64_t stance_flags(void) {
     return c.x[8];
 }
 #define DASH 0x10ull
+static int g_moving = 1;   /* the left stick is out of its dead zone (Hold ignores it) */
 /* a frame: the controllers' read, then Link's update and stance. Returns what the game's controllers gave; *flags, *stance the flags after */
 static uint64_t frame(uint64_t buttons, int on, int blocked, uint64_t *flags, uint64_t *stance) {
-    const uint64_t got = hos_sprint_input(buttons, on, blocked);
+    const uint64_t got = hos_sprint_input(buttons, on, blocked, g_moving);
     *flags = update_flags();
     *stance = stance_flags();
     return got;
@@ -217,16 +218,16 @@ int main(void) {
     puts("PASS: a press that begins in a conversation is the game's LS for its whole length (it hides the text box), no dash; the next one is Sprint's");
 
     /* no update of Link for a while (a menu of the game, a loading screen): not gameplay */
-    for (int k = 0; k < 12; k++) hos_sprint_input(0, 1, 0);
-    got = hos_sprint_input(LS, 1, 0);
+    for (int k = 0; k < 12; k++) hos_sprint_input(0, 1, 0, 1);
+    got = hos_sprint_input(LS, 1, 0, 1);
     CHECK(got & LS);
     for (int k = 0; k < 3; k++) {
-        got = hos_sprint_input(LS, 1, 0);
+        got = hos_sprint_input(LS, 1, 0, 1);
         CHECK(got & LS);
     }
     f = update_flags();
     CHECK(!(f & DASH));
-    hos_sprint_input(0, 1, 0);
+    hos_sprint_input(0, 1, 0, 1);
     update_flags();
     puts("PASS: a press that begins while Link is not updated is the game's LS");
 
@@ -245,6 +246,113 @@ int main(void) {
     got = frame(LS, 0, 0, &f, &s);
     CHECK((got & LS) && !(f & DASH) && !(s & DASH));
     puts("PASS: the row turned off ends the sprint and gives LS back");
+    /* Toggle (row value 2) */
+    g_moving = 1;
+    frame(0, 0, 0, &f, &s);
+    for (int k = 0; k < 3; k++) frame(0, 2, 0, &f, &s);
+    got = frame(LS, 2, 0, &f, &s);
+    CHECK(!(got & LS) && (f & DASH) && (s & DASH));   /* the click starts it, and the game does not get LS */
+    for (int k = 0; k < 3; k++) {
+        got = frame(LS, 2, 0, &f, &s);
+        CHECK(!(got & LS) && (f & DASH));
+    }
+    for (int k = 0; k < 40; k++) {   /* released: it goes on without holding, the stick still out */
+        got = frame(0, 2, 0, &f, &s);
+        CHECK(got == 0 && (f & DASH) && (s & DASH) && (f & 0x40));
+    }
+    g_moving = 0;   /* the stick back at rest: a few reads (a stick passing the middle) keep it, then it ends */
+    for (int k = 0; k < 4; k++) {
+        frame(0, 2, 0, &f, &s);
+        CHECK(f & DASH);
+    }
+    g_moving = 1;
+    frame(0, 2, 0, &f, &s);
+    CHECK(f & DASH);   /* (back out before the end: the count starts again) */
+    g_moving = 0;
+    for (int k = 0; k < 10; k++) frame(0, 2, 0, &f, &s);
+    CHECK(!(f & DASH) && !(s & DASH));
+    g_moving = 1;
+    for (int k = 0; k < 5; k++) CHECK(!(frame(0, 2, 0, &f, &s) & LS) && !(f & DASH));   /* it stays ended: no click, no sprint */
+    puts("PASS: Toggle: a click starts the run, it goes on without holding, a stick back at rest ends it (not a pass through the middle)");
+
+    /* a click with the stick at rest starts nothing; a second click ends the run */
+    g_moving = 0;
+    frame(LS, 2, 0, &f, &s);
+    got = frame(LS, 2, 0, &f, &s);
+    CHECK(!(got & LS) && !(f & DASH));
+    frame(0, 2, 0, &f, &s);
+    g_moving = 1;
+    frame(0, 2, 0, &f, &s);
+    CHECK(!(f & DASH));
+    frame(LS, 2, 0, &f, &s);
+    frame(0, 2, 0, &f, &s);
+    CHECK(f & DASH);
+    frame(LS, 2, 0, &f, &s);   /* the second click */
+    CHECK(!(f & DASH) && !(s & DASH));
+    for (int k = 0; k < 3; k++) { frame(LS, 2, 0, &f, &s); CHECK(!(f & DASH)); }   /* (held on: still no run, Toggle is not Hold) */
+    frame(0, 2, 0, &f, &s);
+    CHECK(!(f & DASH));
+    puts("PASS: Toggle: a click with the stick at rest starts nothing; a second click ends the run and a held press does not bring it back");
+
+    /* what ends it, as in Hold: ZL, a state that is not a run's (it stays ended), a roll keeps it; the menu, an event, no update of Link, the row changed */
+    frame(LS, 2, 0, &f, &s); frame(0, 2, 0, &f, &s);
+    CHECK(f & DASH);
+    frame(ZL, 2, 0, &f, &s);
+    CHECK(!(f & DASH));
+    frame(0, 2, 0, &f, &s);
+    CHECK(!(f & DASH));   /* ZL let go: the run does not come back */
+    frame(LS, 2, 0, &f, &s); frame(0, 2, 0, &f, &s);
+    set_state(99);
+    frame(0, 2, 0, &f, &s);
+    CHECK(f & DASH);   /* a roll keeps it */
+    set_state(5);
+    frame(0, 2, 0, &f, &s);
+    CHECK(!(f & DASH));
+    set_state(1);
+    frame(0, 2, 0, &f, &s);
+    CHECK(!(f & DASH));   /* (an attack ended it for good) */
+    frame(LS, 2, 0, &f, &s); frame(0, 2, 0, &f, &s);
+    CHECK(f & DASH);
+    frame(0, 2, 1, &f, &s);   /* the Insert menu opens */
+    frame(0, 2, 0, &f, &s);
+    CHECK(!(f & DASH));
+    frame(LS, 2, 0, &f, &s); frame(0, 2, 0, &f, &s);
+    CHECK(f & DASH);
+    st64(EVT + 0x68, 1);   /* a cutscene or a conversation */
+    frame(0, 2, 0, &f, &s);
+    st64(EVT + 0x68, 0);
+    frame(0, 2, 0, &f, &s);
+    CHECK(!(f & DASH));
+    frame(LS, 2, 0, &f, &s); frame(0, 2, 0, &f, &s);
+    CHECK(f & DASH);
+    for (int k = 0; k < 12; k++) hos_sprint_input(0, 2, 0, 1);   /* Link is not updated (a zone change, the game's pause menu) */
+    frame(0, 2, 0, &f, &s);
+    CHECK(!(f & DASH));
+    frame(LS, 2, 0, &f, &s); frame(0, 2, 0, &f, &s);
+    CHECK(f & DASH);
+    frame(0, 1, 0, &f, &s);   /* the row set to Hold: the toggled run ends */
+    frame(0, 2, 0, &f, &s);
+    CHECK(!(f & DASH));
+    frame(LS, 2, 0, &f, &s); frame(0, 2, 0, &f, &s);
+    CHECK(f & DASH);
+    got = frame(0, 0, 0, &f, &s);   /* ... or Off */
+    frame(0, 2, 0, &f, &s);
+    CHECK(!(f & DASH));
+    /* a click that begins in a conversation is the game's LS and starts nothing */
+    st64(EVT + 0x68, 1);
+    got = frame(LS, 2, 0, &f, &s);
+    CHECK((got & LS) && !(f & DASH));
+    st64(EVT + 0x68, 0);
+    frame(0, 2, 0, &f, &s);
+    puts("PASS: Toggle ends with ZL, a state that is not a run's, the Insert menu, an event, no update of Link and a change of the row; a roll keeps it");
+
+    /* Hold is as it was with the stick at rest (the game's own rules end the run there) */
+    g_moving = 0;
+    for (int k = 0; k < 3; k++) frame(0, 1, 0, &f, &s);
+    frame(LS, 1, 0, &f, &s);
+    CHECK(f & DASH);
+    g_moving = 1;
+    frame(0, 1, 0, &f, &s);
     CHECK(logs >= 3);   /* (the test run's line, every 15th update of Link while the row is on) */
     return 0;
 }
@@ -336,7 +444,7 @@ def check_sources():
     readme = (ROOT / "readme.md").read_text(encoding="utf-8")
     need("int sprint = 0;" in header, "vk_menu.h: Sprint with L3 is not Off by default")
     need("int touchpad_menu = 1;" in header, "vk_menu.h: Touchpad opens menu is not On by default")
-    sp = re.search(r'\{TAB_CONTROLS, "Sprint with L3", &opts\.sprint, 0, 1, 1, tx_onoff,', menu)
+    sp = re.search(r'\{TAB_CONTROLS, "Sprint with L3", &opts\.sprint, 0, 2, 1, tx_sprint,', menu)
     tp = re.search(r'\{TAB_CONTROLS, "Touchpad opens menu", &opts\.touchpad_menu, 0, 1, 1, tx_onoff,', menu)
     need(sp and tp, "vk_menu.cpp: the two Controls rows are missing")
     # (the options file is keyed by the row's name, as ini_key makes it: a key of its own would need a line there)
@@ -344,13 +452,15 @@ def check_sources():
         made = row.replace(" ", "_").lower()
         need(made == key and len(made) < 32, "the ini key of " + row)
         need(key in readme, "readme.md does not name the ini key " + key)
+    need('return v == 1 ? "Hold" : v == 2 ? "Toggle" : "Off";' in menu, "vk_menu.cpp: the row's values are not Off, Hold, Toggle")
+    need("Toggle" in readme and "sprint_with_l3" in readme, "readme.md does not describe Toggle")
     need("opts.sprint" not in re.search(r"const char\* ini_key\(const Row& r\) \{.*?\n\}", menu, re.S).group(0), "ini_key has a line of its own for sprint")
     need(re.search(r"#define\s+HL_OPT_SPRINT\s+97\b", ids), "vk_opt_ids.h: HL_OPT_SPRINT is not option id 97")
     need("SPRINT" not in api and "touchpad_menu" not in api, "vk_api.h (the shader stamp) names the new options: ids belong in vk_opt_ids.h")
     ids_in_use = re.findall(r"#define\s+HL_OPT_\w+\s+(\d+)", ids)
     need(len(ids_in_use) == len(set(ids_in_use)), "two options share an id in vk_opt_ids.h")
-    need("if (id == HL_OPT_SPRINT) return opts.sprint != 0;" in replay, "vk_replay.cpp does not answer HL_OPT_SPRINT")
-    need("buttons = hos_sprint_input(buttons, rx_option(HL_OPT_SPRINT, 0), menu_open);" in hid, "nn_hid.c does not call Sprint")
+    need("if (id == HL_OPT_SPRINT) return opts.sprint;" in replay, "vk_replay.cpp does not answer HL_OPT_SPRINT")
+    need("buttons = hos_sprint_input(buttons, rx_option(HL_OPT_SPRINT, 0), menu_open, moving);" in hid, "nn_hid.c does not call Sprint")
     need('"LS", B_LS' in hid, "the input script has no LS (a test run's L3)")
     for what in ("Sprint with L3", "Touchpad opens menu"):
         need("**%s:**" % what in readme, "readme.md does not describe " + what)

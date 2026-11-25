@@ -536,6 +536,12 @@ void rbring_describe(uint64_t guest, uint64_t size, char* out, size_t cap);
 bool rbring_test_direct(uint64_t guest, uint64_t size);
 /// (EXPO1, HL_METER_LOG=<rows>, default off: the exposure meter's diagnostic rows; vk_draw.cpp)
 int meter_log_rows();
+/// (FLASH1, HL_METER_TRACE=1, default off) a row for EVERY read of a meter block (and the mean luminance of every shot): the game's
+/// frame, the replay's presents, the sums the game is handed and where they came from. What this thread's last rbring_apply did:
+/// kind 1 an entry applied, 2 the last value handed back, 3 nothing new, 4 not done in time, 0 not called; the entry's tag and value
+struct RbApplyNote { int kind = 0; int64_t c = 0, tag = 0; uint64_t value = 0; };
+RbApplyNote rbring_take_note();
+bool meter_trace_on();
 /// (FIF1, vk_replay.cpp) the ring's frame count: presents_now, or with RX_VK_FRAMES_IN_FLIGHT the game's own count of presents; an entry's
 /// tag (the count at its submission's submit); and the wait (bounded) for the replay to have staged the frames a read at frame c may get
 int64_t rb_frame_now();
@@ -644,6 +650,7 @@ bool vram_usage_now(uint64_t* used, uint64_t* budget);
 void vma_log_heaps();
 /// (TICK-019) one log line: which memory type and heap an allocation landed in (device-local / host-visible / cached)
 void log_alloc_where(const char* what, VmaAllocation allocation);
+bool log_alloc_uncached(const char* what, VmaAllocation allocation);   // (issue 135: logs a host-visible buffer without HOST_CACHED)
 /// (TICK-019) GPU reads straight from imported guest memory outside the buffer bindings' count: texel buffer views, GPU unswizzles
 extern std::atomic<int64_t> st_import_texel_views, st_import_texel_bytes, st_import_unswizzle_bytes;
 /// (longshot #404, vk_draw.cpp) the pipelines the driver refused for want of memory so far (VK_ERROR_OUT_OF_DEVICE_MEMORY or

@@ -92,6 +92,7 @@ static void vk_timeline_wait_sent(uint64_t) {}
 static void memory_late_fix_apply(uint64_t) {}
 static uint64_t vk_timeline_completed() { return 0; }
 static bool guarded_copy(void* d, const void* s, size_t n) { std::memcpy(d, s, n); return true; }
+static void cap_read_copy(void* d, const void* s, size_t n, bool = false) { std::memcpy(d, s, n); }
 #define logf(...) ((void)0)
 """
 CASES = r"""

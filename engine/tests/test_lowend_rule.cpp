@@ -4,6 +4,9 @@
 #include "../gpu/vk/lowend_rule.h"
 
 #include <cstdio>
+#include <string>
+#include <utility>
+#include <vector>
 
 static int failures = 0;
 static void expect(bool ok, const char* what) {
@@ -26,17 +29,41 @@ int main() {
     expect(fog_on(1, 0), "RX_VK_FOG=1 over the row");
     expect(!fog_on(0, 1), "RX_VK_FOG=0 over the row");
 
+    // (the row applies at once: what a fog program's dispatch does while the row is switched)
+    expect(fog_program_index(0x27ee9883e2a20323ull) == 0 && fog_program_index(0xee7764a6b1ef459cull) == 1 &&
+               fog_program_index(0x1e2fcee33a0c7209ull) == 2 && fog_program_index(0x53509044401d78d2ull) == -1,
+           "the fog programs' places");
+    {
+        FogGate g;   // (off from the start: nothing was written, nothing to clear)
+        expect(g.step(false, 0) == FogStep::Skip && g.step(false, 2) == FogStep::Skip, "off from the start: left out");
+        expect(g.step(false, -1) == FogStep::Run, "another program always runs");
+        expect(g.step(true, 1) == FogStep::Run && g.step(true, 0) == FogStep::Run, "on: runs");
+        // (switched off while it ran: every program clears its next kFogClears dispatches, then is left out)
+        for (int p = 0; p < 3; p++) {
+            for (int i = 0; i < kFogClears; i++) expect(g.step(false, p) == FogStep::Clear, "off after on: the images are cleared");
+            expect(g.step(false, p) == FogStep::Skip, "then the dispatches are left out");
+        }
+        expect(g.step(true, 2) == FogStep::Run, "on again: runs");
+        expect(g.step(false, 2) == FogStep::Clear && g.step(false, 0) == FogStep::Clear, "off again: cleared again");
+        // (switched on again before the clears were used up: that program starts clean)
+        FogGate h;
+        h.step(true, 0);
+        expect(h.step(false, 0) == FogStep::Clear, "first clear");
+        expect(h.step(true, 0) == FogStep::Run && h.left[0] == 0, "on again: a program's clears are dropped");
+    }
+
     expect(lowend_gpu(true, false), "integrated without mesh shaders (a Vega 8)");
     expect(!lowend_gpu(true, true), "integrated with mesh shaders (a 780M)");
     expect(!lowend_gpu(false, false), "discrete without mesh shaders (an RX 5700): not this rule");
     expect(!lowend_gpu(false, true), "discrete with mesh shaders");
 
-    expect(first_start(-1, false, true) == APPLY_AND_SAVE, "low-end GPU, never applied: applied and saved");
-    expect(first_start(-1, true, true) == NONE, "applied once already: the player's rows stay");
-    expect(first_start(-1, false, false) == NONE, "another GPU: nothing");
-    expect(first_start(0, false, true) == NONE, "HL_LOWEND=0: never");
-    expect(first_start(1, false, false) == APPLY_THIS_RUN, "HL_LOWEND=1 on any GPU: this run only");
-    expect(first_start(1, true, true) == APPLY_THIS_RUN, "HL_LOWEND=1 after it was applied: this run only, nothing saved");
+    expect(first_start(-1, false, true, true) == PROBE, "an integrated GPU, never asked, settings the player's own: measured");
+    expect(first_start(-1, true, true, true) == NONE, "asked once already: never again");
+    expect(first_start(-1, false, false, true) == NONE, "a discrete GPU: never");
+    expect(first_start(-1, false, true, false) == NONE, "the row or its settings touched by the player: not measured");
+    expect(first_start(0, false, true, true) == NONE, "HL_LOWEND=0: never");
+    expect(first_start(1, false, false, true) == APPLY_THIS_RUN, "HL_LOWEND=1 on any GPU: this run only");
+    expect(first_start(1, true, true, false) == APPLY_THIS_RUN, "HL_LOWEND=1 after it was asked: this run only, nothing saved");
 
     expect(mirror_not_wait(0x1002, true, false), "AMD integrated without mesh shaders (a Vega 8): the mirror, no wait");
     expect(!mirror_not_wait(0x8086, true, false), "Intel integrated without mesh shaders: not measured, as before");
@@ -55,6 +82,25 @@ int main() {
         expect(ini_put_text("resolution_x=1\r\nlast=2", keys).rfind("resolution_x=1\r\nlast=2\r\nresolution=6\r\n", 0) == 0,
                "a key that only starts the same is not the key; a last line without its ending gets the file's");
     }
+    {   // (the Lowest preset's first start: the preset's line and the rows it sets in place, other lines and endings kept)
+        const std::vector<std::pair<std::string, int>> on = {{"quality_preset", 1}, {"resolution", kResolution}, {"handheld_profile", kHandheld},
+                                                             {"volumetric_fog", kFog}, {"options_version", 4}, {"lowend_rule", 1}};
+        for (const char* eol : {"\r\n", "\n"}) {
+            const std::string e = eol;
+            const std::string before = "a=1" + e + "resolution=0" + e + "options_version=3" + e + "handheld_profile=0" + e + "x=2" + e;
+            expect(ini_put_text(before, on) == "a=1" + e + "resolution=6" + e + "options_version=4" + e + "handheld_profile=1" + e + "x=2" + e +
+                                                   "quality_preset=1" + e + "volumetric_fog=0" + e + "lowend_rule=1" + e,
+                   "the rows in place (the version too), the others at the end, the file's endings");
+        }
+    }
+    // (the Quality preset's numbers: a file from before version 4 has Minimum to Ultra at 1 to 5; the old Low-end settings row On is Lowest)
+    expect(migrate_preset(3, 0, false) == 0, "Custom stays Custom");
+    expect(migrate_preset(3, 1, false) == 2 && migrate_preset(3, 3, false) == 4 && migrate_preset(3, 5, false) == 6, "Minimum, Balanced, Ultra move up one");
+    expect(migrate_preset(0, 2, false) == 3, "a file with no version is the old numbering too");
+    expect(migrate_preset(4, 1, false) == 1 && migrate_preset(4, 6, false) == 6, "version 4: as saved (1 is Lowest)");
+    expect(migrate_preset(3, 0, true) == kLowestPreset && migrate_preset(3, 4, true) == kLowestPreset && migrate_preset(4, 0, true) == kLowestPreset,
+           "the old row On: the Lowest preset, whatever the file's preset was");
+    expect(migrate_preset(3, 9, false) == kPresets, "a number past the list stops at the last");
     if (failures) return 1;
     std::printf("lowend_rule: all checks passed\n");
     return 0;

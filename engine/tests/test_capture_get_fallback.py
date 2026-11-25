@@ -45,6 +45,7 @@ static bool cap_fit() { return true; }
 enum class MemKind { Capture };
 struct MemKindScope { MemKindScope(MemKind) {} };
 static void log_alloc_where(const char*, VmaAllocation) {}
+static bool log_alloc_uncached(const char*, VmaAllocation) { return false; }
 #define logf(...) ((void)0)
 // (what the driver refuses: sizes at or above refuse_from, or all of them, or none)
 static uint64_t refuse_from = ~0ull, last_made = 0;

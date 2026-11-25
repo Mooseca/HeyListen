@@ -343,7 +343,7 @@ number is not the obvious one:
 
 | Key | Values |
 |---|---|
-| `quality_preset` | 0 Custom, 1 Minimum (4GB), 2 Low (6GB), 3 Balanced (8GB), 4 High (12GB), 5 Ultra (16GB+) |
+| `quality_preset` | 0 Custom, 1 Lowest (integrated GPU), 2 Minimum (4GB), 3 Low (6GB), 4 Balanced (8GB), 5 High (12GB), 6 Ultra (16GB+) (before `options_version=4` Minimum to Ultra were 1 to 5: moved once when read) |
 | `gpu_device` | 0 Auto, n the n-th card with Vulkan 1.3 as the row lists them |
 | `frame_generation` | 0 Off, 2 to 8 the multiplier |
 | `frame_generation_by` | 0 the renderer's own (AMD FSR 3.1 at 2x, else its block matching), 1 NVIDIA DLSS Frame Generation (off by default; RTX 40 and newer with NVIDIA's runtime, else the renderer's own) |

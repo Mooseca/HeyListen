@@ -693,18 +693,27 @@ void vk_timeline_wait_sent(uint64_t v) {
 // flush under it does not wait there and hold up the threads that only hold their recordings back meanwhile (the Presentation
 // Thread's submits; a poll of the main thread's waited 7.5 ms under it in the first try). A poll does not wait at all
 thread_local bool tl_poll = false;
+namespace {
+bool order_thread_on();   // (PIPE2: RX_VK_ORDER_THREAD; FLASH1: the late fix's last resort is the order thread's alone)
+}
 bool late_fix_wait_unlocked() {
     WaitScope wait_scope(WS_LATE_FIX);   // (DECOUPLE: the stall watch's site)
-    const auto w0 = std::chrono::steady_clock::now();
+    auto w0 = std::chrono::steady_clock::now();
+    uint64_t done0 = completed();
     for (uint64_t lv; (lv = memory_late_fix_pending()) && completed() < lv;) {
         if (tl_poll) return false;   // (a poll: what is held is not done anyway; the fix thread sends it)
         // (DECOUPLE3, a last resort: the cause of the load hang is fixed in timeline_order.h) a fix whose value the timeline has not
-        // reached in 2 s is applied as it is, as late_fix_flush_locked does after its own 2 s, and said: a value nothing will reach
-        // again (the timeline gone back) held every recording behind it for good
-        if (std::chrono::steady_clock::now() - w0 > std::chrono::seconds(2)) {
+        // reached is applied as it is, as late_fix_flush_locked does after its own 2 s, and said: a value nothing will reach
+        // again (the timeline gone back) held every recording behind it for good. (FLASH1) Only with the order thread, and only once
+        // the GPU has made no progress for 2 s (timeline_order::late_fix_gives_up): the laptop's 10 fps inline replay applied fixes
+        // "as it is" 3-8 times a run while its GPU was still working towards them
+        const uint64_t done_now = completed();
+        if (done_now != done0) done0 = done_now, w0 = std::chrono::steady_clock::now();
+        if (timeline_order::late_fix_gives_up(order_thread_on(), std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                                                     std::chrono::steady_clock::now() - w0).count(), 2000000000ll)) {
             static std::atomic<int> logged{0};
             if (logged++ < 8)
-                logf("vk: a late fix's value %llu not reached in 2 s (done %llu, the highest signal sent %llu): applied as it is",
+                logf("vk: a late fix's value %llu not reached, no GPU progress in 2 s (done %llu, the highest signal sent %llu): applied as it is",
                      (unsigned long long)lv, (unsigned long long)completed(), (unsigned long long)tl_signal_sent.load());
             memory_late_fix_apply(lv);
             break;
@@ -6599,6 +6608,14 @@ void invalidate(uint64_t gpu, uint64_t size) {
                 }
                 s.held = held, s.reads++;
             }
+            if (meter_trace_on()) {   // (FLASH1, HL_METER_TRACE=1: every read; the words the game is handed, where they came from)
+                const RbApplyNote rn = rbring_take_note();
+                const std::array<uint32_t, 4> g = held ? last[gpu] : w;
+                logf("vk: mtrace read f %lld p %lld %#llx: %08x %08x%s ring %d t %lld v %llu done %llu", (long long)rb_frame_now(),
+                     (long long)presents_now, (unsigned long long)host->gpu_guest(gpu), g[0], g[3], held ? " HELD" : "",
+                     ring_serve ? rn.kind : -1, (long long)rn.tag, (unsigned long long)rn.value,
+                     (unsigned long long)vk_timeline_reached());
+            }
             if (++st_reads % 2000 == 0)
                 logf("vk: exposure sums: 2000 reads, %lld of them given the last result again (RX_VK_METER_HOLD)", (long long)st_given.exchange(0));
         }
@@ -7763,6 +7780,17 @@ void do_present(const nvn_tex* t, const int crop[4]) {
                          (unsigned long long)(ch[1] / n), (unsigned long long)(ch[2] / n));
                     dump_request(presents + 1);
                 }
+            }
+            if (meter_trace_on()) {   // (FLASH1, HL_METER_TRACE=1 with RX_VK_SHOT_EVERY=1: every shown frame's mean luminance, 0-255)
+                const uint8_t* q0 = px->data();
+                uint64_t sum = 0, n = 0;
+                for (uint32_t y = 0; y < kShotH; y += 2)
+                    for (uint32_t x = 0; x < kShotW; x += 2, n++) {
+                        const uint8_t* q = q0 + ((size_t)y * kShotW + x) * 4;
+                        sum += 54u * q[0] + 183u * q[1] + 19u * q[2];
+                    }
+                logf("vk: mtrace luma p %lld f %lld: %.2f (now p %lld, held present %llu)", (long long)at_present, (long long)rb_frame_now(),
+                     n ? sum / 256.0 / n : 0.0, (long long)presents_now, (unsigned long long)vk_timeline_held_present());
             }
             // (RX_VK_FLASH=1, with RX_VK_SHOT_EVERY=1: a frame that differs from both its neighbours in a part of the
             // picture where they agree is a one-frame flash: the three are written as flash_<present>_{a,b,c}.png and
@@ -9039,6 +9067,8 @@ void ot_main() {
     };
     Job held;              // (a present not ready yet: PIPE4)
     bool holding = false;
+    int64_t held_jobs = 0, held_since = 0;   // (FLASH1, HL_METER_TRACE: the jobs run behind a held present)
+    uint64_t held_first = 0, held_last = 0;
     int64_t held_until = 0;
     for (;;) {
         Job j;
@@ -9085,6 +9115,7 @@ void ot_main() {
             } else {
                 ot_sig_waits++;
                 held = std::move(j), holding = true, held_until = ot_now() + (int64_t)ms * 1000000;
+                held_jobs = 0, held_first = held_last = 0, held_since = ot_now();
                 ot_holding.store(true, std::memory_order_release);
             }
             continue;
@@ -9092,6 +9123,10 @@ void ot_main() {
         if (got) {
             ot_run(j);
             finish(j);
+            if (holding && j.kind == JOB_SUBMIT) {
+                held_jobs++, held_last = j.value;
+                if (!held_first) held_first = j.value;
+            }
         }
         if (holding) {
             const bool force = next_present || ot_now() >= held_until;
@@ -9103,6 +9138,10 @@ void ot_main() {
                         logf("vk: order thread: the present after %lld forced (%s; value %llu)", (long long)presents_now,
                              next_present ? "the next present came" : "waited its time", (unsigned long long)held.value);
                 }
+                if (meter_trace_on())   // (FLASH1: which presents were held, and what ran on the GPU's queue before them)
+                    logf("vk: mtrace hold present p %lld value %llu: %.2f ms, %lld submits run behind it (values %llu-%llu)%s",
+                         (long long)presents_now, (unsigned long long)held.value, (ot_now() - held_since) / 1e6, (long long)held_jobs,
+                         (unsigned long long)held_first, (unsigned long long)held_last, force ? ", forced" : "");
                 ot_held_present.store(0, std::memory_order_release);
                 finish(held);
                 holding = false;
@@ -9880,7 +9919,9 @@ void fill_replay_table(MkwVkRenderer& t) {
         if (id == HOS_OPT_HDR_WHITE) return std::clamp(opts.hdr_white, 80, 500);
         if (id == HOS_OPT_DISCORD) return opts.discord != 0;
         if (id == HL_OPT_SKIP_TITLE) return opts.skip_title != 0;
-        if (id == HL_OPT_SPRINT) return opts.sprint != 0;   // (host/nn_hid.c, host/oot_sprint.c)
+        if (id == HL_OPT_PROMPTS) return opts.prompts;   // (host/prompts.c: the Button prompts row, live)
+        if (id == HL_OPT_HANDHELD) return menu_handheld_now();   // (host/nn_applet.c: a dock or an undock while the game runs)
+        if (id == HL_OPT_SPRINT) return opts.sprint;   // (host/nn_hid.c, host/oot_sprint.c)
         if (id == HL_OPT_HUD_LAYOUT) return opts.hud_layout;
         if (id == HL_OPT_VSYNC_MODE) return opts.vsync_mode;
         return id == 0 ? opts.realtime : id == 1 ? menu_is_open() : id == 2 ? resolution_auto() && !temporal_full_scale() : id == 3 ? (temporal_full_scale() ? 10000 : resolution_scale()) : id == 4 ? opts.pad_background : id == 5 ? opts.text_speed : id == 6 ? opts.mouse_native :

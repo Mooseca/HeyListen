@@ -40,7 +40,8 @@ static void *at(uint64_t address) { CHECK(address <= 512 - 8); return memory + a
 #define ARG(n) (c->x[n])
 #define RET(value) (c->x[0] = (uint64_t)(value))
 
-uint64_t hos_sprint_input(uint64_t buttons, int on, int blocked) { (void)on; (void)blocked; return buttons; }   /* (host/oot_sprint.c: Sprint with L3 off) */
+uint64_t hos_sprint_input(uint64_t buttons, int on, int blocked, int moving) { (void)on; (void)blocked; (void)moving; return buttons; }   /* (host/oot_sprint.c: Sprint with L3 off) */
+int32_t hos_stick_axis(int16_t v, int zone) { (void)zone; return v; }   /* (the real cut is in nn_hid.c, outside this cut) */
 int rx_option(int id, int otherwise) { return id == 4 ? menu_background : id == 1 ? 0 : otherwise; }
 int64_t hos_now_ns(void) { return now_ns; }
 void hos_log(const char *format, ...) {
@@ -76,6 +77,10 @@ void rx_request_frame_dump(void) { commands++; }
 void rx_set_screenshot_ms(int64_t ms) { (void)ms; commands++; }
 void rx_request_rdoc_capture(int frames) { (void)frames; commands++; }
 void rx_flash_dark_arm(void) { commands++; }
+void hos_prompts_live(void) {}   /* (host/prompts.c: the button prompts follow the controls) */
+volatile int hos_prompts_row = -1;   /* (host/prompts.c: "!prompts" in the live input) */
+void hos_bind(int set, int button, int slot, int code) { (void)set, (void)button, (void)slot, (void)code; }   /* ("!bind") */
+volatile int64_t input_pad_ns, input_key_ns;   /* (nn_hid.c: Auto's device in use, host/prompts.c) */
 
 #include "input_actual.inc"
 
