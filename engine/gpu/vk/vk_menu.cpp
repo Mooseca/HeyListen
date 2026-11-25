@@ -1074,7 +1074,7 @@ Row rows[] = {
      "Which face button is which. Binding one yourself on the Controls page makes it Custom.", hn_pad_layout},
     {TAB_CONTROLS, "Button prompts", &opts.prompts, 0, HOS_PROMPT_N, 1, tx_prompts,
      "The button icons the game shows, in its texts, menus and the ocarina's notes: those of this controller or the keyboard, for "
-     "the buttons your controls put each action on. Applies at once; after a restart where the game's files are a mod's.", hn_prompts, true, true},
+     "the buttons your controls put each action on. Applies at once, no restart; a mod's own icon files keep theirs.", hn_prompts, false, true},
     {TAB_CONTROLS, "Controller in background", &opts.pad_background, 0, 1, 1, tx_onoff,
      "Whether the controller plays the game while another window has the focus.", hn_background},
     {TAB_CONTROLS, "Sprint with L3", &opts.sprint, 0, 1, 1, tx_onoff,   // (HL_OPT_SPRINT, vk_opt_ids.h, host/oot_sprint.c; saved as sprint_with_l3)
@@ -1572,13 +1572,6 @@ void save() {
     hos_atomic_write(ini_path().c_str(), out.data(), out.size());
 }
 
-/// (HeyListen, after Longshot #2366) The Button prompts row: a new face shows at once where the game has every part of the prompts
-/// from host/prompts.c (textures, layouts, icons in texts): nothing to restart for then; else, as the other restart rows, at the next start
-void prompts_at_once(const Row& r) {
-    if (r.value == &opts.prompts && (prompts_live.load(std::memory_order_relaxed) & HL_PROMPTS_LIVE_ALL) == HL_PROMPTS_LIVE_ALL)
-        restart_state.restart_value(restart_slot_of(r), *r.value);
-}
-
 /// A row's new value v, as the arrows set it (dir: 1 up, -1 down, for the rows that skip or wrap), saved unless !keep
 /// (a slider's drag: saved once it is let go)
 void set_row(Row& r, int v, int dir, bool keep = true) {
@@ -1626,7 +1619,6 @@ void set_row(Row& r, int v, int dir, bool keep = true) {
     // becomes 6x, AMD FSR 3.1 2x, Auto with either 2x)
     if (r.value == &opts.framegen_by) opts.framegen = fgr::on_mode_change(framegen_by_now(), dlss_fg_most(), opts.framegen);
     if (r.value == &opts.mic && can_mic()) mic_chosen();   // (hookshot)
-    prompts_at_once(r);
     {   // (a row that takes a restart, or a preset that sets one: asked again at the next close)
         int now[mr::kMax];
         restart_values(now);
@@ -2175,7 +2167,7 @@ void draw_controls(ui::Ctx& c) {
                                            "this menu. Home, Select and Start together, the touchpad click, Insert and F1 work too. "
                                            "A combination held does not reach the game. Enter binds it, Delete clears it."
                                   : "Which gamepad button and which keys press each of the Switch's buttons. Enter binds the one "
-                                    "selected; Delete clears it. The game's button icons follow at once (after a restart under a mod's files).";
+                                    "selected; Delete clears it. The game's button icons follow at once, with no restart.";
     const char* hint = page_row ? (page_row->hint ? page_row->hint(*page_row->value, -1) : nullptr)
                                 : "Gamepad: the D-pad moves, A binds, B goes back.";
     float bottom = std::min(c.h - c.safe, bar_top) - 10 * s;   // (the rows end above the prompts)

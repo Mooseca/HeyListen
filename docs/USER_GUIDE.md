@@ -381,9 +381,8 @@ been quiet for a second, and a resting pad's drift or a nudge of the mouse count
 button your controls put each action on (the first of its two keys), including the ocarina's notes, WASD for the left stick's ways
 (or the movement keys you bound) and the mouse for the camera; the pause menu's controller picture keeps the Switch's buttons.
 A new choice, and a new binding on the Controls page, **show at once**: no restart, no reload, the textures and layouts changed in
-place within a frame and the texts the next time the game draws them (a text already on screen keeps its old icons until it is shown
-again: the next dialogue page, a menu page opened again). Where a mod replaces the game's font, textures or layouts the row asks for a
-restart as before, and the game's own icons stay. The choice is saved in `hookshot_options.ini` (`button_prompts=`: 0 Auto, 1 Switch,
+place within a frame and the texts that are on screen, the pause menu's hint bar and tabs, the song-score bar, the item labels, at the
+next frame. The row never asks for a restart. Where a mod replaces the game's font, textures or layouts, the mod's own files stay as they are. The choice is saved in `hookshot_options.ini` (`button_prompts=`: 0 Auto, 1 Switch,
 2 Xbox, 3 PlayStation 4, 4 PlayStation 5, 5 Steam Deck, 6 Keyboard). The icons are drawn when the builder makes your game folder, from your own game files and
 [Kenney's](https://kenney.nl/assets/input-prompts) CC0 Input Prompts, into the `prompts` folder there; they are not downloaded or
 copied from anywhere, so a folder from another build is not needed. No `prompts` folder in your game folder (a game built by a release up to 0.4.2,

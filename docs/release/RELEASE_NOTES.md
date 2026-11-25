@@ -51,8 +51,7 @@ builds the driver's pipelines as you play, so it stutters more than usual. The s
 * **HUD layout row**: the HUD at the screen's edges (every screen shape) or in the middle 16:9.
 * **A tidier menu**: rows that only matter with another setting on (V-Sync mode, the frame generation rows, the DLSS
   model, the HDR and PsychoV35 rows) are hidden while that setting is off; the HDR row says when your screen has no HDR
-  (Windows' *Use HDR* off); *Layout preset* and *Button prompts* are on the Controls tab. Button prompts apply at once
-  (after a restart where a mod replaces the game's files).
+  (Windows' *Use HDR* off); *Layout preset* and *Button prompts* are on the Controls tab. Button prompts apply at once, with no restart.
 * **Open menu** is a bindable control, and a touchpad click opens the in-game menu.
 * **Check for updates**: the update offer also works when the game is started without the launcher, with *Never ask
   again* and a Settings row. The Builder's **Play** button starts the game through the builder (`--play`).
