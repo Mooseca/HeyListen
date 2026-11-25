@@ -41,6 +41,7 @@ ARGS = {
     "tests/test_zone_report.py": ["--cxx", "{cxx}"],
     "tests/test_linux_pressure.py": ["--cxx", "{cxx}"],
     "tests/test_compile_gate.py": ["--cxx", "{cxx}"],
+    "tests/test_thread_prio.py": ["--cxx", "{cxx}"],
     "tests/test_profile_report.py": ["--cxx", "{cxx}"],
     "tests/test_settings_atomic.py": ["--cc", "gcc"],
     "tests/test_host_alloc_wait.py": ["--cc", "gcc"],

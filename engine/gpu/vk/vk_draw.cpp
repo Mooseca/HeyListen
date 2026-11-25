@@ -43,6 +43,7 @@
 #include "vk_paths.h"
 #include "vk_draw.h"
 #include "vk_vrs.h"
+#include "thread_prio.h"
 #include "vk_draw_sample.h"
 #include "flat_map.h"
 #include "perf_report.h"   // (zone_note_program / zone_note_state: the per-zone key recorder, once a key per map)
@@ -1703,6 +1704,7 @@ void state_list_prepare(void (*progress)(size_t done, size_t total), bool backgr
     const auto worker = [&] {
         ub_thread_off();   // (a background thread: see ub_thread_off; the pipeline state list's builds raced the replay's updates)
         SetThreadPriority(GetCurrentThread(), background ? THREAD_PRIORITY_IDLE : THREAD_PRIORITY_BELOW_NORMAL);
+        if (background) MKWVK_PIN_BACKGROUND();   // (RX_VK_THREAD_PRIO: off the replay's core, thread_prio.h)
         for (;;) {
             const size_t i = next++;
             if (i >= want.size()) return;
@@ -1746,6 +1748,7 @@ void state_list_prepare(void (*progress)(size_t done, size_t total), bool backgr
     next = 0;
     const auto variant_worker = [&] {
         SetThreadPriority(GetCurrentThread(), background ? THREAD_PRIORITY_IDLE : THREAD_PRIORITY_BELOW_NORMAL);
+        if (background) MKWVK_PIN_BACKGROUND();   // (RX_VK_THREAD_PRIO: off the replay's core, thread_prio.h)
         for (;;) {
             const size_t i = next++;
             if (i >= variant_of.size()) return;
@@ -10539,6 +10542,7 @@ bool prepare_run(void (*progress)(size_t done, size_t total), bool background) {
         ub_thread_off();   // (a background thread: see ub_thread_off)
         // (below normal, and half the CPUs, below: on all of them at High the driver's compiles froze the whole PC)
         SetThreadPriority(GetCurrentThread(), background ? THREAD_PRIORITY_IDLE : THREAD_PRIORITY_BELOW_NORMAL);
+        if (background) MKWVK_PIN_BACKGROUND();   // (RX_VK_THREAD_PRIO: off the replay's core, thread_prio.h)
         for (;;) {
             if (prepare_stopped()) return;
             const size_t i = next++;
@@ -10893,6 +10897,7 @@ void precompile_run(void (*progress)(size_t done, size_t total), bool wait) {
     if (!total) precompile_finished(pre);
     const auto worker = [pre, total, wait] {
         if (!wait) SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
+        if (!wait) MKWVK_PIN_BACKGROUND();
         ub_thread_off();   // (a background thread: see ub_thread_off)
         for (;;) {
             if (prepare_stopped() || pre->abandoned.load(std::memory_order_relaxed)) break;
@@ -11148,6 +11153,7 @@ void predict_run(void (*progress)(size_t done, size_t total), bool background, b
         auto& keys = S.keys;
         ub_thread_off();   // (a background thread: see ub_thread_off)
         SetThreadPriority(GetCurrentThread(), soft ? THREAD_PRIORITY_IDLE : THREAD_PRIORITY_BELOW_NORMAL);   // (as prepare_run's: these are the driver's compiles, see DriverTurn)
+        if (background) MKWVK_PIN_BACKGROUND();
         driver_cache_only = !noted;
         const unsigned me = worker_n++ % 32;
         std::atomic<uint64_t>& mine = in_flight[me];

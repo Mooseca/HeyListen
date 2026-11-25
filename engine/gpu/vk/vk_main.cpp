@@ -25,6 +25,7 @@
 #include "vk_draw.h"
 #include "vk_framegen.h"
 #include "vk_internal.h"
+#include "thread_prio.h"
 #include "gpu_choice.h"
 #include "present_mode.h"
 #include "sparse_queue.h"
@@ -1436,6 +1437,27 @@ bool shaders_preparing() { return prep_running.load(std::memory_order_relaxed); 
 // (hookshot) The window is being closed (host/display.c, host/posix/display_sdl.c, before they end the process): while the
 // shaders are prepared, their workers are stopped and what they made is kept first (10 s at most: a driver can take longer on one
 // pipeline). Looked up by name, so an executable and a back end of different versions still close
+namespace mkwvk {
+// (RX_VK_THREAD_PRIO, thread_prio.h) the compile threads' processors and the lift's thread handles, and the start line
+void thread_prio_init() {
+#ifdef _WIN32
+    if (prio::mode() > 0) {
+        prio::Hooks& hk = prio::hooks();
+        DWORD_PTR proc = 0, sys = 0;
+        GetProcessAffinityMask(GetCurrentProcess(), &proc, &sys);
+        const uint64_t reserved = host->reserved_cpus ? host->reserved_cpus() : 0;
+        static uint64_t mask;
+        mask = prio::compile_mask((uint64_t)proc, reserved);
+        if (reserved && mask != (uint64_t)proc) {
+            hk.pinned_off = (uint64_t)proc & reserved;
+            hk.pin_compile = [] { SetThreadAffinityMask(GetCurrentThread(), (DWORD_PTR)mask); };
+        }
+    }
+#endif
+    logf("vk: thread priorities: %s", prio::describe().c_str());
+}
+} // namespace mkwvk
+
 extern "C"
 #ifdef _WIN32
 __declspec(dllexport)
@@ -1461,6 +1483,7 @@ const MkwVkRenderer* mkwvk_init(const MkwVkHost* h) {
     using namespace mkwvk;
     if (!h || h->version != MKWVK_API_VERSION) return nullptr;
     host = h;
+    thread_prio_init();
     if (h->out_of_memory) std::set_new_handler(new_refused);   // (the renderer's C++ allocations at the commit limit: new_refused)
     if (!load_global()) {
         logf("vk: vulkan-1.dll not found");
