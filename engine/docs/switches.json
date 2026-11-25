@@ -2,7 +2,7 @@
  "schema": 1,
  "generated_by": "engine/scripts/list_switches.py",
  "scope": "C, C++ and headers under engine/ (engine/tests and vendored trees other than a64-kit excluded) and the Python the builder, the lifter and the scripts run: getenv, std::getenv, _wgetenv, the code's own env helpers and table-driven reads, and os.environ.",
- "count": 1457,
+ "count": 1458,
  "switches": [
   {
    "name": "A64_",
@@ -2587,6 +2587,27 @@
    "comment": "(HL_SHIPPED_STATES) The shipped list's contents by a hash, and the hash state_list_prepare last went through, in hookshot_pipeline_states_shipped.done: a list that came after the shaders were prepared (a list shipped later, or a folder prepared before it had one) was never noted, the prepare being done for that translator and seed, and its pipelines were all made in play. 0: no list.",
    "documented_in": null,
    "source": "comment at gpu/vk/vk_draw.cpp",
+   "documented": true,
+   "set_via": "In `hookshot_env.txt`, or in the environment.",
+   "use": null
+  },
+  {
+   "name": "HL_SKIP_GIVEUP_S",
+   "area": "native",
+   "group": "Native engine",
+   "audience": "developer",
+   "files": [
+    {
+     "path": "host/oot_autoload.c",
+     "line": 217
+    }
+   ],
+   "default": "off (unset)",
+   "values": "on or off (0, false, off, no and empty are off)",
+   "explanation": "(HL_SKIP_GIVEUP_S=<s>: the scripted title skip gives up after that many seconds; a start that re-translates the shaders needs more than 120).",
+   "comment": "(HL_SKIP_GIVEUP_S=<s>: the scripted title skip gives up after that many seconds; a start that re-translates the shaders needs more than 120).",
+   "documented_in": null,
+   "source": "comment at host/oot_autoload.c",
    "documented": true,
    "set_via": "In `hookshot_env.txt`, or in the environment.",
    "use": null
