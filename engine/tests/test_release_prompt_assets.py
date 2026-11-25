@@ -115,6 +115,7 @@ def main():
     check('"%shookshot_options.ini"' in src and "button_prompts=" in src, "prompts.c does not read button_prompts=")
     menu = (ENGINE / "gpu" / "vk" / "vk_menu.cpp").read_text(encoding="utf-8")
     check('"Button prompts", &opts.prompts' in menu, "the menu has no Button prompts row on opts.prompts")
+    check("hn_prompts, false, true}" in menu, "the Button prompts row takes a restart again: the icons follow at once, it must not ask for one")
 
     # 4. no prompts/ folder: the log says so
     check("prompts: NO PROMPTS FOLDER" in src, "prompts.c is silent when the game folder has no prompts/")

@@ -386,7 +386,7 @@ next frame. The row never asks for a restart. Where a mod replaces the game's fo
 2 Xbox, 3 PlayStation 4, 4 PlayStation 5, 5 Steam Deck, 6 Keyboard). The icons are drawn when the builder makes your game folder, from your own game files and
 [Kenney's](https://kenney.nl/assets/input-prompts) CC0 Input Prompts, into the `prompts` folder there; they are not downloaded or
 copied from anywhere, so a folder from another build is not needed. No `prompts` folder in your game folder (a game built by a release up to 0.4.2,
-whose builder could not draw them): update to a newer release and build again to make it; the game's log says `prompts: no prompts folder` while it is missing.
+whose builder could not draw them): update to a newer release and build again to make it; the game's log says `prompts: NO PROMPTS FOLDER` while it is missing, the Button prompts row's help says it changes nothing, and the builder prints a boxed WARNING when it could not draw them (it needs the packages of `nx2/prompt_requirements.txt`).
 
 ## Known issues
 
