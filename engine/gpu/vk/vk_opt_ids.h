@@ -19,6 +19,10 @@
    90 is the Frame rate limit's and 91 the frame generation multiplier's on this tree, 92 the V-Sync mode row's, so 93: free here */
 #define HL_OPT_VRR_CAP 93
 
+/* The Base frame rate limit row (host/nn_vi.c asks, gpu/vk/vk_replay.cpp answers in frames a second: 30 to 120, 0 when it is Off): the
+   game's OWN frame rate, before frame generation. 94 to 99 are perf_parts.h's (the wait kinds), 100 the next free one. */
+#define HL_OPT_BASE_LIMIT 100
+
 /* The Skip title screen row (host/oot_autoload.c asks, gpu/vk/vk_replay.cpp answers 0 or 1). 44 is the id Longshot's change
    of the same row uses in vk_api.h (free in this tree: the ids there run 32 to 35, 40 to 43), so the two agree. */
 #define HL_OPT_SKIP_TITLE 44
@@ -52,3 +56,7 @@
    tree's shader stamp. */
 #define HL_OPT_PROMPTS_LIVE 95
 enum { HL_PROMPTS_LIVE_TEXTURES = 1, HL_PROMPTS_LIVE_LAYOUTS = 2, HL_PROMPTS_LIVE_TEXTS = 4, HL_PROMPTS_LIVE_ALL = 7 };
+
+/* The Controls tab's Sprint with L3 row (host/nn_hid.c asks at each read of the controllers, host/oot_sprint.c acts;
+   gpu/vk/vk_replay.cpp answers 0 or 1). 97 is Longshot's id for its Sprint row (HOS_OPT_SPRINT in its vk_api.h); free here. */
+#define HL_OPT_SPRINT 97

@@ -12,6 +12,7 @@
 // with the Switch 2 GOB swizzle); other formats are unswizzled on the CPU straight into the staging memory.
 #pragma once
 
+#include <memory>
 #include <string>
 #include <cstdint>
 #include <unordered_map>
@@ -29,6 +30,7 @@ struct Texture {
     VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT;
     VkImageUsageFlags usage = 0;
     uint32_t width = 1, height = 1, depth = 1, levels = 1, layers = 1;   // the image's (after skip)
+    uint32_t shrink = 0;      // (RX_VK_SHADOW_SHIFT) a huge depth-only shadow map made 2^shrink times smaller than the guest's: its draws' viewport and scissor shrink with it, nothing is uploaded into it
     uint32_t skip = 0;        // top levels of the texture left out (huge textures: RX_VK_TEX_MAX_DIM, _MAX_MB)
     // (a huge array kept whole as a sparse resident image instead: each layer gets device memory when it is first
     // written, so only what the game streams in costs VRAM. MKW's terrain arrays, 8192 x 8192 x 68 BC6H: 5.8 GB
@@ -86,6 +88,9 @@ struct Texture {
     uint64_t defer_frame = 0, defer_seen = 0;
     int64_t defer_ns = 0;
     uint32_t defer_asks = 0;
+    uint64_t bcd_key = 0;      // (TEXCACHE: held back while the disk cache reads its blocks: their key, 0 when not held)
+    int64_t bcd_hold_ns = 0;   // (since when)
+    bool bcd_keyed = false;    // (the hold was decided once)
     uint64_t last_frame = 0;  // the present it was last used in (the cache's age)
     uint64_t first_render_frame = 0;   // the present it was first rendered into in (0: never)
     uint64_t last_value = 0;  // the timeline value of the last submission that used it
@@ -149,14 +154,18 @@ uint64_t texture_segment();
 /// A parallel replay's segments, in queue order: each one's init command buffer (begun; submitted right before its
 /// uploads). A new image's first layout change (UNDEFINED -> GENERAL, and its clear) that a segment's worker makes goes
 /// to the earliest segment's still being recorded, not to the maker's own uploads: a segment before the maker's that
-/// uses it is submitted first, and found it UNDEFINED (VUID-vkCmdDraw-None-09600 with RX_VK_PARALLEL only)
-void texture_segments_begin(const VkCommandBuffer* init_cmds, size_t n);
-/// This thread records segment `index` of them (-1: none, after it)
-void texture_segment_worker(int index);
+/// uses it is submitted first, and found it UNDEFINED (VUID-vkCmdDraw-None-09600 with RX_VK_PARALLEL only).
+/// (stream REC1) The table is an object of the group of segments, not a global: the group, its jobs and each worker hold it
+/// (SegTableRef), so a later group's table does not replace what workers still recording the last one index
+struct SegTable;
+using SegTableRef = std::shared_ptr<SegTable>;
+SegTableRef texture_segments_begin(const VkCommandBuffer* init_cmds, size_t n);
+/// This thread records segment `index` of that group (a null table, index -1: none, after it)
+void texture_segment_worker(const SegTableRef& table, int index);
 /// Segment `index` recorded: its init command buffer ended (no new image's change goes to it after). 1: something went
 /// to it (submit it before the segment's uploads), 0: nothing, -1: something did and it could not be ended (lost: the
 /// replay stops)
-int texture_segment_end(int index);
+int texture_segment_end(SegTable& table, int index);
 /// (RX_VK_POOL_MIRROR) on a parallel segment's worker, upload_command_buffer() is the earliest open segment's init command buffer
 /// from the begin call to the end call (a mirror made there is filled before any segment that could read it); elsewhere nothing
 void* upload_to_earliest_begin();

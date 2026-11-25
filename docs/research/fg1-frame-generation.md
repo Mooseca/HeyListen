@@ -208,7 +208,7 @@ measurement steps are "function + picture" first):
 | 3 | HUD layer fit and composite (`fg_hud_layer`, `fg_hud_composite`, glslang-made SPIR-V) and tests | 5-6 h | +88 MB at 1440p |
 | 4a | Built-in interpolator on HUD-less pair + HUD composite | 5-7 h | helps every GPU and 3x-8x |
 | 4b | DLSS-G `pHudless` + `pUIAlpha`/`pUI`, UIR create flag | 5-6 h | test on the RTX 5070 only |
-| 5 | FSR 4 FG context-only: extend `ffx_sdk.py` with `amd_fidelityfx_framegeneration_vk.dll` (36 806 928 bytes, hash recorded at fetch), `vk_fsr4fg.cpp` next to `vk_fsr4.cpp` (loader, `ffxCreateContext`, configure/prepare/dispatch order, frame ID, camera vectors reused from vk_dlss.cpp:895), `BY_FSR4` row, graceful "needs RX 9000" | 12-16 h | cannot be tested here; needs Mooseca (RX 9070 XT). Pacing stays ours (no driver-assisted pacing) |
+| 5 | (branch `feat/fg-fsr4-cap`: written without hardware, untested; `engine/gpu/vk/vk_fsr4fg.cpp`, the AMD DLL still to be pinned in `ffx_sdk.py`) FSR 4 FG context-only: extend `ffx_sdk.py` with `amd_fidelityfx_framegeneration_vk.dll` (36 806 928 bytes, hash recorded at fetch), `vk_fsr4fg.cpp` next to `vk_fsr4.cpp` (loader, `ffxCreateContext`, configure/prepare/dispatch order, frame ID, camera vectors reused from vk_dlss.cpp:895), `BY_FSR4` row, graceful "needs RX 9000" | 12-16 h | cannot be tested here; needs Mooseca (RX 9070 XT). Pacing stays ours (no driver-assisted pacing) |
 | 6 | 3050 acceptance: FSR 3.1 FI vs built-in vs off at 1440p, HUD view, pacing | 3-4 h agent, plus leases | only when fps rounds are allowed again |
 
 Order of value for the stated target: 1-3, then 4a, then 6, then 4b, then 5.

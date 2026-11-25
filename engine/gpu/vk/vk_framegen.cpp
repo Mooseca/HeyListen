@@ -28,6 +28,7 @@
 #include "framegen_idle.h"   // (longshot 382a3d675: when its images are let go, framegen_idle)
 #include "framegen_rows.h"   // (the multiplier each Frame generation by makes, the limit's share)
 #include "vk_dlss.h"   // (NVIDIA DLSS Frame Generation: vk_dlss.cpp)
+#include "vk_fsr4fg.h"   // (AMD FSR 4 frame generation: vk_fsr4fg.cpp)
 #include "vk_temporal.h"   // (temporal_wanted: DLSS FG's inputs)
 #include "vk_fsr3_inputs.h"   // (AMD FSR 3.1 frame interpolation's depth and motion)
 #include "vk_fsr3fi.h"
@@ -546,6 +547,8 @@ int framegen_by_now() {
     // (DLSS FG makes the frames only where it is asked for and has a temporal Upscaler's inputs: else the renderer's own does,
     // as the Frame generation by row's line says)
     if (dlss_fg_wanted() && temporal_wanted()) return framegen_rows::BY_DLSS;
+    // (AMD FSR 4 frame generation: chosen, and AMD's own runtime says it runs on this GPU; anywhere else the choice is the renderer's own as before)
+    if (opts.framegen_by == framegen_rows::BY_FSR4 && fsr4fg_wanted()) return framegen_rows::BY_FSR4;
     return opts.framegen_by == framegen_rows::BY_FSR3 ? framegen_rows::BY_FSR3 : framegen_rows::BY_OWN;
 }
 int framegen_now() {
@@ -602,6 +605,7 @@ int framegen_engine(int* mult, bool* automatic) {
     // (the Frame generation by row's third engine, feat/fg-vendor-inputs: NVIDIA DLSS FG where it is chosen and has a temporal
     // Upscaler's inputs; the renderer's own makes the frames where it does not)
     if (framegen_by_now() == framegen_rows::BY_DLSS) return 3;
+    if (framegen_by_now() == framegen_rows::BY_FSR4 && !*automatic && *mult == 2) return 4;
     return !*automatic && *mult == 2 && fsr3fi::frames_wanted() ? 2 : 1;
 }
 
@@ -1108,6 +1112,26 @@ int dlssg_frames(VkCommandBuffer cmd, OutSet& set, int cur, uint32_t uw, uint32_
     return n;
 }
 
+/// (HeyListen) The one made frame of a set by AMD FSR 4 frame generation (vk_fsr4fg.cpp), from this frame's colour and the scene's depth, motion
+/// and camera (vk_fsr3_inputs.h): 1 when it made it into set.frame[0], 0 when it did not (no runtime, the game's HDR picture, a refusal: logged
+/// there in words), which leaves the set to the others, nothing written
+int fsr4_frame(VkCommandBuffer cmd, OutSet& set, int cur, uint32_t uw, uint32_t uh, uint64_t sequence, const fsr3_inputs::Frame& f, bool native_pq) {
+    if (!f.depth_image || !f.motion_image) return 0;
+    DlssFgInputs in;
+    in.depth = f.depth_image, in.depth_view = f.depth, in.depth_format = VK_FORMAT_R32_SFLOAT;
+    in.motion = f.motion_image, in.motion_view = f.motion, in.motion_format = VK_FORMAT_R16G16_SFLOAT;
+    in.render_w = f.width, in.render_h = f.height;
+    std::memcpy(in.projection, f.projection, sizeof in.projection);
+    std::memcpy(in.view_projection, f.view_projection, sizeof in.view_projection);
+    std::memcpy(in.prev_view_projection, f.prev_view_projection, sizeof in.prev_view_projection);
+    in.have_prev = f.have_prev;
+    in.jitter[0] = f.jitter[0], in.jitter[1] = f.jitter[1];
+    in.near_z = f.camera.near_plane, in.far_z = f.camera.far_plane, in.fov_y = f.camera.fov_y;
+    in.reset = f.reset;
+    in.frame_ms = f.frame_ms;
+    return fsr4fg_frames(cmd, fg.frames[cur].image, fg.frames[cur].view, uw, uh, set.frame[0].image, set.frame[0].view, in, sequence, native_pq);
+}
+
 bool framegen_record(VkCommandBuffer cmd, VkImageView src, uint32_t sw, uint32_t sh, const int crop[4], bool native_pq) {
     int x0 = 0, y0 = 0, w = (int)sw, h = (int)sh;
     if (crop && crop[2] > 0 && crop[3] > 0) x0 = crop[0], y0 = crop[1], w = crop[2], h = crop[3];
@@ -1212,8 +1236,14 @@ bool framegen_record(VkCommandBuffer cmd, VkImageView src, uint32_t sw, uint32_t
     // (NVIDIA DLSS Frame Generation first where it is chosen, at any fixed multiplier it can make; the inputs are taken once)
     fsr3_inputs::Frame inputs;
     const bool dlssg = dlss_fg_wanted(), fsr_fi = m == 2 && fsr3fi::frames_wanted();
-    const bool have_inputs = blend && m >= 2 && (dlssg || fsr_fi) && fsr3_inputs::take(inputs);
+    // (AMD FSR 4 frame generation, 2x: tried first where it is chosen and offered; any refusal leaves the set to AMD FSR 3.1's interpolation
+    // where that runs, else the renderer's own, exactly as when it is not chosen)
+    const bool fsr4 = m == 2 && !dlssg && framegen_by_now() == framegen_rows::BY_FSR4;
+    const bool have_inputs = blend && m >= 2 && (dlssg || fsr_fi || fsr4) && fsr3_inputs::take(inputs);
     if (!dlssg) dlss_fg_idle();   // (the row left at the renderer's own: its feature and memory given back)
+    if (!fsr4) fsr4fg_idle();     // (the row left AMD FSR 4: its context and memory given back)
+    if (blend && fsr4 && have_inputs)
+        set->made = fsr4_frame(cmd, *set, cur, uw, uh, sequence, inputs, native_pq);
     if (blend && m >= 2 && dlssg) set->made = dlssg_frames(cmd, *set, cur, uw, uh, m - 1, sequence, have_inputs ? &inputs : nullptr);
     if (set->made == 0 && blend && fsr_fi) set->made = fsr3fi_frame(cmd, *set, cur, uw, uh, sequence, have_inputs ? &inputs : nullptr, native_pq);
     if (set->made == 0 && blend && m > 1) {
