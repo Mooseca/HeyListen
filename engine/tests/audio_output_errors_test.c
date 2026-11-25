@@ -31,7 +31,8 @@ static const char *scenario;
 static int prepare_calls, write_calls, accepted, unprepare_calls, open_calls, close_calls, reset_calls, logs;
 static unsigned last_device, last_channels;
 static uint64_t now_ms;
-static int fail_prepare, fail_write, fail_unprepare, fail_open, fail_open6;
+static int fail_prepare, fail_write, fail_unprepare, fail_open, fail_open6, fail_write_all;
+static unsigned fail_device = 99;   /* (a waveOut number that does not open; the default's opening clears fail_write_all) */
 static int queued[10];
 static WAVEHDR *known[10];
 static char last_log[512];
@@ -58,6 +59,8 @@ static MMRESULT test_open(HWAVEOUT *out, unsigned device, const WAVEFORMATEX *f,
     CHECK(f->nBlockAlign == 2 * f->nChannels && f->nAvgBytesPerSec == 48000 * f->nBlockAlign);
     last_channels = f->nChannels;
     open_calls++;
+    if (device == WAVE_MAPPER) fail_write_all = 0;
+    if (device == fail_device && (fail_open6 ? f->nChannels == 6 : 1)) return 7;
     if (fail_open || (fail_open6 && f->nChannels == 6)) return 7;   /* (MMSYSERR_NOMEM; a device without 5.1: 32) */
     *out = (void *)(uintptr_t)1;
     return 0;
@@ -75,6 +78,7 @@ static MMRESULT test_write(HWAVEOUT out, WAVEHDR *h, unsigned size) {
     const int i = slot(h);
     CHECK(!queued[i]);
     write_calls++;
+    if (fail_write_all) return 7;   /* (an unplugged device) */
     if (!(h->dwFlags & WHDR_PREPARED)) return 34; /* WAVERR_UNPREPARED: no completion follows. */
     if (fail_write && write_calls == 1) return 7; /* MMSYSERR_NOMEM: no buffer was queued. */
     queued[i] = 1;
@@ -108,6 +112,14 @@ static void au_opened(HWAVEOUT w) { (void)w; }
 static int speakers = 2;   /* (the game's speakers: 6 in the "surround" and "fallback" cases) */
 static int au_speakers(void) { return speakers; }
 static const WAVEFORMATEX *au_format(const WAVEFORMATEX *f) { return f; }
+/* (the Output device row's choice, host/nn_audio.c out_selected_index and its generation: a chosen device's waveOut number, -1 the
+   default; given up for, out_mark_bad, it is -1 until the fixture chooses again) */
+static int out_sel_index = -1;
+static long fixture_gen = 1;
+static int marked_bad;
+static long out_gen_now(void) { return fixture_gen; }
+static int out_selected_index(long *gen) { *gen = fixture_gen; return out_sel_index; }
+static void out_mark_bad(long gen) { (void)gen; marked_bad++, out_sel_index = -1; }
 #define getenv test_getenv
 #define waveOutOpen test_open
 #define waveOutPrepareHeader test_prepare
@@ -131,6 +143,63 @@ static void frames(int count, int complete) {
         if (complete) complete_all();
     }
 }
+/* The Output device row's chosen device (host/nn_audio.c: out_selected_index told the fixture's out_sel_index) */
+static void chosen_run(void) {
+    const int stay = !strcmp(scenario, "chosen_changed");
+    if (!strcmp(scenario, "chosen_open_fails") || !strcmp(scenario, "chosen_stereo")) fail_device = 1;
+    if (!strcmp(scenario, "chosen_stereo")) speakers = 6, fail_open6 = 1;
+    if (!stay) out_sel_index = 1;
+    output_open();
+    if (!strcmp(scenario, "chosen_open_fails")) {   /* (device 1 refused: the default stands in, given up for) */
+        CHECK(open_calls == 2 && last_device == WAVE_MAPPER && !on_selected && marked_bad == 1 && wout);
+        CHECK(strstr(last_log, "default device"));
+        frames(40, 1);
+        CHECK(accepted == 20);
+        return;
+    }
+    if (!strcmp(scenario, "chosen_stereo")) {   /* (a device with no 5.1: the chosen one in stereo, not the default in 5.1) */
+        CHECK(open_calls == 2 && last_device == 1 && last_channels == 2 && out_channels == 2 && on_selected && !marked_bad);
+        return;
+    }
+    if (stay) {
+        CHECK(open_calls == 1 && last_device == WAVE_MAPPER && !on_selected);
+        frames(4, 1);
+        CHECK(open_calls == 1 && !close_calls);   /* (the same generation: nothing reopened) */
+        out_sel_index = 1, fixture_gen++;
+        frames(1, 1);
+        CHECK(open_calls == 2 && close_calls == 1 && reset_calls == 1 && last_device == 1 && on_selected);
+        frames(40, 1);
+        CHECK(open_calls == 2 && accepted > 0);
+        out_sel_index = -1, fixture_gen++;
+        frames(1, 1);
+        CHECK(open_calls == 3 && close_calls == 2 && last_device == WAVE_MAPPER && !on_selected);   /* (from the default, not the next device) */
+        return;
+    }
+    CHECK(open_calls == 1 && last_device == 1 && on_selected && !marked_bad && strstr(last_log, "test device 1"));
+    if (!strcmp(scenario, "chosen")) {
+        frames(40, 1);
+        CHECK(accepted == 20 && !marked_bad);
+    } else if (!strcmp(scenario, "chosen_unplugged")) {   /* (every write refused: 40 blocks in a row, then the default) */
+        fail_write_all = 1;
+        frames(70, 1);
+        CHECK(open_calls == 1 && on_selected && accepted == 0);
+        frames(30, 1);
+        CHECK(open_calls == 2 && close_calls == 1 && last_device == WAVE_MAPPER && !on_selected && marked_bad == 1);
+        const int before = accepted;
+        frames(40, 1);
+        CHECK(accepted == before + 20);
+    } else {
+        CHECK(!strcmp(scenario, "chosen_stalls"));   /* (no block ever done: 1.5 s, then the default) */
+        frames(20, 0);
+        now_ms += 1000;
+        frames(1, 0);
+        CHECK(open_calls == 1);
+        now_ms += 1600;
+        frames(1, 0);
+        CHECK(open_calls == 2 && close_calls == 1 && last_device == WAVE_MAPPER && !on_selected && marked_bad == 1);
+        frames(4, 1);
+    }
+}
 int main(int argc, char **argv) {
     CHECK(argc == 2);
     scenario = argv[1];
@@ -141,6 +210,11 @@ int main(int argc, char **argv) {
     if (!strcmp(scenario, "bounded")) fail_prepare = -1;
     if (!strcmp(scenario, "surround") || !strcmp(scenario, "fallback")) speakers = 6;
     fail_open6 = !strcmp(scenario, "fallback");
+    if (!strncmp(scenario, "chosen", 6)) {
+        chosen_run();
+        printf("PASS %s: actual output ring\n", scenario);
+        return 0;
+    }
     output_open();
     if (fail_open6) {
         CHECK(open_calls == 4 && last_channels == 2 && last_device == WAVE_MAPPER);   /* (5.1 on all three, then stereo) */
