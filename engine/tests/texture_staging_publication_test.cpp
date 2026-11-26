@@ -1,5 +1,6 @@
 #include <vulkan/vulkan.h>
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -34,6 +35,13 @@ VkResult vmaFlushAllocation(VmaAllocator, VmaAllocation a, uint64_t offset, uint
     std::copy(a->cpu.begin() + lo, a->cpu.begin() + hi, a->gpu.begin() + lo); flushes++; return VK_SUCCESS;
 }
 void logf(const char*, ...) {}
+// (what main's staging and ASTC upload name besides the slices under test)
+enum class MemKind { Staging };
+struct MemKindScope { explicit MemKindScope(MemKind) {} };
+std::atomic<uint64_t> st_arena_makes{0};
+std::atomic<int64_t> st_arena_make_ns{0};
+bool half_byte_bc(int) { return false; }
+int astc_bytes_alpha(const uint8_t*, uint64_t, uint64_t*) { return 0; }
 void consume(VkCommandBuffer) {
     for (auto& a : allocations) {
         if (coherent) a->gpu = a->cpu;
@@ -46,7 +54,7 @@ bool overlaps(const Ranges* r, uint64_t a, uint64_t b) {
     return !r || std::any_of(r->begin(), r->end(), [=](auto x) { return a < x.second && b > x.first; });
 }
 struct Texture {
-    bool astc = false; uint32_t block_w = 1, block_h = 1;
+    bool astc = false, bc = false, remake = false; int format = 0; uint32_t block_w = 1, block_h = 1;
     VkImageType type = VK_IMAGE_TYPE_2D; VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_1_BIT;
     uint32_t layers = 2; struct { uint64_t layer_size = 64; } L;
     uint64_t gpu = 0;

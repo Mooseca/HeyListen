@@ -30,10 +30,14 @@ def main():
     actual += block(tex, "struct Staging {") + ";\n" + block(tex, "Staging staging(")
     actual += "\n" + block(vma, "void flush_mapped_range(")
     astc = block(tex, "bool upload_astc_gpu(")
-    # The actual gather, publication and command-buffer request. Decoder shaders are outside this cache fixture.
-    stop = astc.index("    const uint64_t align =", astc.index("    const uint64_t staged ="))
-    astc = astc[:stop].replace("    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, astc_pipe);", "    consume(cmd);")
-    actual += "\n" + astc + "    (void)all; return true;\n}\n"
+    # The actual layer selection, staging, gather and publication. main's function has since grown the BC cache before the staging
+    # and the decoder after it: neither is in this cache fixture, so the head is cut where the cache starts and the gather
+    # runs from the staging call to the publication, where the decoder's command buffer is requested.
+    head = astc[:astc.index("    // (a level over the chunk bound")]
+    start = astc.index("    const Staging s = staging(tail * layers.size()")
+    mark = "    flush_mapped_range(s.allocation, s.offset, staged);"
+    end = astc.index("\n", astc.index(mark)) + 1
+    actual += "\n" + head + astc[start:end] + "    consume(upload_cmd());\n    return true;\n}\n"
     cpu = block(tex, "bool upload_inner(Texture& tex, const Ranges* dirty) {")
     start = cpu.index("                    if (!some) continue;")
     start = cpu.index("\n", start) + 1

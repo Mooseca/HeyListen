@@ -29,7 +29,7 @@ def main():
     collect = source[start:end] + "\ncaptured = std::move(rec); }\n"
     start = source.index("    vkWaitForFences(dev.device, 1, &f.done, VK_TRUE, UINT64_MAX);")
     end = source.index("    uint32_t index = 0;", start)
-    fence = source[start:end]
+    fence = "{" + chr(10) + source[start:end]   # (the wait is inside a perf scope block on main: its closing brace is in the slice)
     template = (ROOT / "tests/capture_readback_visibility_test.cpp").read_text(encoding="utf-8")
     fixture = template.replace("/* SHOT_PIXELS */", helper).replace("/* TAKE */", take).replace("/* MADE */", made).replace("/* COLLECT */", collect).replace("/* FENCE */", fence)
     with tempfile.TemporaryDirectory(prefix="capture-visibility-") as temp:

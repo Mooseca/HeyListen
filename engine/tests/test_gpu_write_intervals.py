@@ -8,7 +8,7 @@ texture at 0x130000 saw only the second, which ends before it, and kept its old 
 Both functions and the map are cut from the source and run on such writes: the texture past the inner write finds 10, one
 inside it 11, one before it 10; with only 10 finished, the outer ones are found and the inner one waits; a write that runs past
 the end of a record leaves the record's first part as it was; a write seen once is not found again; and after each write no
-two records overlap, and the map stays within its 65536 records. No game or GPU required.
+two records overlap, and the map stays within its 65536 records. No game or GPU required. The write history (on by default) is left out of the fixture: it is the records of RX_VK_WRITE_HISTORY=0 that the fix is in.
 
 python -I -B tests/test_gpu_write_intervals.py [--cxx g++]
 """
@@ -23,6 +23,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 DRIVER = r'''#define _CRT_SECURE_NO_WARNINGS 1
 #include <algorithm>
+#include <atomic>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -33,8 +34,13 @@ DRIVER = r'''#define _CRT_SECURE_NO_WARNINGS 1
 static int fails;
 #define CHECK(x) do { if (!(x)) { std::printf("FAIL line %d: %s\n", __LINE__, #x); fails++; } } while (0)
 static void logf(const char*, ...) {}
-static uint64_t frame_no, rec_value, completed_value, tl_watch_prog;
-struct Texture { uint64_t gpu, guest_size, gpu_wrote_seen; uint32_t id, width, height, nvn_format; };
+static uint64_t frame_no, rec_value, completed_value, tl_watch_prog, tl_seg;
+struct Texture { uint64_t gpu, guest_size, gpu_wrote_seen; uint32_t id, width, height, nvn_format; bool gpu_written = false; };
+/* (main keeps the write history by default; these records are what RX_VK_WRITE_HISTORY=0 uses: the history is off here, its
+   stand-in is never reached) */
+static bool write_history_on() { return false; }
+static struct { void record(uint64_t, uint64_t, uint64_t, uint64_t) {} uint64_t newest(uint64_t, uint64_t, uint32_t) { return 0; } } gpu_hist;
+static std::atomic<uint64_t> gpu_hist_records;
 std::map<uint64_t, std::pair<uint64_t, uint64_t>> gpu_wrote;
 std::mutex gpu_wrote_mu;
 /* WRITER */
@@ -109,7 +115,7 @@ def main():
     a = p.parse_args()
     src = (ROOT / "gpu/vk/vk_texture.cpp").read_text(encoding="utf-8")
     code = (DRIVER.replace("/* WRITER */", block(src, "void texture_gpu_wrote(uint64_t gpu, uint64_t size) {"))
-            .replace("/* READER */", block(src, "bool gpu_wrote_into(Texture& tex) {")))
+            .replace("/* READER */", block(src, "uint64_t gpu_wrote_into(Texture& tex) {")))
     with tempfile.TemporaryDirectory(prefix="gpu-write-intervals-") as tmp:
         cpp, exe = Path(tmp) / "intervals.cpp", Path(tmp) / "intervals.exe"
         cpp.write_text(code, encoding="utf-8")

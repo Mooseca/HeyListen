@@ -1,6 +1,6 @@
 """Overlapping inline GPU writes retain stream order, including with barrier deduplication.
 
-Compile the real gpu_write, full_barrier, note_work and work wrappers with a recording spy.
+Compile the real gpu_write, full_barrier, the work counters and the work wrappers with a recording spy.
 No GPU or game files. Removing the write's barrier or its work count must fail.
 """
 import argparse
@@ -44,6 +44,16 @@ std::atomic<bool> par_active{false};
 std::atomic<int64_t> st_barriers_left_out{0}, st_barriers_made{0};
 VkCommandBuffer last_barrier_cmd{};
 uint64_t last_barrier_epoch = 0;
+// (what main's full_barrier and work counters name besides the dedupe by work_epoch this test is about: the parallel replay's
+// dedupe, the trust points and the hazard audit are off here, as they are by default)
+std::atomic<uint64_t> foreign_work{0}, other_work_by_cmd[64], xfer_work_by_cmd[64], all_work_by_cmd[64];
+std::atomic<int64_t> st_barriers_left_out_par{0};
+uint64_t last_barrier_cmd_work = 0, last_barrier_foreign = 0, last_barrier_other = 0, last_barrier_xfer = 0;
+bool barrier_dedupe_par_on() { return false; }
+void hz_clear(VkCommandBuffer) {}
+void note_trust_point(VkCommandBuffer) {}
+void hazard_note_xfer(VkCommandBuffer) {}
+void logf(const char*, ...) {}
 bool env_on(const char*) { return false; }
 struct GprofSpan { GprofSpan(VkCommandBuffer, const char*) {} };
 struct BufferRef { VkBuffer buffer; uint64_t offset; explicit operator bool() const { return buffer != VK_NULL_HANDLE; } };
@@ -52,7 +62,7 @@ BufferRef gpu_buffer_bind(uint64_t gpu, uint64_t n, bool write) {
     return gpu >= base && gpu - base <= memory.size() && n <= memory.size() - (gpu - base)
         ? BufferRef{buffer, gpu - base} : BufferRef{};
 }
-void guest_cpu_write(uint64_t, const void*, uint64_t) { ++fallbacks; }
+struct HostStub { void gpu_write(uint64_t, const void*, uint64_t) { ++fallbacks; } } host_stub, *const host = &host_stub;   // (the CPU fallback)
 namespace rec {
 void rx_vkCmdPipelineBarrier2(VkCommandBuffer cmd, const VkDependencyInfo* d) {
     assert(cmd == cb && d->memoryBarrierCount == 1);
@@ -125,17 +135,18 @@ def main():
     if len(declarations) != 1:
         raise SystemExit("vk_texture.h: full_barrier declaration not found once")
     work = (vk / "vk_work.h").read_text(encoding="utf-8")
-    note = block(work, "inline void note_work()")
+    helpers = "".join(block(work, m) for m in ("inline std::atomic<uint64_t>& other_work_slot(", "inline std::atomic<uint64_t>& all_work_slot(",
+                                               "inline void note_xfer_work(", "inline void note_other_work(", "inline void note_work_cmd("))
     wrappers = []
     for name in ("vkCmdPipelineBarrier2", "vkCmdUpdateBuffer"):
         lines = [line for line in work.splitlines() if line.startswith("#define " + name + "(")]
         if len(lines) != 1:
             raise SystemExit("vk_work.h: wrapper not found once: " + name)
-        wrappers.append(lines[0])
-    source = PREFIX + note + "\n}\n" + "\n".join(wrappers) + "\nnamespace mkwvk {\n" + declarations[0] + "\n" + barrier + write + SUFFIX
+        wrappers.append(lines[0].replace("::vkx::" + name, "::mkwvk::rec::rx_" + name))
+    source = PREFIX + "inline thread_local bool work_seg_local = false, work_seg_skip_all = false;" + chr(10) + helpers + "\n}\n" + "\n".join(wrappers) + "\nnamespace mkwvk {\n" + declarations[0] + "\n" + barrier + write + SUFFIX
     variants = [("current", source, 0),
                 ("missing_barrier", source.replace("full_barrier(cmd);", ""), 1),
-                ("missing_work_count", source.replace("::mkwvk::note_work(), ::mkwvk::rec::rx_vkCmdUpdateBuffer", "::mkwvk::rec::rx_vkCmdUpdateBuffer"), 1)]
+                ("missing_work_count", source.replace("::mkwvk::note_other_work(c_), ::mkwvk::rec::rx_vkCmdUpdateBuffer", "::mkwvk::rec::rx_vkCmdUpdateBuffer"), 1)]
     with tempfile.TemporaryDirectory(prefix="inline-write-") as tmp:
         for name, text, expected in variants:
             if name != "current" and text == source:

@@ -73,7 +73,8 @@ struct Texture;
 struct {
     bool vertex_divisor = false, eds3_clamp = false, eds3_polygon = false;
     bool provoking_vertex = false, eds3_a2c = false, eds3_blend = false;
-    bool task_mesh_fallback = false;
+    bool task_mesh_fallback = false, frag_shading_rate = false;
+    uint32_t max_vertex_divisor = 0;
     VkPhysicalDeviceProperties props{};
     VkDriverId driver_id = VK_DRIVER_ID_INTEL_OPEN_SOURCE_MESA;
     VkPhysicalDevice physical = VK_NULL_HANDLE;
@@ -100,13 +101,33 @@ struct Quarantine {
 driver_faults::Quarantine& fault_quarantine() { static driver_faults::Quarantine q; return q; }
 std::string driver_faults_path() { return {}; }
 void driver_fault_note(uint64_t) {}
-constexpr VkResult kDriverFault = static_cast<VkResult>(-77);
+[[maybe_unused]] constexpr VkResult kDriverFault = static_cast<VkResult>(-77);
 bool driver_cache_only = false;
 VkPipelineCache pcache = VK_NULL_HANDLE, driver_ask_cache = VK_NULL_HANDLE;
 uint64_t pcache_built_since_save = 0, st_pipelines = 0, st_pipeline_us = 0;
+// (what main's build_graphics also names around the pipeline creation: its guard, the Intel gate, the ledger and the resource log;
+// none of them is the state under test, so they are plain stand-ins)
+VkResult graphics_with(VkPipelineCache, const VkGraphicsPipelineCreateInfo* ci, VkPipeline* out);
+VkResult guarded_graphics_held(VkPipelineCache cache, const VkGraphicsPipelineCreateInfo* ci, VkPipeline* pl) { return graphics_with(cache, ci, pl); }
+bool pcache_misses_only() { return false; }
+bool retry_without_optimizer(VkResult, VkPipelineCreateFlags) { return false; }
+void intel_gate_busy() {}
+struct IntelDriverGate { bool busy = false; explicit IntelDriverGate(bool = false) {} };
+bool shader_key_on() { return false; }
+uint64_t ledger_id_pipeline(const Program&, const NvnState&, const Targets&, VkPrimitiveTopology) { return 0; }
+void ledger_add(uint64_t) {}
+void ledger_mark(uint64_t, uint64_t, int) {}
+enum { kUseVertex = 1 };
+bool res_log_on() { return false; }
+void res_note_pipeline_use(VkPipeline) {}
+#ifdef _WIN32
+typedef unsigned long DWORD;
+void Sleep(DWORD) {}
+#endif
 
 // The Windows-only optimizer workaround is not the behavior under test.
 VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceProperties2(VkPhysicalDevice, VkPhysicalDeviceProperties2*) {}
+VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceProperties(VkPhysicalDevice, VkPhysicalDeviceProperties*) {}
 
 struct Observed {
     unsigned calls = 0;
@@ -159,6 +180,7 @@ struct BufferRef {
 /* KEPT_VERTEX */
 KeptVertex kept_vb[16]{};
 /* VERTEX_BIND_REUSE */
+/* VERTEX_BIND_RANGE */
 /* VERTEX_SET_SAME */
 unsigned vertex_binds = 0, pipeline_binds = 0, buffer_lookups = 0, binding_errors = 0;
 bool model_stride_valid = false;
@@ -304,7 +326,7 @@ def main():
     for token, marker in [
             ("LAST_VB", "struct LastVb {"), ("VERTEX_SET", "struct VertexSet {"),
             ("KEPT_VERTEX", "struct KeptVertex {"),
-            ("VERTEX_BIND_REUSE", "bool vertex_bind_reuse("),
+            ("VERTEX_BIND_REUSE", "bool vertex_bind_reuse("), ("VERTEX_BIND_RANGE", "void vertex_bind_range("),
             ("VERTEX_SET_SAME", "bool vertex_set_same("),
             ("BIND_PIPELINE", "if (pl != last_pipeline) {")]:
         extracted = block(source, marker) + (";" if marker.startswith("struct ") else "")
