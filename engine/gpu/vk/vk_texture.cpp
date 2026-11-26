@@ -67,6 +67,7 @@
 #include "keep_rendered.h"
 #include "target_overlap.h"
 #include "target_pool.h"
+#include "vram_allowance.h"   // (Longshot 8941d01b4: the budget's floor gives way past the allowance)
 #include "dead_targets.h"
 #include "gpu_write_history.h"
 #include "host_shaders/block_linear_unswizzle_2d_comp_spv.h"
@@ -6414,7 +6415,9 @@ void texture_frame(uint64_t completed) {
         static const bool free_capped = getenv("RX_VK_BUDGET_FREE_CAPPED") != nullptr;   // (TICK-023's 512 MB cap)
         const uint64_t held = used - std::min(used, block_free) + (free_capped ? std::min<uint64_t>(block_free, 512ull << 20) : 0);
         const uint64_t rest = held > total_bytes ? held - total_bytes : 0;
-        budget = std::min(budget, std::max<uint64_t>(target > rest ? target - rest : 0, 1024ull << 20));
+        // (Longshot 8941d01b4, #2082) the 1 GB floor holds only within the allowance: past it the driver pages, and what stays is the
+        // working set (the `recent` floor below). vram_allowance.h floor_within
+        budget = std::min(budget, std::max<uint64_t>(target > rest ? target - rest : 0, vram_allowance::target_floor(used, allowed)));
     }
     // (TICK-023) an image VRAM refused since the last check (it went to system memory, read over PCIe): down to 7/8 of what
     // the textures hold now, the least recently used going before the next one is refused too

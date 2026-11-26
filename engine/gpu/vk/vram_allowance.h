@@ -15,4 +15,17 @@ inline uint64_t past_allowance(uint64_t used, uint64_t allowed) {
     if (!allowed || allowed + kAtCount < used || allowed > used + kAtCount) return allowed;
     return used - used / kPastShare;
 }
+
+/// (Longshot 8941d01b4, #2082) A floor under the textures' budget as the rules may hold it: none once the driver's count is past its
+/// allowance. There the driver pages VRAM out to system memory and every frame reads some of it over PCIe, which costs more than
+/// textures made again: a GTX 1060 6 GB (Longshot #939) sat at 6128 MB of the 5231 it allowed with 1606 MB of textures, under the
+/// floor of Longshot's texture cache, so no rule could take one, and Hyrule Field went from 31 to 14 fps until a restart. Past the
+/// allowance what stays is the textures the last presents drew from (vk_texture.cpp texture_frame's `recent`) and the eviction's own
+/// 60 presents; within it the floor keeps the working set from a downward ratchet. 0 (no allowance known): the floor as it is
+inline uint64_t floor_within(uint64_t floor, uint64_t used, uint64_t allowed) { return allowed && used > allowed ? 0 : floor; }
+/// The floor of the TICK-023 rule (vk_texture.cpp texture_frame: the process held to RX_VK_VRAM_TARGET_PCT of the allowance, the
+/// textures getting what the rest leaves, but not below 1 GB). Longshot's other floors (its 1800 MB texture_min_floor, the dynamic
+/// floor, the compaction's hold) do not exist here; this is the one the textures' budget has
+inline constexpr uint64_t kTargetFloor = 1024ull << 20;
+inline uint64_t target_floor(uint64_t used, uint64_t allowed) { return floor_within(kTargetFloor, used, allowed); }
 } // namespace vram_allowance
