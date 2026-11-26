@@ -29,6 +29,32 @@ typedef struct {int refs;IMFMediaBuffer *buffer;} IMFSample;
 typedef struct {int refs;} IMFCollection;
 typedef struct {int unused;} IMFTransform;
 typedef struct {DWORD dwStreamID;IMFSample *pSample;DWORD dwStatus;IMFCollection *pEvents;} MFT_OUTPUT_DATA_BUFFER;
+/* (the GPU decoding path pull() has since gained: it is taken only with MfAv1.hw set, which no case here does, so its calls are
+   stand-ins that only have to compile) */
+#define STUB static __attribute__((unused))
+typedef unsigned UINT;
+typedef struct ID3D11Device ID3D11Device;
+typedef struct ID3D11DeviceContext ID3D11DeviceContext;
+typedef struct IMFDXGIDeviceManager IMFDXGIDeviceManager;
+typedef struct ID3D11Resource ID3D11Resource;
+typedef struct ID3D11Texture2D ID3D11Texture2D;
+typedef struct IMFDXGIBuffer IMFDXGIBuffer;
+typedef struct {UINT Width,Height,ArraySize,MipLevels,BindFlags,MiscFlags,Usage,CPUAccessFlags;} D3D11_TEXTURE2D_DESC;
+typedef struct {void *pData;UINT RowPitch;} D3D11_MAPPED_SUBRESOURCE;
+#define D3D11_USAGE_STAGING 3
+#define D3D11_CPU_ACCESS_READ 0x20000
+#define D3D11_MAP_READ 1
+static const int IID_IMFDXGIBuffer=2,IID_ID3D11Texture2D=3;
+STUB HRESULT IMFSample_GetBufferByIndex(void *s,DWORD i,void *b){(void)s;(void)i;(void)b;return E_FAIL;}
+STUB HRESULT IMFDXGIBuffer_GetResource(IMFDXGIBuffer *d,const int *iid,void **o){(void)d;(void)iid;(void)o;return E_FAIL;}
+STUB HRESULT IMFDXGIBuffer_GetSubresourceIndex(IMFDXGIBuffer *d,UINT *i){(void)d;(void)i;return E_FAIL;}
+STUB void IMFDXGIBuffer_Release(IMFDXGIBuffer *d){(void)d;}
+STUB void ID3D11Texture2D_GetDesc(ID3D11Texture2D *t,D3D11_TEXTURE2D_DESC *d){(void)t;(void)d;}
+STUB void ID3D11Texture2D_Release(ID3D11Texture2D *t){(void)t;}
+STUB HRESULT ID3D11Device_CreateTexture2D(ID3D11Device *d,const D3D11_TEXTURE2D_DESC *s,const void *i,ID3D11Texture2D **t){(void)d;(void)s;(void)i;(void)t;return E_FAIL;}
+STUB void ID3D11DeviceContext_CopySubresourceRegion(ID3D11DeviceContext *c,ID3D11Resource *d,UINT a,UINT x,UINT y,UINT z,ID3D11Resource *s,UINT b,const void *box){(void)c;(void)d;(void)a;(void)x;(void)y;(void)z;(void)s;(void)b;(void)box;}
+STUB HRESULT ID3D11DeviceContext_Map(ID3D11DeviceContext *c,ID3D11Resource *r,UINT s,int m,UINT f,D3D11_MAPPED_SUBRESOURCE *o){(void)c;(void)r;(void)s;(void)m;(void)f;(void)o;return E_FAIL;}
+STUB void ID3D11DeviceContext_Unmap(ID3D11DeviceContext *c,ID3D11Resource *r,UINT s){(void)c;(void)r;(void)s;}
 @TYPES@
 static IMFMediaBuffer buffers[8];static IMFSample samples[8];static int nb,ns;
 static IMFSample *pending;static int want_2d,fail_2d,fail_linear,null_pointer,fail_length,fail_add,fail_create_sample,fail_create_buffer;

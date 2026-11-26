@@ -1,4 +1,4 @@
-"""The Linux game's move of its saves to $XDG_DATA_HOME/hookshot leaves a linked folder alone (host/hos_main.c, saves_dir).
+"""The Linux game's move of its saves to $XDG_DATA_HOME/heylisten leaves a linked folder alone (host/hos_main.c, saves_dir).
 
 A user/ folder beside the game is moved to the new place at the first start. A symbolic link in it, to saves the player
 keeps elsewhere (a synced folder, another drive), was moved as a file: by rename, and one written from where it stood
@@ -43,12 +43,13 @@ def build(cc, tmp):
 #define SEP '/'
 #define SEP_S "/"
 static void hos_log(const char *fmt, ...) { va_list ap; va_start(ap, fmt); vprintf(fmt, ap); va_end(ap); putchar(10); }
+#include "hos_atomic_file.h"   /* (main's save move writes its note and copies its files whole through these) */
 ''' + source[start:end] + r'''
 int main(int argc, char **argv) { if (argc != 2) return 2; printf("uses %s\n", saves_dir(argv[1])); return 0; }
 '''
     src, exe = tmp / "mover.c", tmp / "mover"
     src.write_text(program, encoding="utf-8")
-    subprocess.run([cc, "-std=gnu11", "-D_GNU_SOURCE", "-w", "-I", str(ROOT / "host" / "posix"), str(src),
+    subprocess.run([cc, "-std=gnu11", "-D_GNU_SOURCE", "-w", "-I", str(ROOT / "host" / "posix"), "-I", str(ROOT / "host"), str(src),
                     str(ROOT / "host" / "posix" / "win32_posix.c"), "-o", str(exe), "-lpthread", "-ldl"], check=True)
     return exe
 
@@ -62,7 +63,7 @@ class Case:
         # (deeper than the game's user/, as ~/.local/share is: a link written from where it stands names another place from it)
         self.data = Path(tempfile.mkdtemp(prefix="home-", dir=data_parent)) / ".local" / "share"
         self.data.mkdir(parents=True)
-        self.user, self.new = self.game / "user", self.data / "hookshot"
+        self.user, self.new = self.game / "user", self.data / "heylisten"
         self.sync = self.game.parent / (self.game.name + "-sync")   # (beside the game: "../../<name>-sync" from user/save)
         (self.user / "temp").mkdir(parents=True)
         (self.sync / USER_ID).mkdir(parents=True)

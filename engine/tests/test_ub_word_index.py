@@ -40,6 +40,12 @@ uint32_t stamp = 1;
 size_t ub_limit = SIZE_MAX;
 struct UbUpdate { uint64_t dst; std::vector<uint8_t> bytes; };
 std::vector<UbUpdate> ub_updates;
+// (main's list of updates counts absolute positions from ub_base, and ub_read holds a guard while the list may grow: neither
+// matters to the cache under test, so the list is read from its start and the guard is empty)
+size_t ub_base = 0;
+size_t ub_end() { return ub_base + ub_updates.size(); }
+const UbUpdate& ub_at(size_t pos) { return ub_updates[pos - ub_base]; }
+struct UbReadGuard { UbReadGuard() {} ~UbReadGuard() {} };
 uint32_t memory_page_stamp(uint64_t) { return stamp; }
 bool ub_gap_holds(uint64_t addr, uint64_t n, size_t first, size_t lim) {
     for (size_t i = first; i < lim; i++) {
