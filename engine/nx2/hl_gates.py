@@ -260,16 +260,27 @@ HEAP_CPU_LINE = "{ uint64_t _t = c->x[8]; c->x[30] = %#xULL; A64_ICALL(c, _t); }
 HEAP_GPU_LINE = "c->x[30] = %#xULL; f_80522050(c);\n"
 
 
-# (operator new's two ways to null, and aligned_alloc's)
-NEW_TAIL = ("c->x[0] = x0_; c->x[1] = x1_; c->x[8] = x8_; c->x[19] = x19_; c->x[20] = x20_; c->x[21] = x21_; c->x[31] = x31_; "
-            "c->n = fn_; c->z = fz_; c->c = fc_; c->v = fv_; A64_IJUMP(c, c->x[3]); return;\n")
-NEW_NOHEAP = "if (x1_ != 0) { goto L_8005ec10; }\n"
+# (operator new's variants f_8005e9d0, f_8005eb20, f_8005ebe0 and aligned_alloc's failure path: where each ends in null. The new's
+# forms are one function written two ways, the lift keeping registers in locals (x0_, x31_) or not (c->x[0]): the places are found
+# by shape, the tail call through the heap's vtable (+0x30 tryAlloc; the line holding "A64_IJUMP(c, c->x[3]); return;", with the
+# stores before it on the same line) and the one line setting x0 to 0 before the epilogue. A hook's hashes may be a list
+# "<hash>,<hash>": one per form of the lift's text)
+NEW_TAIL_RE = re.compile(r"^([^\n]*?)A64_IJUMP\(c, c->x\[3\]\); return;\n", re.M)
+NEW_ZERO_RE = re.compile(r"^    \{ uint64_t _r = \(\(uint64_t\)0 \| \(\(\(uint64_t\)0\) << 0\)\); (?:x0_|c->x\[0\]) = _r; \}\n", re.M)
 NEW_ALIGNED_FAIL = "c->x[30] = 0x8005ecd8ULL; f_85717f00(c);\n"
-# (the lift without registers kept in locals, as the laptop's lift writes operator new: c->x[...] throughout; a hook's hashes may be
-# a list "<hash>,<hash>": one per form of the lift's text)
-NEW_TAIL_B = "A64_IJUMP(c, c->x[3]); return;\n"
-NEW_NOHEAP_B = "if (c->x[1] != 0) { goto L_8005ec10; }\n"
 NEW_DECL = "extern void hl_oot_new_null(Ctx *A64_NOESC, uint64_t, uint64_t, uint64_t, uint64_t, int); "
+NEW_ADDRS = ("8005e9d0", "8005eb20", "8005ebe0")
+# (the module system makes each module heap in f_83b7b340 (the size in x0 from the heap definition, 0 when it has none for the module; a record at sp+8 whose first word is the name; the parent heap in x23); a size of 0 and a heap that fails are told)
+NEW_MHEAP = "c->x[30] = 0x83b7b440ULL; f_809df710(c);\n"
+NEW_MHEAP_IF = "if (c->x[0] == 0) { goto L_83b7b440; }\n"
+
+
+def new_places(body):
+    """[start of the tail line, start of the zero line] in an operator new variant's body, or None"""
+    tails, zeros = list(NEW_TAIL_RE.finditer(body)), list(NEW_ZERO_RE.finditer(body))
+    if len(tails) != 1 or len(zeros) != 1 or tails[0].start() > zeros[0].start():
+        return None
+    return [tails[0].start(), zeros[0].start()]
 
 
 def lift_lines(kind, addr, args, body=None):
@@ -338,16 +349,15 @@ def lift_lines(kind, addr, args, body=None):
     if kind == "new":
         if addr == "8005eca0":
             return ["    { " + NEW_DECL + "hl_oot_new_null(c, 0, 0, 0, recomp_load64(c, c->x[31] + 8), 2); }" + mark]
-        if body is not None and NEW_TAIL not in body:
-            return ["    { " + NEW_DECL + "const uint64_t _hl_h = c->x[0], _hl_s = c->x[1], _hl_a = c->x[2], _hl_lr = c->x[30]; "
-                    "A64_ICALL(c, c->x[3]); if (__builtin_expect(c->x[0] == 0, 0)) "
-                    "hl_oot_new_null(c, _hl_h, _hl_s, _hl_a, _hl_lr, 0); return; }" + mark,
-                    "    { " + NEW_DECL + "hl_oot_new_null(c, 0, c->x[20], c->x[19], recomp_load64(c, c->x[31] + 8), 1); }" + mark]
-        return ["    { " + NEW_DECL + "const uint64_t _hl_h = x0_, _hl_s = x1_, _hl_a = c->x[2], _hl_lr = c->x[30]; "
-                "c->x[0] = x0_; c->x[1] = x1_; c->x[8] = x8_; c->x[19] = x19_; c->x[20] = x20_; c->x[21] = x21_; c->x[31] = x31_; "
-                "c->n = fn_; c->z = fz_; c->c = fc_; c->v = fv_; A64_ICALL(c, c->x[3]); "
-                "if (__builtin_expect(c->x[0] == 0, 0)) hl_oot_new_null(c, _hl_h, _hl_s, _hl_a, _hl_lr, 0); return; }" + mark,
-                "    { " + NEW_DECL + "hl_oot_new_null(c, 0, x20_, x19_, recomp_load64(c, x31_ + 8), 1); }" + mark]
+        if addr == "83b7b340":
+            return ["    { extern void hl_oot_mheap_pre(Ctx *A64_NOESC); hl_oot_mheap_pre(c); }" + mark,
+                    "    { extern void hl_oot_mheap_post(Ctx *A64_NOESC); hl_oot_mheap_post(c); }" + mark]
+        tail = NEW_TAIL_RE.search(body)
+        sp = "x31_" if re.search(r"x31_", body) else "c->x[31]"
+        return [tail.group(1) + "{ " + NEW_DECL + "const uint64_t _hl_h = c->x[0], _hl_s = c->x[1], _hl_a = c->x[2], _hl_lr = c->x[30]; "
+                "A64_ICALL(c, c->x[3]); if (__builtin_expect(c->x[0] == 0, 0)) "
+                "hl_oot_new_null(c, _hl_h, _hl_s, _hl_a, _hl_lr, 0); return; }" + mark,
+                "    { " + NEW_DECL + "hl_oot_new_null(c, 0, 0, 0, recomp_load64(c, " + sp + " + 8), 1); }" + mark]
     if kind == "heap":
         lines = []
         for lr in HEAP_CPU:
@@ -451,13 +461,11 @@ def lift_places(body, addr, kind, args):
     if kind == "new":
         if addr == "8005eca0":
             return [body.index(NEW_ALIGNED_FAIL)] if body.count(NEW_ALIGNED_FAIL) == 1 else None
-        if body.count(NEW_TAIL) == 1 and body.count(NEW_NOHEAP) == 1:
-            tail, noheap = body.index(NEW_TAIL), body.index(NEW_NOHEAP) + len(NEW_NOHEAP)
-        elif body.count(NEW_TAIL_B) == 1 and body.count(NEW_NOHEAP_B) == 1 and "x0_" not in body:
-            tail, noheap = body.index(NEW_TAIL_B), body.index(NEW_NOHEAP_B) + len(NEW_NOHEAP_B)
-        else:
-            return None
-        return [tail, noheap] if tail < noheap else None
+        if addr == "83b7b340":
+            if body.count(NEW_MHEAP) != 1 or body.count(NEW_MHEAP_IF) != 1 or body.index(NEW_MHEAP_IF) > body.index(NEW_MHEAP):
+                return None
+            return [body.index(NEW_MHEAP_IF), body.index(NEW_MHEAP) + len(NEW_MHEAP)]
+        return new_places(body) if addr in NEW_ADDRS else None
     if kind == "heap":
         places = []
         for lines in ((HEAP_CPU_LINE, HEAP_CPU), (HEAP_GPU_LINE, HEAP_GPU)):

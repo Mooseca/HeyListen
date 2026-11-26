@@ -23,8 +23,11 @@
 #include <stdlib.h>
 #include <string.h>
 
-HL_NEW_HOOK(8005ebe0, "b26a4038456275d8,fb3beb00575415da");   /* operator new (size, heap, alignment) */
+HL_NEW_HOOK(8005e9d0, "cc5c961686c8cd09");   /* operator new variants (size, heap, alignment): the same function written three ways */
+HL_NEW_HOOK(8005eb20, "a523c51881267cd9");
+HL_NEW_HOOK(8005ebe0, "b26a4038456275d8,fb3beb00575415da");
 HL_NEW_HOOK(8005eca0, "0ce5468d82ee701d");   /* aligned_alloc (alignment, size) */
+HL_NEW_HOOK(83b7b340, "39c8d417e1c2204e");   /* the module system: each module heap is made here */
 
 enum { HEAP_NAME = 0x20, HEAP_START = 0x28, HEAP_SIZE = 0x30, HEAP_PARENT = 0x38, VT_FREE_SIZE = 0x80 };
 
@@ -95,4 +98,39 @@ void hl_oot_new_null(Ctx *c, uint64_t heap, uint64_t size, uint64_t align, uint6
     }
     (void)at;
     hos_log("%s", line);
+}
+
+/* ---- the module system's heaps: f_83b7b340 makes each module's heap with f_809df710 (x0 the size, x1 a record whose first word is
+   the name, x2 the parent heap). A heap that cannot be made (the parent has no room for it) leaves the module's heap null, and the
+   first allocation made in that module is the null above. hl_oot_mheap_pre saves the arguments before the call, hl_oot_mheap_post
+   tells a null result after it (the first 12) ---- */
+static __thread struct { uint64_t size, name, parent; } mh;
+static void mheap_tell(Ctx *c, const char *what) {
+    static volatile long told;
+    static int off = -1;
+    if (off < 0) off = getenv("HOS_NEW_NULL_LOG") && atoi(getenv("HOS_NEW_NULL_LOG")) == 0;
+    if (off || __atomic_fetch_add(&told, 1, __ATOMIC_RELAXED) >= 12) return;
+    char nm[48], line[1400];
+    guest_string(c, mh.name, nm, sizeof nm);
+    int at = snprintf(line, sizeof line, "oot: a module heap was not made: \"%s\", %s (%llu KB), parent ", nm, what,
+                      (unsigned long long)(mh.size >> 10));
+    at += describe(c, mh.parent, line + at, (int)sizeof line - at);
+    uint64_t p = readable(mh.parent) ? recomp_load64(c, mh.parent + HEAP_PARENT) : 0;
+    for (int depth = 0; p && readable(p) && depth < 6 && at < (int)sizeof line - 200; depth++) {
+        at += snprintf(line + at, sizeof line - at, "; its parent ");
+        at += describe(c, p, line + at, (int)sizeof line - at);
+        p = recomp_load64(c, p + HEAP_PARENT);
+    }
+    hos_log("%s", line);
+}
+/* before the module's size is tested: x0 the size the heap definition gives it (0: the module has no heap of its own, as most), the name
+   at sp + 8, the parent in x23 */
+void hl_oot_mheap_pre(Ctx *c) {
+    mh.size = c->x[0];
+    mh.name = readable(c->x[31] + 8) ? recomp_load64(c, c->x[31] + 8) : 0;
+    mh.parent = c->x[23];
+}
+/* after the call that makes it: x0 the heap, 0 when the parent had no room */
+void hl_oot_mheap_post(Ctx *c) {
+    if (!c->x[0] && mh.size) mheap_tell(c, "the parent had no room for the size asked");
 }

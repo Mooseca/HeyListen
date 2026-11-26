@@ -75,6 +75,8 @@ static void make_heap(int i, int parent, uint64_t free_room, const char *name, u
     room[i] = free_room;
 }
 void hl_oot_new_null(Ctx *c, uint64_t heap, uint64_t size, uint64_t align, uint64_t lr, int kind);
+void hl_oot_mheap_pre(Ctx *c);
+void hl_oot_mheap_post(Ctx *c);
 int main(int argc, char **argv) {
     const char *mode = argc > 1 ? argv[1] : "";
     Ctx c;
@@ -106,6 +108,27 @@ int main(int argc, char **argv) {
     for (int k = 0; k < 1000; k++) hl_oot_new_null(&c, H(0), 0x10, 8, 0x80000040, 0);
     CHECK(logs == 12 + 3);   /* (twelve, then every 256th of 1004: #256, #512, #768) */
     CHECK(memcmp(&c, &before, sizeof c) == 0);
+    /* a module heap that was not made: the arguments saved before the test of the size (the name at sp + 8, the parent in x23), the
+       null told after the call, or at once when the heap definition has no size for the module */
+    memset(&c, 0, sizeof c);
+    strcpy((char *)mem + 0x70000, "Graphics");
+    recomp_store64(NULL, 0x80070100ull, 0x80070000ull);
+    c.x[31] = 0x800700f8ull;
+    logs = 0;
+    c.x[0] = 0x3a000000ull, c.x[23] = H(1);
+    hl_oot_mheap_pre(&c);
+    CHECK(logs == 0);
+    c.x[0] = 0;   /* (f_809df710 returned null) */
+    hl_oot_mheap_post(&c);
+    CHECK(logs == 1 && strstr(last, "\"Graphics\", the parent had no room for the size asked (950272 KB), parent heap 0x80010100 \"Modules\"") &&
+          strstr(last, "its parent heap 0x80010200 \"Root\""));
+    c.x[0] = 0x80090000ull;   /* (a heap that was made: nothing told) */
+    hl_oot_mheap_post(&c);
+    CHECK(logs == 1);
+    c.x[0] = 0;   /* (no size for the module: it has no heap of its own, as most: not told) */
+    hl_oot_mheap_pre(&c);
+    hl_oot_mheap_post(&c);
+    CHECK(logs == 1);
     puts("PASS: a null from the allocator: the heap, its parents, the size, the caller; the first twelve, then every 256th");
     return 0;
 }
@@ -131,7 +154,17 @@ L_8005ec54:;
     x1_=recomp_load64(c,x8_ + 0);
 if (x1_ != 0) { goto L_8005ec10; }
     { uint64_t _b=x31_; int64_t _o=32; { uint64_t _p0,_p1; recomp_ldp64(c,(_b+_o),&_p0,&_p1); x20_=_p0; x19_=_p1; } }
+    { uint64_t _r = ((uint64_t)0 | (((uint64_t)0) << 0)); x0_ = _r; }
 return;
+}
+'''
+LIFTED_M = '''#include "a64.h"
+void f_83b7b340(Ctx *__restrict A64_NOESC c) {
+if (c->x[0] == 0x34900000ULL) c->x[0] += hos_rt_pool_size(0x13100000ULL) - 0x13100000ULL;
+if (c->x[0] == 0) { goto L_83b7b440; }
+c->x[30] = 0x83b7b440ULL; f_809df710(c);
+L_83b7b440:; A64_POLL(c);
+    recomp_store64_sp(c,c->x[19] + 0,c->x[0]);
 }
 '''
 
@@ -146,6 +179,7 @@ L_8005ec54:;
     c->x[1]=recomp_load64(c,c->x[8] + 0);
 if (c->x[1] != 0) { goto L_8005ec10; }
     { uint64_t _b=c->x[31]; int64_t _o=32; { uint64_t _p0,_p1; recomp_ldp64(c,(_b+_o),&_p0,&_p1); c->x[20]=_p0; c->x[19]=_p1; } }
+    { uint64_t _r = ((uint64_t)0 | (((uint64_t)0) << 0)); c->x[0] = _r; }
 return;
 }
 '''
@@ -163,7 +197,7 @@ def main():
         assert len(marked) == (1 if addr == "8005eca0" else 2), (addr, len(marked))
         assert all(l.count("{") == l.count("}") for l in marked), "the hook's braces do not balance"
         assert hl_gates.apply_lift(hook, addr, "new", ()) == hook, "a second run changed the text"
-        other = LIFTED.replace("if (x1_ != 0)", "if (x1_ == 0)") if addr == "8005ebe0" else LIFTED.replace("0x8005ecd8ULL", "0x8005ecdcULL")
+        other = LIFTED.replace("A64_IJUMP(c, c->x[3]);", "A64_IJUMP(c, c->x[4]);") if addr == "8005ebe0" else LIFTED.replace("0x8005ecd8ULL", "0x8005ecdcULL")
         assert hl_gates.apply_lift(other, addr, "new", ()) is None, "another version's text was hooked"
     both = hl_gates.apply_lift(hl_gates.apply_lift(LIFTED, "8005ebe0", "new", ()), "8005eca0", "new", ())
     assert both.count("hl_oot_new_null(c") == 3, both.count("hl_oot_new_null(c")
@@ -177,6 +211,14 @@ def main():
     assert hl_gates.apply_lift(hook_b, "8005ebe0", "new", ()) == hook_b
     assert hl_gates.apply_text(hook_b, {}, {}, {}, {})[0] == LIFTED_B
     assert "A64_ICALL(c, c->x[3]); if (__builtin_expect(c->x[0] == 0, 0))" in hook_b
+    hook_m = hl_gates.apply_lift(LIFTED_M, "83b7b340", "new", ())
+    assert hook_m is not None, "the module heap hook was not put in"
+    lines_m = hook_m.splitlines()
+    i = lines_m.index("c->x[30] = 0x83b7b440ULL; f_809df710(c);")
+    j = lines_m.index("if (c->x[0] == 0) { goto L_83b7b440; }")
+    assert "hl_oot_mheap_pre" in lines_m[j - 1] and "hl_oot_mheap_post" in lines_m[i + 1], "the hook's lines are not around the size test and the call"
+    assert hl_gates.text_hash(hook_m, "83b7b340") == hl_gates.text_hash(LIFTED_M, "83b7b340")
+    assert hl_gates.apply_text(hook_m, {}, {}, {}, {})[0] == LIFTED_M
     asked = hl_gates.wanted_lifts()
     assert asked.get("8005ebe0", (None, None))[1] == "new" and asked.get("8005eca0", (None, None))[1] == "new", \
         "host/hl_alloc_null.c does not ask for the hooks"

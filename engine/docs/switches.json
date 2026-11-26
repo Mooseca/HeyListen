@@ -7423,7 +7423,11 @@
    "files": [
     {
      "path": "host/hl_alloc_null.c",
-     "line": 74
+     "line": 77
+    },
+    {
+     "path": "host/hl_alloc_null.c",
+     "line": 111
     }
    ],
    "default": "off (unset)",
