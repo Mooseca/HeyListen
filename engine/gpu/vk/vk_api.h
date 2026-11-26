@@ -17,7 +17,7 @@
 extern "C" {
 #endif
 
-#define MKWVK_API_VERSION 21
+#define MKWVK_API_VERSION 22
 enum { HOS_OPT_CHEAT_HEARTS = 32, HOS_OPT_CHEAT_FLIGHT, HOS_OPT_CHEAT_ACTION, HOS_OPT_CHEAT_CAMERA };
 /* (hookshot) the Motion page's rows (host/pad_sdl.c reads them, vk_replay.cpp's option answers them): Motion controls on
    or off, the horizontal's and the vertical's sensitivity in percent, each turned around, and the deadzone (0 to 2) */
@@ -174,6 +174,13 @@ typedef struct MkwVkHost {
     /* (version 20) whether play is on: the player ran in the last quarter second (no title, no load screen: host/hos_main.c
        hos_oot_player_seen); the Lowest preset measure (gpu/vk/lowend_measure.h) counts the frames of play only */
     int (*play_on)(void);
+    /* (version 22, heylisten) the audio outputs for the Insert menu's Output device row (host/nn_audio.c): how many there are
+       (listing them again; -1 where the host cannot list them: Linux), one's friendly name and its stable id, and the row's
+       choice: mode 0 the system's default, 1 the device with that id (name: for the host's log). A change applies at once */
+    int (*out_count)(void);
+    const char *(*out_name)(int index);
+    const char *(*out_id)(int index);
+    void (*out_select)(int mode, const char *id, const char *name);
 } MkwVkHost;
 enum {
     MKWVK_TRACE_WRITEBACK = 1,     /* a mirror's GPU writes copied into guest memory (in a submission) */

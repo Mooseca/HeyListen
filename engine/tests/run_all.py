@@ -219,6 +219,7 @@ ARGS = {
     "tests/test_audio_voice_biquad.py": ["--cc", "gcc"],
     "tests/test_audio_effects.py": ["--cc", "gcc"],
     "tests/test_audio_output_menu.py": ["--cxx", "g++"],
+    "tests/test_audio_output_device.py": ["--cc", "gcc", "--cxx", "g++"],
     "tests/test_motion.py": ["--cc", "gcc"],
     "tests/test_low_memory_notice.py": ["--cc", "gcc"],
     "tests/test_romfs_boot_notice.py": ["--cc", "gcc"],

@@ -45,7 +45,7 @@ def main():
     assert "vk && vk->save_caches ? vk->save_caches(budget_ms) : 0" in call, "the host's call is not guarded or not the table's"
 
     api = (ROOT / "gpu/vk/vk_api.h").read_text(encoding="utf-8")
-    assert "#define MKWVK_API_VERSION 21" in api and "int (*save_caches)(uint32_t budget_ms);" in api
+    assert re.search(r"#define MKWVK_API_VERSION (2[1-9]|[3-9]\d)", api) and "int (*save_caches)(uint32_t budget_ms);" in api
     assert api.index("save_caches") > api.index("nvn_release_may_wait"), "the new entry is not at the table's end"
     replay = (ROOT / "gpu/vk/vk_replay.cpp").read_text(encoding="utf-8")
     assert "t.save_caches = caches_save_at_exit;" in block(replay, "void fill_replay_table(MkwVkRenderer& t) {")

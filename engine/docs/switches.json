@@ -1550,11 +1550,11 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2609
+     "line": 2704
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2613
+     "line": 2708
     }
    ],
    "default": "off (unset)",
@@ -1575,7 +1575,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2605
+     "line": 2700
     }
    ],
    "default": "0 (unset)",
@@ -1596,7 +1596,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2594
+     "line": 2689
     }
    ],
    "default": "unset",
@@ -4630,7 +4630,7 @@
    "files": [
     {
      "path": "host/nn_audio.c",
-     "line": 945
+     "line": 1131
     }
    ],
    "default": "off (unset)",
@@ -4651,7 +4651,7 @@
    "files": [
     {
      "path": "host/nn_audio.c",
-     "line": 884
+     "line": 1068
     }
    ],
    "default": "unset",
@@ -4693,15 +4693,19 @@
    "files": [
     {
      "path": "host/nn_audio.c",
-     "line": 905
+     "line": 951
+    },
+    {
+     "path": "host/nn_audio.c",
+     "line": 1089
     }
    ],
    "default": "unset",
    "values": "text",
-   "explanation": "The device: HOS_AUDIO_DEVICE=<n> (a waveOut device number) first, then the Windows default (WAVE_MAPPER), then each device in turn. Players had no sound at all while every other program played (\"no sound in 2.0.5\"): the log now names the device; one that takes no block for 1.5 s (an unplugged headset, a default bound to a dead output) is closed and the next candidate opened (at most 6 times a run); 10 s after opening the log says how many blocks the device took and how loud the game's sound was, which tells a silent game from a deaf device. Issue 99: when HOS_AUDIO_DEVICE is unset, device 0 is tried first (not skipped to WAVE_MAPPER). the next candidate: 0 = device 0 (or HOS_AUDIO_DEVICE), 1 = the default, 2.. = device n-2.",
+   "explanation": "**Output device** is where the game's sound plays. Default follows Windows' default output device; the list shows each active output by its name, and a change applies at once, with no restart. The choice is kept by the device's id (`output_device_id`, with its name beside it, in `hookshot_options.ini`). A chosen device that is unplugged stays chosen (shown as not connected) and Default stands in, with a line in the log; it is tried again when the menu is opened. A device unplugged while the game plays is left for Default the same way. On Linux the sound goes to SDL's default device and the row has Default only: the system's sound settings choose the device. `HOS_AUDIO_DEVICE=<n>` (a waveOut device number) still wins over the row for one run. Audio output (Auto, Stereo, 5.1) is the speakers the game mixes for; this row is the device they play on.",
    "comment": "The device: HOS_AUDIO_DEVICE=<n> (a waveOut device number) first, then the Windows default (WAVE_MAPPER), then each device in turn. Players had no sound at all while every other program played (\"no sound in 2.0.5\"): the log now names the device; one that takes no block for 1.5 s (an unplugged headset, a default bound to a dead output) is closed and the next candidate opened (at most 6 times a run); 10 s after opening the log says how many blocks the device took and how loud the game's sound was, which tells a silent game from a deaf device. Issue 99: when HOS_AUDIO_DEVICE is unset, device 0 is tried first (not skipped to WAVE_MAPPER). the next candidate: 0 = device 0 (or HOS_AUDIO_DEVICE), 1 = the default, 2.. = device n-2.",
-   "documented_in": null,
-   "source": "comment at host/nn_audio.c",
+   "documented_in": "readme.md",
+   "source": "readme.md",
    "documented": true,
    "set_via": "In `hookshot_env.txt`, or in the environment.",
    "use": null
@@ -4714,7 +4718,7 @@
    "files": [
     {
      "path": "host/nn_audio.c",
-     "line": 937
+     "line": 1121
     }
    ],
    "default": "unset",
@@ -4735,7 +4739,7 @@
    "files": [
     {
      "path": "host/nn_audio.c",
-     "line": 1186
+     "line": 1410
     }
    ],
    "default": "off (unset)",
@@ -4861,7 +4865,7 @@
    "files": [
     {
      "path": "host/nn_audio.c",
-     "line": 1668
+     "line": 1892
     }
    ],
    "default": "unset",
@@ -5289,7 +5293,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2766
+     "line": 2868
     }
    ],
    "default": "0 (unset)",
@@ -5436,11 +5440,11 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2775
+     "line": 2877
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2783
+     "line": 2885
     },
     {
      "path": "host/nn_vi.c",
@@ -5515,11 +5519,11 @@
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2775
+     "line": 2877
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2783
+     "line": 2885
     },
     {
      "path": "host/nn_vi.c",
@@ -5842,7 +5846,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2871
+     "line": 2973
     },
     {
      "path": "host/display.c",
@@ -6154,7 +6158,7 @@
     },
     {
      "path": "host/rx_backend.c",
-     "line": 297
+     "line": 301
     }
    ],
    "default": "unset",
@@ -8028,7 +8032,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2670
+     "line": 2765
     }
    ],
    "default": "unset",
@@ -8049,7 +8053,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2673
+     "line": 2768
     },
     {
      "path": "host/hos_main.c",
@@ -8158,7 +8162,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2767
+     "line": 2869
     },
     {
      "path": "host/nn_applet.c",
@@ -8707,7 +8711,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2765
+     "line": 2867
     }
    ],
    "default": "0 (unset)",
@@ -8770,11 +8774,11 @@
    "files": [
     {
      "path": "host/rx_backend.c",
-     "line": 618
+     "line": 623
     },
     {
      "path": "host/rx_backend.c",
-     "line": 711
+     "line": 716
     }
    ],
    "default": "off (unset)",
@@ -9444,7 +9448,7 @@
    "files": [
     {
      "path": "host/rx_backend.c",
-     "line": 602
+     "line": 607
     }
    ],
    "default": "off (unset)",
@@ -9956,7 +9960,7 @@
    "files": [
     {
      "path": "host/rx_backend.c",
-     "line": 473
+     "line": 478
     }
    ],
    "default": "unset",
@@ -10969,7 +10973,7 @@
     },
     {
      "path": "host/rx_backend.c",
-     "line": 457
+     "line": 462
     }
    ],
    "default": "unset",
@@ -17986,7 +17990,7 @@
     },
     {
      "path": "host/rx_backend.c",
-     "line": 92
+     "line": 96
     }
    ],
    "default": "unset",
@@ -18962,7 +18966,7 @@
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2761
+     "line": 2863
     }
    ],
    "default": "unset",
@@ -20589,7 +20593,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2551
+     "line": 2646
     }
    ],
    "default": "unset",
@@ -20966,7 +20970,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2755
+     "line": 2857
     }
    ],
    "default": "0 (unset)",
@@ -21456,7 +21460,7 @@
     },
     {
      "path": "host/rx_backend.c",
-     "line": 427
+     "line": 432
     }
    ],
    "default": "off (unset)",
@@ -21850,7 +21854,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2757
+     "line": 2859
     }
    ],
    "default": "unset",
@@ -23853,7 +23857,7 @@
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2749
+     "line": 2851
     }
    ],
    "default": "2",
@@ -23937,7 +23941,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 3077
+     "line": 3179
     }
    ],
    "default": "unset",
@@ -26605,7 +26609,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2756
+     "line": 2858
     }
    ],
    "default": "0 (unset)",
@@ -31945,7 +31949,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 3049
+     "line": 3151
     }
    ],
    "default": "unset",
@@ -32113,7 +32117,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2762
+     "line": 2864
     }
    ],
    "default": "0 (unset)",
