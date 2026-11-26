@@ -120,10 +120,8 @@ void ledger_mark(uint64_t, uint64_t, int) {}
 enum { kUseVertex = 1 };
 bool res_log_on() { return false; }
 void res_note_pipeline_use(VkPipeline) {}
-#ifdef _WIN32
-typedef unsigned long DWORD;
+typedef unsigned long DWORD;   // (no windows.h here: the same stand-ins on every platform)
 void Sleep(DWORD) {}
-#endif
 
 // The Windows-only optimizer workaround is not the behavior under test.
 VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceProperties2(VkPhysicalDevice, VkPhysicalDeviceProperties2*) {}
