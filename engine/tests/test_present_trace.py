@@ -29,6 +29,9 @@ PREFIX = r'''
 #include <stdlib.h>
 #include <string.h>
 typedef long long LONG64;
+
+static int hos_vcore_away(void) { return 1; }   /* (STUT3: the flush gives the virtual core up) */
+static void hos_vcore_back(void) {}
 static volatile int present_interval = 1;
 static int64_t next_frame_at, window_start, frames_in_window, shown_at[16];
 static volatile LONG64 presents, shown_count;

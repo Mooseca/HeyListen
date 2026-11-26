@@ -299,8 +299,14 @@ static void live_input(void) {
     const int64_t now = hos_now_ns();
     if (now < next_check) return;
     next_check = now + 30000000;
+    /* (STUT3) the open and the read of the live file without the virtual core: on the PC 3050, with its commit at the limit,
+       BaseProcExecutor1 sat 2-4 s in this fopen (ZwCreateFile) holding core 1. Test runs only (HOS_INPUT_LIVE) */
+    const int away = hos_vcore_away();
     FILE *f = fopen(path, "rb");
-    if (!f) return;
+    if (!f) {
+        if (away) hos_vcore_back();
+        return;
+    }
     if (fseek(f, (long)offset, SEEK_SET) == 0) {
         char line[4096];
         while (fgets(line, sizeof line, f)) {
@@ -335,6 +341,7 @@ static void live_input(void) {
         }
     }
     fclose(f);
+    if (away) hos_vcore_back();
 }
 
 static const struct { const char *name; int b; int axis; int dir; } names[] = {

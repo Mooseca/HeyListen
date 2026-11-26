@@ -485,11 +485,25 @@ static void present_trace(int64_t frame, int64_t now) {
         }
     }
     if (!file) return;
-    fprintf(file, "%lld,%lld,%lld\n", (long long)frame, (long long)now, (long long)(frame > 1 ? now - last : 0));
+    /* (STUT3) the record goes into the stream's 64 KB buffer; a full buffer or the once-a-second flush writes to the disk, and that
+       write is made without the virtual core: on the PC 3050, with its commit at the limit, the presenting thread sat 2-12 s in it
+       (WriteFile) holding core 4, and the game's threads waited for the core. Test runs only (HOS_PRESENT_TRACE) */
+    char rec[64];
+    const int n = snprintf(rec, sizeof rec, "%lld,%lld,%lld\n", (long long)frame, (long long)now, (long long)(frame > 1 ? now - last : 0));
+    static size_t buffered;
     last = now;
-    if (now - flushed >= 1000000000LL) {
-        fflush(file);
-        flushed = now;
+    const int flush = now - flushed >= 1000000000LL;
+    if (flush || buffered + (size_t)n >= sizeof buffer) {
+        const int away = hos_vcore_away();
+        fputs(rec, file);
+        if (flush) fflush(file);
+        if (away) hos_vcore_back();
+        buffered = flush ? 0 : buffered + (size_t)n;
+        if (flush) flushed = now;
+        if (buffered >= sizeof buffer) buffered = 0;
+    } else {
+        fputs(rec, file);
+        buffered += (size_t)n;
     }
 }
 /* (hookshot, TICK-014) HOS_SPEED_LOG=1: the game's clock against the wall clock, once a second. The frame-time block

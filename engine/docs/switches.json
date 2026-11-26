@@ -5741,7 +5741,7 @@
    "files": [
     {
      "path": "host/nn_vi.c",
-     "line": 527
+     "line": 541
     }
    ],
    "default": "0",
@@ -6350,11 +6350,11 @@
    "files": [
     {
      "path": "host/nn_hid.c",
-     "line": 817
+     "line": 824
     },
     {
      "path": "host/nn_hid.c",
-     "line": 1001
+     "line": 1008
     }
    ],
    "default": "unset",
@@ -6375,7 +6375,7 @@
    "files": [
     {
      "path": "host/nn_hid.c",
-     "line": 803
+     "line": 810
     }
    ],
    "default": "off (unset)",
@@ -6444,7 +6444,7 @@
    "default": "unset",
    "values": "text (`1` named)",
    "explanation": "A file the test appends lines of presses to, read every 30 ms; each line's times count from when it is read. A line `!cheat <n>` sends a Cheats page action, `!synclog` logs the NVN syncs (`!dump`, `!shots`, `!rdoc` and `!flasharm` are the WebGPU renderer's).",
-   "comment": "HOS_INPUT_SCRIPT, and HOS_INPUT_LIVE=<file>: lines appended to that file while the game runs are presses in the script's syntax, their times counted from when the line is read (\"0:LUP/2000,2:A\"): a test can steer the game by looking at its screenshots.",
+   "comment": "(STUT3) the open and the read of the live file without the virtual core: on the PC 3050, with its commit at the limit, BaseProcExecutor1 sat 2-4 s in this fopen (ZwCreateFile) holding core 1. Test runs only (HOS_INPUT_LIVE).",
    "documented_in": "development.md",
    "source": "development.md",
    "documented": true,
@@ -6480,7 +6480,7 @@
    "files": [
     {
      "path": "host/nn_hid.c",
-     "line": 811
+     "line": 818
     }
    ],
    "default": "off (unset)",
@@ -7067,7 +7067,7 @@
    "files": [
     {
      "path": "host/nn_vi.c",
-     "line": 551
+     "line": 565
     }
    ],
    "default": "1",
@@ -7209,7 +7209,7 @@
     },
     {
      "path": "host/nn_hid.c",
-     "line": 843
+     "line": 850
     }
    ],
    "default": "unset",
@@ -9288,7 +9288,7 @@
     },
     {
      "path": "host/nn_vi.c",
-     "line": 504
+     "line": 518
     }
    ],
    "default": "off (unset)",
