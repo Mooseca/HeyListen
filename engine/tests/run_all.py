@@ -136,10 +136,6 @@ ARGS = {
     "tests/test_write_history.py": ["--cxx", "{cxx}"],
     "tests/test_posix_cv_wake.py": ["--cc", "cc"],
     "tests/test_posix_thread_cycle_time.py": ["--cc", "cc"],
-    "tests/test_ub_word_index.py": ({"windows"}, "the fixture links the CRT's oldnames.lib, which the MSVC-target clang here lacks: checked on Linux"),
-    "tests/test_mf_buffer_lifetime.py": ({"windows"}, "the fixture links the CRT's oldnames.lib, which the MSVC-target clang here lacks: checked on Linux"),
-    "tests/test_wayland_libdecor_hint.py": ({"windows"}, "the harness sets the Wayland switch with POSIX setenv: checked on Linux"),
-    "tests/test_linux_saves_move.py": ({"windows"}, "the Linux saves folder move: POSIX paths and shell"),
     "tests/test_parallel_rb_refresh.py": ["--cxx", "{cxx}"],
     "tests/test_prof_sampling.py": ["--cxx", "{cxx}"],
     "tests/test_present_geometry_trace.py": ["--cxx", "{cxx}"],
@@ -325,6 +321,10 @@ SKIP = {
     "tests/test_sdl_audio_reopen.py": ({"windows"}, "Linux's waveOut on SDL (host/posix): Windows plays through its own"),
     "tests/test_posix_cv_wake.py": ({"windows"}, "tests the Linux futex implementation (host/posix)"),
     "tests/test_posix_thread_cycle_time.py": ({"windows"}, "tests the Linux implementation in host/posix"),
+    "tests/test_ub_word_index.py": ({"windows"}, "the fixture links the CRT's oldnames.lib, which the MSVC-target clang here lacks: checked on Linux"),
+    "tests/test_mf_buffer_lifetime.py": ({"windows"}, "the fixture links the CRT's oldnames.lib, which the MSVC-target clang here lacks: checked on Linux"),
+    "tests/test_wayland_libdecor_hint.py": ({"windows"}, "the harness sets the Wayland switch with POSIX setenv: checked on Linux"),
+    "tests/test_linux_saves_move.py": ({"windows"}, "the Linux saves folder move: POSIX paths and shell"),
 }
 # (spirv-val: SPIRV-Tools comes with the Linux runner's packages, not on Windows)
 for _name in ("nx2/test_texture_phi_dominance.py", "nx2/test_unsigned_image_types.py", "nx2/test_depth_sample_types.py", "nx2/test_default_point_size.py", "nx2/test_draw_parameters.py", "nx2/test_coop_spirv.py",
