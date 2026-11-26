@@ -62,6 +62,14 @@ The producers are not behind a backlog; they are at the head of a long job whose
   (`RX_VK_RB_EARLY_SPLIT`, so the copy goes to the GPU at once): the copy is queued behind the GPU work submitted before it (the
   previous frame's passes). That GPU part is what a CPU version of the block (below) or a second queue for the eight programs
   would remove.
+- **The cost on the main PC** (order2f, speed lease, Market with the camera turning, 150 s, fps from play + 10 s; build/s5/s1-*):
+  round 1 E (the copy) 110.3 | P (flash2f's wait) 101.7 | B (the old read, flashes) 112.3 | O (order thread off) 110.0; round 2, a
+  disturbed machine, E 107.0 | P 93.0 | B 100.5 | O 97.9. The reads' time a frame (`RX_VK_RB_PROF`, each 0x3980 range): O 0.01-0.02 ms
+  (inline the game's thread has replayed the job itself and the GPU is done by the read), E 0.25, P 0.66. The PC 3050's numbers are
+  the test that matters (its replay and GPU are slower).
+- **The check** (`RX_VK_RB_EARLY=2`, the read's target taken when it begins): inline, the copy equals what the game reads in 55-75 % of
+  the reads; with the order thread, flash2f's wait handed out a value that is neither the copy nor the previous one (300 of 300). By
+  eye flash2f was clean, and E is by the counter.
 - **A read during a replay stall** (a texture-upload burst at a zone load, the order thread tens of ms behind): the read waits for its
   own job's copy at most `RX_VK_RB_EARLY_WAIT_MS` (30 ms), then up to 200 ms more (the range's write-backs are left out, so it must
   find a copy), then leaves guest memory as it is and counts it (STALE). It never waits for the rest of the replay or the present.
