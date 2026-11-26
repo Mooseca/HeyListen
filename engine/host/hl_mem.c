@@ -42,11 +42,14 @@
      HL_MEM_COLD_LOWMEM=<MB>  no trimming while the system's available RAM is under that (a quarter more to start again; default 0:
        never held, 3072 proposed). HL_MEM_ACCOUNT=<seconds>  the "hl mem: account:" lines (private commit and working set by owner)
      HL_MEM_COLD_FLAGS=<hex,...>  the pool flags (default 24,64)    HL_MEM_COLD_AGE=<seconds>  the pools' age (default 10)
+     HL_MEM_COLD_LOW_MB=<MB> (default 4096) / HL_MEM_COLD_HIGH_MB=<MB> (default 6144)  the whole pass only while the available RAM
+       is short: on under LOW, off again from HIGH (hl_mem_coldgate.h); LOW=0: whatever the free RAM, as before (STUT3)
    HL_FAULT_WATCH=<ms>: who takes the page faults, and on what memory (its comment, above hl_mem_init).
    Every 10 s two lines "hl mem: cold pages (pools): ..." and "(heaps): ..." give the counters (MB out now, taken out, came
    back and how often, the most that came back in 10 s). */
 #include "hos.h"
 #include "hl/c/hl_mem.h"
+#include "hl_mem_coldgate.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -475,6 +478,9 @@ static DWORD WINAPI account_main(void *arg) {
 static int pressure_on = 1;
 static uint64_t lowmem_mb = 3072;   /* (HL_MEM_COLD_LOWMEM=<MB>: available RAM under which nothing is taken out; 0: never held. Default 3072 since STALL1, 22 Nov: the PC 3050's hog run with it had 56 frames over 50 ms against 77 with the pages taken out as before) */
 static int lowmem_held;
+/* (STUT3, hl_mem_coldgate.h) the pass only while the PC is short of RAM: HL_MEM_COLD_LOW_MB / HL_MEM_COLD_HIGH_MB */
+static uint64_t gate_low_mb = HL_COLDGATE_LOW_DEFAULT_MB, gate_high_mb = HL_COLDGATE_HIGH_DEFAULT_MB;
+static int gate_on = 0, gate_told = 0;
 static int64_t lowmem_since, lowmem_ns, lowmem_passes;
 static int64_t pressure_until;
 static DWORD WINAPI cold_main(void *unused) {
@@ -486,6 +492,16 @@ static DWORD WINAPI cold_main(void *unused) {
     {
         const char *lm = getenv("HL_MEM_COLD_LOWMEM");
         if (lm && lm[0]) lowmem_mb = (uint64_t)atoll(lm);
+        /* (STUT3, HL_MEM_COLD_LOW_MB=<MB>, default 4096; HL_MEM_COLD_HIGH_MB=<MB>, default 6144) the pass, pools and heaps, runs only
+           while the PC is short of RAM: it starts when the available RAM falls under the LOW line and stops once it is back at the
+           HIGH line (never under LOW). HL_MEM_COLD_LOW_MB=0: whatever the free RAM, as before. On the PC 3050 (32 GB, 4.4 GB free at
+           the least in play) the pass took 5-6 GB of pool pages and ~3 GB of heap pages out in a warp tour and 4-5 GB came back;
+           with the pass off the frames over 100 ms fell by 31 percent in one series. A pool-only gate moved the churn to the heaps
+           (6 GB out, 2.2 GB back): so the whole pass */
+        const char *pl = getenv("HL_MEM_COLD_LOW_MB");
+        gate_low_mb = pl ? (uint64_t)strtoull(pl, NULL, 10) : 4096;
+        const char *ph = getenv("HL_MEM_COLD_HIGH_MB");
+        gate_high_mb = ph ? (uint64_t)strtoull(ph, NULL, 10) : 6144;
     }
     double worst_ms[2] = {0, 0};
     int64_t next_report = hos_now_ns() + 10000000000LL;
@@ -535,6 +551,32 @@ static DWORD WINAPI cold_main(void *unused) {
                 }
                 if (lowmem_held) continue;
             }
+        }
+        {   /* (STUT3) the whole pass only while the PC is short of RAM (hl_mem_coldgate.h), its state logged at each change */
+            MEMORYSTATUSEX gm;
+            memset(&gm, 0, sizeof gm);
+            gm.dwLength = sizeof gm;
+            if (GlobalMemoryStatusEx(&gm)) {
+                const uint64_t avail_mb = gm.ullAvailPhys >> 20;
+                const int was = gate_on;
+                gate_on = hl_coldgate_next(gate_on, avail_mb, gate_low_mb, gate_high_mb);
+                if (gate_on != was || !gate_told) {
+                    gate_told = 1;
+                    if (!gate_low_mb)
+                        hos_log("hl mem: cold pages: on whatever the free RAM (HL_MEM_COLD_LOW_MB=0)");
+                    else if (gate_on)
+                        hos_log("hl mem: cold pages: on, %llu MB of RAM available (under %llu MB, HL_MEM_COLD_LOW_MB; off again from %llu MB)",
+                                (unsigned long long)avail_mb, (unsigned long long)gate_low_mb,
+                                (unsigned long long)hl_coldgate_high(gate_low_mb, gate_high_mb));
+                    else
+                        hos_log("hl mem: cold pages: off, %llu MB of RAM available (pages are taken out only under %llu MB, HL_MEM_COLD_LOW_MB; "
+                                "off from %llu MB, HL_MEM_COLD_HIGH_MB; 0: always)", (unsigned long long)avail_mb,
+                                (unsigned long long)gate_low_mb, (unsigned long long)hl_coldgate_high(gate_low_mb, gate_high_mb));
+                }
+            } else {
+                gate_on = 1;   /* (no answer: the pass as before) */
+            }
+            if (!gate_on) continue;   /* (RAM to spare: nothing is taken out, pools or heaps) */
         }
         const int64_t t0 = hos_now_ns();
         const int64_t unlocks0 = cold_unlocks, queries0 = cold_queries;
