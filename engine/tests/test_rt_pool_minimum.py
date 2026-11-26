@@ -30,10 +30,11 @@ def main():
 #define MIB (UINT64_C(1) << 20)
 volatile uint64_t hos_wide_out;
 static unsigned output_width, output_height;
-static const char *override;
+static const char *override, *uncapped;
 static uint32_t hos_output_size(int height) { return height ? output_height : output_width; }
 static void hos_log(const char *fmt, ...) { (void)fmt; }
 static const char *fixture_env(const char *name) {
+    if (!strcmp(name, "HOS_RT_POOL_UNCAPPED")) return uncapped;
     if (strcmp(name, "HOS_RT_POOL_MB")) exit(2);
     return override;
 }
@@ -45,6 +46,7 @@ static const struct {
     uint64_t wide, game_mib;
     const char *env;
     uint64_t expected_mib;
+    const char *uncapped;
 } cases[] = {
     {2560, 1440, 0, 305, NULL, 512},
     {3840, 2160, 0, 305, NULL, 687},
@@ -58,12 +60,16 @@ static const struct {
     {2560, 1440, 0, 305, "0", 0},
     {2560, 1440, 0, 768, NULL, 768},
     {3840, 2160, 0, 768, NULL, 1728},
+    {2560, 1440, 0, 305, "1024", 1024},
+    {2560, 1440, 0, 305, "1500", 1024},   /* (an explicit size past 1 GB leaves the later module heaps no room) */
+    {2560, 1440, 0, 305, "2000", 1024},
+    {2560, 1440, 0, 305, "2000", 2000, "1"},
 };
 int main(void) {
     int failed = 0;
     for (unsigned i = 0; i < sizeof cases / sizeof *cases; i++) {
         output_width = cases[i].width; output_height = cases[i].height;
-        hos_wide_out = cases[i].wide; override = cases[i].env;
+        hos_wide_out = cases[i].wide; override = cases[i].env; uncapped = cases[i].uncapped;
         uint64_t got = hos_rt_pool_size(cases[i].game_mib * MIB);
         if (got != cases[i].expected_mib * MIB) {
             fprintf(stderr, "case %u: got %llu bytes, expected %llu MiB\n", i,
@@ -84,7 +90,7 @@ int main(void) {
         source.write_text(fixture)
         subprocess.run([compiler, "-std=c11", "-O2", str(source), "-o", str(binary)], check=True)
         subprocess.run([str(binary)], check=True, timeout=5)
-    print("PASS: 512 MiB floor, 4K/ultrawide growth and explicit overrides (12 cases)")
+    print("PASS: 512 MiB floor, 4K/ultrawide growth and explicit overrides (16 cases)")
 
 
 if __name__ == "__main__":

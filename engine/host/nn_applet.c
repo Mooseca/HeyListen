@@ -177,7 +177,15 @@ uint64_t hos_rt_pool_size(uint64_t game) {
     if (wide_px > px) px = wide_px;
     const uint64_t scaled = px > 2560 * 1440 ? (game * px / (2560 * 1440) + 0xfffff) & ~0xfffffULL : game;
     const uint64_t minimum = 512ULL << 20;
-    const uint64_t v = e ? strtoull(e, NULL, 0) << 20 : scaled < minimum ? minimum : scaled;
+    /* (the Graphics module heap grows by the pool (nx2/oot_patches.py) and is carved from the ModuleSystem heap, which the other module heaps share:
+       past about 1.1 GB the modules made after it find no room, get no heap and crash at boot (HOS_RT_POOL_MB=1200: a 256 MB heap asked with
+       187 MB free; 2000: a 3 GB one). An explicit size above 1024 MB is brought down to it, HOS_RT_POOL_UNCAPPED=1: as asked) */
+    uint64_t v = e ? strtoull(e, NULL, 0) << 20 : scaled < minimum ? minimum : scaled;
+    static int capped;
+    if (e && v > (1024ULL << 20) && !(getenv("HOS_RT_POOL_UNCAPPED") && atoi(getenv("HOS_RT_POOL_UNCAPPED")))) {
+        if (!capped++) hos_log("applet: render target pool %llu MB asked: 1024 MB (more leaves the later module heaps no room and the game crashes at boot; HOS_RT_POOL_UNCAPPED=1: as asked)", (unsigned long long)(v >> 20));
+        v = 1024ULL << 20;
+    }
     static int logged;
     if (!logged++) hos_log("applet: render target pool %llu MB (the game's %llu MB)", (unsigned long long)(v >> 20), (unsigned long long)(game >> 20));
     return v;

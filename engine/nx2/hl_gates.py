@@ -174,6 +174,12 @@ def movie_site(s, addr, off):
 #   when it failed (host/hl_heap_retry.c). Upstream replaces those lines; here the game's own line stays, between a line
 #   before it (which saves the arguments and may refuse the call, for the test switch: "if (pre) x0 = 0; else {") and a line
 #   after it ("}" and the retry), so that taking the hook out leaves the lift as it was.
+# - HL_NEW_HOOK(8005ebe0, "<hash>") and HL_NEW_HOOK(8005eca0, "<hash>"): the game's operator new (f_8005ebe0: x0 size, x1 heap or 0
+#   for the thread's current heap, x2 alignment) and aligned_alloc (f_8005eca0). The null result is told once with what is known
+#   (host/hl_alloc_null.c: the heap, its size and free size, the size asked, the caller). f_8005ebe0 has three ways to a null: no
+#   heap to take from (a line before its epilogue), and the heap's own tryAlloc, which it jumps to: that jump becomes a call and a
+#   test of x0 (a line before it; the original jump stays behind it, never reached). f_8005eca0: its failure path, before the
+#   errno call. Nothing changes for a block that was made.
 # - HL_DRIVE_HOOK(804f5030, "<hash>"): (Longshot d30b9479 / Hookshot 72f2a07c, CraftyCorvid; Link's pull-up onto a ledge) a rigid
 #   body's update before the physics step, on its path for a body driven to a target, in the function twice (the body loaded into
 #   x23 or x24 from the controller's +240): a call hos_oot_drive_target(controller x20, body, the time object's slot) between the
@@ -193,7 +199,7 @@ def movie_site(s, addr, off):
 #   goes through hos_oot_ocb_pick (host/hl_ocb_hold.c) before the update tests it. A line after the label, once.
 # Each goes in only where its function's text hashes as recorded, both lines of a kind or none. The marker is the address
 # plus one, as a step hook's (one hook a function), so a tree that does not ask for it takes it out as a stale gate.
-WANT_LIFT = re.compile(r'^HL_(SOUND|SOLVER|WHOLE|HEAP|BGM|TURN|HORSE|FLOOR|DRIVE|LOOP|POSE|SONG|OCB)_HOOK\(\s*([0-9a-f]{8})\s*,\s*"([0-9a-f]*)"((?:\s*,\s*(?:\d+|"[^"\n]*"))*)\s*\)',
+WANT_LIFT = re.compile(r'^HL_(SOUND|SOLVER|WHOLE|HEAP|NEW|BGM|TURN|HORSE|FLOOR|DRIVE|LOOP|POSE|SONG|OCB)_HOOK\(\s*([0-9a-f]{8})\s*,\s*"([0-9a-f,]*)"((?:\s*,\s*(?:\d+|"[^"\n]*"))*)\s*\)',
                        re.M)
 CUT = "    c->x[%d]=recomp_fp_to_int(c->vreg[0][0]&UINT64_C(0xffffffff),32,32,1,3,c->fpcr,&c->fpsr);\n"
 SOUND_SLOT = "g_module_base + 0x80435000ULL + (int64_t)75927552"   # (the page of the step's pointer, whose +2192 holds it)
@@ -254,7 +260,30 @@ HEAP_CPU_LINE = "{ uint64_t _t = c->x[8]; c->x[30] = %#xULL; A64_ICALL(c, _t); }
 HEAP_GPU_LINE = "c->x[30] = %#xULL; f_80522050(c);\n"
 
 
-def lift_lines(kind, addr, args):
+# (operator new's variants f_8005e9d0, f_8005eb20, f_8005ebe0 and aligned_alloc's failure path: where each ends in null. The new's
+# forms are one function written two ways, the lift keeping registers in locals (x0_, x31_) or not (c->x[0]): the places are found
+# by shape, the tail call through the heap's vtable (+0x30 tryAlloc; the line holding "A64_IJUMP(c, c->x[3]); return;", with the
+# stores before it on the same line) and the one line setting x0 to 0 before the epilogue. A hook's hashes may be a list
+# "<hash>,<hash>": one per form of the lift's text)
+NEW_TAIL_RE = re.compile(r"^([^\n]*?)A64_IJUMP\(c, c->x\[3\]\); return;\n", re.M)
+NEW_ZERO_RE = re.compile(r"^    \{ uint64_t _r = \(\(uint64_t\)0 \| \(\(\(uint64_t\)0\) << 0\)\); (?:x0_|c->x\[0\]) = _r; \}\n", re.M)
+NEW_ALIGNED_FAIL = "c->x[30] = 0x8005ecd8ULL; f_85717f00(c);\n"
+NEW_DECL = "extern void hl_oot_new_null(Ctx *A64_NOESC, uint64_t, uint64_t, uint64_t, uint64_t, int); "
+NEW_ADDRS = ("8005e9d0", "8005eb20", "8005ebe0")
+# (the module system makes each module heap in f_83b7b340 (the size in x0 from the heap definition, 0 when it has none for the module; a record at sp+8 whose first word is the name; the parent heap in x23); a size of 0 and a heap that fails are told)
+NEW_MHEAP = "c->x[30] = 0x83b7b440ULL; f_809df710(c);\n"
+NEW_MHEAP_IF = "if (c->x[0] == 0) { goto L_83b7b440; }\n"
+
+
+def new_places(body):
+    """[start of the tail line, start of the zero line] in an operator new variant's body, or None"""
+    tails, zeros = list(NEW_TAIL_RE.finditer(body)), list(NEW_ZERO_RE.finditer(body))
+    if len(tails) != 1 or len(zeros) != 1 or tails[0].start() > zeros[0].start():
+        return None
+    return [tails[0].start(), zeros[0].start()]
+
+
+def lift_lines(kind, addr, args, body=None):
     """the lines a lift hook puts in, in the order of their places"""
     mark = "   /* hl gate %s */\n" % step_id(addr)
     if kind == "sound":
@@ -317,6 +346,18 @@ def lift_lines(kind, addr, args):
     if kind == "ocb":
         return ["    { extern uint64_t hos_oot_ocb_pick(Ctx *A64_NOESC, uint64_t, uint64_t); "
                 "c->x[21] = hos_oot_ocb_pick(c, c->x[19], c->x[21]); }" + mark]
+    if kind == "new":
+        if addr == "8005eca0":
+            return ["    { " + NEW_DECL + "hl_oot_new_null(c, 0, 0, 0, recomp_load64(c, c->x[31] + 8), 2); }" + mark]
+        if addr == "83b7b340":
+            return ["    { extern void hl_oot_mheap_pre(Ctx *A64_NOESC); hl_oot_mheap_pre(c); }" + mark,
+                    "    { extern void hl_oot_mheap_post(Ctx *A64_NOESC); hl_oot_mheap_post(c); }" + mark]
+        tail = NEW_TAIL_RE.search(body)
+        sp = "x31_" if re.search(r"x31_", body) else "c->x[31]"
+        return [tail.group(1) + "{ " + NEW_DECL + "const uint64_t _hl_h = c->x[0], _hl_s = c->x[1], _hl_a = c->x[2], _hl_lr = c->x[30]; "
+                "A64_ICALL(c, c->x[3]); if (__builtin_expect(c->x[0] == 0, 0)) "
+                "hl_oot_new_null(c, _hl_h, _hl_s, _hl_a, _hl_lr, 0); return; }" + mark,
+                "    { " + NEW_DECL + "hl_oot_new_null(c, 0, 0, 0, recomp_load64(c, " + sp + " + 8), 1); }" + mark]
     if kind == "heap":
         lines = []
         for lr in HEAP_CPU:
@@ -417,6 +458,14 @@ def lift_places(body, addr, kind, args):
     if kind == "ocb":
         anchor = OCB_LABEL + OCB_TEST
         return [body.index(anchor) + len(OCB_LABEL)] if body.count(anchor) == 1 else None
+    if kind == "new":
+        if addr == "8005eca0":
+            return [body.index(NEW_ALIGNED_FAIL)] if body.count(NEW_ALIGNED_FAIL) == 1 else None
+        if addr == "83b7b340":
+            if body.count(NEW_MHEAP) != 1 or body.count(NEW_MHEAP_IF) != 1 or body.index(NEW_MHEAP_IF) > body.index(NEW_MHEAP):
+                return None
+            return [body.index(NEW_MHEAP_IF), body.index(NEW_MHEAP) + len(NEW_MHEAP)]
+        return new_places(body) if addr in NEW_ADDRS else None
     if kind == "heap":
         places = []
         for lines in ((HEAP_CPU_LINE, HEAP_CPU), (HEAP_GPU_LINE, HEAP_GPU)):
@@ -455,7 +504,7 @@ def apply_lift(s, addr, kind, args):
     if places is None:
         return None
     # (the lines in reverse order of place, those of one place the last first, so that they end up in their order)
-    for _, at, line in sorted(((i, at, line) for i, (at, line) in enumerate(zip(places, lift_lines(kind, addr, args)))),
+    for _, at, line in sorted(((i, at, line) for i, (at, line) in enumerate(zip(places, lift_lines(kind, addr, args, body)))),
                               key=lambda t: (t[1], t[0]), reverse=True):
         body = body[:at] + line + body[at:]
     return s[:span[0]] + body + s[span[1]:]
@@ -613,7 +662,7 @@ def apply(gen, host=HOST, quiet=False, skip=None):
             s = f.read()
         # (a movie or lift hook goes in only where its function's text hashes as recorded; elsewhere a stale one is taken out)
         movies = {a: off for a, (h, off) in movies_asked.items() if body_of(s, a) is not None and text_hash(s, a) == h}
-        lifts = {a: (k, v) for a, (h, k, v) in lifts_asked.items() if body_of(s, a) is not None and text_hash(s, a) == h}
+        lifts = {a: (k, v) for a, (h, k, v) in lifts_asked.items() if body_of(s, a) is not None and text_hash(s, a) in h.split(",")}
         if not want and not steps and not movies and not lifts and "/* hl gate " not in s:
             continue
         out, status = apply_text(s, want, steps, movies, lifts)

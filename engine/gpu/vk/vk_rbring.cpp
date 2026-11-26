@@ -161,6 +161,10 @@ void rbring_note_read(uint64_t guest, uint64_t size) {
     const int cls = rb_ring::class_of(size);
     if (!cls) return;
     if (cls == 4 && !r4_on()) return;
+    // (EXPO3, HL_RB_CLASSES=<mask> (15: all): bit 0 the meter's blocks R1, bit 1 the 0x40 slots R2, bit 2 the 0x2000 blocks R3; a class left out is
+    // never learned, so its reads take the old path (the waits, the write-backs): an A/B to find which class steps the picture at the 60 limit)
+    static const unsigned classes = getenv("HL_RB_CLASSES") ? (unsigned)strtoul(getenv("HL_RB_CLASSES"), nullptr, 0) : 15u;
+    if (!(classes >> (cls - 1) & 1)) return;
     std::lock_guard lk(mu);
     if (table.size() > 4096) {
         if (meter_log_rows() > 0) logf("vk: rbring: the table of learned ranges cleared (4096 ranges) at frame %lld", (long long)rb_frame_now());
@@ -361,7 +365,9 @@ void rbring_apply(uint64_t gpu, uint64_t size) {
         Addr& a = it->second;
         cls = a.cls;
         total = arena_total;
-        const int k = rb_ring::pick(a.ents, a.n, c, config().lag, a.applied);
+        // (EXPO3, HL_RB_PICK=0: the newest eligible entry as before) the steady pick: no sample is jumped over by a read one frame late
+        static const bool steady = !getenv("HL_RB_PICK") || atoi(getenv("HL_RB_PICK")) != 0;
+        const int k = steady ? rb_ring::pick_steady(a.ents, a.n, c, config().lag, a.applied) : rb_ring::pick(a.ents, a.n, c, config().lag, a.applied);
         stats[cls].reads++;
         if (k < 0) {
             // (PIPE2) the exposure meter's block: the game reads and zeroes it, so a read with no new entry finds the game's own
