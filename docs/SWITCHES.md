@@ -10,7 +10,7 @@ python -I engine/scripts/list_switches.py
 
 and commit both files. A test (`engine/tests/test_switches_documented.py`) fails when a switch read in the source is missing here or the data file is out of date.
 
-1549 switches: 56 players may be told to use, 398 diagnostic, 1095 developer-only; 1332 have a real explanation and 217 are marked `undocumented`.
+1550 switches: 56 players may be told to use, 399 diagnostic, 1095 developer-only; 1333 have a real explanation and 217 are marked `undocumented`.
 
 ## How to set a switch
 
@@ -72,7 +72,7 @@ The entries below say what each one does, its values and default, and when it is
 | [Native engine (`HL_*`)](#native-engine-hl_) | 111 | 1 | 40 | 70 |
 | [Host and OS (`HOS_*` and the system's variables)](#host-and-os-hos_-and-the-systems-variables) | 140 | 10 | 0 | 130 |
 | [Telemetry and crash reports](#telemetry-and-crash-reports) | 12 | 0 | 12 | 0 |
-| [Diagnostics and logging](#diagnostics-and-logging) | 310 | 0 | 310 | 0 |
+| [Diagnostics and logging](#diagnostics-and-logging) | 311 | 0 | 311 | 0 |
 | [Build and lift time (`A64_*`, `RX_*` and `HOOKSHOT_*` the builder reads)](#build-and-lift-time-a64_-rx_-and-hookshot_-the-builder-reads) | 99 | 0 | 0 | 99 |
 
 ## Renderer: upscaling, frame generation, HDR, V-Sync and presentation
@@ -11565,7 +11565,7 @@ No crash window: the helper (`HeyListen --crash-watch <pid> <run id> <game folde
 
 ## Diagnostics and logging
 
-310 switches for logs, dumps, profiles and checks.
+311 switches for logs, dumps, profiles and checks.
 
 ### Logs and traces
 
@@ -11668,6 +11668,16 @@ HOS_MUTEX_TRACE=<ms> (diagnostic): waits longer than that are logged with the th
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
 **Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/nn_os_sync.c:641`.
+
+#### `HOS_NEW_NULL_LOG` - diagnostic
+
+A heap of the sead class here has +0x20 its name, +0x28 its memory, +0x30 its size, +0x38 its parent, vtable +0x80 its free size (hl_heap_retry.c). HOS_NEW_NULL_LOG=0: nothing told.
+
+**Values:** on or off (0, false, off, no and empty are off); the description names `0`. **Default:** off (unset).
+
+**When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
+
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hl_alloc_null.c:74`.
 
 #### `HOS_NVN_CHMASK_LOG` - diagnostic
 

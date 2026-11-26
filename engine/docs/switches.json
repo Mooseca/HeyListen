@@ -2,7 +2,7 @@
  "schema": 1,
  "generated_by": "engine/scripts/list_switches.py",
  "scope": "C, C++ and headers under engine/ (engine/tests and vendored trees other than a64-kit excluded) and the Python the builder, the lifter and the scripts run: getenv, std::getenv, _wgetenv, the code's own env helpers and table-driven reads, and os.environ.",
- "count": 1549,
+ "count": 1550,
  "switches": [
   {
    "name": "A64_",
@@ -7411,6 +7411,27 @@
    "comment": "O: the object that changed. Only an object some holder links into a multi-wait can make a WaitAny ready, so the others no longer wake every WaitAny: each event, semaphore or queue change anywhere woke them all, and OoT's three nn.npln threads (offline: their own events never set) woke ~8,500 times a second each to sleep again, 57% of the game's context switches. The check is under mw_lock, as Link and WaitAny's scan are: a link before it is seen here, one after it is followed by a scan that sees the stored state. HOS_MW_WAKE=all: every change, as before.",
    "documented_in": null,
    "source": "comment at host/nn_os_sync.c",
+   "documented": true,
+   "set_via": "In `hookshot_env.txt`, or in the environment.",
+   "use": null
+  },
+  {
+   "name": "HOS_NEW_NULL_LOG",
+   "area": "logging",
+   "group": "Logs and traces",
+   "audience": "diagnostic",
+   "files": [
+    {
+     "path": "host/hl_alloc_null.c",
+     "line": 74
+    }
+   ],
+   "default": "off (unset)",
+   "values": "on or off (0, false, off, no and empty are off); the description names `0`",
+   "explanation": "A heap of the sead class here has +0x20 its name, +0x28 its memory, +0x30 its size, +0x38 its parent, vtable +0x80 its free size (hl_heap_retry.c). HOS_NEW_NULL_LOG=0: nothing told.",
+   "comment": "A heap of the sead class here has +0x20 its name, +0x28 its memory, +0x30 its size, +0x38 its parent, vtable +0x80 its free size (hl_heap_retry.c). HOS_NEW_NULL_LOG=0: nothing told.",
+   "documented_in": null,
+   "source": "comment at host/hl_alloc_null.c",
    "documented": true,
    "set_via": "In `hookshot_env.txt`, or in the environment.",
    "use": null

@@ -174,6 +174,12 @@ def movie_site(s, addr, off):
 #   when it failed (host/hl_heap_retry.c). Upstream replaces those lines; here the game's own line stays, between a line
 #   before it (which saves the arguments and may refuse the call, for the test switch: "if (pre) x0 = 0; else {") and a line
 #   after it ("}" and the retry), so that taking the hook out leaves the lift as it was.
+# - HL_NEW_HOOK(8005ebe0, "<hash>") and HL_NEW_HOOK(8005eca0, "<hash>"): the game's operator new (f_8005ebe0: x0 size, x1 heap or 0
+#   for the thread's current heap, x2 alignment) and aligned_alloc (f_8005eca0). The null result is told once with what is known
+#   (host/hl_alloc_null.c: the heap, its size and free size, the size asked, the caller). f_8005ebe0 has three ways to a null: no
+#   heap to take from (a line before its epilogue), and the heap's own tryAlloc, which it jumps to: that jump becomes a call and a
+#   test of x0 (a line before it; the original jump stays behind it, never reached). f_8005eca0: its failure path, before the
+#   errno call. Nothing changes for a block that was made.
 # - HL_DRIVE_HOOK(804f5030, "<hash>"): (Longshot d30b9479 / Hookshot 72f2a07c, CraftyCorvid; Link's pull-up onto a ledge) a rigid
 #   body's update before the physics step, on its path for a body driven to a target, in the function twice (the body loaded into
 #   x23 or x24 from the controller's +240): a call hos_oot_drive_target(controller x20, body, the time object's slot) between the
@@ -193,7 +199,7 @@ def movie_site(s, addr, off):
 #   goes through hos_oot_ocb_pick (host/hl_ocb_hold.c) before the update tests it. A line after the label, once.
 # Each goes in only where its function's text hashes as recorded, both lines of a kind or none. The marker is the address
 # plus one, as a step hook's (one hook a function), so a tree that does not ask for it takes it out as a stale gate.
-WANT_LIFT = re.compile(r'^HL_(SOUND|SOLVER|WHOLE|HEAP|BGM|TURN|HORSE|FLOOR|DRIVE|LOOP|POSE|SONG|OCB)_HOOK\(\s*([0-9a-f]{8})\s*,\s*"([0-9a-f]*)"((?:\s*,\s*(?:\d+|"[^"\n]*"))*)\s*\)',
+WANT_LIFT = re.compile(r'^HL_(SOUND|SOLVER|WHOLE|HEAP|NEW|BGM|TURN|HORSE|FLOOR|DRIVE|LOOP|POSE|SONG|OCB)_HOOK\(\s*([0-9a-f]{8})\s*,\s*"([0-9a-f]*)"((?:\s*,\s*(?:\d+|"[^"\n]*"))*)\s*\)',
                        re.M)
 CUT = "    c->x[%d]=recomp_fp_to_int(c->vreg[0][0]&UINT64_C(0xffffffff),32,32,1,3,c->fpcr,&c->fpsr);\n"
 SOUND_SLOT = "g_module_base + 0x80435000ULL + (int64_t)75927552"   # (the page of the step's pointer, whose +2192 holds it)
@@ -252,6 +258,14 @@ HEAP_CPU = (0x80456910, 0x80456da4)   # (f_804566e0's tryAlloc calls, by their r
 HEAP_GPU = (0x80456f1c, 0x80457098)
 HEAP_CPU_LINE = "{ uint64_t _t = c->x[8]; c->x[30] = %#xULL; A64_ICALL(c, _t); }\n"
 HEAP_GPU_LINE = "c->x[30] = %#xULL; f_80522050(c);\n"
+
+
+# (operator new's two ways to null, and aligned_alloc's)
+NEW_TAIL = ("c->x[0] = x0_; c->x[1] = x1_; c->x[8] = x8_; c->x[19] = x19_; c->x[20] = x20_; c->x[21] = x21_; c->x[31] = x31_; "
+            "c->n = fn_; c->z = fz_; c->c = fc_; c->v = fv_; A64_IJUMP(c, c->x[3]); return;\n")
+NEW_NOHEAP = "if (x1_ != 0) { goto L_8005ec10; }\n"
+NEW_ALIGNED_FAIL = "c->x[30] = 0x8005ecd8ULL; f_85717f00(c);\n"
+NEW_DECL = "extern void hl_oot_new_null(Ctx *A64_NOESC, uint64_t, uint64_t, uint64_t, uint64_t, int); "
 
 
 def lift_lines(kind, addr, args):
@@ -317,6 +331,14 @@ def lift_lines(kind, addr, args):
     if kind == "ocb":
         return ["    { extern uint64_t hos_oot_ocb_pick(Ctx *A64_NOESC, uint64_t, uint64_t); "
                 "c->x[21] = hos_oot_ocb_pick(c, c->x[19], c->x[21]); }" + mark]
+    if kind == "new":
+        if addr == "8005eca0":
+            return ["    { " + NEW_DECL + "hl_oot_new_null(c, 0, 0, 0, recomp_load64(c, c->x[31] + 8), 2); }" + mark]
+        return ["    { " + NEW_DECL + "const uint64_t _hl_h = x0_, _hl_s = x1_, _hl_a = c->x[2], _hl_lr = c->x[30]; "
+                "c->x[0] = x0_; c->x[1] = x1_; c->x[8] = x8_; c->x[19] = x19_; c->x[20] = x20_; c->x[21] = x21_; c->x[31] = x31_; "
+                "c->n = fn_; c->z = fz_; c->c = fc_; c->v = fv_; A64_ICALL(c, c->x[3]); "
+                "if (__builtin_expect(c->x[0] == 0, 0)) hl_oot_new_null(c, _hl_h, _hl_s, _hl_a, _hl_lr, 0); return; }" + mark,
+                "    { " + NEW_DECL + "hl_oot_new_null(c, 0, x20_, x19_, recomp_load64(c, x31_ + 8), 1); }" + mark]
     if kind == "heap":
         lines = []
         for lr in HEAP_CPU:
@@ -417,6 +439,13 @@ def lift_places(body, addr, kind, args):
     if kind == "ocb":
         anchor = OCB_LABEL + OCB_TEST
         return [body.index(anchor) + len(OCB_LABEL)] if body.count(anchor) == 1 else None
+    if kind == "new":
+        if addr == "8005eca0":
+            return [body.index(NEW_ALIGNED_FAIL)] if body.count(NEW_ALIGNED_FAIL) == 1 else None
+        if body.count(NEW_TAIL) != 1 or body.count(NEW_NOHEAP) != 1:
+            return None
+        tail, noheap = body.index(NEW_TAIL), body.index(NEW_NOHEAP) + len(NEW_NOHEAP)
+        return [tail, noheap] if tail < noheap else None
     if kind == "heap":
         places = []
         for lines in ((HEAP_CPU_LINE, HEAP_CPU), (HEAP_GPU_LINE, HEAP_GPU)):
