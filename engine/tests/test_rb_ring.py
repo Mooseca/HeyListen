@@ -41,6 +41,11 @@ int main() {
     CHECK(pick(e, n, 6, 2, 0) < 0);           // nothing 2 frames old yet
     CHECK(pick(e, n, 8, 1, 0) == 2);
     CHECK(pick(e, n, 8, 1, 3) < 0 && pick(e, n, 8, 1, 2) == 2 && pick(e, n, 7, 2, 1) < 0);   // applied ones are not handed out again
+    // (EXPO3) the steady pick: the oldest tag not handed out yet that is lag old, the newest only when it is more than a frame overdue
+    CHECK(pick_steady(e, n, 7, 2, 0) == 0 && pick_steady(e, n, 6, 2, 0) < 0);   // tags 5, 6, 7 (seq 1, 2, 3)
+    CHECK(pick_steady(e, n, 8, 2, 0) == 0);                                      // a read one frame late takes the oldest, not the newest (pick: 1)
+    CHECK(pick_steady(e, n, 8, 2, 1) == 1 && pick_steady(e, n, 8, 2, 2) < 0);    // applied ones are not handed out again
+    CHECK(pick_steady(e, n, 9, 2, 0) == 2);                                      // two frames overdue: the newest, as pick
     CHECK(newest(e, n) == 2);
     for (uint64_t s = 4; s <= 12; s++) push(e, n, Entry{s, (int64_t)s + 4, 0, 0, 0});
     CHECK(n == kMaxEntries);

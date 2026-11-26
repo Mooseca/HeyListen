@@ -10,7 +10,7 @@ python -I engine/scripts/list_switches.py
 
 and commit both files. A test (`engine/tests/test_switches_documented.py`) fails when a switch read in the source is missing here or the data file is out of date.
 
-1546 switches: 56 players may be told to use, 398 diagnostic, 1092 developer-only; 1329 have a real explanation and 217 are marked `undocumented`.
+1548 switches: 56 players may be told to use, 398 diagnostic, 1094 developer-only; 1331 have a real explanation and 217 are marked `undocumented`.
 
 ## How to set a switch
 
@@ -69,7 +69,7 @@ The entries below say what each one does, its values and default, and when it is
 | [Memory and textures](#memory-and-textures) | 216 | 10 | 0 | 206 |
 | [Audio](#audio) | 15 | 5 | 10 | 0 |
 | [Input and controllers](#input-and-controllers) | 13 | 1 | 12 | 0 |
-| [Native engine (`HL_*`)](#native-engine-hl_) | 108 | 1 | 40 | 67 |
+| [Native engine (`HL_*`)](#native-engine-hl_) | 110 | 1 | 40 | 69 |
 | [Host and OS (`HOS_*` and the system's variables)](#host-and-os-hos_-and-the-systems-variables) | 140 | 10 | 0 | 130 |
 | [Telemetry and crash reports](#telemetry-and-crash-reports) | 12 | 0 | 12 | 0 |
 | [Diagnostics and logging](#diagnostics-and-logging) | 310 | 0 | 310 | 0 |
@@ -8899,7 +8899,7 @@ As above; the last lets every device count while the window is behind another on
 
 ## Native engine (`HL_*`)
 
-108 switches of the native engine (`HL_*`).
+110 switches of the native engine (`HL_*`).
 
 ### Main loop
 
@@ -9751,6 +9751,16 @@ HL_JOBGROUP_CHECK=1: its invariants are counted and the counters logged every 10
 
 **Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_shader.cpp:2634`.
 
+#### `HL_RB_CLASSES` - developer
+
+(EXPO3, HL_RB_CLASSES=<mask> (15: all): bit 0 the meter's blocks R1, bit 1 the 0x40 slots R2, bit 2 the 0x2000 blocks R3; a class left out is never learned, so its reads take the old path (the waits, the write-backs): an A/B to find which class steps the picture at the 60 limit).
+
+**Values:** a whole number. **Default:** the engine's own value.
+
+**When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
+
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_rbring.cpp:166`.
+
 #### `HL_RB_LAG` - developer
 
 (A check alone compares the lag 2 ring) (FIF1) with the CPU k-1 frames ahead of the replay (RX_VK_FRAMES_IN_FLIGHT=k) an entry is staged k-1 frames later: lag 2 + (k-1) keeps every read free of a wait for the replay; HL_RB_LAG says otherwise.
@@ -9769,7 +9779,7 @@ HL_RB_LAG_KEEP=0: as before 2026-11-23 (A/B): every learned range's binding is s
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_rbring.cpp:225`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_rbring.cpp:229`.
 
 #### `HL_RB_LAG_WAIT_MS` - developer
 
@@ -9780,6 +9790,16 @@ HL_RB_LAG_CHECK=1: the old path runs and the ring is compared with what it read 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
 **Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_rbring.cpp:25`.
+
+#### `HL_RB_PICK` - developer
+
+(EXPO3, HL_RB_PICK=0: the newest eligible entry as before) the steady pick: no sample is jumped over by a read one frame late.
+
+**Values:** on or off (0, false, off, no and empty are off); the description names `0`. **Default:** on (unless set to 0, false, off or no).
+
+**When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
+
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_rbring.cpp:369`.
 
 #### `HL_RB_R2` - developer
 
@@ -9809,7 +9829,7 @@ HL_RB_LAG_CHECK=1: the old path runs and the ring is compared with what it read 
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_rbring.cpp:489` and 1 more place.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_rbring.cpp:495` and 1 more place.
 
 #### `HL_REGION_KEEP` - developer
 

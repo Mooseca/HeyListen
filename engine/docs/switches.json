@@ -2,7 +2,7 @@
  "schema": 1,
  "generated_by": "engine/scripts/list_switches.py",
  "scope": "C, C++ and headers under engine/ (engine/tests and vendored trees other than a64-kit excluded) and the Python the builder, the lifter and the scripts run: getenv, std::getenv, _wgetenv, the code's own env helpers and table-driven reads, and os.environ.",
- "count": 1546,
+ "count": 1548,
  "switches": [
   {
    "name": "A64_",
@@ -2416,6 +2416,27 @@
    "use": null
   },
   {
+   "name": "HL_RB_CLASSES",
+   "area": "native",
+   "group": "Native engine",
+   "audience": "developer",
+   "files": [
+    {
+     "path": "gpu/vk/vk_rbring.cpp",
+     "line": 166
+    }
+   ],
+   "default": "the engine's own value",
+   "values": "a whole number",
+   "explanation": "(EXPO3, HL_RB_CLASSES=<mask> (15: all): bit 0 the meter's blocks R1, bit 1 the 0x40 slots R2, bit 2 the 0x2000 blocks R3; a class left out is never learned, so its reads take the old path (the waits, the write-backs): an A/B to find which class steps the picture at the 60 limit).",
+   "comment": "(EXPO3, HL_RB_CLASSES=<mask> (15: all): bit 0 the meter's blocks R1, bit 1 the 0x40 slots R2, bit 2 the 0x2000 blocks R3; a class left out is never learned, so its reads take the old path (the waits, the write-backs): an A/B to find which class steps the picture at the 60 limit).",
+   "documented_in": null,
+   "source": "comment at gpu/vk/vk_rbring.cpp",
+   "documented": true,
+   "set_via": "In `hookshot_env.txt`, or in the environment.",
+   "use": null
+  },
+  {
    "name": "HL_RB_LAG",
    "area": "native",
    "group": "Native engine",
@@ -2473,7 +2494,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_rbring.cpp",
-     "line": 225
+     "line": 229
     }
    ],
    "default": "on (unless set to 0, false, off or no)",
@@ -2498,7 +2519,7 @@
     },
     {
      "path": "gpu/vk/vk_rbring.cpp",
-     "line": 172
+     "line": 176
     }
    ],
    "default": "off (unset)",
@@ -2526,6 +2547,27 @@
    "values": "text (`1` named)",
    "explanation": "HL_RB_LAG_CHECK=1: the old path runs and the ring is compared with what it read (per-class counts in the log). HL_RB_LAG_WAIT_MS=<ms> (200): how long a read waits for an entry the GPU has not finished. HL_RB_LAG_LOG=1: one log row a frame with the hash of the values served.",
    "comment": "HL_RB_LAG_CHECK=1: the old path runs and the ring is compared with what it read (per-class counts in the log). HL_RB_LAG_WAIT_MS=<ms> (200): how long a read waits for an entry the GPU has not finished. HL_RB_LAG_LOG=1: one log row a frame with the hash of the values served.",
+   "documented_in": null,
+   "source": "comment at gpu/vk/vk_rbring.cpp",
+   "documented": true,
+   "set_via": "In `hookshot_env.txt`, or in the environment.",
+   "use": null
+  },
+  {
+   "name": "HL_RB_PICK",
+   "area": "native",
+   "group": "Native engine",
+   "audience": "developer",
+   "files": [
+    {
+     "path": "gpu/vk/vk_rbring.cpp",
+     "line": 369
+    }
+   ],
+   "default": "on (unless set to 0, false, off or no)",
+   "values": "on or off (0, false, off, no and empty are off); the description names `0`",
+   "explanation": "(EXPO3, HL_RB_PICK=0: the newest eligible entry as before) the steady pick: no sample is jumped over by a read one frame late.",
+   "comment": "(EXPO3, HL_RB_PICK=0: the newest eligible entry as before) the steady pick: no sample is jumped over by a read one frame late.",
    "documented_in": null,
    "source": "comment at gpu/vk/vk_rbring.cpp",
    "documented": true,
@@ -2624,11 +2666,11 @@
    "files": [
     {
      "path": "gpu/vk/vk_rbring.cpp",
-     "line": 489
+     "line": 495
     },
     {
      "path": "gpu/vk/vk_rbring.cpp",
-     "line": 491
+     "line": 497
     }
    ],
    "default": "0",

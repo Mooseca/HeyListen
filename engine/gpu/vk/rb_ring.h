@@ -67,6 +67,25 @@ inline int pick(const Entry* e, unsigned n, int64_t c, unsigned lag, uint64_t ap
         if (e[i].seq > applied && e[i].tag + (int64_t)lag <= c && (best < 0 || e[i].seq > e[best].seq)) best = (int)i;
     return best;
 }
+/// (EXPO3) The steady pick: the oldest tag not handed out yet that is lag frames old (the newest entry of that tag), so that a read that
+/// comes one game frame late (the clock c is the game's present count; a worker thread's read of frame k can run after the main thread's
+/// present of frame k) does not jump over an entry and leave the read after it with nothing new: with the order thread the delivered tags
+/// ran 1 1 2 0 1 1 (a skipped sample, then the same one again), and the picture's brightness stepped after about every third of them.
+/// An entry more than one frame overdue (a stall) is not waited for: the newest one then, as pick()
+inline int pick_steady(const Entry* e, unsigned n, int64_t c, unsigned lag, uint64_t applied) {
+    int tmin = -1, newest_ok = -1;
+    for (unsigned i = 0; i < n; i++) {
+        if (!(e[i].seq > applied && e[i].tag + (int64_t)lag <= c)) continue;
+        if (tmin < 0 || e[i].tag < e[tmin].tag) tmin = (int)i;
+        if (newest_ok < 0 || e[i].seq > e[newest_ok].seq) newest_ok = (int)i;
+    }
+    if (tmin < 0) return -1;
+    if (c - (e[tmin].tag + (int64_t)lag) > 1) return newest_ok;
+    int best = tmin;
+    for (unsigned i = 0; i < n; i++)
+        if (e[i].seq > applied && e[i].tag == e[tmin].tag && e[i].seq > e[best].seq) best = (int)i;
+    return best;
+}
 /// The newest entry whatever its tag (for the age statistics), -1 when none
 inline int newest(const Entry* e, unsigned n) {
     int best = -1;
