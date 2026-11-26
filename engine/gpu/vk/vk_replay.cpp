@@ -133,6 +133,10 @@ std::mutex wl_mu;
 std::map<std::pair<std::string, int>, WaitAgg> wl_agg;
 int64_t wl_from = 0, wl_next = 0;
 void wait_note(int site, int64_t ns);
+// (STUT3) every thread's time in each wait site since the last hitch-log read (wait_frame_take, perf_report.cpp): always kept, one
+// relaxed add a scope; and the presents handed over and not shown when the presenting thread began its wait for a present slot
+std::atomic<int64_t> ws_frame_ns[WS_COUNT];
+std::atomic<int> ws_slot_ahead{-1};
 // (DECOUPLE) where each thread is among these sites now, for the order thread's stall watch (ot_watch): a slot a thread, the innermost
 // site and since when. Always kept (two relaxed stores a scope); read only when a stall is logged
 struct WhereSlot {
@@ -152,6 +156,7 @@ struct WaitScope {
     int64_t prev_since = 0;
     explicit WaitScope(int s) : site(s) {
         const int64_t now = std::chrono::steady_clock::now().time_since_epoch().count();
+        t_in = now;
         if (wait_log_on()) t0 = now;
         if (tl_where < 0) {
             tl_where = where_n.fetch_add(1, std::memory_order_relaxed);
@@ -162,8 +167,11 @@ struct WaitScope {
         prev_site = w->site.load(std::memory_order_relaxed), prev_since = w->since.load(std::memory_order_relaxed);
         w->since.store(now, std::memory_order_relaxed), w->site.store(s, std::memory_order_release);
     }
+    int64_t t_in = 0;   // (STUT3: for ws_frame_ns, always)
     ~WaitScope() {
-        if (t0) wait_note(site, std::chrono::steady_clock::now().time_since_epoch().count() - t0);
+        const int64_t now = std::chrono::steady_clock::now().time_since_epoch().count();
+        if (site >= 0 && site < WS_COUNT && t_in) ws_frame_ns[site].fetch_add(now - t_in, std::memory_order_relaxed);
+        if (t0) wait_note(site, now - t0);
         if (w) w->site.store(prev_site, std::memory_order_release), w->since.store(prev_since, std::memory_order_relaxed);
     }
     WaitScope(const WaitScope&) = delete;
@@ -9593,6 +9601,7 @@ void ot_present(const nvn_tex* t, const int crop[4]) {
         std::unique_lock lk(ot_mu);
         if (ot_presents >= ot_ahead()) {
             const int64_t t0 = ot_now();
+            ws_slot_ahead.store(ot_presents, std::memory_order_relaxed);   // (STUT3: the hitch line's "ahead")
             ot_waiters++;
             WaitScope wait_scope(WS_OT_SLOT);   // (DECOUPLE: the stall watch's site)
             ot_done_cv.wait(lk, [] { return ot_presents < ot_ahead(); });
@@ -10382,6 +10391,14 @@ int64_t gpu_time_ns() { return st_gpu_ns; }
 /// (heylisten) the read-backs' waits for the GPU so far, ns (the summary's readback cause and its gpu_wait part,
 /// perf_report.cpp): the CPU reads of GPU results waiting for their write-back, invalidate above
 int64_t readback_wait_ns() { return st_rb_wait_ns.load(std::memory_order_relaxed); }
+/// (STUT3, the hitch log) since the call before: every thread's ms in a present slot's wait (RX_VK_ORDER_AHEAD), for the order thread's
+/// done marks, for a recording slot (the slot ring: the GPU giving a recording back), on the GPU timeline (wait_value) and in the
+/// order thread's idle wait; and the presents ahead when the last present-slot wait began (-1: no such wait)
+void wait_frame_take(double* slot, double* done, double* ring, double* value, double* idle, int* ahead) {
+    const auto take = [](int s) { return ws_frame_ns[s].exchange(0, std::memory_order_relaxed) / 1e6; };
+    *slot = take(WS_OT_SLOT), *done = take(WS_OT_DONE), *ring = take(WS_SLOT), *value = take(WS_VALUE), *idle = take(WS_OT_IDLE);
+    *ahead = ws_slot_ahead.exchange(-1, std::memory_order_relaxed);
+}
 int64_t readback_worst_take(char* label, size_t cap) {
     std::lock_guard lk(rb_worst_mu);
     const int64_t ns = rb_worst_ns;
