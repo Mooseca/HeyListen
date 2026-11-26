@@ -36,6 +36,10 @@ int64_t gpu_time_ns();
 int64_t readback_wait_ns();
 /// (vk_replay.cpp, v0.4.4) the longest single read's wait since the last call, ns (0: none of 1 ms or more), and its label (readback_wait.h)
 int64_t readback_worst_take(char* label, size_t cap);
+/// (vk_replay.cpp, STUT3) the renderer's waits since the last call, ms, every thread: a present slot (RX_VK_ORDER_AHEAD), the order
+/// thread's done marks, a recording slot, the GPU timeline, the order thread idle; ahead: presents not shown when the last slot wait
+/// began (-1: none)
+void wait_frame_take(double* slot, double* done, double* ring, double* value, double* idle, int* ahead);
 /// (perf_report.cpp) a draw's program key, once per key per map: the zone usage recorder (zone_report.h), on only while
 /// the performance statistics row is on, the build has an address and HL_TELEMETRY_ZONES is not 0
 void zone_note_program(uint64_t key);

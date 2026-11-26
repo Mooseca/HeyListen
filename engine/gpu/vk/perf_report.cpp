@@ -987,6 +987,19 @@ void perf_frame_shown() {
         if (primed && before && current && perf_measure.load(std::memory_order_relaxed) && tel_on("HL_TEL_STALLS"))
             pr::add_stall(*current, (now - before) / 1e6, perf_parts::loading.load(std::memory_order_relaxed) != 0, &recent_hitches,
                           now / 1000000);
+        // (STUT3) a gap of over 2 s leaves a hitch line too, with what the renderer's counters were made of over it: the multi-second
+        // freezes of the 3050's tours had no line at all. Not a frame: no parts, only the renderer's waits and work since the frame before
+        if (primed && before && (hitch_log_cfg().rel_ms > 0 || hitch_log_ms() > 0)) {
+            double s_slot = 0, s_done = 0, s_ring = 0, s_value = 0, s_idle = 0;
+            int s_ahead = -1;
+            wait_frame_take(&s_slot, &s_done, &s_ring, &s_value, &s_idle, &s_ahead);
+            logf("vk: hitch %.1f ms: stall (over 2 s, not counted as a frame)%s | gpu %.1f | pipe %.1f xlate %.1f upload %.1f memsync %.1f "
+                 "readback %.1f drvcomp %.1f present %.1f | desc %.1f | faults %lld, ws -%.0f MB | rb %s | waits: slot %.1f (ahead %d) done %.1f "
+                 "ring %.1f value %.1f ot_idle %.1f",
+                 (now - before) / 1e6, perf_parts::loading.load(std::memory_order_relaxed) ? " (load)" : "", f.gpu_ms, w.pipeline, w.translate,
+                 w.upload, w.memsync, w.readback, w.driver_compile, w.present, w.descriptors, (long long)w.faults, w.ws_drop_mb,
+                 w.readback_which.empty() ? "-" : w.readback_which.c_str(), s_slot, s_ahead, s_done, s_ring, s_value, s_idle);
+        }
         primed = true;
         return;
     }
@@ -1032,6 +1045,10 @@ void perf_frame_shown() {
     const bool loading = load_now || load_last || map_switched;
     load_last = load_now, map_switched = false;
     pr::add_frame(*current, f, w, target, last_ms, usual, loading, &recent_hitches, now / 1000000);
+    // (STUT3) the renderer's waits of this frame, taken each frame so that a hitch line holds its own frame's
+    double wt_slot = 0, wt_done = 0, wt_ring = 0, wt_value = 0, wt_idle = 0;
+    int wt_ahead = -1;
+    if (hitch_log_cfg().rel_ms > 0 || hitch_log_ms() > 0) wait_frame_take(&wt_slot, &wt_done, &wt_ring, &wt_value, &wt_idle, &wt_ahead);
     static HitchRel hitch_rel;
     int64_t hitch_dropped = 0;
     const bool hitch_by_rel = hitch_log_cfg().rel_ms > 0 && hitch_rel.test(f.ms, hitch_log_cfg().rel_ms, now, &hitch_dropped);
@@ -1039,11 +1056,12 @@ void perf_frame_shown() {
     if (const int hl = hitch_log_ms(); hitch_by_rel || (hl > 0 && f.ms >= (float)hl)) {   // (HL_HITCH_LOG=<ms> or rel:<ms>: the numbers a slow frame's cause was made of)
         logf("vk: hitch %.1f ms: %s%s | game %.1f render %.1f gpu_wait %.1f pace %.1f gpu %.1f | pipe %.1f xlate %.1f upload %.1f memsync %.1f "
              "readback %.1f drvcomp %.1f present %.1f | desc %.1f (build %.1f pool %.1f, tex %.1f in upload) | os_wait %.1f: lock %.1f sleep %.1f "
-             "vcore %.1f file %.1f, faults %lld, ws -%.0f MB (%s)",
+             "vcore %.1f file %.1f, faults %lld, ws -%.0f MB (%s) | rb %s | waits: slot %.1f (ahead %d) done %.1f ring %.1f value %.1f ot_idle %.1f",
              f.ms, pr::cause_name(pr::cause_of(f, w)), loading ? " (load)" : "", f.part[fs::kGame], f.part[fs::kRender], f.part[fs::kGpuWait],
              f.part[fs::kPace], f.gpu_ms, w.pipeline, w.translate, w.upload, w.memsync, w.readback, w.driver_compile, w.present,
              w.descriptors, w.desc_self, w.desc_pool, w.desc_tex, w.os_wait, w.ow_lock, w.ow_sleep, w.ow_vcore, w.ow_file, (long long)w.faults,
-             w.ws_drop_mb, pr::os_wait_kind(w).c_str());
+             w.ws_drop_mb, pr::os_wait_kind(w).c_str(), w.readback_which.empty() ? "-" : w.readback_which.c_str(), wt_slot, wt_ahead, wt_done,
+             wt_ring, wt_value, wt_idle);
     }
     profile_feed(profile_host_map, f.ms, pr::is_hitch(f.ms, std::max(target, usual)));
     last_ms = f.ms;
