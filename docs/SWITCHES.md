@@ -10,7 +10,7 @@ python -I engine/scripts/list_switches.py
 
 and commit both files. A test (`engine/tests/test_switches_documented.py`) fails when a switch read in the source is missing here or the data file is out of date.
 
-1543 switches: 56 players may be told to use, 397 diagnostic, 1090 developer-only; 1326 have a real explanation and 217 are marked `undocumented`.
+1544 switches: 56 players may be told to use, 398 diagnostic, 1090 developer-only; 1327 have a real explanation and 217 are marked `undocumented`.
 
 ## How to set a switch
 
@@ -69,7 +69,7 @@ The entries below say what each one does, its values and default, and when it is
 | [Memory and textures](#memory-and-textures) | 216 | 10 | 0 | 206 |
 | [Audio](#audio) | 15 | 5 | 10 | 0 |
 | [Input and controllers](#input-and-controllers) | 13 | 1 | 12 | 0 |
-| [Native engine (`HL_*`)](#native-engine-hl_) | 107 | 1 | 39 | 67 |
+| [Native engine (`HL_*`)](#native-engine-hl_) | 108 | 1 | 40 | 67 |
 | [Host and OS (`HOS_*` and the system's variables)](#host-and-os-hos_-and-the-systems-variables) | 139 | 10 | 0 | 129 |
 | [Telemetry and crash reports](#telemetry-and-crash-reports) | 12 | 0 | 12 | 0 |
 | [Diagnostics and logging](#diagnostics-and-logging) | 310 | 0 | 310 | 0 |
@@ -4585,7 +4585,7 @@ A scene change makes the ones it needs again. RX_VK_STAGING_KEEP_MB=256: as befo
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hl_trace.c:356`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hl_trace.c:383`.
 
 #### `RX_VK_STAMP_SPLIT` - developer
 
@@ -8889,7 +8889,7 @@ As above; the last lets every device count while the window is behind another on
 
 ## Native engine (`HL_*`)
 
-107 switches of the native engine (`HL_*`).
+108 switches of the native engine (`HL_*`).
 
 ### Main loop
 
@@ -8953,7 +8953,7 @@ HL_STEP_SCAN=<s> (with HL_TRACE=1): which of the game's objects count frames and
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hl_trace.c:349`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hl_trace.c:376`.
 
 #### `HL_STEP_SCAN_SECS` - developer
 
@@ -9105,7 +9105,7 @@ A pass runs on this thread and is being recorded the render-state function's tra
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hl_trace.c:338`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hl_trace.c:362`.
 
 #### `HL_TRACE_DUMP` - diagnostic
 
@@ -9115,7 +9115,7 @@ The back end (gpu/vk, through the renderer interface's trace_gpu) records its wr
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hl_trace.c:347`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hl_trace.c:374`.
 
 #### `HL_TRACE_WB` - diagnostic
 
@@ -9126,6 +9126,16 @@ The back end (gpu/vk, through the renderer interface's trace_gpu) records its wr
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
 **Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_draw.cpp:3824` and 2 more places.
+
+#### `HL_TRACE_WB_POISON` - diagnostic
+
+(CRASH3) HL_TRACE_WB_POISON=1 (a debug switch, with HL_TRACE_WB=1): a write-back into a live heap block leaves HL_TRACE_WB_POISON_WORD over that block's bytes instead of the mirror's, for HL_TRACE_WB_POISON_MS: what a stale write-back can do at worst, made visible at once (the crash's pointers read 0xbadc0de0bad).
+
+**Values:** text (`1` named). **Default:** unset.
+
+**When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
+
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hl_trace.c:367`.
 
 ### Native engine diagnostics
 

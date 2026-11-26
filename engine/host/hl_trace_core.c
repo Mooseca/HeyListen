@@ -72,7 +72,13 @@ typedef struct {
 } WbPage;
 static WbPage *wbp;
 static atomic_flag wb_lock = ATOMIC_FLAG_INIT;
-static _Atomic uint64_t wb_n[5];   /* into live, allocated over, freed under, targets, targets hit */
+static _Atomic uint64_t wb_n[6];   /* into live, allocated over, freed under, targets, targets hit, poisoned */
+/* (HL_TRACE_WB_POISON) the ranges poisoned lately, poisoned again by hl_trace_wb_poison_tick until `until` or their block's free */
+typedef struct {
+    uint64_t lo, hi, block, until;   /* (hi 0: empty) */
+} WbPoison;
+enum { WB_POISONS = 64 };
+static WbPoison wb_poisons[WB_POISONS];
 
 uint64_t hl_trace_now(void) {
 #if defined(__x86_64__) || defined(_M_X64)
@@ -352,6 +358,7 @@ static void wb_write(uint32_t what, uint64_t guest, uint64_t size, uint64_t valu
     WbLines lines;
     lines.n = 0;
     int hit = 0;
+    uint64_t plo = 0, phi = 0;   /* (HL_TRACE_WB_POISON) the hit's bytes inside the live block, its header included */
     wb_lock_take();
     for (uint64_t page = guest >> 12; page <= (hi - 1) >> 12; page++) {
         WbPage *p = wb_page(page, 1);
@@ -374,6 +381,22 @@ static void wb_write(uint32_t what, uint64_t guest, uint64_t size, uint64_t valu
         if (t->blk.addr && !hit) {
             hit = 1;
             atomic_fetch_add_explicit(&wb_n[0], 1, memory_order_relaxed);
+            if (cfg.poison) {
+                const uint64_t blo = t->blk.addr >= 16 ? t->blk.addr - 16 : 0, bhi = t->blk.addr + (t->blk.size ? t->blk.size : 16);
+                plo = guest > blo ? guest : blo, phi = hi < bhi ? hi : bhi;
+                if (plo < phi) {
+                    WbPoison *slot = NULL;
+                    for (int k = 0; k < WB_POISONS && !slot; k++)
+                        if (wb_poisons[k].lo == plo && wb_poisons[k].hi == phi) slot = &wb_poisons[k];
+                    for (int k = 0; k < WB_POISONS && !slot; k++)
+                        if (!wb_poisons[k].hi || (int64_t)(now - wb_poisons[k].until) > 0) slot = &wb_poisons[k];
+                    if (slot) *slot = (WbPoison){plo, phi, t->blk.addr, now + (uint64_t)(HL_TRACE_WB_POISON_MS * tick_ms)};
+                    if (!t->told[0]) wb_line(&lines, "TRACE WB: POISON (HL_TRACE_WB_POISON) over [%#llx, %#llx) in block %#llx size %#llx",
+                                             (unsigned long long)plo, (unsigned long long)phi, (unsigned long long)t->blk.addr,
+                                             (unsigned long long)t->blk.size);
+                    atomic_fetch_add_explicit(&wb_n[5], 1, memory_order_relaxed);
+                }
+            }
             if (!t->told[0] && !t->told[1]) atomic_fetch_add_explicit(&wb_n[4], 1, memory_order_relaxed);
             if (wb_tell(&t->told[0])) {
                 char ch[96];
@@ -388,7 +411,24 @@ static void wb_write(uint32_t what, uint64_t guest, uint64_t size, uint64_t valu
         }
     }
     wb_lock_drop();
+    if (plo < phi) cfg.poison(plo, phi - plo);
     wb_flush(&lines);
+}
+
+void hl_trace_wb_poison_tick(void) {
+    if (!cfg.poison || !wbp) return;
+    WbPoison now_due[WB_POISONS];
+    int n = 0;
+    const uint64_t now = hl_trace_now();
+    wb_lock_take();
+    for (int k = 0; k < WB_POISONS; k++) {
+        WbPoison *p = &wb_poisons[k];
+        if (!p->hi) continue;
+        if ((int64_t)(now - p->until) > 0) p->hi = 0;
+        else now_due[n++] = *p;
+    }
+    wb_lock_drop();
+    for (int k = 0; k < n; k++) cfg.poison(now_due[k].lo, now_due[k].hi - now_due[k].lo);
 }
 
 static void wb_block(uint64_t block, uint64_t size, int freed, const HlTraceRecord *r) {
@@ -398,6 +438,9 @@ static void wb_block(uint64_t block, uint64_t size, int freed, const HlTraceReco
     WbLines lines;
     lines.n = 0;
     wb_lock_take();
+    if (freed && cfg.poison)   /* (a freed block is no longer poisoned) */
+        for (int k = 0; k < WB_POISONS; k++)
+            if (wb_poisons[k].hi && wb_poisons[k].block == block) wb_poisons[k].hi = 0;
     for (uint64_t page = lo >> 12; page <= (hi - 1) >> 12; page++) {
         WbPage *p = wb_page(page, 0);
         if (!p) continue;
@@ -438,6 +481,7 @@ void hl_trace_wb_counts(HlTraceWbCounts *out) {
     out->frees_under = atomic_load(&wb_n[2]);
     out->targets = atomic_load(&wb_n[3]);
     out->targets_hit = atomic_load(&wb_n[4]);
+    out->poisoned = atomic_load(&wb_n[5]);
 }
 
 /* ---- the report ---- */

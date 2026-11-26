@@ -2,7 +2,7 @@
  "schema": 1,
  "generated_by": "engine/scripts/list_switches.py",
  "scope": "C, C++ and headers under engine/ (engine/tests and vendored trees other than a64-kit excluded) and the Python the builder, the lifter and the scripts run: getenv, std::getenv, _wgetenv, the code's own env helpers and table-driven reads, and os.environ.",
- "count": 1543,
+ "count": 1544,
  "switches": [
   {
    "name": "A64_",
@@ -2947,7 +2947,7 @@
    "files": [
     {
      "path": "host/hl_trace.c",
-     "line": 349
+     "line": 376
     }
    ],
    "default": "unset",
@@ -3322,7 +3322,7 @@
    "files": [
     {
      "path": "host/hl_trace.c",
-     "line": 338
+     "line": 362
     }
    ],
    "default": "unset",
@@ -3343,7 +3343,7 @@
    "files": [
     {
      "path": "host/hl_trace.c",
-     "line": 347
+     "line": 374
     }
    ],
    "default": "unset",
@@ -3372,7 +3372,7 @@
     },
     {
      "path": "host/hl_trace.c",
-     "line": 342
+     "line": 366
     }
    ],
    "default": "0 (unset)",
@@ -3381,6 +3381,27 @@
    "comment": "(CRASH3, HL_TRACE_WB=1: the write-back watch's origins) each storage binding marked written, of 16 KB or less, once per guest range and program: which program, stage and descriptor, the table entry, bare or sized.",
    "documented_in": null,
    "source": "comment at gpu/vk/vk_draw.cpp",
+   "documented": true,
+   "set_via": "In `hookshot_env.txt`, or in the environment.",
+   "use": null
+  },
+  {
+   "name": "HL_TRACE_WB_POISON",
+   "area": "native",
+   "group": "Hooks and tracing",
+   "audience": "diagnostic",
+   "files": [
+    {
+     "path": "host/hl_trace.c",
+     "line": 367
+    }
+   ],
+   "default": "unset",
+   "values": "text (`1` named)",
+   "explanation": "(CRASH3) HL_TRACE_WB_POISON=1 (a debug switch, with HL_TRACE_WB=1): a write-back into a live heap block leaves HL_TRACE_WB_POISON_WORD over that block's bytes instead of the mirror's, for HL_TRACE_WB_POISON_MS: what a stale write-back can do at worst, made visible at once (the crash's pointers read 0xbadc0de0bad).",
+   "comment": "(CRASH3) HL_TRACE_WB_POISON=1 (a debug switch, with HL_TRACE_WB=1): a write-back into a live heap block leaves HL_TRACE_WB_POISON_WORD over that block's bytes instead of the mirror's, for HL_TRACE_WB_POISON_MS: what a stale write-back can do at worst, made visible at once (the crash's pointers read 0xbadc0de0bad).",
+   "documented_in": null,
+   "source": "comment at host/hl_trace.c",
    "documented": true,
    "set_via": "In `hookshot_env.txt`, or in the environment.",
    "use": null
@@ -30490,7 +30511,7 @@
    "files": [
     {
      "path": "host/hl_trace.c",
-     "line": 356
+     "line": 383
     }
    ],
    "default": "unset",

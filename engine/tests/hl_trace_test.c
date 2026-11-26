@@ -20,6 +20,13 @@ static int nlines;
 static void out(const char *line) {
     if (nlines < 4096) snprintf(lines[nlines++], sizeof lines[0], "%s", line);
 }
+/* (HL_TRACE_WB_POISON) the poison's calls */
+static uint64_t poison_lo, poison_hi;
+static int poison_calls;
+static void poison(uint64_t guest, uint64_t size) {
+    poison_lo = guest, poison_hi = guest + size;
+    poison_calls++;
+}
 static _Thread_local char my_name[32];
 static const char *name(void) { return my_name; }
 static int has_line(const char *needle) {
@@ -46,7 +53,7 @@ static DWORD WINAPI writer(void *p) {
 int main(void) {
     snprintf(my_name, sizeof my_name, "main");
     const HlTraceConfig cfg = {.thread_name = name, .out = out, .ring_events = EVENTS, .live_slots = 1u << 16, .freed_slots = 1u << 14,
-                              .wb_watch = 1};
+                              .wb_watch = 1, .poison = poison};
     CHECK(hl_trace_start(HL_TR_ALL, &cfg), "started");
     HANDLE th[WRITERS];
     for (int t = 0; t < WRITERS; t++) th[t] = CreateThread(NULL, 0, writer, (void *)(uintptr_t)t, 0, NULL);
@@ -107,17 +114,28 @@ int main(void) {
     hl_trace_alloc(0x2fff8, 0x28, 7, c1);
     CHECK(has_line("TRACE WB: ALLOCATED OVER A WRITE-BACK TARGET: block 0x2fff8 size 0x28") &&
           has_line("target [0x30000, 0x30040) (write-back) written back 1 times"), "allocated over a target");
+    CHECK(poison_calls == 0, "no poison before a write-back into a live block");
     hl_trace_gpu_record(1, 0x30000, 0x40, 0, 101, 100);
     CHECK(has_line("TRACE WB: write-back INTO A LIVE HEAP BLOCK: [0x30000, 0x30040) submission 101") &&
           has_line("block 0x2fff8 size 0x28 heap 0x7"), "a write-back into the live block");
+    /* (HL_TRACE_WB_POISON) the hit's bytes inside the block (its header from 0x2ffe8, its end 0x30020) poisoned at once, and
+       again at each tick while the block lives */
+    CHECK(poison_calls == 1 && poison_lo == 0x30000 && poison_hi == 0x30020, "poisoned at the hit: %d [%#llx, %#llx)", poison_calls,
+          (unsigned long long)poison_lo, (unsigned long long)poison_hi);
+    CHECK(has_line("TRACE WB: POISON (HL_TRACE_WB_POISON) over [0x30000, 0x30020) in block 0x2fff8 size 0x28"), "the poison told");
+    hl_trace_wb_poison_tick();
+    CHECK(poison_calls == 2 && poison_lo == 0x30000 && poison_hi == 0x30020, "poisoned again at the tick: %d", poison_calls);
     hl_trace_free(0x2fff8, 7, c2);
     CHECK(has_line("TRACE WB: FREED UNDER A WRITE-BACK TARGET: block 0x2fff8 size 0x28"), "freed under a target");
+    hl_trace_wb_poison_tick();
+    CHECK(poison_calls == 2, "no poison after the block's free: %d", poison_calls);
     hl_trace_gpu_record(1, 0x30000, 0x40, 0, 102, 101);
     hl_trace_gpu_record(1, 0x50800, 0x1000, 0, 102, 101);   /* (a target over two pages... */
     hl_trace_alloc(0x51000, 0x100, 7, c1);                  /* ...a block over both: told once) */
     hl_trace_gpu_record(1, 0x60000, 0x100000, 0, 102, 101);   /* (larger than the watch keeps: no target) */
     hl_trace_alloc(0x60100, 0x40, 7, c1);
     hl_trace_wb_counts(&wn);
+    CHECK(wn.poisoned == 1 && poison_calls == 2, "one range poisoned: %llu", (unsigned long long)wn.poisoned);
     CHECK(wn.into_live == 1 && wn.allocs_over == 3 && wn.frees_under == 2 && wn.targets == 3 && wn.targets_hit == 2,
           "the counts: %llu into live, %llu over, %llu under, %llu targets, %llu hit", (unsigned long long)wn.into_live,
           (unsigned long long)wn.allocs_over, (unsigned long long)wn.frees_under, (unsigned long long)wn.targets,

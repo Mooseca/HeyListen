@@ -327,9 +327,33 @@ static DWORD WINAPI wb_counts_every(void *p) {
         HlTraceWbCounts n;
         hl_trace_wb_counts(&n);
         hos_log("hl trace wb: %llu write-backs into live heap blocks, %llu blocks allocated over and %llu freed under a "
-                "target written back in the last 5 s; %llu targets seen, %llu of them hit", (unsigned long long)n.into_live,
+                "target written back in the last 5 s; %llu targets seen, %llu of them hit; %llu poisoned", (unsigned long long)n.into_live,
                 (unsigned long long)n.allocs_over, (unsigned long long)n.frees_under, (unsigned long long)n.targets,
-                (unsigned long long)n.targets_hit);
+                (unsigned long long)n.targets_hit, (unsigned long long)n.poisoned);
+    }
+    return 0;
+}
+
+/* (CRASH3) HL_TRACE_WB_POISON=1 (a debug switch, with HL_TRACE_WB=1): a write-back into a live heap block leaves
+   HL_TRACE_WB_POISON_WORD over that block's bytes instead of the mirror's, for HL_TRACE_WB_POISON_MS: what a stale
+   write-back can do at worst, made visible at once (the crash's pointers read 0xbadc0de0bad) */
+static void wb_poison(uint64_t guest, uint64_t size) {
+    uint8_t *p = (uint8_t *)hos_guest_range(guest, size);
+    if (!p) return;
+    for (uint64_t k = 0; k < size; k++) {
+        const uint64_t at = guest + k;
+        p[k] = (uint8_t)(HL_TRACE_WB_POISON_WORD >> (8 * (at & 7)));
+    }
+    HOS_WRITTEN(p, size);
+}
+static DWORD WINAPI wb_poison_every(void *p) {
+    (void)p;
+    Sleep(5000);
+    hos_log("hl trace wb: POISON on (HL_TRACE_WB_POISON=1): a write-back into a live heap block leaves %#llx there",
+            (unsigned long long)HL_TRACE_WB_POISON_WORD);
+    for (;;) {
+        Sleep(2);
+        hl_trace_wb_poison_tick();
     }
     return 0;
 }
@@ -340,10 +364,13 @@ static DWORD WINAPI wb_counts_every(void *p) {
     if (!mask) return;
     if (mask == 1) mask = HL_TR_ALL;
     const char *wb = getenv("HL_TRACE_WB");
-    const HlTraceConfig config = {.thread_name = thread_name, .out = out_line,
-                                  .wb_watch = (mask & HL_TR_MEM) && wb && atoi(wb) != 0};
+    const char *wp = getenv("HL_TRACE_WB_POISON");
+    const int watch = (mask & HL_TR_MEM) && wb && atoi(wb) != 0;
+    const HlTraceConfig config = {.thread_name = thread_name, .out = out_line, .wb_watch = watch,
+                                  .poison = watch && wp && atoi(wp) != 0 ? wb_poison : NULL};
     if (!hl_trace_start(mask, &config)) return;
     if (config.wb_watch) CreateThread(NULL, 0, wb_counts_every, NULL, 0, NULL);
+    if (config.poison) CreateThread(NULL, 0, wb_poison_every, NULL, 0, NULL);
     const char *d = getenv("HL_TRACE_DUMP");
     if (d && atoi(d) > 0) CreateThread(NULL, 0, dump_after, (void *)(uintptr_t)atoi(d), 0, NULL);
     const char *sc = getenv("HL_STEP_SCAN");
