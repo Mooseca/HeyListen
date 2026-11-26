@@ -2,7 +2,7 @@
  "schema": 1,
  "generated_by": "engine/scripts/list_switches.py",
  "scope": "C, C++ and headers under engine/ (engine/tests and vendored trees other than a64-kit excluded) and the Python the builder, the lifter and the scripts run: getenv, std::getenv, _wgetenv, the code's own env helpers and table-driven reads, and os.environ.",
- "count": 1544,
+ "count": 1545,
  "switches": [
   {
    "name": "A64_",
@@ -6371,11 +6371,11 @@
    "files": [
     {
      "path": "host/nn_hid.c",
-     "line": 824
+     "line": 889
     },
     {
      "path": "host/nn_hid.c",
-     "line": 1008
+     "line": 1073
     }
    ],
    "default": "unset",
@@ -6396,7 +6396,7 @@
    "files": [
     {
      "path": "host/nn_hid.c",
-     "line": 810
+     "line": 875
     }
    ],
    "default": "off (unset)",
@@ -6501,7 +6501,7 @@
    "files": [
     {
      "path": "host/nn_hid.c",
-     "line": 818
+     "line": 883
     }
    ],
    "default": "off (unset)",
@@ -7230,7 +7230,7 @@
     },
     {
      "path": "host/nn_hid.c",
-     "line": 850
+     "line": 915
     }
    ],
    "default": "unset",
@@ -10408,6 +10408,27 @@
    "comment": "Sets this process's working-set minimum by the rule above, from env (getenv(\"HOS_WS_FLOOR_MB\")): 1 set, 0 none asked for, -1 refused (*err the error). *mb and *ram_mb: the minimum and the PC's RAM, MB.",
    "documented_in": null,
    "source": "comment at host/ws_floor.h",
+   "documented": true,
+   "set_via": "In `hookshot_env.txt`, or in the environment.",
+   "use": null
+  },
+  {
+   "name": "HOS_XINPUT_THREAD",
+   "area": "host",
+   "group": "Threads and scheduling",
+   "audience": "developer",
+   "files": [
+    {
+     "path": "host/nn_hid.c",
+     "line": 711
+    }
+   ],
+   "default": "1",
+   "values": "a whole number (`0` in the description)",
+   "explanation": "XInput's pads into raw and s: the thread's last reading (the thread starts at the first ask), or read here where there are no threads, or with HOS_XINPUT_THREAD=0 (as before the thread; the switch is HeyListen's own port's name, kept).",
+   "comment": "XInput's pads into raw and s: the thread's last reading (the thread starts at the first ask), or read here where there are no threads, or with HOS_XINPUT_THREAD=0 (as before the thread; the switch is HeyListen's own port's name, kept).",
+   "documented_in": null,
+   "source": "comment at host/nn_hid.c",
    "documented": true,
    "set_via": "In `hookshot_env.txt`, or in the environment.",
    "use": null
