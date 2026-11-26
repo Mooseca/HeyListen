@@ -3269,13 +3269,13 @@ The same for the destination of a texture-to-texture copy.
 
 #### `RX_VK_NO_EXTREGS` - developer
 
-undocumented: gpu/vk/eden/shader_recompiler/frontend/ampere/lower_to_maxwell.h:297 reads it as an on/off switch: `static const bool no_extended = std::getenv("RX_VK_NO_EXTREGS") != nullptr;`. No comment in the source says what it changes.
+undocumented: gpu/vk/eden/shader_recompiler/frontend/ampere/lower_to_maxwell.h:302 reads it as an on/off switch: `static const bool no_extended = std::getenv("RX_VK_NO_EXTREGS") != nullptr;`. No comment in the source says what it changes.
 
 **Values:** on or off (0, false, off, no and empty are off). **Default:** off (unset).
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/eden/shader_recompiler/frontend/ampere/lower_to_maxwell.h:297`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/eden/shader_recompiler/frontend/ampere/lower_to_maxwell.h:302`.
 
 #### `RX_VK_NO_FOLLOW` - developer
 
@@ -6165,7 +6165,7 @@ Task and mesh programs: `1` builds them with the driver's optimizer on every GPU
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/eden/shader_recompiler/frontend/ampere/lower_to_maxwell.h:1769`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/eden/shader_recompiler/frontend/ampere/lower_to_maxwell.h:1774`.
 
 #### `RX_VK_MSYNC_DIFF` - developer
 
@@ -6295,7 +6295,7 @@ On NVIDIA by default (the game's barriers were placed for an NVIDIA GPU), off on
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/eden/shader_recompiler/frontend/ampere/lower_to_maxwell.h:1637`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/eden/shader_recompiler/frontend/ampere/lower_to_maxwell.h:1642`.
 
 #### `RX_VK_SLOW_DISPATCH` - developer
 

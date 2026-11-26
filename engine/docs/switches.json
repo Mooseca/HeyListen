@@ -883,7 +883,7 @@
     },
     {
      "path": "gpu/vk/eden/shader_recompiler/frontend/ampere/lower_to_maxwell.h",
-     "line": 1681
+     "line": 1686
     }
    ],
    "default": "unset",
@@ -24666,7 +24666,7 @@
    "files": [
     {
      "path": "gpu/vk/eden/shader_recompiler/frontend/ampere/lower_to_maxwell.h",
-     "line": 1769
+     "line": 1774
     }
    ],
    "default": "unset",
@@ -25378,12 +25378,12 @@
    "files": [
     {
      "path": "gpu/vk/eden/shader_recompiler/frontend/ampere/lower_to_maxwell.h",
-     "line": 297
+     "line": 302
     }
    ],
    "default": "off (unset)",
    "values": "on or off (0, false, off, no and empty are off)",
-   "explanation": "undocumented: gpu/vk/eden/shader_recompiler/frontend/ampere/lower_to_maxwell.h:297 reads it as an on/off switch: `static const bool no_extended = std::getenv(\"RX_VK_NO_EXTREGS\") != nullptr;`. No comment in the source says what it changes.",
+   "explanation": "undocumented: gpu/vk/eden/shader_recompiler/frontend/ampere/lower_to_maxwell.h:302 reads it as an on/off switch: `static const bool no_extended = std::getenv(\"RX_VK_NO_EXTREGS\") != nullptr;`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -29794,7 +29794,7 @@
    "files": [
     {
      "path": "gpu/vk/eden/shader_recompiler/frontend/ampere/lower_to_maxwell.h",
-     "line": 1637
+     "line": 1642
     }
    ],
    "default": "unset",

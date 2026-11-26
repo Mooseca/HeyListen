@@ -246,7 +246,12 @@ inline LoweredProgram LowerToMaxwellWith(std::span<const Instruction> code, u32 
                 for (u32 k = 0; k < span_of(reg) && reg + k < 255; ++k)
                     native_occupied[reg + k] = true;
                 if (reg >= 255 || reg + 3 < reserved_base) continue;   // (a quad below may reach up)
-                if (register_field(f) && reg >= reserved_base) any_high = true;
+                // (Longshot 0e32bc100, #2179) A vector load can write reserved registers even when its first destination is
+                // below them: LDG.E.128 R204 with the reserved registers from R206 writes R206 and R207 too
+                const bool load_dest = f == 0 && (opcode == 0x381 || opcode == 0x981);
+                const u32 load_size = insn.Bits(73, 3);
+                const u32 width = load_dest && load_size == 6 ? 4U : load_dest && load_size == 5 ? 2U : 1U;
+                if (register_field(f) && reg + width > reserved_base) any_high = true;
             }
             for (u32 f = 0; f < 4 && any_high; ++f) {
                 const u32 bit = bits[f], reg = insn.Bits(bit, 8);
