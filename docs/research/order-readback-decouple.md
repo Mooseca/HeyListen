@@ -87,7 +87,17 @@ The producers are not behind a backlog; they are at the head of a long job whose
 
 ## Not known yet
 
-- Whether the segment holding the last R4 dispatch is submitted before the job ends in every frame (segment sizes, the dry pass's
-  holds); the build's counters will say.
-- Whether the CPU writes into the R4 block between its reads (the ring's tainted-range rule covers a direct write).
-- The 3050's numbers.
+- **What flash2f's wait handed out.** With the order thread its value is neither the frame's last copy nor the one before (check of
+  order2f: 300 of 300 fresh reads differ from both, ~1300 of 3680 words). Not identified. By eye it was clean, and so is the copy by
+  the counter; the copy is what the inline replay gives most of the time (next point).
+- **Why the copy equals the inline value in 55-75 % of the reads, not all.** Inline, this read does not wait at all (`RX_VK_RB_PROF`:
+  0 pending, 0.00 ms), so it takes guest memory as it is: the job's write-back when it has landed, the range's previous write when
+  it has not; and the game's thread reads the block twice a frame, the check comparing only the read that would take a newer copy.
+  The 25-45 % are therefore the inline path's own timing, not an error rate of the copy; it is an explanation that fits the counts,
+  not a measured one (a per-read flag of whether the write-back had landed would prove it).
+- **The split behind the last copy** (`RX_VK_RB_EARLY_SPLIT`) never fired on the main PC ("0 parts ended"): the eight dispatches are
+  recorded in parallel segments (worker threads), which go to the GPU as their segment ends; a segment boundary right behind the last
+  copy is not built.
+- **What the eight programs read** besides their ~70 storage ranges (textures, uniform buffers): needed before they could be moved
+  ahead of the work queued before them, or onto a queue of their own.
+- The 3050's numbers (list-3050-order2, build order2g).
