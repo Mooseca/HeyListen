@@ -405,9 +405,13 @@ static void wb_block(uint64_t block, uint64_t size, int freed, const HlTraceReco
             WbTarget *t = &p->t[j];
             if (!t->hi || !(t->lo < hi && lo < t->hi)) continue;
             if (freed && t->blk.addr == block) t->blk.addr = 0;
-            if (now - t->last > window) continue;   /* (not written back lately) */
+            /* (CRASH3, 26 Nov) a block allocated over a target is the target's victim from then on, however long ago the target was
+               last written back: the crash of c3t-def came from a stale head written back first 2 s AFTER a 0x90 block was allocated
+               over it, which the 5 s window below left out. A block that starts at the target itself is a new buffer bound there,
+               not a victim */
+            if (!freed && block != t->lo) t->blk = *r;
+            if (now - t->last > window) continue;   /* (not written back lately: no "allocated over" line) */
             const int kind = freed ? 2 : 1;
-            if (!freed) t->blk = *r;
             if (page != ((t->lo > lo ? t->lo : lo) >> 12)) continue;   /* (one count for a block over a target's pages) */
             atomic_fetch_add_explicit(&wb_n[kind], 1, memory_order_relaxed);
             if (!t->told[0] && !t->told[1] && !t->told[2]) atomic_fetch_add_explicit(&wb_n[4], 1, memory_order_relaxed);

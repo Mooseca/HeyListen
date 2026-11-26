@@ -60,6 +60,29 @@ static void chain_of(Ctx *c, uint32_t *chain) {
 
 static _Thread_local int through;   /* the next gate entered on this thread lets the translated body run */
 
+/* (CRASH3) RX_VK_STALE_HEAD_GUARD (default 1; 0: off): the big blocks the game's heaps freed, for the back end's bare storage entries
+   (hl_stale_heads.h; the host table's bare_head_live, host/rx_backend.c). With it the gates run without the trace too: then
+   only these two table writes, no chain and no record */
+#include "hl_stale_heads.h"
+static HlStaleHeads stale_heads;
+static int stale_on;
+int hos_bare_head_live(uint64_t guest) { return !stale_on || !hl_stale_freed(&stale_heads, guest); }
+static DWORD WINAPI stale_counts_every(void *p) {   /* (its counts in the log once a minute, when they changed) */
+    (void)p;
+    uint64_t last[4] = {~0ull, 0, 0, 0};
+    for (;;) {
+        Sleep(60000);
+        const uint64_t now[4] = {atomic_load(&stale_heads.unbound), atomic_load(&stale_heads.revived), atomic_load(&stale_heads.freed),
+                                 atomic_load(&stale_heads.listed)};
+        if (!memcmp(now, last, sizeof now)) continue;
+        memcpy(last, now, sizeof now);
+        hos_log("hl stale heads: %llu bindings of a bare written storage entry left unbound (its block freed by the game), %llu freed "
+                "starts allocated big again; %llu big heap blocks freed, %llu listed (RX_VK_STALE_HEAD_GUARD)",
+                (unsigned long long)now[0], (unsigned long long)now[1], (unsigned long long)now[2], (unsigned long long)now[3]);
+    }
+    return 0;
+}
+
 static int alloc_gate(Ctx *c, uint64_t guest, int size_arg, int heap_arg) {
     if (through) {
         through = 0;
@@ -80,15 +103,19 @@ static int alloc_gate(Ctx *c, uint64_t guest, int size_arg, int heap_arg) {
                 break;
             }
     }
-    uint32_t chain[HL_TRACE_CHAIN];
-    chain_of(c, chain);
+    uint32_t chain[HL_TRACE_CHAIN] = {0};
+    if (hl_trace_mask) chain_of(c, chain);
     const uint64_t size = size_arg < 0 ? c->x[0] * c->x[1] : c->x[size_arg];
     const uint64_t heap = heap_arg < 0 ? 0 : c->x[heap_arg];
     const uint64_t old = guest == 0x814e6d50 ? c->x[0] : 0;   /* (realloc: the block it may free) */
     through = 1;
     fn(c);
     const uint64_t block = c->x[0];
-    if (old && block) hl_trace_free(old, 0, chain);   /* (moved, or resized in place: listed again with its new size) */
+    if (old && block) {   /* (moved, or resized in place: listed again with its new size) */
+        if (old != block) hl_stale_free(&stale_heads, old);
+        hl_trace_free(old, 0, chain);
+    }
+    hl_stale_alloc(&stale_heads, block, size);
     hl_trace_alloc(block, size, heap, chain);
     return 1;
 }
@@ -98,6 +125,8 @@ static int free_gate(Ctx *c, int ptr_arg, int heap_arg) {
         through = 0;
         return 0;
     }
+    hl_stale_free(&stale_heads, c->x[ptr_arg]);
+    if (!hl_trace_mask) return 0;
     uint32_t chain[HL_TRACE_CHAIN];
     chain_of(c, chain);
     hl_trace_free(c->x[ptr_arg], heap_arg < 0 ? 0 : c->x[heap_arg], chain);
@@ -324,11 +353,19 @@ static DWORD WINAPI wb_counts_every(void *p) {
 /* The gates go on once the lift's gates are known (hl_gates_in reads the presence lines' constructors: asked at the
    first use, from the OS layer's start). */
 void hl_trace_gates(void) {
-    if (!(hl_trace_mask & HL_TR_MEM)) return;
-    const int in = GATES_IN("HL_TRACE memory", mem_gates);
-    hos_log("hl trace: on (mask %#x): the heaps' allocations and frees %s", hl_trace_mask,
-            in ? "recorded (18 entry gates)" : "NOT recorded (gates missing from this lift)");
+    const char *sh = getenv("RX_VK_STALE_HEAD_GUARD");
+    const int stale = !sh || atoi(sh) != 0;
+    if (!(hl_trace_mask & HL_TR_MEM) && !stale) return;
+    const int in = GATES_IN(hl_trace_mask & HL_TR_MEM ? "HL_TRACE memory" : "RX_VK_STALE_HEAD_GUARD", mem_gates);
+    if (hl_trace_mask & HL_TR_MEM)
+        hos_log("hl trace: on (mask %#x): the heaps' allocations and frees %s", hl_trace_mask,
+                in ? "recorded (18 entry gates)" : "NOT recorded (gates missing from this lift)");
+    hos_log("hl stale heads: %s", !stale ? "off (RX_VK_STALE_HEAD_GUARD=0): bare storage entries bound as before"
+                                  : in ? "on: a bare written storage entry whose pointer starts a heap block the game freed is left unbound"
+                                       : "NOT on (the heaps' gates are missing from this lift)");
     if (!in) return;
+    stale_on = stale;
+    if (stale) CreateThread(NULL, 0, stale_counts_every, NULL, 0, NULL);
     hl_gate_on_809df950 = hl_gate_on_803b44e0 = hl_gate_on_834921a0 = hl_gate_on_801e8460 = hl_gate_on_80504840 = 1;
     hl_gate_on_8080fd70 = hl_gate_on_834931b0 = hl_gate_on_808101d0 = hl_gate_on_806a22f0 = hl_gate_on_834991f0 = 1;
     hl_gate_on_83499320 = hl_gate_on_834bdd90 = hl_gate_on_834bdfc0 = hl_gate_on_8005eca0 = hl_gate_on_814e6c90 = 1;

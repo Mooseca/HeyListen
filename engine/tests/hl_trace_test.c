@@ -123,6 +123,23 @@ int main(void) {
           (unsigned long long)wn.allocs_over, (unsigned long long)wn.frees_under, (unsigned long long)wn.targets,
           (unsigned long long)wn.targets_hit);
 
+    /* (CRASH3, 26 Nov) a block allocated over a target written back more than 5 s before is its victim all the same: the next
+       write-back into it counts (c3t-def's crash); a block that starts at the target itself is a buffer bound there, not one */
+    hl_trace_gpu_record(1, 0x70000, 0x40, 0, 200, 199);
+    hl_trace_gpu_record(1, 0x80000, 0x40, 0, 200, 199);
+    Sleep(5300);
+    hl_trace_alloc(0x70010, 0x90, 7, c1);
+    hl_trace_alloc(0x80000, 0x8000, 7, c1);
+    HlTraceWbCounts w2;
+    hl_trace_wb_counts(&w2);
+    CHECK(w2.allocs_over == wn.allocs_over && w2.into_live == wn.into_live, "no allocated-over line past the 5 s");
+    hl_trace_gpu_record(1, 0x70000, 0x40, 0, 201, 200);
+    hl_trace_gpu_record(1, 0x80000, 0x40, 0, 201, 200);
+    hl_trace_wb_counts(&w2);
+    CHECK(w2.into_live == wn.into_live + 1 && has_line("TRACE WB: write-back INTO A LIVE HEAP BLOCK: [0x70000, 0x70040) submission 201"),
+          "the first write-back after the allocation counts, the buffer at the target does not: %llu",
+          (unsigned long long)(w2.into_live - wn.into_live));
+
     /* the rings, through the file: each writer's last EVENTS events whole and in order */
     char path[MAX_PATH];
     GetTempPathA(sizeof path, path);

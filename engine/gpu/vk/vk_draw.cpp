@@ -3718,6 +3718,22 @@ void build_descriptors(const NvnState& s, const Program& p) {
                         size = std::min<uint64_t>(end - addr, d.is_written ? (1ull << 20) : bare_read) & ~3ull, bare = true;
                 // (EvilOOT) the pointer table's regions (c0+0x880, vk_bank.cpp pointer_table) are guesses too: GPU-only, as above
                 if (d.cbuf_index == 0 && d.cbuf_offset == 0x880 && d.count == 3) bare = true;
+                // (CRASH3, issue 55) a bare entry the program writes through whose pointer starts a heap block the game has freed
+                // (the module system's destroy path frees the culling buffer and leaves its pointer in the table; a loader then
+                // allocates small CPU objects there): left unbound (reads 0, writes dropped), so no GPU write, write-back or guess
+                // lands over the game's new objects. Judged at each recording of a binding. RX_VK_STALE_HEAD_GUARD=0: bound as before
+                bool stale = false;
+                if (bare && d.is_written && host->bare_head_live)
+                    if (const uint64_t g = host->gpu_guest(addr); g && !host->bare_head_live(g)) {
+                        stale = true;
+                        static std::mutex sm;
+                        static std::unordered_set<uint64_t> told;
+                        std::lock_guard lk(sm);
+                        if (told.size() < 64 && told.insert(g).second)
+                            logf("vk: a bare written storage entry (program %016llx c%u+%#x entry %u of %u) points at %#llx, the start of a "
+                                 "heap block the game freed: left unbound (RX_VK_STALE_HEAD_GUARD)", (unsigned long long)p.key,
+                                 (unsigned)d.cbuf_index, off, k, d.count, (unsigned long long)g);
+                    }
                 // (Fritchii's storage buffer pass, Info::native_global_bounds) a program whose accesses pick among candidate
                 // pointers at run time: those are bare 8-byte arguments, the word after one another argument (a stride, a
                 // handle), not an NVN size. Unless that word looks like this pointer's size (its high half 0, inside the
@@ -3753,7 +3769,7 @@ void build_descriptors(const NvnState& s, const Program& p) {
                 const LedgerUse ledger_scope_(kUseStorage);   // (RX_VK_LEDGER)
                 // (hookshot) a storage buffer table's entries (count > 1, Info::global_tables): the ones past the table's
                 // end are whatever the constant buffer holds there, bound only when they look like a buffer
-                const bool plausible = d.count == 1 || (size && size <= (256ull << 20) && host->gpu_guest(base));
+                const bool plausible = !stale && (d.count == 1 || (size && size <= (256ull << 20) && host->gpu_guest(base)));
                 BufferRef b = addr && plausible ? gpu_buffer_bind(base, n, d.is_written && !bare) : BufferRef{};
                 // (AyyBeeDee20738, PR 138) a table entry's region that does not fit its pool this moment bound nothing, and the next
                 // frame bound it again: its reads flipped between the data and 0, the picture between bright and dark. Smaller,

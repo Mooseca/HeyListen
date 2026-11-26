@@ -53,7 +53,7 @@ def check_source():
     turn = turn[:turn.index("\n}\n")]
     if "save();" in turn:
         raise SystemExit("lowend_turn_on writes the preset's lines only (ini_put_only), never a whole save")
-    need("gpu/vk/vk_api.h", ["int (*play_on)(void);", "#define MKWVK_API_VERSION 22"])
+    need("gpu/vk/vk_api.h", ["int (*play_on)(void);", "#define MKWVK_API_VERSION 23"])
     need("host/rx_backend.c", ["hos_profile_threads, hos_oot_player_seen,"])
     need("gpu/vk/vk_memory.cpp", ["discrete || lowend_mirror_not_wait();"])
     need("gpu/vk/vk_replay.cpp", ["!lowend_mirror_not_wait());   // (LAPTOP1: the mirror in its place there)"])
