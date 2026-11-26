@@ -136,6 +136,10 @@ ARGS = {
     "tests/test_write_history.py": ["--cxx", "{cxx}"],
     "tests/test_posix_cv_wake.py": ["--cc", "cc"],
     "tests/test_posix_thread_cycle_time.py": ["--cc", "cc"],
+    "tests/test_ub_word_index.py": ({"windows"}, "the fixture links the CRT's oldnames.lib, which the MSVC-target clang here lacks: checked on Linux"),
+    "tests/test_mf_buffer_lifetime.py": ({"windows"}, "the fixture links the CRT's oldnames.lib, which the MSVC-target clang here lacks: checked on Linux"),
+    "tests/test_wayland_libdecor_hint.py": ({"windows"}, "the harness sets the Wayland switch with POSIX setenv: checked on Linux"),
+    "tests/test_linux_saves_move.py": ({"windows"}, "the Linux saves folder move: POSIX paths and shell"),
     "tests/test_parallel_rb_refresh.py": ["--cxx", "{cxx}"],
     "tests/test_prof_sampling.py": ["--cxx", "{cxx}"],
     "tests/test_present_geometry_trace.py": ["--cxx", "{cxx}"],
@@ -278,6 +282,15 @@ ARGS = {
     "tests/test_vcore_texels.py": ["--cxx", "{cxx}"],
     "tests/test_vcore_video_acquire.py": ["--cxx", "{cxx}"],
     "tests/test_gpu_choice.py": ["--cxx", "{cxx}"],
+    "tests/test_gyro_rearm.py": ["--cc", "gcc"],
+    "tests/test_motion_background.py": ["--cc", "gcc"],
+    "tests/test_mf_buffer_lifetime.py": ["--cc", "{cxx}"],
+    "tests/test_texture_layout_sizes.py": ["--cc", "gcc", "--cxx", "g++"],
+    "tests/test_ub_word_index.py": ["--cxx", "{cxx}"],
+    "tests/test_inline_write_order.py": ["--cxx", "{cxx}", "--headers", "{vulkan_headers}"],
+    "tests/test_fallback_pipeline_state.py": ["--cxx", "{cxx}", "--headers", "{vulkan_headers}"],
+    "tests/test_gpu_write_intervals.py": ["--cxx", "{cxx}"],
+    "tests/test_linux_saves_move.py": ["--cc", "gcc"],
 }
 
 # Python packages some tests import (CI installs them; the runner itself needs none)
