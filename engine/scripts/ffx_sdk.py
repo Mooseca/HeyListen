@@ -1,9 +1,12 @@
-"""AMD's FSR runtime for Vulkan (FSR SDK 2.4: FSR 4.1.2), for AMD FSR 4 in the Upscaler row (gpu/vk/vk_fsr4.cpp).
+"""AMD's FSR runtime for Vulkan (FSR SDK 2.4: FSR 4.1.2, frame generation 4.0.2), for AMD FSR 4 in the Upscaler row
+(gpu/vk/vk_fsr4.cpp) and AMD FSR 4 FG in the Frame generation by row (gpu/vk/vk_fsr4fg.cpp).
 
 AMD's files are not part of Hookshot and are not committed: they are AMD's, signed by AMD, under AMD's FSR SDK license
 (the SDK's docs/license.md, fetched beside them as LICENSE-AMD-FSR-SDK.md). This fetches them from AMD's FidelityFX SDK
 repository at one pinned release, each file checked against its SHA-256, into <folder>:
-  - amd_fidelityfx_loader_vk.dll (the loader the game calls) and amd_fidelityfx_upscaler_vk.dll (FSR 4 and FSR 3.1);
+  - amd_fidelityfx_loader_vk.dll (the loader the game calls), amd_fidelityfx_upscaler_vk.dll (FSR 4 and FSR 3.1) and
+    amd_fidelityfx_framegeneration_vk.dll (frame generation 4.0.2 and 3.1.x; the loader picks it beside itself). Its imports
+    are Windows' own DLLs and Vulkan; the loader names no other AMD file (checked against the pinned files);
   - LICENSE-AMD-FSR-SDK.md.
 gpu/vk/vk_fsr4.cpp looks for them in RX_VK_FSR_DIR, beside the executable, then in the game folder. Windows only: AMD
 publishes the runtime for Windows alone (Linux takes a Vulkan FSR 4 library of its own: the readme).
@@ -36,16 +39,23 @@ FILES = [
      "38a56a01fb3565c0757d9f5c1e4e69de4b65e5f2e5769b323b200dc1f142bab9", "amd_fidelityfx_loader_vk.dll"),
     ("Kits/FidelityFX/signedbin/amd_fidelityfx_upscaler_vk.dll",
      "4a7e895af6e0b615d40a84d59eb8c2b1054ad91cdd0c739567940270d51bdab7", "amd_fidelityfx_upscaler_vk.dll"),
+    ("Kits/FidelityFX/signedbin/amd_fidelityfx_framegeneration_vk.dll",
+     "d002dabff8c5e71eaa715fc99438cd4dc81230262a7897b16bc402efec3498b4", "amd_fidelityfx_framegeneration_vk.dll"),
     ("Kits/FidelityFX/docs/license.md",
      "32357259b965d6a8001e9e508ba60eda6034027c5923a7d226ffbaff813c2bfb", "LICENSE-AMD-FSR-SDK.md"),
 ]
+# (the size of each DLL, to say what a download is and to catch a cut-off file before hashing it; the SHA-256 decides)
+SIZES = {"amd_fidelityfx_loader_vk.dll": 39184, "amd_fidelityfx_upscaler_vk.dll": 36135696,
+         "amd_fidelityfx_framegeneration_vk.dll": 36806928}
+FRAMEGEN = "amd_fidelityfx_framegeneration_vk.dll"   # (a game folder built with AMD FSR 4 before it was fetched lacks it)
 RUNTIME = [f[2] for f in FILES]
 DLLS = [f[2] for f in FILES if f[2].endswith(".dll")]
 
 NOTICE = """\
 AMD FSR 4: this downloads AMD's FSR runtime for Vulkan (FSR SDK v2.4.0: FSR 4.1.2) from
 github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK. AMD's files are AMD's, not Hookshot's, signed by AMD and under AMD's
-FSR SDK license (saved as LICENSE-AMD-FSR-SDK.md beside them):
+FSR SDK license (saved as LICENSE-AMD-FSR-SDK.md beside them). It is three DLLs, about 70 MB, for FSR 4 and AMD's frame
+generation:
   """ + LICENSE_URL
 
 TIMEOUT = 60   # (seconds without an answer, or between two reads, before a download gives up)
@@ -69,6 +79,9 @@ def fetch_one(path, digest, dst, opener=urllib.request.urlopen):
     try:
         with opener(BASE + "/" + path, timeout=TIMEOUT) as r, open(tmp, "wb") as f:
             shutil.copyfileobj(r, f, 1 << 20)
+        size = SIZES.get(os.path.basename(dst))
+        if size is not None and os.path.getsize(tmp) != size:
+            raise ValueError("ffx-sdk: %s is not the file expected (%d bytes, not %d): not used" % (path, os.path.getsize(tmp), size))
         if sha256(tmp) != digest:
             raise ValueError("ffx-sdk: %s is not the file expected (SHA-256): not used" % path)
         os.replace(tmp, dst)

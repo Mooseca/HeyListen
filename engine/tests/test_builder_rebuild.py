@@ -38,12 +38,39 @@ def make_game():
 class BuilderRebuild(unittest.TestCase):
     def test_a_built_folder_with_other_ticks_is_not_play(self):
         cs = text("MainWindow.xaml.cs")
-        self.assertIn("enum Mode { Build, UpdateGame, UpToDate, UpdateBuilder, Rebuild }", cs)
+        self.assertIn("enum Mode { Build, UpdateGame, UpToDate, UpdateBuilder, Rebuild, FetchFsr }", cs)
         refresh = body(cs, "void RefreshMode()")
         # (the same version: the ticks against the folder, Rebuild when they differ, Play only when they agree)
         self.assertIn("GameFeatures.Changes(OutPath.Text, DlssTick.IsChecked == true, FsrTick.IsChecked == true)", refresh)
         self.assertIn("rebuildChanges.Count > 0 ? Mode.Rebuild : Mode.UpToDate", refresh)
         self.assertIn('BuildButton.Content = "Rebuild"', refresh)
+
+    def test_a_folder_without_frame_generation_gets_that_file_only(self):
+        """A folder built with AMD FSR 4 before AMD's frame generation DLL was fetched: same version, ticks as built, the file missing.
+        The window offers Get the file (no rebuild): make_game.py --fsr-runtime-only, with the fetch arguments the tick passes"""
+        cs, features = text("MainWindow.xaml.cs"), text("GameFeatures.cs")
+        refresh = body(cs, "void RefreshMode()")
+        self.assertIn("mode == Mode.UpToDate && FsrTick.IsChecked == true && GameFeatures.FsrFrameGenMissing(OutPath.Text)) mode = Mode.FetchFsr;", refresh)
+        self.assertIn('BuildButton.Content = "Get the file"', refresh)
+        start = body(cs, "async void StartBuild(")
+        fetch = start[start.index("case Mode.FetchFsr:"):start.index("case Mode.UpToDate:")]
+        for flag in ("--fsr-runtime-only", "--fetch-fsr-runtime", "--accept-amd-license", '"--out", OutPath.Text'):
+            self.assertIn(flag, fetch)
+        self.assertNotIn("UpdateBuild(", fetch)   # (nothing is built again)
+        self.assertNotIn("Updater.UpdateFolder", fetch)
+        # (the Runner is given the fetch folder because the arguments hold --fetch-fsr-runtime)
+        self.assertIn('args.Contains("--fetch-fsr-runtime") ? Storage.FfxSdk', cs)
+        # (what the check looks for is what scripts/ffx_sdk.py and make_game.py place: the mark, the license file, the DLL)
+        import sys
+        sys.path.insert(0, str(ENGINE / "scripts"))
+        import ffx_sdk
+        self.assertIn('FsrFrameGenFile = "%s"' % ffx_sdk.FRAMEGEN, features)
+        self.assertIn('FsrLicenseFile = "LICENSE-AMD-FSR-SDK.md"', features)
+        self.assertIn("LICENSE-AMD-FSR-SDK.md", [n for _, _, n in ffx_sdk.FILES])
+        self.assertIn("HasFsr(folder) && File.Exists(Path.Combine(folder, FsrLicenseFile)) && !File.Exists(Path.Combine(folder, FsrFrameGenFile))", features)
+        # (a folder where the player put AMD's DLLs by hand has no license file: left to them)
+        mg = (ENGINE / "nx2" / "make_game.py").read_text(encoding="utf-8")
+        self.assertIn('"--fsr-runtime-only"', mg)
 
     def test_changing_a_tick_changes_the_button(self):
         cs = text("MainWindow.xaml.cs")

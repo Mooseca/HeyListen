@@ -34,6 +34,17 @@ static class GameFeatures
 
     public static bool HasFsr(string folder) => File.Exists(Path.Combine(folder, FsrMark));
 
+    /// make_game.py's AMD runtime in the game folder: the license the build saves beside AMD's DLLs, and AMD's frame generation DLL
+    /// (scripts/ffx_sdk.py's table). A folder built with AMD FSR 4 before that DLL was fetched has the first and not the second
+    public const string FsrLicenseFile = "LICENSE-AMD-FSR-SDK.md";
+    public const string FsrFrameGenFile = "amd_fidelityfx_framegeneration_vk.dll";
+
+    /// AMD FSR 4 was built into the folder and AMD's runtime fetched by this Builder (its license file is there), but AMD's frame generation
+    /// DLL is not: only that file is missing, no rebuild is needed (make_game.py --fsr-runtime-only gets it). A folder where the player put
+    /// AMD's DLLs by hand has no license file here, and is left to them
+    public static bool FsrFrameGenMissing(string folder) =>
+        HasFsr(folder) && File.Exists(Path.Combine(folder, FsrLicenseFile)) && !File.Exists(Path.Combine(folder, FsrFrameGenFile));
+
     /// What the ticks ask that the folder does not have, in words ("with NVIDIA DLSS", "without AMD FSR 4"); empty: nothing
     public static List<string> Changes(string folder, bool dlss, bool fsr)
     {

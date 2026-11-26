@@ -14693,13 +14693,13 @@ undocumented: third_party/a64-kit/lift/a64_lift.py:2289 reads it as an on/off sw
 
 #### `A64_HOT_FUNCS` - developer
 
-undocumented: nx2/make_game.py:1713 reads it as a path: `env["A64_HOT_FUNCS"] = os.path.join(work, "hot_funcs.txt")`. No comment in the source says what it changes.
+undocumented: nx2/make_game.py:1737 reads it as a path: `env["A64_HOT_FUNCS"] = os.path.join(work, "hot_funcs.txt")`. No comment in the source says what it changes.
 
 **Values:** text. **Default:** unset.
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/make_game.py:1713` and 1 more place.
+**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/make_game.py:1737` and 1 more place.
 
 #### `A64_KEEP_FLAGS` - developer
 
@@ -14925,7 +14925,7 @@ The free memory is read again as compiles start and end, so a game or browser op
 
 #### `HOOKSHOT_FFX_SDK` - developer
 
-**Or fetched for you (Windows):** `make_game.py --fsr --fetch-fsr-runtime --accept-amd-license` downloads those two DLLs and AMD's license from AMD's FidelityFX SDK repository at the v2.4.0 tag, checks each against its SHA-256, and puts them in the game folder (`HOOKSHOT_FFX_SDK=<folder>` keeps them between builds, default `work fx-sdk`). `python -I scripts/ffx_sdk.py --accept-amd-license --game <game folder>` does the same for a game built already. Without `--accept-amd-license` nothing is downloaded (the script asks when run by hand), as with NVIDIA's license for DLSS. AMD DLLs already in the game folder that are not v2.4.0's (a newer SDK put there by hand) are left alone, and the build says so.
+**Or fetched for you (Windows):** `make_game.py --fsr --fetch-fsr-runtime --accept-amd-license` downloads those three DLLs and AMD's license from AMD's FidelityFX SDK repository at the v2.4.0 tag, checks each against its SHA-256, and puts them in the game folder (`HOOKSHOT_FFX_SDK=<folder>` keeps them between builds, default `work fx-sdk`). `python -I scripts/ffx_sdk.py --accept-amd-license --game <game folder>` does the same for a game built already. Without `--accept-amd-license` nothing is downloaded (the script asks when run by hand), as with NVIDIA's license for DLSS. AMD DLLs already in the game folder that are not v2.4.0's (a newer SDK put there by hand) are left alone, and the build says so.
 
 **Values:** text. **Default:** unset.
 
@@ -15297,13 +15297,13 @@ undocumented: nx2/make_game.py:529 reads it as a path: `env["INCLUDE"] = ";".joi
 
 #### `LANG` - developer
 
-undocumented: nx2/make_game.py:1518 reads it as a text value: `name = (locale.getlocale()[0] or os.environ.get("LANG", "")).split(".")[0]`. No comment in the source says what it changes.
+undocumented: nx2/make_game.py:1540 reads it as a text value: `name = (locale.getlocale()[0] or os.environ.get("LANG", "")).split(".")[0]`. No comment in the source says what it changes.
 
 **Values:** text. **Default:** .
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/make_game.py:1518`.
+**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/make_game.py:1540`.
 
 #### `LIB` - developer
 
@@ -15567,13 +15567,13 @@ The CPM cache (Vulkan and SPIR-V headers, VMA, FFmpeg) and wgpu-native.
 
 #### `XDG_CACHE_HOME` - developer
 
-undocumented: nx2/make_game.py:1442 reads it as a path: `p.add_argument("--work", default=os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"),`. No comment in the source says what it changes.
+undocumented: nx2/make_game.py:1461 reads it as a path: `p.add_argument("--work", default=os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"),`. No comment in the source says what it changes.
 
 **Values:** a path (text). **Default:** unset.
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/make_game.py:1442`.
+**Set it:** In the build's environment (the builder or the command line), before the build runs. **Read at:** `nx2/make_game.py:1461`.
 
 #### `XDG_CONFIG_HOME` - developer
 

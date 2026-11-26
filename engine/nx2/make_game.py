@@ -1368,8 +1368,27 @@ def place_fsr_runtime(out):
         ffx.install(ffx_folder(), out, say=lambda line: print(line, flush=True))   # (it says what it left alone)
         return None
     dst = ffx.install(ffx_folder(), out)
-    print("AMD FSR 4: AMD's runtime in %s (AMD's, under AMD's license)" % dst, flush=True)
+    print("AMD FSR 4: AMD's runtime in %s (FSR 4 and frame generation; AMD's, under AMD's license)" % dst, flush=True)
     return dst
+
+
+def fsr_runtime_only(a):
+    """--fsr-runtime-only (with --out <game folder>, --fetch-fsr-runtime, --accept-amd-license; the Builder's "Get the file" for a
+    folder built with AMD FSR 4 before AMD's frame generation file was fetched): only AMD's runtime fetched and placed, nothing
+    translated or compiled. Only for a folder built with AMD FSR 4 (its mark), Windows"""
+    out = os.path.abspath(a.out or a.update or "")
+    if LINUX:
+        fail("AMD publishes its FSR runtime for Windows only; on Linux see the readme (amd_fidelityfx_upscaler_vk.so).")
+    if not os.path.isfile(os.path.join(out, FSR_MARK)):
+        fail("This game folder was not built with AMD FSR 4, so AMD's runtime has nothing to be added to: build it again with "
+             "the AMD FSR 4 box ticked.")
+    fetch_fsr_runtime(a)
+    place_fsr_runtime(out)
+    if not os.path.isfile(os.path.join(out, ffx_script().FRAMEGEN)):
+        fail("AMD's frame generation file is not in the game folder (the line above says why: AMD's DLLs of your own, or a download that "
+             "did not finish). Check the connection and try again, or build the game again with the AMD FSR 4 box ticked.")
+    say("done", out)
+    return 0
 
 
 def place_ngx_runtime(out):
@@ -1462,6 +1481,9 @@ def parse_args():
     p.add_argument("--fetch-fsr-runtime", action="store_true",
                    help="with --fsr (Windows): download AMD's FSR runtime (scripts/ffx_sdk.py) and put it in the game folder")
     p.add_argument("--accept-amd-license", action="store_true", help="AMD's FSR SDK license, accepted (with --fetch-fsr-runtime)")
+    p.add_argument("--fsr-runtime-only", action="store_true",
+                   help="with --out <game folder built with AMD FSR 4>, --fetch-fsr-runtime and --accept-amd-license (Windows): only AMD's runtime "
+                        "fetched and placed (the file a folder built before AMD's frame generation was added lacks), no build")
     # (the opt-in reports, off unless asked: the setup screen's two ticks write the game's own menu rows, nothing else of the file)
     p.add_argument("--send-perf-stats", action="store_true",
                    help="write send_performance_stats=1 into the game folder's hookshot_options.ini (the menu's Send performance statistics)")
@@ -1573,6 +1595,8 @@ def main(a=None):
     if a is None:
         a = parse_args()
     prepare_setup(a)
+    if getattr(a, "fsr_runtime_only", False):
+        return fsr_runtime_only(a)
     resolve_game(a)
     if a.jobs is not None and a.jobs < 0:
         fail("--jobs must be 1 or more, or 0 for automatic.")

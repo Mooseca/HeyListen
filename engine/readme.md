@@ -696,18 +696,18 @@ With HDR on **Native**, it takes the game's HDR colour as linear light, so highl
 Unlike FSR 3.1 (above), it runs AMD's own DLLs, so it needs them beside the game. Choose it in the menu (`dlss=4` or `5`
 in `hookshot_options.ini`, `RX_VK_FSR4=1` or `2` for one run, `RX_VK_FSR4=0` to leave it out).
 
-- **Windows, the Builder window:** tick **AMD FSR 4** before you build. The tick shows AMD's license and, once you accept it, the build downloads AMD's signed runtime, checks it and puts it in the game folder (the same as `--fsr --fetch-fsr-runtime --accept-amd-license` below); an update of that folder fetches again what is missing. Nothing of AMD's is in the builder.
+- **Windows, the Builder window:** tick **AMD FSR 4** before you build. The tick shows AMD's license and, once you accept it, the build downloads AMD's signed runtime (the loader, the FSR 4 upscaler and AMD's frame generation, three DLLs, about 70 MB), checks each against its SHA-256 and size and puts them in the game folder (the same as `--fsr --fetch-fsr-runtime --accept-amd-license` below); an update of that folder fetches again what is missing. A folder built with the tick before the frame generation file was added: the Builder offers **Get the file** (`make_game.py --out <folder> --fsr-runtime-only --fetch-fsr-runtime --accept-amd-license`), which fetches only that file and builds nothing. Nothing of AMD's is in the builder.
 - **The command line:** `make_game.py --fsr` (or `HOOKSHOT_FSR=1` for `nx2/build.py`). Rebuilding a folder built with
   it (`--update`) keeps it; `--no-fsr` takes it out.
 - **AMD's files, by hand (the Builder window and the next item do it for you):** Hookshot includes only AMD's MIT-licensed API headers (`third_party/fidelityfx`). Put
-  `amd_fidelityfx_loader_vk.dll` and `amd_fidelityfx_upscaler_vk.dll` from the
+  `amd_fidelityfx_loader_vk.dll`, `amd_fidelityfx_upscaler_vk.dll` and (for AMD FSR 4 FG) `amd_fidelityfx_framegeneration_vk.dll` from the
   [FidelityFX SDK](https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK) 2.4 release (`Kits/FidelityFX/signedbin`)
   beside the game's exe (`bin\hookshot.exe`) or in the game folder. (`RX_VK_FSR_DIR` names another folder, for testing:
   set it in the environment or a `HOS_ENV_FILE` file; `hookshot_env.txt` takes no paths.) Without them the Upscaler row
   says so and offers the rest. On Linux, a Vulkan FSR 4 library (`amd_fidelityfx_upscaler_vk.so`, such as fsr4-vk's)
   takes their place. The Linux AppImage's Vulkan back end is built with FSR 4 (AMD's headers are in the image, their licence under
   `licenses/fidelityfx`), so there the library beside the game is all it takes.
-- **Or fetched for you (Windows):** `make_game.py --fsr --fetch-fsr-runtime --accept-amd-license` downloads those two
+- **Or fetched for you (Windows):** `make_game.py --fsr --fetch-fsr-runtime --accept-amd-license` downloads those three
   DLLs and AMD's license from AMD's FidelityFX SDK repository at the v2.4.0 tag, checks each against its SHA-256, and
   puts them in the game folder (`HOOKSHOT_FFX_SDK=<folder>` keeps them between builds, default `workfx-sdk`).
   `python -I scripts/ffx_sdk.py --accept-amd-license --game <game folder>` does the same for a game built already.

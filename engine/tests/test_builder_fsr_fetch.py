@@ -61,6 +61,9 @@ class BuilderFsrFetch(unittest.TestCase):
         sys.path.insert(0, str(ENGINE / "scripts"))
         import ffx_sdk
         self.assertIn(ffx_sdk.LICENSE_URL, cs)
+        # (the prompt says what is fetched now: the frame generation DLL too, and the size)
+        self.assertIn("frame generation DLL, about 70 MB", cs)
+        self.assertIn("amd_fidelityfx_framegeneration_vk.dll", [n for _, _, n in ffx_sdk.FILES])
 
     def test_fetch_folder_reaches_the_build(self):
         self.assertIn("HOOKSHOT_FFX_SDK", text("Runner.cs"))

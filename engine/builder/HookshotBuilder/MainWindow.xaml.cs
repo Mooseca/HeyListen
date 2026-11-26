@@ -124,7 +124,7 @@ public partial class MainWindow : Window
     // ================= what the button does: build, update the game, play it, or get the newer builder =================
     // (as NX2navi's launcher: whatever version the player opens, it checks the latest release and says what is there)
 
-    enum Mode { Build, UpdateGame, UpToDate, UpdateBuilder, Rebuild }
+    enum Mode { Build, UpdateGame, UpToDate, UpdateBuilder, Rebuild, FetchFsr }
     Mode mode = Mode.Build;
     string? latestTag, updateTarget;
     bool sourcePicked;   // (the player chose game files here: a build from them, even over a game that is up to date)
@@ -162,6 +162,8 @@ public partial class MainWindow : Window
             // tick, and the game had no DLSS however many times the box was ticked, issue 130)
             rebuildChanges = GameFeatures.Changes(OutPath.Text, DlssTick.IsChecked == true, FsrTick.IsChecked == true);
             mode = rebuildChanges.Count > 0 ? Mode.Rebuild : Mode.UpToDate;
+            // (built with AMD FSR 4 before AMD's frame generation file was fetched: that one file is got, nothing is built again)
+            if (mode == Mode.UpToDate && FsrTick.IsChecked == true && GameFeatures.FsrFrameGenMissing(OutPath.Text)) mode = Mode.FetchFsr;
         }
         else if (latestTag != null && builder != null && builder != latestTag) mode = Mode.UpdateBuilder;
         else mode = Mode.Build;
@@ -179,6 +181,13 @@ public partial class MainWindow : Window
                                 $"{string.Join(" and ", rebuildChanges)}, from the game files kept in its folder. The game is translated again, " +
                                 "so it takes a while.";
                 BuildButton.Content = "Rebuild";
+                break;
+            case Mode.FetchFsr:
+                FilesTitle.Text = "AMD FSR 4 needs one more file";
+                FilesSub.Text = $"{game} is the latest version and has AMD FSR 4, but not AMD's frame generation file (about 35 MB), which was added " +
+                                "later. Get the file downloads it from AMD, under the AMD license you accepted, into your game folder. " +
+                                "The game is not built again.";
+                BuildButton.Content = "Get the file";
                 break;
             case Mode.UpToDate:
                 FilesTitle.Text = "Your game is up to date";
@@ -708,6 +717,21 @@ public partial class MainWindow : Window
                 UpdateBuild(rebuildTools, OutPath.Text);
                 return;
             }
+            case Mode.FetchFsr:   // (AMD's frame generation file only, into the folder: no translation, no compile)
+            {
+                SaveSettings();
+                var fetchTools = Tools.Find();
+                if (fetchTools == null)
+                {
+                    ShowProblem("The build tools are not in HeyListen's folder.", tools: true);
+                    return;
+                }
+                BeginUpdate(OutPath.Text, null);
+                VersionChip.Visibility = Visibility.Collapsed;
+                BuildTitle.Text = "Getting AMD's frame generation file";
+                Run(fetchTools, new List<string> { "--fsr-runtime-only", "--fetch-fsr-runtime", "--accept-amd-license", "--out", OutPath.Text }, keepRows: true);
+                return;
+            }
             case Mode.UpToDate:
                 finished = OutPath.Text;
                 Play(sender, e);
@@ -757,7 +781,8 @@ public partial class MainWindow : Window
     static readonly string[] FsrArgs = { "--fsr", "--fetch-fsr-runtime", "--accept-amd-license" };
 
     const string FsrLicense =
-        "AMD FSR 4 is AMD's, not HeyListen's. With it ticked, the build downloads AMD's signed FSR 4 runtime (FidelityFX SDK v2.4.0) from " +
+        "AMD FSR 4 is AMD's, not HeyListen's. With it ticked, the build downloads AMD's signed FSR 4 runtime (FidelityFX SDK v2.4.0: the loader, the " +
+        "upscaler and the frame generation DLL, about 70 MB) from " +
         "github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK, checks each file against its SHA-256 and puts it in the game folder, under " +
         "AMD's own license, the FidelityFX SDK license:\n\n" +
         "https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK/blob/7539ae8b6568ad29ed78a753404351daf3b5cca7/Kits/FidelityFX/docs/license.md\n\n" +

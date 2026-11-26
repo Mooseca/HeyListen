@@ -50,6 +50,12 @@ def main():
     assert "v[0] == 4" in ask, "a 3.x provider could stand in for FSR 4 frame generation"
     assert ask.count("return no(FSR4FG_NO_PROVIDER)") >= 3 and "return no(FSR4FG_NO_LOADER)" in ask, "a reason for each way it is not offered"
     assert 'logf("vk: AMD FSR 4 FG: not offered' in ask and 'logf("vk: AMD FSR 4 FG: offered' in ask, "the log does not say why it is not offered here"
+    # the frame generation DLL beside the loader: a folder built before the Builder fetched it says what to do, in the log and the menu
+    assert 'kFrameGen = "amd_fidelityfx_framegeneration_vk.dll"' in src and "return no(FSR4FG_NO_FG_DLL)" in ask, "a missing frame generation DLL is not told apart"
+    assert ask.index("return no(FSR4FG_NO_FG_DLL)") < ask.index("s.query(nullptr, &versions.header)"), "AMD is asked before the DLL is looked for"
+    assert ask.count("run the Builder again with the AMD FSR 4 box ticked") >= 2, "the log does not say what to do"
+    why = src[src.index("const char* fsr4fg_why_text("):src.index("#if defined(HOOKSHOT_FSR) && defined(_WIN32)", src.index("const char* fsr4fg_why_text("))]
+    assert "case FSR4FG_NO_FG_DLL:" in why and why.count("run the Builder again with the AMD FSR 4 box ticked") >= 2, "the menu's reason does not say what to do"
     assert "NOT TRIED ON REAL HARDWARE" in ask, "the offered line does not say it is untested"
     # nothing is asked before it is chosen (an NVIDIA PC loads nothing of AMD's unless the row or the switch asks)
     wanted = src[src.index("bool fsr4fg_wanted() {"):src.index("void fsr4fg_idle() {")]

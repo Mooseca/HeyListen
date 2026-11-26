@@ -14,7 +14,7 @@
 namespace mkwvk {
 
 /// Why FSR 4 frame generation is not offered here, for the menu and the log
-enum Fsr4FgWhy { FSR4FG_OK, FSR4FG_NOT_BUILT, FSR4FG_ENV_OFF, FSR4FG_NOT_WINDOWS, FSR4FG_NO_LOADER, FSR4FG_NO_PROVIDER, FSR4FG_FAILED, FSR4FG_UNKNOWN };
+enum Fsr4FgWhy { FSR4FG_OK, FSR4FG_NOT_BUILT, FSR4FG_ENV_OFF, FSR4FG_NOT_WINDOWS, FSR4FG_NO_LOADER, FSR4FG_NO_PROVIDER, FSR4FG_FAILED, FSR4FG_NO_FG_DLL, FSR4FG_UNKNOWN };
 /// The reason, FSR4FG_UNKNOWN while AMD's runtime has not been asked yet (the menu asks when it opens; the first frame with the row
 /// at FSR 4 asks too)
 Fsr4FgWhy fsr4fg_why();

@@ -62,7 +62,8 @@ const char* fsr4fg_why_text(Fsr4FgWhy why) {
     case FSR4FG_NOT_BUILT: return "Not in this build (it is built with AMD's FSR headers).";
     case FSR4FG_ENV_OFF: return "Turned off for this run (RX_VK_FSR4_FG=0).";
     case FSR4FG_NOT_WINDOWS: return "AMD publishes FSR 4 frame generation for Windows only.";
-    case FSR4FG_NO_LOADER: return "AMD's runtime is not there (amd_fidelityfx_loader_vk.dll and amd_fidelityfx_framegeneration_vk.dll, from AMD's FidelityFX SDK 2.4).";
+    case FSR4FG_NO_LOADER: return "AMD's runtime is not there (amd_fidelityfx_loader_vk.dll and amd_fidelityfx_framegeneration_vk.dll, from AMD's FidelityFX SDK 2.4): run the Builder again with the AMD FSR 4 box ticked, it fetches them.";
+    case FSR4FG_NO_FG_DLL: return "AMD's frame generation file (amd_fidelityfx_framegeneration_vk.dll) is not beside the loader: run the Builder again with the AMD FSR 4 box ticked, it fetches it.";
     case FSR4FG_NO_PROVIDER: return "AMD's runtime has no frame generation for this GPU (it needs a Radeon RX 9000 on Windows 11).";
     case FSR4FG_FAILED: return "AMD's runtime refused three frames in a row; it is off for this run.";
     default: return "Not asked yet.";
@@ -74,6 +75,7 @@ const char* fsr4fg_why_text(Fsr4FgWhy why) {
 namespace {
 
 constexpr const char* kLoader = "amd_fidelityfx_loader_vk.dll";
+constexpr const char* kFrameGen = "amd_fidelityfx_framegeneration_vk.dll";   // (AMD's frame generation provider, which the loader picks beside itself)
 constexpr int kFailuresOff = 3;   // (frames in a row AMD's runtime refuses before it is let go for the run)
 
 /// AMD's return code in words (ffx_api.h ffxReturnCode_t)
@@ -138,7 +140,7 @@ void ask_locked(State& s) {
         s.cap = 0;
     };
     if (env_fg() == 0) return no(FSR4FG_ENV_OFF);
-    std::string where;
+    std::string where, loaded_dir;
     for (const std::string& dir : fsr_library_dirs()) {
         where += (where.empty() ? "" : ", ") + dir;
         const std::string path = dir + "\\" + kLoader;
@@ -146,10 +148,14 @@ void ask_locked(State& s) {
         // (as vk_fsr4.cpp opens it: the DLLs the loader picks lie beside it, its folder first in the search; the same module when the upscaler has it open)
         s.lib = LoadLibraryExA(path.c_str(), nullptr, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
         if (!s.lib) logf("vk: AMD FSR 4 FG: %s not loaded (Windows error %lu)", path.c_str(), (unsigned long)GetLastError());
-        else break;
+        else {
+            loaded_dir = dir;
+            break;
+        }
     }
     if (!s.lib) {
-        logf("vk: AMD FSR 4 FG: not offered: no %s in %s (AMD's runtime: the readme says where it comes from)", kLoader, where.c_str());
+        logf("vk: AMD FSR 4 FG: not offered: no %s in %s (run the Builder again with the AMD FSR 4 box ticked: it fetches AMD's runtime; the readme says where it comes from)",
+             kLoader, where.c_str());
         return no(FSR4FG_NO_LOADER);
     }
     s.create = (PfnFfxCreateContext)GetProcAddress(s.lib, "ffxCreateContext");
@@ -160,6 +166,13 @@ void ask_locked(State& s) {
     if (!s.create || !s.destroy || !s.query || !s.dispatch || !s.configure) {
         logf("vk: AMD FSR 4 FG: not offered: %s lacks the FSR API's entry points", kLoader);
         return no(FSR4FG_NO_LOADER);
+    }
+    // (the loader finds the frame generation provider beside itself: a folder built with AMD FSR 4 before the Builder fetched it has the
+    // upscaler and the loader but not this file, and AMD's query would only say "no provider")
+    if (GetFileAttributesA((loaded_dir + "\\" + kFrameGen).c_str()) == INVALID_FILE_ATTRIBUTES) {
+        logf("vk: AMD FSR 4 FG: not offered: no %s beside the loader in %s (run the Builder again with the AMD FSR 4 box ticked: it fetches it)",
+             kFrameGen, loaded_dir.c_str());
+        return no(FSR4FG_NO_FG_DLL);
     }
     s.device_context = VkDeviceContext{dev.device, dev.physical, vkGetDeviceProcAddr};
     // (AMD's own capability query: the frame generation versions the runtime has for this device, as the upscaler row asks for FSR 4)
