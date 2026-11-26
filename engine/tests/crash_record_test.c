@@ -169,6 +169,7 @@ void hos_hostcall_stats(void) {}
 /* HOS_LOG */
 /* HOS_FATAL */
 void rx_close_asked(void) {}
+int rx_save_caches_at_exit(unsigned budget_ms) { (void)budget_ms; return 0; }   /* (host/rx_backend.c: the window close saves the back end's caches) */
 static int relaunch_asked = 1;
 static void relaunch(void) { assert(marker == NO_FILE && !ready); }
 /* WINDOW_EXIT */

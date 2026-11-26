@@ -89,6 +89,10 @@ static void relaunch(void) {
 void hos_window_closed_exit(void) {
     const int again = relaunch_asked != 0;
     hos_log(again ? "display: window closed for a restart (the Insert menu's Restart now)" : "display: window closed, exiting");
+    /* (STUT3) the pipeline cache first, as the menu's Restart saves it: the close ended the process with the session's new
+       pipelines unsaved. At most a second: the exit stays prompt, and a save cut short leaves the old file whole */
+    int rx_save_caches_at_exit(unsigned budget_ms);
+    rx_save_caches_at_exit(1000);
     hos_log_flush();
     void hos_crash_clean_end(void);
     hos_crash_clean_end();

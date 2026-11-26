@@ -10155,7 +10155,9 @@ static int release_may_wait() {
     replay_mu.unlock();
     return 0;
 }
+int caches_save_at_exit(uint32_t budget_ms);   // (vk_draw.cpp, STUT3)
 void fill_replay_table(MkwVkRenderer& t) {
+    t.save_caches = caches_save_at_exit;
     t.nvn_release_may_wait = release_may_wait;
     t.stats = stats;
     t.nvn_submit = submit;

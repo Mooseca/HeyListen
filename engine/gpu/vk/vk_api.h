@@ -17,7 +17,7 @@
 extern "C" {
 #endif
 
-#define MKWVK_API_VERSION 20
+#define MKWVK_API_VERSION 21
 enum { HOS_OPT_CHEAT_HEARTS = 32, HOS_OPT_CHEAT_FLIGHT, HOS_OPT_CHEAT_ACTION, HOS_OPT_CHEAT_CAMERA };
 /* (hookshot) the Motion page's rows (host/pad_sdl.c reads them, vk_replay.cpp's option answers them): Motion controls on
    or off, the horizontal's and the vertical's sensitivity in percent, each turned around, and the deadzone (0 to 2) */
@@ -235,6 +235,9 @@ typedef struct MkwVkRenderer {
        progress under the order lock (RX_VK_RELEASE_HINT): the host gives its thread's virtual core up around the call only then.
        NULL: not known, the host gives it up for each release as an invalidate does */
     int (*nvn_release_may_wait)(void);
+    /* (STUT3, version 21) the window is closing: the caches the back end keeps only by its own saves (the pipeline cache) written
+       now, waiting at most budget_ms for it; returns 1 when it was written in time (host/hos_relaunch.c, before ExitProcess) */
+    int (*save_caches)(uint32_t budget_ms);
 } MkwVkRenderer;
 
 /* the DLL's one export: null when Vulkan is not usable (the executable then falls back to WebGPU) */

@@ -608,6 +608,11 @@ static int texels_keep_core(void) {
    issue 67), and every game thread allowed on that core waited for it. The thread gives its core up for the call when the
    back end says the call would wait (nvn_release_may_wait: a lock held now); releases are thousands a load, so a call
    with the locks free keeps the core and pays nothing. HOS_RELEASE_KEEP_CORE=1: kept always, as before */
+/* (STUT3) the window is closing: the back end's caches written, waiting at most budget_ms (MkwVkRenderer::save_caches); 0 when
+   there is no Vulkan back end or it did not finish in time */
+int rx_save_caches_at_exit(unsigned budget_ms) {
+    return vk && vk->save_caches ? vk->save_caches(budget_ms) : 0;
+}
 static int release_gives_core(void) {
     static int off = -1;
     if (off < 0) off = env_on("HOS_RELEASE_KEEP_CORE");
