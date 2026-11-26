@@ -213,6 +213,7 @@ ARGS = {
     "tests/test_stick_rest.py": ["--cc", "gcc"],
     "tests/test_xinput_thread.py": ["--cc", "gcc"],
     "tests/test_handle_table_count.py": ["--cxx", "{cxx}"],
+    "tests/test_stack_commit.py": ["--cc", "gcc"],
     "tests/test_menu_restart.py": ["--cxx", "g++", "--cc", "gcc"],
     "tests/test_output_resolution.py": ["--cxx", "{cxx}"],
     "tests/test_handheld_live.py": ["--cxx", "{cxx}"],
