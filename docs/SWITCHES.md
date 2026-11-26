@@ -10,7 +10,7 @@ python -I engine/scripts/list_switches.py
 
 and commit both files. A test (`engine/tests/test_switches_documented.py`) fails when a switch read in the source is missing here or the data file is out of date.
 
-1537 switches: 56 players may be told to use, 396 diagnostic, 1085 developer-only; 1320 have a real explanation and 217 are marked `undocumented`.
+1540 switches: 56 players may be told to use, 396 diagnostic, 1088 developer-only; 1323 have a real explanation and 217 are marked `undocumented`.
 
 ## How to set a switch
 
@@ -64,12 +64,12 @@ The entries below say what each one does, its values and default, and when it is
 
 | Area | Switches | Player | Diagnostic | Developer |
 |---|---:|---:|---:|---:|
-| [Renderer](#renderer-upscaling-frame-generation-hdr-v-sync-and-presentation) | 501 | 23 | 14 | 464 |
+| [Renderer](#renderer-upscaling-frame-generation-hdr-v-sync-and-presentation) | 502 | 23 | 14 | 465 |
 | [Shaders and pipelines](#shaders-and-pipelines) | 128 | 6 | 0 | 122 |
 | [Memory and textures](#memory-and-textures) | 216 | 10 | 0 | 206 |
 | [Audio](#audio) | 14 | 5 | 9 | 0 |
 | [Input and controllers](#input-and-controllers) | 13 | 1 | 12 | 0 |
-| [Native engine (`HL_*`)](#native-engine-hl_) | 105 | 1 | 39 | 65 |
+| [Native engine (`HL_*`)](#native-engine-hl_) | 107 | 1 | 39 | 67 |
 | [Host and OS (`HOS_*` and the system's variables)](#host-and-os-hos_-and-the-systems-variables) | 139 | 10 | 0 | 129 |
 | [Telemetry and crash reports](#telemetry-and-crash-reports) | 12 | 0 | 12 | 0 |
 | [Diagnostics and logging](#diagnostics-and-logging) | 310 | 0 | 310 | 0 |
@@ -77,7 +77,7 @@ The entries below say what each one does, its values and default, and when it is
 
 ## Renderer: upscaling, frame generation, HDR, V-Sync and presentation
 
-501 switches of the renderer: the upscaler, frame generation, HDR, V-Sync and what reaches the screen.
+502 switches of the renderer: the upscaler, frame generation, HDR, V-Sync and what reaches the screen.
 
 ### Upscaling (DLSS, FSR, TAAU)
 
@@ -369,7 +369,7 @@ No frame generation whatever the menu says; over the options file: its multiplie
 
 **When a player would use it:** The upscaler causes artifacts: `=0` to `2` choose the filter for one run.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2762`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2864`.
 
 ### Frame generation
 
@@ -461,7 +461,7 @@ No frame generation whatever the menu says; over the options file: its multiplie
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2755`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2857`.
 
 #### `RX_VK_FRAMEGEN_RADIUS` - developer
 
@@ -583,7 +583,7 @@ Starts in fullscreen; the Insert menu's Fullscreen row is then left alone.
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2871` and 2 more places.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2973` and 2 more places.
 
 #### `HOS_HUD_FULL_RATIO` - developer
 
@@ -633,7 +633,7 @@ Over the options file: the output resolution (0 2048x1152, 1 2560x1440, 2 3840x2
 
 **When a player would use it:** The output resolution is wrong or the game starts at a size the screen cannot show: `0` to `4` pick a resolution for one run.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2767` and 1 more place.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2869` and 1 more place.
 
 #### `HOS_PRESENT_NOWAIT` - diagnostic
 
@@ -653,7 +653,7 @@ Over the options file: the output resolution (0 2048x1152, 1 2560x1440, 2 3840x2
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1155`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1182`.
 
 #### `HOS_REALTIME_WINDOW` - diagnostic
 
@@ -743,7 +743,7 @@ The Insert menu's HDR row for one run (the ini keeps the player's choice).
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2757`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2859`.
 
 #### `RX_VK_HDR_FIND` - developer
 
@@ -783,7 +783,7 @@ No frame generation whatever the menu says; over the options file: its multiplie
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2756`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2858`.
 
 #### `RX_VK_PRESENT_QUEUE` - diagnostic
 
@@ -843,7 +843,7 @@ The menu's button prompts for a controller or the keys, whatever was used last (
 
 **When a player would use it:** Screenshots need one set of button prompts: `pad` or `keys`.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:3049`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:3151`.
 
 #### `SDL_VIDEODRIVER` - diagnostic
 
@@ -2417,6 +2417,16 @@ The graphics card listed as `vk: device <n>` in the log, over the menu's GPU dev
 
 **Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_replay.cpp:5335`.
 
+#### `RX_VK_EXIT_SAVE` - developer
+
+The file is written whole as .tmp and renamed (pcache_save_mapped / the vector path): a save cut by the exit leaves the old file as it was. RX_VK_EXIT_SAVE=0: nothing written at the close, as before.
+
+**Values:** on or off (0, false, off, no and empty are off); the description names `0`. **Default:** off (unset).
+
+**When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
+
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_draw.cpp:12198`.
+
 #### `RX_VK_FALLBACK_INDEXED` - developer
 
 (LAPTOP1) RX_VK_FALLBACK_INDEXED=1: the no-mesh fallback writes a record a vertex and draws indexed (emit_spirv.h MESH_FALLBACK_INDEX_WORDS) for the mesh programs it can (triangles, no per-primitive lines). Off by default; in the program cache's stamp when on.
@@ -2545,7 +2555,7 @@ The flash detector, with `RX_VK_SHOTS` and `RX_VK_SHOT_EVERY=1`: writes the fram
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2551`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2646`.
 
 #### `RX_VK_FOG_BOXES` - developer
 
@@ -3085,7 +3095,7 @@ Timed Insert menu keys: `INS`, `UP`, `DOWN`, `LEFT`, `RIGHT`, `ESC`, `ENTER`, `T
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:3077`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:3179`.
 
 #### `RX_VK_METER_HOLD` - player
 
@@ -3295,7 +3305,7 @@ On Windows, Intel's compiler (UHD and Arc) is entered by one thread (`IntelDrive
 
 **When a player would use it:** Windows on an Intel UHD or Arc: a driver fault or a long stall when shaders and pipelines are made. `=1` builds them side by side for the run.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_draw.cpp:12326`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_draw.cpp:12353`.
 
 #### `RX_VK_NO_INVARIANT` - developer
 
@@ -5373,7 +5383,7 @@ The pipeline cache's saves in play: `1` (default) only when the free physical me
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_draw.cpp:12195`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_draw.cpp:12222`.
 
 #### `RX_VK_PEEK_PROG` - developer
 
@@ -5555,7 +5565,7 @@ A lift without the option never asks: MXCSR is left alone, as before. HOS_FPCR_S
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:586`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:613`.
 
 #### `HOS_NVN_SYNC_BLOCK` - developer
 
@@ -7795,7 +7805,7 @@ The heaps: not while hos_heapsplit.c measures their coldness itself (HOS_HEAP_SP
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hl_mem.c:841` and 1 more place.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hl_mem.c:883` and 1 more place.
 
 #### `HOS_HEAP_SPLIT_COLD` - developer
 
@@ -7805,7 +7815,7 @@ The heaps: not while hos_heapsplit.c measures their coldness itself (HOS_HEAP_SP
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hl_mem.c:841` and 1 more place.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hl_mem.c:883` and 1 more place.
 
 #### `HOS_KEEP_FREED_PAGES` - developer
 
@@ -8575,13 +8585,13 @@ RX_VK_WAIT_OWN=1 / 0 turns the wait on / off on any GPU; setting RX_VK_WAIT_GPU 
 
 #### `HOS_AUDIO_DEVICE` - diagnostic
 
-The device: HOS_AUDIO_DEVICE=<n> (a waveOut device number) first, then the Windows default (WAVE_MAPPER), then each device in turn. Players had no sound at all while every other program played ("no sound in 2.0.5"): the log now names the device; one that takes no block for 1.5 s (an unplugged headset, a default bound to a dead output) is closed and the next candidate opened (at most 6 times a run); 10 s after opening the log says how many blocks the device took and how loud the game's sound was, which tells a silent game from a deaf device. Issue 99: when HOS_AUDIO_DEVICE is unset, device 0 is tried first (not skipped to WAVE_MAPPER). the next candidate: 0 = device 0 (or HOS_AUDIO_DEVICE), 1 = the default, 2.. = device n-2.
+**Output device** is where the game's sound plays. Default follows Windows' default output device; the list shows each active output by its name, and a change applies at once, with no restart. The choice is kept by the device's id (`output_device_id`, with its name beside it, in `hookshot_options.ini`). A chosen device that is unplugged stays chosen (shown as not connected) and Default stands in, with a line in the log; it is tried again when the menu is opened. A device unplugged while the game plays is left for Default the same way. On Linux the sound goes to SDL's default device and the row has Default only: the system's sound settings choose the device. `HOS_AUDIO_DEVICE=<n>` (a waveOut device number) still wins over the row for one run. Audio output (Auto, Stereo, 5.1) is the speakers the game mixes for; this row is the device they play on.
 
 **Values:** text. **Default:** unset.
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/nn_audio.c:905`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/nn_audio.c:951` and 1 more place.
 
 #### `HOS_AUDIO_MUTE` - diagnostic
 
@@ -8603,7 +8613,7 @@ No sound device is opened (the mixer still runs); `scripts/run-vk.ps1` sets it u
 
 **When a player would use it:** No sound device works and the game will not start: `=0` opens none (the mixer still runs).
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/nn_audio.c:945`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/nn_audio.c:1131`.
 
 #### `HOS_AUDIO_CENTRE` - diagnostic
 
@@ -8613,7 +8623,7 @@ No sound device is opened (the mixer still runs); `scripts/run-vk.ps1` sets it u
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/nn_audio.c:884`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/nn_audio.c:1068`.
 
 #### `HOS_AUDIO_IMMEDIATE` - diagnostic
 
@@ -8623,7 +8633,7 @@ HOS_AUDIO_IMMEDIATE=1: every change applied as it comes (as before).
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/nn_audio.c:1186`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/nn_audio.c:1410`.
 
 #### `HOS_AUDIO_NO_EFFECTS` - player
 
@@ -8655,7 +8665,7 @@ Output: waveOut, 10 ms blocks; a WAV file with HOS_AUDIO_DUMP ------------------
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/nn_audio.c:937`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/nn_audio.c:1121`.
 
 #### `HOS_AUDIO_STATS` - diagnostic
 
@@ -8685,7 +8695,7 @@ HOS_AUDIO_WB_DUMP=<dir>: the first 40 wave buffers' data and the voice's coeffic
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/nn_audio.c:1668`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/nn_audio.c:1892`.
 
 #### `HOS_MIC_LOG` - player
 
@@ -8849,7 +8859,7 @@ As above; the last lets every device count while the window is behind another on
 
 ## Native engine (`HL_*`)
 
-105 switches of the native engine (`HL_*`).
+107 switches of the native engine (`HL_*`).
 
 ### Main loop
 
@@ -8893,7 +8903,17 @@ Not asked if you had set the Quality preset or the rows it sets. `HL_LOWEND=0` n
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2605`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2700`.
+
+#### `HL_MEM_COLD_HIGH_MB` - developer
+
+(STUT3, HL_MEM_COLD_LOW_MB=<MB>, default 4096; HL_MEM_COLD_HIGH_MB=<MB>, default 6144) the pass, pools and heaps, runs only while the PC is short of RAM: it starts when the available RAM falls under the LOW line and stops once it is back at the HIGH line (never under LOW). HL_MEM_COLD_LOW_MB=0: whatever the free RAM, as before.
+
+**Values:** text (`0` named). **Default:** unset.
+
+**When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
+
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hl_mem.c:503`.
 
 #### `HL_STEP_SCAN` - developer
 
@@ -9107,7 +9127,7 @@ HL_FAULT_WATCH=<poll ms> (diagnostic, off by default; STALL2, 22 Nov 2026): who 
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hl_mem.c:808`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hl_mem.c:850`.
 
 #### `HL_HITCH_LOG` - diagnostic
 
@@ -9459,7 +9479,7 @@ Not asked if you had set the Quality preset or the rows it sets. `HL_LOWEND=0` n
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2609` and 1 more place.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2704` and 1 more place.
 
 #### `HL_LOWEND_TEST` - developer
 
@@ -9469,7 +9489,7 @@ Not asked if you had set the Quality preset or the rows it sets. `HL_LOWEND=0` n
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2594`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2689`.
 
 #### `HL_MATH` - developer
 
@@ -9499,7 +9519,7 @@ HL_MEM_ACCOUNT=<seconds> (off by default): where the process's private commit an
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hl_mem.c:804`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hl_mem.c:846`.
 
 #### `HL_MEM_COLD` - developer
 
@@ -9519,27 +9539,27 @@ The pools: those with the chosen flags made HL_MEM_COLD_AGE ago or more, from wh
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hl_mem.c:824`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hl_mem.c:866`.
 
 #### `HL_MEM_COLD_FLAGS` - developer
 
-HL_MEM_ACCOUNT=<seconds> the "hl mem: account:" lines (private commit and working set by owner) HL_MEM_COLD_FLAGS=<hex,...> the pool flags (default 24,64) HL_MEM_COLD_AGE=<seconds> the pools' age (default 10) HL_FAULT_WATCH=<ms>: who takes the page faults, and on what memory (its comment, above hl_mem_init). Every 10 s two lines "hl mem: cold pages (pools): ..." and "(heaps): ..." give the counters (MB out now, taken out, came back and how often, the most that came back in 10 s).
+HL_MEM_ACCOUNT=<seconds> the "hl mem: account:" lines (private commit and working set by owner) HL_MEM_COLD_FLAGS=<hex,...> the pool flags (default 24,64) HL_MEM_COLD_AGE=<seconds> the pools' age (default 10) HL_MEM_COLD_LOW_MB=<MB> (default 4096) / HL_MEM_COLD_HIGH_MB=<MB> (default 6144) the whole pass only while the available RAM is short: on under LOW, off again from HIGH (hl_mem_coldgate.h); LOW=0: whatever the free RAM, as before (STUT3) HL_FAULT_WATCH=<ms>: who takes the page faults, and on what memory (its comment, above hl_mem_init). Every 10 s two lines "hl mem: cold pages (pools): ..." and "(heaps): ..." give the counters (MB out now, taken out, came back and how often, the most that came back in 10 s).
 
-**Values:** text. **Default:** unset.
+**Values:** text (`0` named). **Default:** unset.
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hl_mem.c:824`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hl_mem.c:866`.
 
 #### `HL_MEM_COLD_HEAPS` - developer
 
-HL_MEM_COLD=1 on (the default) HL_MEM_COLD=0 off: nothing here runs, as before HL_MEM_COLD_HEAPS=1 the heaps too (the default) HL_MEM_COLD_HEAPS=0 the pools only HL_MEM_COLD_PRESSURE=0 without the back-off: a pass of 500 ms or more stops all trimming for 60 s, and the pools wait out the quiet rule too (the default: the system is paging then, and what comes back is read from the page file) HL_MEM_COLD_LOWMEM=<MB> no trimming while the system's available RAM is under that (a quarter more to start again; default 0: never held, 3072 proposed). HL_MEM_ACCOUNT=<seconds> the "hl mem: account:" lines (private commit and working set by owner) HL_MEM_COLD_FLAGS=<hex,...> the pool flags (default 24,64) HL_MEM_COLD_AGE=<seconds> the pools' age (default 10) HL_FAULT_WATCH=<ms>: who takes the page faults, and on what memory (its comment, above hl_mem_init).
+HL_MEM_COLD=1 on (the default) HL_MEM_COLD=0 off: nothing here runs, as before HL_MEM_COLD_HEAPS=1 the heaps too (the default) HL_MEM_COLD_HEAPS=0 the pools only HL_MEM_COLD_PRESSURE=0 without the back-off: a pass of 500 ms or more stops all trimming for 60 s, and the pools wait out the quiet rule too (the default: the system is paging then, and what comes back is read from the page file) HL_MEM_COLD_LOWMEM=<MB> no trimming while the system's available RAM is under that (a quarter more to start again; default 0: never held, 3072 proposed). HL_MEM_ACCOUNT=<seconds> the "hl mem: account:" lines (private commit and working set by owner) HL_MEM_COLD_FLAGS=<hex,...> the pool flags (default 24,64) HL_MEM_COLD_AGE=<seconds> the pools' age (default 10) HL_MEM_COLD_LOW_MB=<MB> (default 4096) / HL_MEM_COLD_HIGH_MB=<MB> (default 6144) the whole pass only while the available RAM is short: on under ...
 
 **Values:** text (`1`, `0` named). **Default:** unset.
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hl_mem.c:841`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hl_mem.c:883`.
 
 #### `HL_MEM_COLD_LISTED` - developer
 
@@ -9549,7 +9569,7 @@ HL_MEM_COLD=1 on (the default) HL_MEM_COLD=0 off: nothing here runs, as before H
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hl_mem.c:846`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hl_mem.c:888`.
 
 #### `HL_MEM_COLD_LOWMEM` - developer
 
@@ -9561,6 +9581,16 @@ HL_MEM_COLD=1 on (the default) HL_MEM_COLD=0 off: nothing here runs, as before H
 
 **Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/perf_report.cpp:793` and 1 more place.
 
+#### `HL_MEM_COLD_LOW_MB` - developer
+
+(STUT3, HL_MEM_COLD_LOW_MB=<MB>, default 4096; HL_MEM_COLD_HIGH_MB=<MB>, default 6144) the pass, pools and heaps, runs only while the PC is short of RAM: it starts when the available RAM falls under the LOW line and stops once it is back at the HIGH line (never under LOW). HL_MEM_COLD_LOW_MB=0: whatever the free RAM, as before. On the PC 3050 (32 GB, 4.4 GB free at the least in play) the pass took 5-6 GB of pool pages and ~3 GB of heap pages out in a warp tour and 4-5 GB came back; with the pass off the frames over 100 ms fell by 31 percent in one series.
+
+**Values:** text (`0` named). **Default:** unset.
+
+**When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
+
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hl_mem.c:501`.
+
 #### `HL_MEM_COLD_PRESSURE` - developer
 
 (STUT1, HL_MEM_COLD_PRESSURE=0: as before) A pass that took 500 ms or more, or memory coming back fast, stops the trimming for a while, the pools' too: the v0.4.2 log of issue 67 (16 GB, 10.3 GB used, an RX 580) took 8.7 GB of pool pages out and 6.8 GB came back, 113,504 units, and one working-set query took 6.8 s with game threads 2-11 s without a core: the system was paging, and each page taken out was one more to read back.
@@ -9569,7 +9599,7 @@ HL_MEM_COLD=1 on (the default) HL_MEM_COLD=0 off: nothing here runs, as before H
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hl_mem.c:482`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hl_mem.c:488`.
 
 #### `HL_MEM_DROP` - developer
 
@@ -9935,7 +9965,7 @@ The Frame rate limit for the run, over the row and Unlimited: the rate presented
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2775` and 2 more places.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2877` and 2 more places.
 
 #### `HOS_FPS_LOOP` - developer
 
@@ -10057,7 +10087,7 @@ TICK-062 A10, HOS_CORE_COUNT=1 (diagnostic, no behaviour change): per guest thre
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1062`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1089`.
 
 #### `HOS_CV_SIGNAL_FAST` - developer
 
@@ -10167,7 +10197,7 @@ HOS_POLL_SLEEP_NS=<ns> (experiment): a guest sleep of up to 100 us lasts at most
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1105`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1132`.
 
 #### `HOS_PRIO` - developer
 
@@ -10177,17 +10207,17 @@ The first matching entry wins. (2026-10-20: the castle's MainThread and ModuleSy
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:837`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:864`.
 
 #### `HOS_RELEASE_KEEP_CORE` - player
 
-(HeyListen, v0.4.4, RX_VK_RELEASE_HINT / HOS_RELEASE_KEEP_CORE) A texture's or a program's release, with the replay not asynchronous, drains the stopped queues under the order lock and takes the replay's lock: behind a whole submission being replayed, 2 s with an RX 580's pipeline compiles (OptimizeChangeBanc held core 4 for 2.0-2.5 s inside hookshot_vk.dll, issue 67), and every game thread allowed on that core waited for it. The thread gives its core up for the call when the back end says the call would wait (nvn_release_may_wait: a lock held now); releases are thousands a load, so a call with the locks free keeps the core and pays nothing. HOS_RELEASE_KEEP_CORE=1: kept always, as before.
+(HeyListen, v0.4.4) The memory pool calls (a pool made, its flags, its finalize: a few hundred a boot, none in the frames) take the back end's pool locks, which an import or a replay in progress holds: BootupBackgroundWorkThread sat in a futex inside the renderer for 165 s holding core 2 at the start of an Arc B580's boot on Linux (issue 88; every other game thread "ran without a core after 2000 ms"). The core is given up for them. HOS_RELEASE_KEEP_CORE=1: kept, as before.
 
 **Values:** on or off (0, false, off, no and empty are off); the description names `1`. **Default:** off (unset).
 
 **When a player would use it:** Freezes while a zone loads: `=1` keeps the thread's virtual core through a texture or program release even when the renderer would make it wait (v0.4.3's behaviour).
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/rx_backend.c:613` and 1 more place.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/rx_backend.c:623` and 1 more place.
 
 #### `HOS_RESERVE_CORE` - developer
 
@@ -10197,7 +10227,7 @@ No virtual cores; the cores the game sees (6); no core kept for the replay (one 
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:802`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:829`.
 
 #### `HOS_SHORT_SLEEP_PAUSE` - developer
 
@@ -10217,7 +10247,7 @@ The game's sleeps under a millisecond (SleepThread): `0` all short sleeps yield 
 
 **When a player would use it:** Short sleeps cost CPU time: `=1` waits on the timer instead of yielding.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:950` and 1 more place.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:977` and 1 more place.
 
 #### `HOS_SPIN_ALWAYS` - developer
 
@@ -10247,7 +10277,7 @@ undocumented: host/hos_svc.c:138 (in `spin_for_release()`) reads it as a text va
 
 **When a player would use it:** Freezes at area changes: `=1` keeps the thread's virtual core while a CPU read or write of texels waits for the GPU (the behaviour before Longshot #1827).
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/rx_backend.c:602`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/rx_backend.c:607`.
 
 #### `HOS_THREAD_OF_CACHE` - developer
 
@@ -10267,7 +10297,7 @@ No virtual cores; the cores the game sees (6); no core kept for the replay (one 
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1438`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1465`.
 
 #### `HOS_VCORE_ESCAPE_EQ_US` - developer
 
@@ -10277,7 +10307,7 @@ A waiter better than a holder asks it to give the core up (vc_kick), which it do
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1773`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1800`.
 
 #### `HOS_VCORE_ESCAPE_US` - developer
 
@@ -10287,7 +10317,7 @@ A waiter better than a holder asks it to give the core up (vc_kick), which it do
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1774`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1801`.
 
 #### `HOS_VCORE_SLICE_US` - developer
 
@@ -10297,7 +10327,7 @@ The worst holder worse than t on a core t may use gives it up at its next checkp
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1775`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1802`.
 
 #### `HOS_VCORE_STARVE_US` - developer
 
@@ -10307,7 +10337,7 @@ A game thread that has waited this long for a virtual core (default 1000000, 1 s
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1776`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1803`.
 
 #### `HOS_VCORE_WHERE` - developer
 
@@ -10317,7 +10347,7 @@ HOS_VCORE_WHERE=all (diagnostic): at each of the first 12 escapes, where every t
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1724`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1751`.
 
 #### `HOS_WEB_SPIN_SLEEP` - developer
 
@@ -10327,7 +10357,7 @@ The web has no high-resolution timer, and its clock is a call into JavaScript: s
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:930`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:957`.
 
 #### `MESA_VK_ENABLE_SUBMIT_THREAD` - developer
 
@@ -10613,7 +10643,7 @@ The API is synchronous and single-stream: mf_av1_decode takes one temporal unit 
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1473`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1500`.
 
 #### `HOS_BG_RUN_US` - developer
 
@@ -10623,7 +10653,7 @@ HOS_BG_CAP=auto: the physical cores the game's threads have (the host's, less th
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1473`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1500`.
 
 #### `HOS_BG_THROTTLE` - developer
 
@@ -10633,7 +10663,7 @@ HOS_BG_CAP=auto: the physical cores the game's threads have (the host's, less th
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:2006`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:2033`.
 
 #### `HOS_BG_WAIT_US` - developer
 
@@ -10643,7 +10673,7 @@ HOS_BG_CAP=auto: the physical cores the game's threads have (the host's, less th
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1473`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1500`.
 
 #### `HOS_COND_RECORD` - developer
 
@@ -10683,7 +10713,7 @@ Over the options file: Resolution 100% (non-zero: Auto), Game speed Per frame (1
 
 **When a player would use it:** The dynamic resolution makes the picture soft: `=0` holds 100% for one run.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2766`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2868`.
 
 #### `HOS_EVENT_FAST` - developer
 
@@ -11003,7 +11033,7 @@ HOS_OCB_HOLD_MS (default 2000): how many ms a new neighbouring map must stay the
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:846`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:873`.
 
 #### `HOS_OOT_CHEATS` - player
 
@@ -11013,7 +11043,7 @@ To enable the debug tools, turn **Debug tools** on in the menu's Debug tab (or a
 
 **When a player would use it:** The Debug tab's tools should show without turning them on in the menu.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2670`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2765`.
 
 #### `HOS_OOT_PROTECT_HEARTS` - developer
 
@@ -11023,7 +11053,7 @@ To enable the debug tools, turn **Debug tools** on in the menu's Debug tab (or a
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2673` and 1 more place.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2768` and 1 more place.
 
 #### `HOS_OOT_TELEPORT_EVENT` - developer
 
@@ -11063,7 +11093,7 @@ undocumented: host/hos_main.c:1104 (in `oot_teleport()`) reads it as a text valu
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:898`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:925`.
 
 #### `HOS_PGO` - developer
 
@@ -11083,7 +11113,7 @@ HOS_PIN=<name part>=<hex mask>,...[,*=<hex mask>] (experiment): host CPU affinit
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:836`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:863`.
 
 #### `HOS_POWER_THROTTLING` - developer
 
@@ -11123,7 +11153,7 @@ Over the options file: Resolution 100% (non-zero: Auto), Game speed Per frame (1
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2765`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_menu.cpp:2867`.
 
 #### `HOS_RESTART_OF` - developer
 
@@ -11183,7 +11213,7 @@ Over the options file: Resolution 100% (non-zero: Auto), Game speed Per frame (1
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1255`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1282`.
 
 #### `HOS_VC_YIELD_FAST` - developer
 
@@ -11193,7 +11223,7 @@ A yield takes the virtual-core lock every time, and twice when it gives the core
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1940`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1967`.
 
 #### `HOS_VI_DOUBLE` - developer
 
@@ -11213,7 +11243,7 @@ A yield takes the virtual-core lock every time, and twice when it gives the core
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/rx_backend.c:473`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/rx_backend.c:478`.
 
 #### `HOS_VOICE_OPTION_FOLLOW` - developer
 
@@ -11415,13 +11445,13 @@ The sender's limits: summaries a start (12), a request's seconds (10), and wheth
 
 #### `HOS_CRASH_MINIDUMP` - diagnostic
 
-undocumented: host/hos_crash_record.c:755 (in `prepare_dump()`) reads it as an on/off switch: `if (!env_on("HOS_CRASH_MINIDUMP")) return;`. No comment in the source says what it changes.
+undocumented: host/hos_crash_record.c:760 (in `prepare_dump()`) reads it as an on/off switch: `if (!env_on("HOS_CRASH_MINIDUMP")) return;`. No comment in the source says what it changes.
 
 **Values:** on or off (0, false, off, no and empty are off). **Default:** off (unset).
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_crash_record.c:755`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_crash_record.c:760`.
 
 #### `HOS_CRASH_TEST` - diagnostic
 
@@ -11497,7 +11527,7 @@ The game's semantics are kept: a job is pushed only once it is ready, as before;
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:227`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:230`.
 
 #### `HOS_LOG_QPC` - diagnostic
 
@@ -11507,17 +11537,17 @@ Every log line ends with ` @qpc <ticks>`, the clock of PresentMon's `TimeInQPC` 
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:347`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:373`.
 
 #### `HOS_LOG_SYNC` - diagnostic
 
-Lines are written by log_main, not by the thread that logs: a write that blocks (a console; the log file while the disk is busy: the render thread was seen held 140-310 ms in one line's write) holds no game thread. Nothing queued is lost when the game ends or crashes: hos_fatal, report_crash/report_fatal (mkw_glue.c), log_crash_filter, svcExitProcess, the window's close and the process's exit (atexit) write the queue first. HOS_LOG_SYNC=1: each line written by the thread that logs it, as files and pipes were before.
+Lines are written by log_main, not by the thread that logs: a write that blocks (a console; the log file while the disk is busy: the render thread was seen held 140-310 ms in one line's write) holds no game thread. Nothing queued is lost when the game ends or crashes: hos_fatal, report_crash/report_fatal (mkw_glue.c), log_crash_filter, svcExitProcess, the window's close and the process's exit (atexit) write the queue first. HOS_LOG_SYNC=1: each line written by the thread that logs it, as files and pipes were before (STUT3: lines a full queue left out, not yet said) (STUT3: all of them, for the crash record's header: hos_log_dropped_total).
 
 **Values:** text (`1` named). **Default:** unset.
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:304`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:310`.
 
 #### `HOS_MAP_TRACE` - diagnostic
 
@@ -11707,7 +11737,7 @@ HOS_SLEEP_LOG=1 (diagnostic): guest sleeps by caller (LR) every 5 s: count, aske
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1110` and 1 more place.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1137` and 1 more place.
 
 #### `HOS_SPEED_LOG` - diagnostic
 
@@ -11737,17 +11767,17 @@ HOS_TICK_LOG=1 (diagnostic): who reads the clock, by caller (LR), every 5 s.
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1241`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1268`.
 
 #### `HOS_TLS_TRACE` - diagnostic
 
-undocumented: host/hos_thread.c:630 (in `thread_main()`) reads it as a text value: `if (hos_trace || getenv("HOS_TLS_TRACE"))`. No comment in the source says what it changes.
+undocumented: host/hos_thread.c:657 (in `thread_main()`) reads it as a text value: `if (hos_trace || getenv("HOS_TLS_TRACE"))`. No comment in the source says what it changes.
 
 **Values:** text. **Default:** unset.
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:630`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:657`.
 
 #### `HOS_TRACE` - diagnostic
 
@@ -11767,7 +11797,7 @@ HOS_VCORE_LOG=1 (diagnostic): with the "vcores:" line, each thread that waited f
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1586`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/hos_thread.c:1613`.
 
 #### `HOS_VIDEO_LOG` - diagnostic
 
@@ -14241,7 +14271,7 @@ RX_VK_MSYNC_DIFF_GROUP=<chunks> (1, 2, 4, 8): copy granularity (default 1, 256 b
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_replay.cpp:10237`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_replay.cpp:10239`.
 
 #### `RX_VK_PASS_SAMPLE_MASK` - diagnostic
 

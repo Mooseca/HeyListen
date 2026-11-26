@@ -272,6 +272,7 @@ they apply at once, with no new translation.
 | | Audio output | Auto, Stereo, 5.1 (after a restart) | Auto |
 | | Skip title screen | Off, On (after a restart) | Off |
 | | Microphone | Off, Default, or each microphone by name | Default |
+| | Output device | Default, or each audio output by name | Default |
 | Controls | Controller in background | Off, On | Off |
 | | Sprint with L3 | Off, Hold, Toggle | Off |
 | | Touchpad opens menu | Off, On | On |
@@ -360,6 +361,14 @@ they apply at once, with no new translation.
   once. A chosen microphone that is unplugged stays chosen (shown as not connected): Default stands in until it is
   back. On Linux (SDL2) two microphones with the same name cannot be told apart: the first is used. Windows must allow desktop apps to use the microphone
   (Settings, Privacy & security, Microphone). `HOS_MIC_LOG=1` logs what the game reads, a line a second.
+- **Output device** is where the game's sound plays. Default follows Windows' default output device; the list shows each
+  active output by its name, and a change applies at once, with no restart. The choice is kept by the device's id
+  (`output_device_id`, with its name beside it, in `hookshot_options.ini`). A chosen device that is unplugged stays chosen
+  (shown as not connected) and Default stands in, with a line in the log; it is tried again when the menu is opened. A
+  device unplugged while the game plays is left for Default the same way. On Linux the sound goes to SDL's default device and
+  the row has Default only: the system's sound settings choose the device. `HOS_AUDIO_DEVICE=<n>` (a waveOut device number)
+  still wins over the row for one run. Audio output (Auto, Stereo, 5.1) is the speakers the game mixes for; this row is the
+  device they play on.
 - **Controller in background:** On keeps the controller working while another window has the focus. The keyboard and
   mouse still need the game's window.
 - **Sprint with L3:** Hold makes the left stick's press run Link with the game's own fast run, the one that follows a roll while A

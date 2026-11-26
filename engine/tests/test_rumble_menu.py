@@ -82,6 +82,7 @@ struct { void note(const int*) {} } restart_state;
 %(ini_key)s
 /* (the Microphone row's hook in set_row: no microphones here) */
 bool can_mic() { return false; }
+bool can_out() { return false; }   /* (the Output device row's hook: no outputs here) */
 /* (the Upscaler row's choices, which set_row steps through: the game's own only, here) */
 unsigned upscalers_available() { return 1; }
 /* (the Frame generation rows' modes, which set_row steps through: not what this checks) */
@@ -93,6 +94,7 @@ bool dlss_built() { return false; }
 bool fsr4fg_offered() { return false; }
 void mic_chosen() {}
 [[maybe_unused]] static bool lowend_touched;   // (the Lowest preset's measure: vk_menu.cpp)
+void out_chosen() {}
 // (set_row steps the Output row through vk_menu.cpp's step_output_choice (#1144): not what this checks)
 int step_output_choice(int id, int dir) { return id + dir; }
 %(set_row)s

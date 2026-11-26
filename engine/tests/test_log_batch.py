@@ -16,7 +16,7 @@ import sys
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
-CASES = {"batch": None, "off": "0", "burst": "2000", "flush": "2000"}
+CASES = {"batch": None, "off": "0", "burst": "2000", "flush": "2000", "full": "0"}
 
 
 def log_block(source):

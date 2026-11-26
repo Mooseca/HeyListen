@@ -78,6 +78,7 @@ void hos_log(const char *fmt, ...) { (void)fmt; }
 void hos_log_flush(void) {}
 const char *hos_version(void) { return "vtest-1"; }
 const char *hos_lift_key(void) { return "testlift01"; }
+long hos_log_dropped_total(void) { return 0; }
 int hos_crash_test_box(const char *t, const char *x, const char *const *b, int n) { (void)t, (void)x, (void)b; return n - 1; }
 int hos_crash_test_clipboard(const char *t) { (void)t; return 1; }
 int hos_crash_test_open(const char *w) { (void)w; return 1; }

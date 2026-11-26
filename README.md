@@ -119,6 +119,7 @@ HeyListen's `engine/` is Hookshot's source imported with its history and kept in
 *Tooling and packaging*
 - **HeyListen Builder**: its own releases, updates and work folder, so it never touches a Hookshot install; **emulator save import and export** with backup.
 - Game executable `HeyListen.exe`, an original icon (a blue fairy orb), and a Discord status that shows "Playing HeyListen".
+- **Output device** row (Gameplay tab, like Microphone): the sound's device chosen in the menu, by name, applied at once; Default follows Windows, a device unplugged while playing falls back to Default.
 - Overlay: frame rate limit row and FPS counter (F10); 3D scene size from the Resolution row.
 - Measurement tools: a bench harness (`tools/bench/`), frame job tracing and critical-path tools, GPU segment timestamps, a hot-function map and a hash-gated native-replacement framework.
 - A large set of measured performance switches (off by default unless adopted), each with its ticket and benchmark in `docs/tickets/` and `docs/benchmarks/`, plus static analyses of the remaining frame time in `docs/research/`.

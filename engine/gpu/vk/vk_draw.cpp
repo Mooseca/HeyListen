@@ -12188,6 +12188,33 @@ uint64_t pcache_available_bytes() {
     return UINT64_MAX;
 #endif
 }
+/// (STUT3) The window is closing (MkwVkRenderer::save_caches): the pipeline cache written as the menu's Restart does, on a thread
+/// of its own, and waited for at most budget_ms. A window's close ended the process at once (host/hos_relaunch.c ExitProcess) and the
+/// driver's compiled pipelines of the session were lost unless a save in play had got through RX_VK_PCACHE_PLAY_SAVE's gate (on the
+/// PC 3050 it seldom did: 4.5-4.8 GB free against the 4.6 GB the gate wants); the next start's precompile built them again. The file
+/// is written whole as .tmp and renamed (pcache_save_mapped / the vector path): a save cut by the exit leaves the old file as it was.
+/// RX_VK_EXIT_SAVE=0: nothing written at the close, as before
+int caches_save_at_exit(uint32_t budget_ms) {
+    static const bool off = getenv("RX_VK_EXIT_SAVE") && env_value_off(getenv("RX_VK_EXIT_SAVE"));
+    if (off || !pcache) return 0;
+    const auto t0 = std::chrono::steady_clock::now();
+    auto done = std::make_shared<std::atomic<bool>>(false);
+    try {
+        std::thread([done] {
+            pipeline_cache_save(true);
+            done->store(true, std::memory_order_release);
+        }).detach();
+    } catch (const std::exception&) {
+        return 0;
+    }
+    while (!done->load(std::memory_order_acquire) &&
+           std::chrono::steady_clock::now() - t0 < std::chrono::milliseconds(budget_ms))
+        Sleep(5);
+    const bool ok = done->load(std::memory_order_acquire);
+    logf("vk: the window's close: pipeline cache %s in %.0f ms (at most %u ms; RX_VK_EXIT_SAVE=0: not)", ok ? "saved" : "not saved",
+         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count(), budget_ms);
+    return ok ? 1 : 0;
+}
 void pipeline_cache_save(bool force) {
     const bool between = pcache_save_between;
     // (RX_VK_PCACHE_SAVE_ALWAYS=1, for measurements: every save asked in play goes ahead to the gate even with fewer than 32

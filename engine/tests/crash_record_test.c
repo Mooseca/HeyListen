@@ -156,7 +156,7 @@ static __attribute__((noinline)) void walk_call(void (*code)(void)) {
     __asm__ volatile("");
 }
 #endif
-static int log_queue(const char *line) { (void)line; return 0; }
+static int log_queue(const char *line, int must) { (void)line; (void)must; return 0; }
 volatile int hos_control_on;
 void hos_control_log(const char *line) { (void)line; }
 void hos_log_flush(void) {}
@@ -169,6 +169,8 @@ void hos_hostcall_stats(void) {}
 /* HOS_LOG */
 /* HOS_FATAL */
 void rx_close_asked(void) {}
+int rx_save_caches_at_exit(unsigned budget_ms) { (void)budget_ms; return 0; }   /* (host/rx_backend.c: the window close saves the back end's caches) */
+long hos_log_dropped_total(void) { return 0; }   /* (host/hos_thread.c: the log lines a full queue left out) */
 static int relaunch_asked = 1;
 static void relaunch(void) { assert(marker == NO_FILE && !ready); }
 /* WINDOW_EXIT */

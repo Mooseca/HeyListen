@@ -860,6 +860,188 @@ static const WAVEFORMATEX *au_format(const WAVEFORMATEX *f) {
 #endif
 }
 
+/* (hookshot) The Insert menu's Output device (gpu/vk/vk_menu.cpp, Gameplay): the device the sound plays on. Default follows
+   the system's default output, as before; or one of the active outputs, kept by its endpoint id (output_device_id= in
+   hookshot_options.ini, the name beside it for display). The menu lists them (hos_out_count, hos_out_name, hos_out_id) and
+   tells its choice (hos_out_select); the audio thread sees the choice's generation change at its next frame and reopens
+   the stream on the new device (output_switch), no click and no wait. A chosen device that is not there when the stream
+   opens, does not open, or stops taking sound (unplugged: 40 blocks in a row refused, about 0.4 s, or no block done for 1.5 s) is given
+   up for the generation it was chosen in: the default stands in, with a log line, until the menu tells its choice again
+   (opening the menu does, so a device plugged in again is tried again). HOS_AUDIO_DEVICE=<n> in the environment, a
+   waveOut number, still wins over the menu. Linux has no list (waveOut there is SDL's default device): the menu's row
+   shows Default only. */
+#define OUT_MAX_DEV 16
+#define OUT_ID_MAX 128
+#define OUT_NAME_MAX 128
+typedef struct { char id[OUT_ID_MAX], name[OUT_NAME_MAX]; } OutDev;
+/* (the platform's: the active outputs in the system's order, -1 where the system has no list, and the waveOut number of the one with that id, -1 when it is
+   not there; the name is the fallback when the system does not tell a waveOut device's endpoint) */
+static int out_enum(OutDev *list, int max);
+static int out_wave_index(const char *id, const char *name);
+static int out_lock_word;   /* (the menu's thread and the audio thread: held for copies only) */
+static void out_lock(void) { while (__atomic_exchange_n(&out_lock_word, 1, __ATOMIC_ACQUIRE)) {} }
+static void out_unlock(void) { __atomic_store_n(&out_lock_word, 0, __ATOMIC_RELEASE); }
+static OutDev out_list[OUT_MAX_DEV];
+static int out_listed;
+static int out_mode;                           /* 0 the default, 1 the device out_want_id */
+static char out_want_id[OUT_ID_MAX], out_want_name[OUT_NAME_MAX];
+static long out_gen = 1;                       /* (the choice's generation: a change of it is a reopen) */
+static long out_bad_gen;                       /* (the generation the chosen device was given up for) */
+
+int hos_out_count(void) {   /* (lists them again: one plugged in since shows up; the system asked without the lock) */
+    OutDev now[OUT_MAX_DEV];
+    memset(now, 0, sizeof now);
+    int n = out_enum(now, OUT_MAX_DEV);
+    if (n < 0) {   /* (this system cannot list them: Linux) */
+        out_lock();
+        out_listed = 0;
+        out_unlock();
+        return -1;
+    }
+    if (n > OUT_MAX_DEV) n = OUT_MAX_DEV;
+    out_lock();
+    memcpy(out_list, now, sizeof now), out_listed = n;
+    out_unlock();
+    return n;
+}
+const char *hos_out_name(int index) {
+    static char name[OUT_NAME_MAX];
+    out_lock();
+    snprintf(name, sizeof name, "%s", index >= 0 && index < out_listed ? out_list[index].name : "");
+    out_unlock();
+    return name;
+}
+const char *hos_out_id(int index) {
+    static char id[OUT_ID_MAX];
+    out_lock();
+    snprintf(id, sizeof id, "%s", index >= 0 && index < out_listed ? out_list[index].id : "");
+    out_unlock();
+    return id;
+}
+/* The menu's choice: mode 0 the default, 1 the device with that id (name: for the log). A new generation only when the
+   choice changed, or the chosen device was given up for the one in force (the menu asks again when it opens) */
+void hos_out_select(int mode, const char *id, const char *name) {
+    out_lock();
+    if (mode != 1) mode = 0;
+    const int same = mode == out_mode && (mode == 0 || !strcmp(out_want_id, id ? id : ""));
+    const int retry = mode == 1 && out_bad_gen == out_gen;
+    out_mode = mode;
+    snprintf(out_want_id, sizeof out_want_id, "%s", mode == 1 && id ? id : "");
+    snprintf(out_want_name, sizeof out_want_name, "%s", mode == 1 && name ? name : "");
+    if (!same || retry) out_gen++;
+    out_unlock();
+    if (!same || retry) hos_log("audio: output device: %s", mode == 1 && name && *name ? name : "the default");
+}
+static long out_gen_now(void) {
+    out_lock();
+    const long g = out_gen;
+    out_unlock();
+    return g;
+}
+/* The waveOut number the stream is to open on (-1: the default), and the generation that was read into *gen. A chosen
+   device that is not there is given up for that generation, with a line in the log */
+static int out_selected_index(long *gen) {
+    char id[OUT_ID_MAX], name[OUT_NAME_MAX];
+    out_lock();
+    const int mode = out_mode, bad = out_bad_gen == out_gen;
+    *gen = out_gen;
+    snprintf(id, sizeof id, "%s", out_want_id), snprintf(name, sizeof name, "%s", out_want_name);
+    out_unlock();
+    if (mode != 1 || bad) return -1;
+    const char *env = getenv("HOS_AUDIO_DEVICE");
+    if (env && *env) return -1;   /* (the environment's device wins) */
+    const int index = out_wave_index(id, name);
+    if (index < 0) {
+        hos_log("audio: the chosen output device \"%s\" is not there: the default stands in", name);
+        out_lock();
+        out_bad_gen = *gen;
+        out_unlock();
+    }
+    return index;
+}
+static void out_mark_bad(long gen) {   /* (the device chosen in generation gen does not play: the default stands in) */
+    out_lock();
+    out_bad_gen = gen;
+    out_unlock();
+}
+/* (Windows' endpoints) */
+#ifdef _WIN32
+#define DRV_QUERYFUNCTIONINSTANCEID 0x0811       /* (DRV_RESERVED + 17: the waveOut device's endpoint id) */
+#define DRV_QUERYFUNCTIONINSTANCEIDSIZE 0x0812
+static void out_utf8(const WCHAR *w, char *out, int size) {
+    out[0] = 0;
+    if (w && WideCharToMultiByte(CP_UTF8, 0, w, -1, out, size, NULL, NULL) <= 0) out[0] = 0;   /* (too long: no name) */
+}
+static int out_enum(OutDev *list, int max) {
+    static const GUID clsid_enumerator = {0xbcde0395, 0xe52f, 0x467c, {0x8e, 0x3d, 0xc4, 0x57, 0x92, 0x91, 0x69, 0x2e}};
+    static const GUID iid_enumerator = {0xa95664d2, 0x9614, 0x4f35, {0xa7, 0x46, 0xde, 0x8d, 0xb6, 0x36, 0x17, 0xe6}};
+    static const PROPERTYKEY friendly = {{0xa45c254e, 0xdf1c, 0x4efd, {0x80, 0x20, 0x67, 0xd1, 0x46, 0xa8, 0x50, 0xe0}}, 14};
+    int n = 0;
+    const HRESULT com = CoInitializeEx(NULL, COINIT_MULTITHREADED);   /* (a thread in another apartment keeps it) */
+    IMMDeviceEnumerator *e = NULL;
+    if (SUCCEEDED(CoCreateInstance(&clsid_enumerator, NULL, CLSCTX_ALL, &iid_enumerator, (void **)&e)) && e) {
+        IMMDeviceCollection *c = NULL;
+        UINT count = 0;
+        if (SUCCEEDED(e->lpVtbl->EnumAudioEndpoints(e, eRender, DEVICE_STATE_ACTIVE, &c)) && c &&
+            SUCCEEDED(c->lpVtbl->GetCount(c, &count))) {
+            for (UINT i = 0; i < count && n < max; i++) {
+                IMMDevice *d = NULL;
+                if (FAILED(c->lpVtbl->Item(c, i, &d)) || !d) continue;
+                WCHAR *wid = NULL;
+                OutDev *o = &list[n];
+                if (SUCCEEDED(d->lpVtbl->GetId(d, &wid)) && wid) {
+                    out_utf8(wid, o->id, sizeof o->id);
+                    CoTaskMemFree(wid);
+                }
+                IPropertyStore *p = NULL;
+                if (SUCCEEDED(d->lpVtbl->OpenPropertyStore(d, STGM_READ, &p)) && p) {
+                    PROPVARIANT v;
+                    PropVariantInit(&v);
+                    if (SUCCEEDED(p->lpVtbl->GetValue(p, &friendly, &v)) && v.vt == VT_LPWSTR)
+                        out_utf8(v.pwszVal, o->name, sizeof o->name);
+                    PropVariantClear(&v);
+                    p->lpVtbl->Release(p);
+                }
+                if (!o->name[0]) snprintf(o->name, sizeof o->name, "Output %u", (unsigned)(i + 1));
+                if (o->id[0]) n++;
+                d->lpVtbl->Release(d);
+            }
+        }
+        if (c) c->lpVtbl->Release(c);
+        e->lpVtbl->Release(e);
+    }
+    if (SUCCEEDED(com)) CoUninitialize();
+    return n;
+}
+/* The waveOut device that is an endpoint: by its endpoint id (what the driver says through waveOutMessage), else by its
+   name (waveOut cuts the names to 31 characters) */
+static int out_wave_index(const char *id, const char *name) {
+    WCHAR want[OUT_ID_MAX];
+    if (!MultiByteToWideChar(CP_UTF8, 0, id, -1, want, OUT_ID_MAX)) want[0] = 0;
+    const UINT devices = waveOutGetNumDevs();
+    int by_name = -1;
+    for (UINT i = 0; i < devices; i++) {
+        DWORD_PTR size = 0;
+        WCHAR have[OUT_ID_MAX];
+        have[0] = 0;
+        if (waveOutMessage((HWAVEOUT)(UINT_PTR)i, DRV_QUERYFUNCTIONINSTANCEIDSIZE, (DWORD_PTR)&size, 0) == MMSYSERR_NOERROR &&
+            (DWORD)size >= 2 && (DWORD)size <= sizeof have &&
+            waveOutMessage((HWAVEOUT)(UINT_PTR)i, DRV_QUERYFUNCTIONINSTANCEID, (DWORD_PTR)have, (DWORD)size) == MMSYSERR_NOERROR) {
+            have[OUT_ID_MAX - 1] = 0;
+            if (want[0] && !wcscmp(have, want)) return (int)i;
+        }
+        WAVEOUTCAPSA caps;
+        if (by_name < 0 && name[0] && waveOutGetDevCapsA(i, &caps, sizeof caps) == MMSYSERR_NOERROR && caps.szPname[0] &&
+            !strncmp(name, caps.szPname, strlen(caps.szPname)))
+            by_name = (int)i;
+    }
+    return by_name;
+}
+#else
+static int out_enum(OutDev *list, int max) { (void)list, (void)max; return -1; }
+static int out_wave_index(const char *id, const char *name) { (void)id, (void)name; return -1; }
+#endif
+
 /* ---- output: waveOut, 10 ms blocks; a WAV file with HOS_AUDIO_DUMP ---------------------------------------------- */
 #define NBLOCKS 10
 #define OUT_MAX_CH 6
@@ -868,6 +1050,8 @@ static WAVEHDR hdr[NBLOCKS];
 static int16_t blocks[NBLOCKS][FRAME * 2 * OUT_MAX_CH];
 static int fill_block, fill_frames;
 static int out_channels = 2;   /* the device's (and the dump's): 2, or 6 for 5.1 */
+static long out_applied;       /* the Output device row's generation the stream was opened for (out_selected_index) */
+static int on_selected, sel_write_fails;   /* (the stream is on the menu's chosen device; writes refused in a row on it) */
 static FILE *dump;
 static uint32_t dump_bytes;
 
@@ -942,8 +1126,10 @@ static void output_open(void) {
         out_channels = channels;
         dump_done = 1;
     }
+    int sel = out_selected_index(&out_applied);   /* (the Output device row: a waveOut number, -1 the default) */
+    on_selected = sel_write_fails = 0;
     if (getenv("HOS_AUDIO") && atoi(getenv("HOS_AUDIO")) == 0) return;
-    if (dump) channels = out_channels;   /* (a dump keeps one layout: no stereo fallback) */
+    if (dump) channels = out_channels, sel = -1;   /* (a dump keeps one layout: no stereo fallback) */
     for (;;) {
         WAVEFORMATEX f = {0};
         f.wFormatTag = WAVE_FORMAT_PCM;
@@ -953,10 +1139,21 @@ static void output_open(void) {
         f.nBlockAlign = 2 * channels;
         f.nAvgBytesPerSec = RATE * 2 * channels;
         const int candidates = 2 + (int)au_device_count();
-        for (int tried = 0; tried < candidates && !wout; tried++) {
-            const int c = out_next;
-            out_next = (out_next + 1) % candidates;
-            output_try(c, &f);
+        if (sel >= 0) {   /* (the chosen device, at the game's speakers, then in stereo; else the default stands in) */
+            if (output_try(sel + 2, &f)) on_selected = 1;
+            else if (channels == 6) { channels = 2; continue; }
+            else {
+                hos_log("audio: the chosen output device did not open: the default stands in");
+                out_mark_bad(out_applied);
+                sel = -1, channels = au_speakers();
+                continue;
+            }
+        } else {
+            for (int tried = 0; tried < candidates && !wout; tried++) {
+                const int c = out_next;
+                out_next = (out_next + 1) % candidates;
+                output_try(c, &f);
+            }
         }
         if (wout || channels == 2 || dump) break;
         hos_log("audio: no device took 5.1: stereo instead");
@@ -975,16 +1172,38 @@ static void output_open(void) {
     out_stall_since = 0;
     out_played = out_peak = out_reported = 0;
 }
-static void output_reopen(void) {
-    static int reopens;
-    out_stall_since = 0;
-    if (++reopens > 6) return;
-    hos_log("audio: the output device took no sound for 1.5 s: trying the next one");
+static void output_close(void) {
     waveOutReset(wout);
     for (int i = 0; i < NBLOCKS; i++)
         if (hdr[i].dwFlags & WHDR_PREPARED) waveOutUnprepareHeader(wout, &hdr[i], sizeof hdr[i]);
     waveOutClose(wout);
     wout = NULL;
+}
+/* The Output device row's choice changed (or the stream never opened): reopened on the new choice at the next frame */
+static void output_switch(void) {
+    hos_log("audio: reopening the output for the Output device row");
+    if (wout) output_close();
+    out_next = 0;   /* (from the default: not the device after the last one tried) */
+    output_open();
+}
+/* The chosen device plays nothing (unplugged): given up for this choice, the default stands in */
+static void output_leave_chosen(const char *why) {
+    hos_log("audio: the chosen output device %s: the default stands in", why);
+    out_mark_bad(out_applied);
+    if (wout) output_close();
+    out_next = 0;
+    output_open();
+}
+static void output_reopen(void) {
+    static int reopens;
+    out_stall_since = 0;
+    if (on_selected) {
+        output_leave_chosen("took no sound for 1.5 s");
+        return;
+    }
+    if (++reopens > 6) return;
+    hos_log("audio: the output device took no sound for 1.5 s: trying the next one");
+    output_close();
     output_open();
 }
 static void dump_finish(void) {
@@ -1019,6 +1238,7 @@ static void output_frame(const int16_t *pcm) {
             fseek(dump, at, SEEK_SET);
         }
     }
+    if (!dump && out_gen_now() != out_applied) output_switch();
     if (!wout) return;
     for (int i = 0; i < FRAME * out_channels; i++) {
         const unsigned a = (unsigned)(pcm[i] < 0 ? -pcm[i] : pcm[i]);
@@ -1056,6 +1276,9 @@ static void output_frame(const int16_t *pcm) {
             result = waveOutWrite(wout, h, sizeof *h);
             if (result == MMSYSERR_NOERROR) out_played++;
         }
+        int gone = 0;
+        if (result == MMSYSERR_NOERROR) sel_write_fails = 0;
+        else gone = on_selected && ++sel_write_fails >= 40;   /* (40 blocks, 0.4 s, refused: unplugged) */
         if (result != MMSYSERR_NOERROR) {
             output_error(operation, result);
             /* A failed submission has no completion to set DONE. Reuse only a host-owned block; a prepared header
@@ -1064,6 +1287,7 @@ static void output_frame(const int16_t *pcm) {
         }
         fill_frames = 0;
         fill_block = (fill_block + 1) % NBLOCKS;
+        if (gone) output_leave_chosen("refuses the sound");
     }
 }
 
