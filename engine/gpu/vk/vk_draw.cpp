@@ -80,6 +80,7 @@
 #include "prepare_work.h"   // (what a program of the seed costs a preparation: its progress bar)
 #include "mesh_conv.h"   // (RX_VK_MESH_CONV: the indirect mesh draws' ring slots and the batch at the game's barriers)
 #include "lowend_rule.h"   // (the Volumetric fog row: the fog's programs)
+#include "equal_depth_rule.h"   // (the EQUAL depth margin's default)
 #include "vk_work.h"   // (after the others: counts the commands that do GPU work, for full_barrier)
 
 namespace mkwvk {
@@ -5260,7 +5261,23 @@ void dynamic_state(VkCommandBuffer cmd, const NvnState& s, const Targets& at, Vk
         // program 701ae221d88b2908) where the depth is exactly its own, and LESS_OR_EQUAL drew the whole sheet over the mountain behind:
         // a flat khaki veil on Intel (Arc 155H). The prepass's colour passes the margin was made for do not blend: some have blending
         // on with ONE, ZERO (the same as off), and those keep the margin (without it, Death Mountain Trail's ground had holes).
-        static const float eq_bias = getenv("RX_VK_EQ_BIAS") ? (float)atof(getenv("RX_VK_EQ_BIAS")) : dev.props.vendorID == 0x8086 ? 64.0f : 0.0f;
+        // (Longshot 03a6e8d0e and 641030ed9, #1801 and #2299) Not on Intel's Windows driver on discrete Battlemage (0xE2xx) and Lunar
+        // Lake (0x64xx): there the margin's LESS_OR_EQUAL passes the fragments an alpha-tested prepass cut away, and the foliage drew
+        // as solid blocks (equal_depth_rule.h). RX_VK_EQ_BIAS=64 brings the margin back
+        static const float eq_bias = [] {
+            VkPhysicalDeviceDriverProperties drv{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES};
+            VkPhysicalDeviceProperties2 pr{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, &drv};
+            vkGetPhysicalDeviceProperties2(dev.physical, &pr);
+            const float rule = equal_depth_rule::default_margin(pr.properties.vendorID, pr.properties.deviceID,
+                                                                drv.driverID == VK_DRIVER_ID_INTEL_PROPRIETARY_WINDOWS);
+            // RX_VK_EQ_BIAS=<units>: the margin towards the camera of a colour pass's EQUAL test, 0: as the game asks. Unset: 64 on
+            // Intel, 0 on Intel's Windows driver for Battlemage (0xE2xx) and Lunar Lake (0x64xx), 0 on other vendors
+            const float value = getenv("RX_VK_EQ_BIAS") ? (float)atof(getenv("RX_VK_EQ_BIAS")) : rule;
+            if (pr.properties.vendorID == equal_depth_rule::kIntel)
+                logf("vk: EQUAL depth margin: %g units%s (device %04x, driver id %d)", value, value != rule ? " (RX_VK_EQ_BIAS)" : "",
+                     pr.properties.deviceID, (int)drv.driverID);
+            return value;
+        }();
         bool blends = false;
         for (int i = 0; i < at.n && !blends && eq_bias > 0; i++) {
             const nvn_blend_st& b = s.blend[i];
