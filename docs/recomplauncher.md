@@ -66,7 +66,9 @@ in [USER_GUIDE.md](USER_GUIDE.md#install-with-recomplauncher).
     repository or release.
   - The two **options** are ticks on the setup screen. Each adds its arguments when on and starts off, because it has a
     license to accept: **NVIDIA DLSS** (`--fetch-ngx-sdk --accept-nvidia-license`, NVIDIA RTX cards) and **AMD FSR 4**
-    (`--fsr --fetch-fsr-runtime --accept-amd-license`, Windows, AMD cards). The license links are the ones the builder shows
+    (`--fsr --fetch-fsr-runtime --accept-amd-license`, Windows, AMD cards; the build fetches AMD's three DLLs, loader, upscaler and frame
+    generation, each checked against its pinned SHA-256 and size, so one tick is enough for AMD FSR 4 and AMD FSR 4 FG; a setup that was
+    run before the frame generation file was added gets it the next time the setup step runs with the tick on). The license links are the ones the builder shows
     (`scripts/ngx_sdk.py`, `scripts/ffx_sdk.py`; a test keeps them equal). Without a tick nothing is downloaded.
 - `config`: `HeyListen/hookshot_options.ini`, the file the in-game menu (`gpu/vk/vk_menu.cpp`) keeps. The launcher writes only the
   keys of the choices; the menu writes the whole file again when the player changes a row, so the two agree.

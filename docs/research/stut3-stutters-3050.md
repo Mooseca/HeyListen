@@ -75,3 +75,43 @@ Of the frames over 500 ms in 16 tours: one of 2.1-2.5 s at the start of play in 
 waiting for a pipeline built in play, `RX_VK_PIPE_WAIT_FRESH`: slow-submit lines "pipelines 1960-3811"); 0.5-1.7 s at each zone
 arrival (readback waits, uploads with faults, the game thread off CPU); twice a first compute dispatch waiting 1-2.9 s
 (`RX_VK_LAZY_COMPUTE`); and five of 3-12.7 s that no line names yet.
+
+## Step 2, sized (not built): the upload's CPU copy out from under the parallel replay's lock
+
+**What the lock protects there.** `vk_draw.cpp texture_view_of()` (every descriptor build, per texture handle): a handle seen the first
+time takes ParLock (one recursive mutex for all segment workers) for `texture_of`, `texture_get` (the Texture and its image),
+`texture_view` and `texture_touch` (the upload); a known handle tries `texture_touch_quick` / `texture_touch_unlocked` and falls back to
+ParLock + `texture_touch` when it needs an upload. Inside `upload()` / `upload_astc_gpu()` (vk_texture.cpp), under the lock: `staging()`
+(the arenas vector), `guest_bytes()` (`memory_as_submitted`, the late-fix wait, the lazy write-back settle), the memcpy or CPU
+unswizzle into staging (where the page faults land), the BC and disk cache maps, recording into `upload_cmd()` (one command buffer a
+recording), the texture's upload state, the budget counters and the GPU write history. The copy is inside only because it sits between
+the reservation and the recording. Meanwhile every other worker's descriptor build waits on the lock (the freeze lines' "desc", summed
+over workers), the order thread does not record, and the game's 0x3980 read waits ("readback").
+
+**Two phases instead.** (a) Under ParLock, short: find or make the Texture, decide the upload, reserve the staging range (arena +
+offset, pinned by its rec_value), set a per-texture "upload in flight" token and pin the Texture, copy the parameters. (b) Outside: the
+guest read and the copy or unswizzle into the reserved range (the faults, in parallel on the 4-6 workers). (c) Under ParLock, short:
+re-validate (not destroyed or evicted, slot version unchanged), record the copy or the ASTC dispatch, the BC/disk cache entries, set
+uploaded/upload_gen, publish, clear the token. Readers that must respect the token: other workers meeting the same texture (the touch
+fast path, the handle cache), the eviction pass and texture destroy, the defer budget.
+
+**What can go wrong.** A draw binding the image before (c) recorded its copy (the copy must go to the right segment's upload buffer,
+as SegInit does for first layout changes); eviction or destroy between (a) and (c) (pin; drop the range if gone); guest memory read
+outside the replay's serialization (`memory_as_submitted`, the late-fix and lazy write-back calls write guest memory: the riskiest
+part, where the guessed write-backs and the crash family live); two workers uploading one texture (the token); the BC7 remake flag
+set in (b). Failure modes: wrong or missing textures, validation errors, a lost device on a destroyed image.
+
+**Tests.** A state-machine header (reserve / fill / publish, pin, token, eviction in between) compiled and run with two threads; text
+checks that the copy holds no ParLock and that (c) re-validates; a parallel-replay stress with a fake host; pictures at the six
+arrivals, the hitch lines' desc/upload/readback at arrival, validation layers once; a switch to turn it off.
+
+**Expected gain** (estimates from the logs' parts, not measured): start freeze 1.1-2.5 s to about 0.9-1.3 s; arrival frames 0.5-1.7 s
+to 0.3-0.9 s; a zone change of 1165 ms (descriptors 1404 + upload 1023, 264k faults) to 500-700 ms. The faults stay (3-10 us each,
+1-3 s of CPU, spread over threads). No fps change. Size: 4-5 working days, risk medium-high: after the release, behind a switch.
+
+**The page faults (120-380k a frame).** In the seconds holding a frame over 50 ms: guest GPU pools about 40 percent (the textures'
+source arrays the upload reads: many taken out by the cold pass, which the gate now stops on PCs with RAM to spare; others never
+resident since loaded), guest address regions about 30 percent (the loaders' file reads, not the upload), host private memory about
+20 percent (new 64 MB staging arenas, freed when idle and faulted again at each zone; capture buffers). The destination is VRAM.
+Ahead of time: a worker could touch a texture's guest source when the game registers it (before its first draw), and the staging
+arenas an arrival needs could be kept and touched by a worker when made (RX_VK_STAGING_KEEP_MB / _IDLE_S / _BURST_S exist).

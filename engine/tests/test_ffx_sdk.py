@@ -52,25 +52,75 @@ class TableTests(unittest.TestCase):
 
     def test_files(self):
         names = [name for _, _, name in ffx_sdk.FILES]
-        self.assertEqual(names, ["amd_fidelityfx_loader_vk.dll", "amd_fidelityfx_upscaler_vk.dll", "LICENSE-AMD-FSR-SDK.md"])
+        self.assertEqual(names, ["amd_fidelityfx_loader_vk.dll", "amd_fidelityfx_upscaler_vk.dll",
+                                 "amd_fidelityfx_framegeneration_vk.dll", "LICENSE-AMD-FSR-SDK.md"])
         for path, sha, _ in ffx_sdk.FILES:
             self.assertTrue(path.startswith("Kits/FidelityFX/"), path)
             self.assertRegex(sha, r"^[0-9a-f]{64}$")
+
+    def test_frame_generation_is_pinned(self):
+        """AMD's frame generation DLL (SDK v2.4.0, frame generation 4.0.2): its name, SHA-256 and size are pinned like the other
+        two, and the loader finds it beside itself"""
+        table = {name: (path, sha) for path, sha, name in ffx_sdk.FILES}
+        path, sha = table[ffx_sdk.FRAMEGEN]
+        self.assertEqual(path, "Kits/FidelityFX/signedbin/amd_fidelityfx_framegeneration_vk.dll")
+        self.assertEqual(sha, "d002dabff8c5e71eaa715fc99438cd4dc81230262a7897b16bc402efec3498b4")
+        self.assertEqual(ffx_sdk.SIZES[ffx_sdk.FRAMEGEN], 36806928)
+        self.assertIn(ffx_sdk.FRAMEGEN, ffx_sdk.DLLS)
+        for name in ffx_sdk.DLLS:   # (every DLL has a size: the check before the hash)
+            self.assertIn(name, ffx_sdk.SIZES)
 
 
 class FetchTests(unittest.TestCase):
     def setUp(self):
         self.data = {p: ("file %s" % p).encode() for p, _, _ in ffx_sdk.FILES}
+        patcher = mock.patch.dict(ffx_sdk.SIZES, clear=True)   # (the fake files have sizes of their own)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_wrong_size_not_kept(self):
+        """A file of another size than pinned is refused before it is hashed, and nothing of it stays"""
+        name = ffx_sdk.FILES[0][2]
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(ffx_sdk, "FILES", fake_table(self.data)), \
+                mock.patch.dict(ffx_sdk.SIZES, {name: len(self.data[ffx_sdk.FILES[0][0]]) + 1}):
+            with self.assertRaises(ValueError) as e:
+                ffx_sdk.fetch(tmp, opener=Opener(self.data), say=lambda _: None, tries=1)
+            self.assertIn("bytes", str(e.exception))
+            self.assertEqual(os.listdir(tmp), [])
+
+    def test_folder_from_before_frame_generation_gets_only_that_file(self):
+        """A folder fetched with the loader, the upscaler and the license only: the next fetch asks for the one file it lacks"""
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(ffx_sdk, "FILES", fake_table(self.data)):
+            full = ffx_sdk.FILES
+            old = [f for f in full if f[2] != ffx_sdk.FRAMEGEN]
+            with mock.patch.object(ffx_sdk, "FILES", old):
+                ffx_sdk.fetch(tmp, opener=Opener(self.data), say=lambda _: None)
+            self.assertFalse(ffx_sdk.complete(tmp))
+            opener = Opener(self.data)
+            said = []
+            ffx_sdk.fetch(tmp, opener=opener, say=said.append)
+            self.assertEqual(len(opener.asked), 1)
+            self.assertIn("framegeneration", opener.asked[0])
+            self.assertEqual(said, ["ffx-sdk: " + ffx_sdk.FRAMEGEN])
+            self.assertTrue(ffx_sdk.complete(tmp))
+            # (the game folder with the old files: install adds the missing one)
+            game = os.path.join(tmp, "game")
+            os.makedirs(game)
+            for _, _, n in old:
+                with open(os.path.join(game, n), "wb") as f, open(os.path.join(tmp, n), "rb") as src:
+                    f.write(src.read())
+            ffx_sdk.install(tmp, game)
+            self.assertTrue(os.path.isfile(os.path.join(game, ffx_sdk.FRAMEGEN)))
 
     def test_fetch_and_install(self):
         with tempfile.TemporaryDirectory() as tmp, mock.patch.object(ffx_sdk, "FILES", fake_table(self.data)):
             opener = Opener(self.data)
             said = []
             ffx_sdk.fetch(os.path.join(tmp, "sdk"), opener=opener, say=said.append)
-            self.assertEqual(len(said), 3)
+            self.assertEqual(len(said), 4)
             self.assertTrue(ffx_sdk.complete(os.path.join(tmp, "sdk")))
             ffx_sdk.fetch(os.path.join(tmp, "sdk"), opener=opener, say=said.append)   # (there already: nothing asked)
-            self.assertEqual(len(opener.asked), 3)
+            self.assertEqual(len(opener.asked), 4)
             game_ffx = ffx_sdk.install(os.path.join(tmp, "sdk"), os.path.join(tmp, "game", "ffx"))
             self.assertTrue(ffx_sdk.complete(game_ffx))
 
@@ -119,7 +169,7 @@ class MakeGameTests(unittest.TestCase):
         spec.loader.exec_module(make_game)
         data = {p: ("file %s" % p).encode() for p, _, _ in ffx_sdk.FILES}
         with tempfile.TemporaryDirectory() as tmp, mock.patch.object(ffx_sdk, "FILES", fake_table(data)), \
-                mock.patch.object(make_game, "ffx_script", return_value=ffx_sdk), \
+                mock.patch.dict(ffx_sdk.SIZES, clear=True), mock.patch.object(make_game, "ffx_script", return_value=ffx_sdk), \
                 mock.patch.dict(os.environ, {"HOOKSHOT_FFX_SDK": os.path.join(tmp, "sdk")}):
             game = os.path.join(tmp, "game")
             os.makedirs(game)
@@ -139,6 +189,52 @@ def load_make_game():
     make_game = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(make_game)
     return make_game
+
+
+class RuntimeOnlyTests(unittest.TestCase):
+    """make_game.py --fsr-runtime-only: the Builder's "Get the file" for a folder built with AMD FSR 4 before the frame generation
+    file was fetched: only AMD's runtime fetched and placed, and only for a folder with the FSR mark"""
+    def test_flag_and_order(self):
+        src = (ROOT / "nx2" / "make_game.py").read_text(encoding="utf-8")
+        self.assertIn('"--fsr-runtime-only"', src)
+        main = src[src.index("def main(a=None):"):]
+        self.assertLess(main.index('getattr(a, "fsr_runtime_only", False)'), main.index("resolve_game(a)"),
+                        "the game files are read before the runtime-only branch")
+
+    def test_needs_the_mark_and_places_the_file(self):
+        make_game = load_make_game()
+        data = {p: ("file %s" % p).encode() for p, _, _ in ffx_sdk.FILES}
+
+        def fake_fetch(folder, **kw):
+            os.makedirs(folder, exist_ok=True)
+            for p, _, n in ffx_sdk.FILES:
+                with open(os.path.join(folder, n), "wb") as f:
+                    f.write(data[p])
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(ffx_sdk, "FILES", fake_table(data)), \
+                mock.patch.object(make_game, "ffx_script", return_value=ffx_sdk), mock.patch.object(ffx_sdk, "fetch", fake_fetch), \
+                mock.patch.object(make_game, "say") as said, mock.patch("sys.stdout", io.StringIO()), \
+                mock.patch.dict(os.environ, {"HOOKSHOT_FFX_SDK": os.path.join(tmp, "sdk")}):
+            game = os.path.join(tmp, "game")
+            os.makedirs(game)
+            a = SimpleNamespace(out=game, update=None, fetch_fsr_runtime=True, accept_amd_license=True)
+            with self.assertRaises(SystemExit):   # (no mark: not a folder built with AMD FSR 4; on Linux: Windows only)
+                make_game.fsr_runtime_only(a)
+            if make_game.LINUX:
+                return
+            self.assertIn("not built with AMD FSR 4", str(said.call_args))
+            open(os.path.join(game, make_game.FSR_MARK), "w").close()
+            self.assertEqual(make_game.fsr_runtime_only(a), 0)
+            self.assertTrue(os.path.isfile(os.path.join(game, ffx_sdk.FRAMEGEN)))
+            self.assertEqual(said.call_args.args[0], "done")
+
+    def test_refused_without_the_license(self):
+        make_game = load_make_game()
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(make_game, "say") as said:
+            open(os.path.join(tmp, make_game.FSR_MARK), "w").close()
+            with self.assertRaises(SystemExit):
+                make_game.fsr_runtime_only(SimpleNamespace(out=tmp, update=None, fetch_fsr_runtime=True, accept_amd_license=False))
+        if not make_game.LINUX:
+            self.assertIn("license accepted first", str(said.call_args))
 
 
 class LicenseTests(unittest.TestCase):

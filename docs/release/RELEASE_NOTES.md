@@ -29,6 +29,11 @@ builds the driver's pipelines as you play, so it stutters more than usual. The s
 * **NVIDIA DLSS Frame Generation** (RTX 40 and newer) as a *Frame generation by* choice, next to the built-in and AMD
   FSR 3.1 makers: 2x up to the most your GPU's runtime allows (6x on an RTX 50). It needs the DLSS or FSR 4 upscaler for
   depth and motion; until then the built-in one makes the frames. Off by default.
+* **AMD FSR 4 frame generation** (a Radeon RX 9000, **not tested on real hardware yet**) as a fourth *Frame generation by*
+  choice, 2x, through AMD's own runtime. The Builder's **AMD FSR 4** tick now also downloads AMD's frame generation file
+  (`amd_fidelityfx_framegeneration_vk.dll`, FidelityFX SDK v2.4.0, checked against its SHA-256 and size, under the same AMD
+  license you accept at the tick). A game built with the tick before this release shows **Get the file** in the Builder:
+  it fetches that one file without building the game again. The game's menu and log say what to do when the file is missing.
 * **DLSS model row names DLSS 4 and DLSS 4.5**, plus **DLSS 3** (CNN, preset E); the first-run default follows your GPU's
   generation and VRAM (DLSS 3 under 7 GB).
 * **Upscaler and Render resolution** now sit above the frame rows; **DLAA** is a Render resolution choice; the **Frame
