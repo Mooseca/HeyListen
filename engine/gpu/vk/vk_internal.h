@@ -514,6 +514,27 @@ bool rbring_on();
 bool rbring_check_on();
 void rbring_note_read(uint64_t guest, uint64_t size);
 void rbring_note_written(uint64_t guest, uint64_t size);
+void ot_note_r4_writer();   // (FLASH2, vk_replay.cpp) a 0x3980 range bound for writing on the order thread: the job's place in its frame
+void r4map_note_write(uint64_t guest, uint64_t size);   // (ORDER2, vk_replay.cpp, RX_VK_ORDER_R4_MAP: a written binding of a readback class R4/R5/R6 size, logged in the window)
+void r4map_read(uint64_t gpu, uint64_t size, int64_t t_enter);   // (ORDER2: a CPU read of those ranges, after invalidate's waits)
+void r4map_job(int kind, uint64_t value, uint64_t queue, uint64_t seq, uint64_t since, int64_t queued_ns, int64_t t0, int64_t t1);   // (ORDER2: an order-thread job run)
+extern std::atomic<int64_t> r4map_job_t0;   // (ORDER2: the start of the order thread's current job, steady clock ns)
+// (ORDER2, vk_rbearly.cpp, RX_VK_RB_EARLY, docs/research/order-readback-decouple.md) the 0x3980 culling results copied right behind each
+// program that writes them; the read waits for its own frame's copy only
+int rbearly_mode();
+void rbearly_note_read(uint64_t guest, uint64_t size);
+bool rbearly_bind(uint64_t guest, uint64_t size, VkBuffer buffer, VkDeviceSize offset);   // (true: served, its write-back left out)
+void rbearly_note_written(uint64_t guest, uint64_t size);   // (every written binding: an overlap taints a served range)
+void rbearly_after_dispatch(VkCommandBuffer cmd);
+bool rbearly_split_take();   // (true once after the dispatch that recorded a final copy: the replay ends its part there)
+bool rbearly_answer(uint64_t gpu, uint64_t size);
+void rbearly_check(uint64_t gpu, uint64_t size);
+extern std::atomic<uint64_t> ot_cur_job;
+uint64_t ot_current_job();   // (vk_replay.cpp: the order thread's job being replayed, its sequence number; 0 none)
+uint64_t ot_rb_target();     // (the last submission handed over before the newest present: what a read of the frame's results needs)
+uint64_t ot_rb_done();       // (the order thread's done mark)
+bool ot_on();                // (RX_VK_ORDER_THREAD in effect)
+void ot_describe_now(char* out, size_t cap);   // (ORDER2: the order thread's job now, for a read that waits long)
 /// (stream SUB1) the readback ring's staged ranges of one submission: its own list, so a submission that ends after the next began flushes its own
 struct RbPending {
     struct Req {
