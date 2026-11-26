@@ -63,7 +63,7 @@ def main():
 
     check(not re.search(r"HOS_OPT_\w+ = 11\b", api), "a HOS_OPT_ enum also takes option 11")
     check("int32_t hos_stick_axis(" in hid, "nn_hid.c has no hos_stick_axis")
-    pads = block(hid, "static void pads_read(")
+    pads = block(hid, "static void xinput_poll(")   # (XInput's pads, read off the game's thread: Longshot c5e1421d2)
     check("rx_option(11, 0)" in pads and "hos_stick_axis(thumb[i], zone)" in pads,
           "XInput's sticks do not go through hos_stick_axis with the row's zone (option 11)")
     check("7849" not in pads, "XInput's sticks still cut at 7849 themselves")

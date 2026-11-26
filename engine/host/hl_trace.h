@@ -61,7 +61,13 @@ typedef struct {
     uint32_t live_slots;                /* the live blocks' table (a power of two of 256 or more; 0: 2 M) */
     uint32_t freed_slots;               /* the last frees kept (a power of two; 0: 1 M) */
     uint32_t wb_watch;                  /* HL_TRACE_WB=1: the write-back watch (hl_trace_gpu_record) */
+    /* HL_TRACE_WB_POISON=1 (a debug switch, with the watch): writes HL_TRACE_WB_POISON_WORD over the bytes of a live heap
+       block a write-back lands in, at the hit and again at each hl_trace_wb_poison_tick for HL_TRACE_WB_POISON_MS (the copy
+       itself may land after the watch hears of it). NULL: off */
+    void (*poison)(uint64_t guest, uint64_t size);
 } HlTraceConfig;
+#define HL_TRACE_WB_POISON_WORD 0x00000badc0de0badull   /* (as a guest pointer: outside the guest window, recognisable) */
+enum { HL_TRACE_WB_POISON_MS = 250 };
 
 int hl_trace_start(uint32_t mask, const HlTraceConfig *config);
 uint64_t hl_trace_now(void);   /* the events' clock (ticks) */
@@ -86,8 +92,11 @@ void hl_trace_gpu_record(uint32_t what, uint64_t guest, uint64_t size, uint64_t 
    CPU. Each line once per target and kind (then every 1000th); the counts for the log: */
 typedef struct {
     uint64_t into_live, allocs_over, frees_under, targets, targets_hit;
+    uint64_t poisoned;   /* (HL_TRACE_WB_POISON) ranges poisoned at a hit */
 } HlTraceWbCounts;
 void hl_trace_wb_counts(HlTraceWbCounts *out);
+/* (HL_TRACE_WB_POISON) the poison again over the ranges hit in the last HL_TRACE_WB_POISON_MS whose block still lives */
+void hl_trace_wb_poison_tick(void);
 /* Each live block (under its stripe's lock: fn must not allocate through the recorder). */
 void hl_trace_live_each(void (*fn)(const HlTraceRecord *, void *), void *user);
 /* (counters for the log) */

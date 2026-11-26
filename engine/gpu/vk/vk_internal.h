@@ -72,7 +72,7 @@ struct Device {
     VkQueue queue = VK_NULL_HANDLE;
     // extensions in use
     bool frag_shading_rate = false;   // (RX_VK_VRS: VK_KHR_fragment_shading_rate's pipeline rate, 2x2 usable; vk_vrs.h)
-    bool mesh_shader = false, external_memory_host = false, external_memory_fd = false, dma_buf_import = false, pipeline_library = false,
+    bool mesh_shader = false, mesh_queries = false, external_memory_host = false, external_memory_fd = false, dma_buf_import = false, pipeline_library = false,
          graphics_pipeline_library = false, custom_border_color = false, dynamic_state3 = false,
          depth_clip_control = false, null_descriptor = false, index_uint8 = false, push_descriptor = false,
          conditional_rendering = false, provoking_vertex = false, vertex_divisor = false, stencil_export = false, memory_budget = false,
@@ -440,6 +440,7 @@ uint64_t gpu_pool_start(uint64_t gpu); // (EvilOOT) and where it begins
 bool create_buffer_cached(uint64_t size, VkBufferUsageFlags usage, VkBuffer& buffer, VmaAllocation& allocation,
                           void** mapped, bool dedicated = false);   // (vk_vma.cpp: cached host memory, mapped)
 void flush_mapped(VmaAllocation allocation, uint64_t size);
+void flush_mapped_range(VmaAllocation allocation, uint64_t offset, uint64_t size);
 void invalidate_mapped(VmaAllocation allocation, uint64_t size);   // (the CPU is to read what the GPU wrote: a no-op in coherent memory)
 void memory_stamp_gpu(uint64_t guest, uint64_t size);   // (a GPU write: memory_stamp, and the pages noted)
 void memory_protect_gpu(uint64_t guest, uint64_t size);  // (RX_VK_PROTECT_BARE=1: pages a shader writes through a table pointer)
@@ -581,6 +582,7 @@ void sampler_counts(uint32_t* made, uint32_t* retired_waiting, uint64_t* retired
 /// (HeyListen, HL_TRACE) one of the back end's writes into guest memory, or a mirror's or an import's life, for the crash
 /// recorder (vk_api.h trace_gpu; nothing when it is off)
 inline void trace_gpu(uint32_t what, uint64_t guest, uint64_t size, uint64_t pool, uint64_t value) {
+    if (host && host->gpu_wrote && (what == MKWVK_TRACE_WRITEBACK || what == MKWVK_TRACE_LAZY)) host->gpu_wrote(guest, size, value);   // (CRASH3: always)
     if (host && host->trace_gpu) host->trace_gpu(what, guest, size, pool, value, vk_timeline_completed());
 }
 void vk_timeline_wait(uint64_t v);

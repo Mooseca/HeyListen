@@ -64,6 +64,7 @@ void full_barrier(VkCommandBuffer, const char* = "") {}
 struct Host {   // (GPU addresses below 1 TB are guest addresses)
     bool gpu_ptr(uint64_t, uint64_t* avail) const { return *avail = ~0ull, true; }
     uint64_t gpu_guest(uint64_t g) const { return g; }
+    int (*bare_head_live)(uint64_t) = nullptr;   // (CRASH3's stale-head guard: off in the model, as without the heaps' gates)
 } const host_object;
 const Host* host = &host_object;
 std::atomic<bool> par_active{false};
@@ -169,6 +170,8 @@ BufferRef bind_storage(const Desc& d, uint64_t addr, uint64_t size, uint64_t* ba
     static const uint64_t bare_read = 64ull << 20;   // (the device's reach)
     const uint64_t salign = 16;                      // (minStorageBufferOffsetAlignment)
     bool bare = false;
+    const struct { uint64_t key; } p{0};   // (the program, its descriptor's offset and entry: for the stale-head guard's log only)
+    const uint32_t off = d.cbuf_offset, k = 0;
 #include "rb_draw.inc"
     (void)t0;
     *base_out = base;

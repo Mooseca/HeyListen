@@ -391,6 +391,52 @@ static LONG CALLBACK commit_on_touch(EXCEPTION_POINTERS *info) {
     return EXCEPTION_CONTINUE_SEARCH;
 }
 
+#ifdef _WIN32
+/* (Longshot 96caf2f23, #1885) A thread's stack is only reserved (the guest's 64 MB, hos_thread.c): Windows commits each page
+   below it as the stack grows, through the guard page. At the commit limit it can't commit the next guard page and raises a stack overflow with the stack
+   nearly unused. That one waits for commit as a guest page does, and the thread goes on. A stack that really ran out (under
+   128 KB of its reservation left) goes on to the crash report, and so does one whose commit never came back, after the
+   out-of-memory notice.
+   The handler runs on what is left of the page Windows did commit (under 4 KB, less the exception's own frames), with only
+   reserved pages below it: until the 64 KB below the stack is committed, nothing here may take more stack than a system call
+   (hos_log takes over 4 KB, and running off the page there killed the process with no line and no report). So the wait is its
+   own loop, as commit_retry's but saying nothing, and the 64 KB is committed as guard pages, which Windows then hands to the
+   stack one at a time as it grows, as its own. Commit that never came back: stack_spare, 1 MB committed at the start, is given
+   back for that 64 KB, so the line, the notice and the crash report have a stack to run on */
+enum { STACK_ROOM = 0x10000, STACK_SPARE = 1 << 20 };
+static void *volatile stack_spare;
+static LONG CALLBACK stack_on_touch(EXCEPTION_POINTERS *info) {
+    if (info->ExceptionRecord->ExceptionCode != EXCEPTION_STACK_OVERFLOW) return EXCEPTION_CONTINUE_SEARCH;
+    char *const limit = (char *)((NT_TIB *)NtCurrentTeb())->StackLimit;
+    MEMORY_BASIC_INFORMATION mbi;
+    if (!VirtualQuery(limit - 1, &mbi, sizeof mbi) || mbi.State != MEM_RESERVE) return EXCEPTION_CONTINUE_SEARCH;
+    const size_t left = (size_t)(limit - (char *)mbi.AllocationBase);
+    if (left < 2 * STACK_ROOM) return EXCEPTION_CONTINUE_SEARCH;   /* (it really ran out) */
+    char *const room = limit - STACK_ROOM;
+    int ms = 0;
+    while (!VirtualAlloc(room, STACK_ROOM, MEM_COMMIT, PAGE_READWRITE | PAGE_GUARD)) {
+        if (GetLastError() != ERROR_COMMITMENT_LIMIT) return EXCEPTION_CONTINUE_SEARCH;   /* (not the limit: as before) */
+        if (ms == 5000) {   /* (100 x 50 ms, as commit_retry) */
+            void *spare = InterlockedExchangePointer((void *volatile *)&stack_spare, NULL);
+            if (!spare || !VirtualFree(spare, 0, MEM_RELEASE) ||
+                !VirtualAlloc(room, STACK_ROOM, MEM_COMMIT, PAGE_READWRITE | PAGE_GUARD))
+                return EXCEPTION_CONTINUE_SEARCH;   /* (no stack to say it on: the crash report, as before) */
+            hos_log("mem: a thread's stack still could not grow after 5 s at the commit limit, with %llu KB of it unused",
+                    (unsigned long long)(left >> 10));
+            hos_out_of_memory(1);
+            return EXCEPTION_CONTINUE_SEARCH;
+        }
+        Sleep(50);
+        ms += 50;
+    }
+    static volatile LONG grown;
+    const LONG n = InterlockedIncrement(&grown);
+    if (n <= 8 || (n & 255) == 0)
+        hos_log("mem: a thread's stack grew at the commit limit after waiting %d ms for commit (%ld so far)", ms, (long)n);
+    return EXCEPTION_CONTINUE_EXECUTION;
+}
+#endif
+
 /* A crash nothing handles: what, where (mkw.exe+offset: nx2/dllmap.py reads mkw.map the same way), and the guest
    state of the thread, as of its last call out of lifted code, with its frame chain from x29. */
 static uint64_t peek_guest(uint64_t a) {
@@ -557,6 +603,57 @@ static void crash_stack(const CONTEXT *ctx, char *out, size_t cap) {
 }
 #endif
 
+/* (CRASH3) the last GPU write-back by guest page (host/hos_wb_stamp.h), told by the back end (vk_api.h gpu_wrote), always on */
+#include "hos_wb_stamp.h"
+static HosWbStamps wb_stamps;
+static uint64_t wb_ms(void) { return (uint64_t)hos_now_ns() / 1000000u; }
+void hos_gpu_wrote(uint64_t guest, uint64_t size, uint64_t value) { hos_wbs_note(&wb_stamps, guest, size, value, wb_ms()); }
+
+/* (CRASH3) the crash record's registers, as values (the rows of memory stay out of the report: hos_crash_memory_row): the
+   guest's x0-x30 and sp, the host's general registers; then, for the faulting guest address and each guest register that
+   points into the guest window, the GPU's last write-back over its page (hos_wb_stamp.h): the culprit of a crash on an
+   object a stale write-back overwrote */
+static void crash_regs(const CONTEXT *h, const Ctx *c, uint64_t fault_guest) {
+    char line[300];
+    if (c)
+        for (int i = 0; i < 32; i += 8) {
+            int n = snprintf(line, sizeof line, "CRASH: guest regs:");
+            for (int r = i; r < i + 8; r++)
+                n += snprintf(line + n, sizeof line - n, " %s%d=%llx", r == 31 ? "sp" : "x", r == 31 ? 0 : r,
+                              (unsigned long long)c->x[r]);
+            hos_log("%s", line);
+        }
+    hos_log("CRASH: host regs: rax=%llx rbx=%llx rcx=%llx rdx=%llx rsi=%llx rdi=%llx rbp=%llx rsp=%llx",
+            (unsigned long long)h->Rax, (unsigned long long)h->Rbx, (unsigned long long)h->Rcx, (unsigned long long)h->Rdx,
+            (unsigned long long)h->Rsi, (unsigned long long)h->Rdi, (unsigned long long)h->Rbp, (unsigned long long)h->Rsp);
+    hos_log("CRASH: host regs: r8=%llx r9=%llx r10=%llx r11=%llx r12=%llx r13=%llx r14=%llx r15=%llx rip=%llx",
+            (unsigned long long)h->R8, (unsigned long long)h->R9, (unsigned long long)h->R10, (unsigned long long)h->R11,
+            (unsigned long long)h->R12, (unsigned long long)h->R13, (unsigned long long)h->R14, (unsigned long long)h->R15,
+            (unsigned long long)h->Rip);
+    const uint64_t now = wb_ms();
+    int n = snprintf(line, sizeof line, "CRASH: GPU write-back:"), told = 0, lines = 0;
+    for (int r = -1; r < (c ? 31 : 0) && lines < 3; r++) {
+        const uint64_t a = r < 0 ? fault_guest : c->x[r];
+        uint64_t age;
+        uint32_t value;
+        if (a < 0x10000 || a >= (uint64_t)HOS_SPACE_END || !hos_wbs_find(&wb_stamps, a, now, &age, &value)) continue;
+        char who[8], one[96];
+        if (r < 0) snprintf(who, sizeof who, "fault");
+        else snprintf(who, sizeof who, "x%d", r);
+        snprintf(one, sizeof one, " %s %llx page %llu ms ago (submission %u);", who, (unsigned long long)a,
+                 (unsigned long long)age, value);
+        if (n + (int)strlen(one) >= (int)sizeof line) {
+            hos_log("%s", line);
+            lines++;
+            n = snprintf(line, sizeof line, "CRASH: GPU write-back:");
+        }
+        n += snprintf(line + n, sizeof line - n, "%s", one);
+        told++;
+    }
+    if (!told) hos_log("CRASH: GPU write-back: none known on the fault's page or the registers' pages");
+    else if (lines < 3) hos_log("%s", line);
+}
+
 static LONG WINAPI report_crash(EXCEPTION_POINTERS *info) {
     record_exception(info);
     EXCEPTION_RECORD *rec = info->ExceptionRecord;
@@ -643,6 +740,7 @@ static LONG WINAPI report_crash(EXCEPTION_POINTERS *info) {
                 fp = next;
             }
         }
+        crash_regs(info->ContextRecord, c, addr - (uint64_t)A64_MEM);
         /* the memory x0, x1, x19, x20, x21, x22 and x24 point to (the object a crash is usually about, its
            manager and the next array entry: the review of #67's report) */
         static const int dumped[] = {0, 1, 19, 20, 21, 22, 24};
@@ -655,7 +753,8 @@ static LONG WINAPI report_crash(EXCEPTION_POINTERS *info) {
                         (unsigned long long)peek_guest(base + row), (unsigned long long)peek_guest(base + row + 8),
                         (unsigned long long)peek_guest(base + row + 16), (unsigned long long)peek_guest(base + row + 24));
         }
-    }
+    } else
+        crash_regs(info->ContextRecord, NULL, addr - (uint64_t)A64_MEM);   /* (a host thread: its registers) */
     {   /* (HL_TRACE: the blocks the fault and the registers are in, the last events; hl_trace.c) */
         void hl_trace_on_crash(Ctx *, uint64_t);
         hl_trace_on_crash(c, addr - (uint64_t)A64_MEM);
@@ -710,6 +809,10 @@ static LONG CALLBACK report_fatal(EXCEPTION_POINTERS *info) {
 
 void hos_commit_init(void) {
     AddVectoredExceptionHandler(1, commit_on_touch);
+#ifdef _WIN32
+    stack_spare = VirtualAlloc(NULL, STACK_SPARE, MEM_COMMIT, PAGE_READWRITE);
+    AddVectoredExceptionHandler(1, stack_on_touch);
+#endif
     AddVectoredExceptionHandler(0, report_fatal);
     SetUnhandledExceptionFilter(report_crash);
     {   /* (the lifted table, so a host frame in it is named f_<guest address> even with no .sym beside the game) */

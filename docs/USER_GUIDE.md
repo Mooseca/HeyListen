@@ -492,6 +492,12 @@ The builder's problem page has *Copy for a bug report*. Report issues at
 <https://github.com/Sacrappy/HeyListen/issues> with your GPU, driver and the log. Do not attach game files, keys or saves
 with personal data.
 
+**Windows: an out-of-memory notice, or a crash with `0xc00000fd` (stack overflow).** Windows has run out of memory (RAM plus
+the page file); the log has `mem: ... at the commit limit` lines before it. The game waits up to 5 seconds for memory to come
+back (for a thread's stack too); when it does not, it shows the notice and closes. Let Windows manage the page
+file (System > About > Advanced system settings > Performance > Advanced > Virtual memory, "Automatically manage paging file
+size", or at least 16 GB), close other large programs while you play, and choose a lower Quality preset in the Insert menu.
+
 A maintainer may ask you to try a switch, a line such as `RX_VK_ASTC_RGBA8=1` in `hookshot_env.txt` beside `image.bin`
 (in the game folder; on Linux `~/Games/HeyListen`, not `bin/`). [docs/SWITCHES.md](SWITCHES.md) lists every switch, what
 it does and which symptom it fixes, and says how to set one (also from Steam's launch options).

@@ -28,7 +28,14 @@ def main():
     state = block(source, "void dynamic_state(VkCommandBuffer cmd")
     if 'getenv("RX_VK_EQ_BIAS")' not in state:
         raise SystemExit("no RX_VK_EQ_BIAS switch")
-    if "dev.props.vendorID == 0x8086 ? 64.0f : 0.0f" not in state:
+    # (the default is equal_depth_rule.h's: 64 on Intel, 0 on Intel's Windows driver for Battlemage 0xE2xx and Lunar Lake 0x64xx;
+    # tests/test_equal_depth_rule.py has it on each GPU; Longshot 03a6e8d0e and 641030ed9)
+    if "equal_depth_rule::default_margin(pr.properties.vendorID, pr.properties.deviceID," not in state or             "drv.driverID == VK_DRIVER_ID_INTEL_PROPRIETARY_WINDOWS" not in state:
+        raise SystemExit("the margin's default is not equal_depth_rule's, from the device and its driver")
+    if "const float value = getenv(\"RX_VK_EQ_BIAS\") ? (float)atof(getenv(\"RX_VK_EQ_BIAS\")) : rule;" not in state:
+        raise SystemExit("RX_VK_EQ_BIAS does not decide over the default")
+    rule = (ROOT / "gpu" / "vk" / "equal_depth_rule.h").read_text(encoding="utf-8")
+    if "if (vendor_id != kIntel) return 0.0f;" not in rule or "return 64.0f;" not in rule:
         raise SystemExit("the margin is not on by default on Intel only")
     cond = "if (eq_bias > 0 && d.dt && !d.dw && d.dop == VK_COMPARE_OP_EQUAL && !blends)"
     if cond not in state:

@@ -339,6 +339,36 @@ def _body(source, head):
     return (start, end) if end >= 0 else (None, None)
 
 
+# (Hookshot f4cf40ab8, NotRexed, from a finding of Rekarina: git.rekarina.dev/rekarina/rekarina, GPL-3.0) The resource lookup
+# by handle, f_80cb38d0: a type-0 handle's id indexes the resource manager's table ([[main+0x4e22540]+0x120], its count at +0x840,
+# its entries at +0x848). A negative id, one past the table, or an empty entry went on to L_80cb3940, which reads the entry's
+# +0x150 with a null entry: the guest address 0x150 (issue 114: guest lr 0x80580b38, the return from this function; v0.4.1 and
+# v0.4.2, mostly an RX 580). The three take the function's own path for an invalid handle (L_80cb3a18): the output gets null,
+# which its callers test
+RES_HEAD = "void f_80cb38d0(Ctx *__restrict A64_NOESC c) {\n"
+RES_GUARD = "   /* (nx2/oot_patches.py: an invalid resource handle takes the null path) */"
+RES_SITES = ("if (((x8_ >> 31) & 1)) { goto L_80cb3940; }",            # (a negative id)
+             "if (!((fn_ == fv_) && !fz_)) { goto L_80cb3940; }",     # (one past the table)
+             "if (x19_ == 0) { goto L_80cb3940; }")                     # (an empty entry)
+
+
+def patch_res_guard(s):
+    """The resource lookup's three invalid-handle branches to its null path: (s, 1) when it is in s with them (made now or
+    before), (s, 0) when it is not here or its code differs (another game version or lift: left as it is)"""
+    head, end = _body(s, RES_HEAD)
+    if head is None:
+        return s, 0
+    body = s[head:end]
+    news = [old.replace("L_80cb3940", "L_80cb3a18") + RES_GUARD for old in RES_SITES]
+    if all(body.count(n) == 1 for n in news):
+        return s, 1
+    if any(body.count(old + "\n") != 1 for old in RES_SITES):
+        return s, 0
+    for old, new in zip(RES_SITES, news):
+        body = body.replace(old + "\n", new + "\n", 1)
+    return s[:head] + body + s[end:], 1
+
+
 def patch_job_order(source):
     """None when neither function is found here; else (text, how many of the two functions are patched, now or before)"""
     done = 0
@@ -453,7 +483,7 @@ def apply(gen, *, protect_hearts=False, required=False):
     import hl_gates   # (HeyListen native engine: entry gates of the guest functions host/hl_*.c answers, nx2/hl_gates.py)
     hl_gates.apply(gen)
     job_order = os.environ.get("OOT_JOB_ORDER") == "1"   # (TICK-047, lift time; off: no job order statements)
-    done = {"dynamic resolution branch": 0, "text speed block": 0, "fixed path's scale": 0}
+    done = {"dynamic resolution branch": 0, "text speed block": 0, "fixed path's scale": 0, "resource guard": 0}
     if job_order:
         done["job order"] = 0
     if protect_hearts:
@@ -487,6 +517,11 @@ def apply(gen, *, protect_hearts=False, required=False):
         if n:
             done["fixed path's scale"] += 1
             print("oot_patches: the fixed path's scale in", os.path.basename(path))
+        res, found = patch_res_guard(out)
+        done["resource guard"] += found
+        if res != out:
+            print("oot_patches: the resource lookup's invalid handles take its null path in", os.path.basename(path))
+        out = res
         if protect_hearts:
             voice, found = patch_voice_option(out)
             done["voice option check"] += found

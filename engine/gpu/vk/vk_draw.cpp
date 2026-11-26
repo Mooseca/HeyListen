@@ -80,6 +80,7 @@
 #include "prepare_work.h"   // (what a program of the seed costs a preparation: its progress bar)
 #include "mesh_conv.h"   // (RX_VK_MESH_CONV: the indirect mesh draws' ring slots and the batch at the game's barriers)
 #include "lowend_rule.h"   // (the Volumetric fog row: the fog's programs)
+#include "equal_depth_rule.h"   // (the EQUAL depth margin's default)
 #include "vk_work.h"   // (after the others: counts the commands that do GPU work, for full_barrier)
 
 namespace mkwvk {
@@ -1018,6 +1019,7 @@ __declspec(noinline) VkResult guarded_graphics(VkPipelineCache cache, const VkGr
     __try {
         return vkCreateGraphicsPipelines(dev.device, cache, 1, ci, nullptr, pl);
     } __except (1) {
+        logf("vk: the driver faulted compiling a graphics pipeline (exception %#lx): that one is left out", (unsigned long)GetExceptionCode());
         return VK_ERROR_UNKNOWN;
     }
 }
@@ -1025,6 +1027,7 @@ __declspec(noinline) VkResult guarded_compute_once(VkPipelineCache cache, const 
     __try {
         return vkCreateComputePipelines(dev.device, cache, 1, ci, nullptr, pl);
     } __except (1) {
+        logf("vk: the driver faulted compiling a compute pipeline (exception %#lx): that one is left out", (unsigned long)GetExceptionCode());
         return (VkResult)-77;   // (a fault in the driver, told apart from what it returns)
     }
 }
@@ -2324,7 +2327,8 @@ VkPipeline build_graphics(const Program& p, const NvnState& s, const Targets& at
     if (!p.mesh) {
         dyn.push_back(VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY);
         dyn.push_back(VK_DYNAMIC_STATE_PRIMITIVE_RESTART_ENABLE);
-        dyn.push_back(VK_DYNAMIC_STATE_VERTEX_INPUT_BINDING_STRIDE);
+        // The fallback vertex stage reads records by vertex index, with no vertex buffers bound.
+        if (!p.fallback) dyn.push_back(VK_DYNAMIC_STATE_VERTEX_INPUT_BINDING_STRIDE);
     }
     if (dev.eds3_blend) {
         dyn.push_back(VK_DYNAMIC_STATE_COLOR_BLEND_ENABLE_EXT);
@@ -2421,6 +2425,16 @@ VkPipeline build_graphics(const Program& p, const NvnState& s, const Targets& at
             }
         }
     }
+#ifdef _WIN32
+    // AMD's optimizer can leave this cloth color pipeline pending after its depth pass has drawn (issues #461, #1540).
+    if (p.key == 0x5fa56485a6b07619ull) {
+        VkPhysicalDeviceDriverProperties driver{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES};
+        VkPhysicalDeviceProperties2 props{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
+        props.pNext = &driver;
+        vkGetPhysicalDeviceProperties2(dev.physical, &props);
+        if (driver.driverID == VK_DRIVER_ID_AMD_PROPRIETARY) ci.flags |= VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT;
+    }
+#endif
     if (cold) ci.flags |= VK_PIPELINE_CREATE_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT;
     // (HeyListen, RX_VK_PCACHE_MISSES: whether the pipeline cache had it. A hit adds nothing to the cache: counted as built, the
     // 1.2 GB cache was fetched and written again at every scene load, whose pipelines all come from it)
@@ -3705,6 +3719,22 @@ void build_descriptors(const NvnState& s, const Program& p) {
                         size = std::min<uint64_t>(end - addr, d.is_written ? (1ull << 20) : bare_read) & ~3ull, bare = true;
                 // (EvilOOT) the pointer table's regions (c0+0x880, vk_bank.cpp pointer_table) are guesses too: GPU-only, as above
                 if (d.cbuf_index == 0 && d.cbuf_offset == 0x880 && d.count == 3) bare = true;
+                // (CRASH3, issue 55) a bare entry the program writes through whose pointer starts a heap block the game has freed
+                // (the module system's destroy path frees the culling buffer and leaves its pointer in the table; a loader then
+                // allocates small CPU objects there): left unbound (reads 0, writes dropped), so no GPU write, write-back or guess
+                // lands over the game's new objects. Judged at each recording of a binding. RX_VK_STALE_HEAD_GUARD=0: bound as before
+                bool stale = false;
+                if (bare && d.is_written && host->bare_head_live)
+                    if (const uint64_t g = host->gpu_guest(addr); g && !host->bare_head_live(g)) {
+                        stale = true;
+                        static std::mutex sm;
+                        static std::unordered_set<uint64_t> told;
+                        std::lock_guard lk(sm);
+                        if (told.size() < 64 && told.insert(g).second)
+                            logf("vk: a bare written storage entry (program %016llx c%u+%#x entry %u of %u) points at %#llx, the start of a "
+                                 "heap block the game freed: left unbound (RX_VK_STALE_HEAD_GUARD)", (unsigned long long)p.key,
+                                 (unsigned)d.cbuf_index, off, k, d.count, (unsigned long long)g);
+                    }
                 // (Fritchii's storage buffer pass, Info::native_global_bounds) a program whose accesses pick among candidate
                 // pointers at run time: those are bare 8-byte arguments, the word after one another argument (a stride, a
                 // handle), not an NVN size. Unless that word looks like this pointer's size (its high half 0, inside the
@@ -3740,7 +3770,7 @@ void build_descriptors(const NvnState& s, const Program& p) {
                 const LedgerUse ledger_scope_(kUseStorage);   // (RX_VK_LEDGER)
                 // (hookshot) a storage buffer table's entries (count > 1, Info::global_tables): the ones past the table's
                 // end are whatever the constant buffer holds there, bound only when they look like a buffer
-                const bool plausible = d.count == 1 || (size && size <= (256ull << 20) && host->gpu_guest(base));
+                const bool plausible = !stale && (d.count == 1 || (size && size <= (256ull << 20) && host->gpu_guest(base)));
                 BufferRef b = addr && plausible ? gpu_buffer_bind(base, n, d.is_written && !bare) : BufferRef{};
                 // (AyyBeeDee20738, PR 138) a table entry's region that does not fit its pool this moment bound nothing, and the next
                 // frame bound it again: its reads flipped between the data and 0, the picture between bright and dark. Smaller,
@@ -3977,7 +4007,7 @@ void build_descriptors(const NvnState& s, const Program& p) {
             // are read once
             static thread_local std::vector<uint32_t> table;
             const bool is_table = d.handle_program != ~0U && d.count > 1;
-            if (is_table) table.resize(d.count), stage_handles(s, st, d.handle_program, d.count, table.data());
+            if (is_table) table.resize(d.count), stage_handles(s, st, d.handle_program, d.count, table.data(), p.key);
             for (uint32_t k = 0; k < d.count; k++) {
                 // (Fritchii d603d98bb) A handle word where a storage buffer of the same program keeps its address is not a
                 // handle: OoT's water samples each light's texture with a handle loaded per pixel from the light buffer, and
@@ -4718,7 +4748,7 @@ void checkpoints_report() {
     logf("vk: device lost: reading %s", dev.checkpoints ? "the checkpoints"
                                         : marker_words ? "the buffer markers"
                                                        : "the fault info (RX_VK_CHECKPOINTS=1 for markers)");
-    struct FaultLast { ~FaultLast() { if (std::getenv("RX_VK_FAULT_INFO")) device_fault_report(); } } fault_last;
+    struct FaultLast { ~FaultLast() { if ((!dev.checkpoints && !marker_words) || std::getenv("RX_VK_FAULT_INFO")) device_fault_report(); } } fault_last;
     const auto watched = [] {
         std::lock_guard lk(watch_mu);
         for (int i = 0; i < 40; i++)
@@ -5231,7 +5261,23 @@ void dynamic_state(VkCommandBuffer cmd, const NvnState& s, const Targets& at, Vk
         // program 701ae221d88b2908) where the depth is exactly its own, and LESS_OR_EQUAL drew the whole sheet over the mountain behind:
         // a flat khaki veil on Intel (Arc 155H). The prepass's colour passes the margin was made for do not blend: some have blending
         // on with ONE, ZERO (the same as off), and those keep the margin (without it, Death Mountain Trail's ground had holes).
-        static const float eq_bias = getenv("RX_VK_EQ_BIAS") ? (float)atof(getenv("RX_VK_EQ_BIAS")) : dev.props.vendorID == 0x8086 ? 64.0f : 0.0f;
+        // (Longshot 03a6e8d0e and 641030ed9, #1801 and #2299) Not on Intel's Windows driver on discrete Battlemage (0xE2xx) and Lunar
+        // Lake (0x64xx): there the margin's LESS_OR_EQUAL passes the fragments an alpha-tested prepass cut away, and the foliage drew
+        // as solid blocks (equal_depth_rule.h). RX_VK_EQ_BIAS=64 brings the margin back
+        static const float eq_bias = [] {
+            VkPhysicalDeviceDriverProperties drv{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES};
+            VkPhysicalDeviceProperties2 pr{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, &drv};
+            vkGetPhysicalDeviceProperties2(dev.physical, &pr);
+            const float rule = equal_depth_rule::default_margin(pr.properties.vendorID, pr.properties.deviceID,
+                                                                drv.driverID == VK_DRIVER_ID_INTEL_PROPRIETARY_WINDOWS);
+            // RX_VK_EQ_BIAS=<units>: the margin towards the camera of a colour pass's EQUAL test, 0: as the game asks. Unset: 64 on
+            // Intel, 0 on Intel's Windows driver for Battlemage (0xE2xx) and Lunar Lake (0x64xx), 0 on other vendors
+            const float value = getenv("RX_VK_EQ_BIAS") ? (float)atof(getenv("RX_VK_EQ_BIAS")) : rule;
+            if (pr.properties.vendorID == equal_depth_rule::kIntel)
+                logf("vk: EQUAL depth margin: %g units%s (device %04x, driver id %d)", value, value != rule ? " (RX_VK_EQ_BIAS)" : "",
+                     pr.properties.deviceID, (int)drv.driverID);
+            return value;
+        }();
         bool blends = false;
         for (int i = 0; i < at.n && !blends && eq_bias > 0; i++) {
             const nvn_blend_st& b = s.blend[i];
@@ -6362,7 +6408,7 @@ bool stats_make_pool() {
                                                VK_QUERY_PIPELINE_STATISTIC_FRAGMENT_SHADER_INVOCATIONS_BIT |
                                                VK_QUERY_PIPELINE_STATISTIC_COMPUTE_SHADER_INVOCATIONS_BIT;
     qi.pipelineStatistics = base;
-    if (dev.mesh_shader) {
+    if (dev.mesh_queries) {   // (not dev.mesh_shader: see where it is set)
         qi.pipelineStatistics = base | VK_QUERY_PIPELINE_STATISTIC_TASK_SHADER_INVOCATIONS_BIT_EXT |
                                 VK_QUERY_PIPELINE_STATISTIC_MESH_SHADER_INVOCATIONS_BIT_EXT;
         if (vkCreateQueryPool(dev.device, &qi, nullptr, &stats_pool) == VK_SUCCESS) {
@@ -8846,6 +8892,12 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
         FINE_N(FC_BIND_PIPE, 1);
         if (res_log_on()) res_note_pipeline_use(pl);   // (TICK-038)
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pl), last_pipeline = pl;
+        if (p.fallback) {
+            // A static-stride pipeline invalidates the dynamic strides, even with no vertex bindings.
+            // Drop both bind-skip caches; the resolved buffer references themselves are still reusable.
+            last_vb_valid = false;
+            vertex_set.on = false;
+        }
     }
     if (!same_desc || pre_recorded) {   // (after DLAA's commands its pushes are gone: temporal_pre_bloom)
         FINE_SCOPE(FT_BINDDESC);

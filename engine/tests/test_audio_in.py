@@ -47,6 +47,8 @@ FIXTURE = r'''
 
 static int64_t clock_ns = 1000000000;
 int64_t hos_now_ns(void) { return clock_ns; }
+static int game_fps = 60;   /* (host/nn_vi.c's frame rate: the Frame rate limit above 60) */
+int hos_vi_game_fps(void) { return game_fps; }
 static int logged;
 void hos_log(const char *fmt, ...) { (void)fmt; logged++; }
 const char *hos_sdl_error(void) { return "no device"; }
@@ -285,8 +287,37 @@ int main(void) {
     for (int k = 0; k < 12; k++) MS(1000), (void)FILLED(big);   /* (silence comes a second at most a poll) */
     if (FILLED(big) != 480000) FAIL(42, "a huge frame count: %d frames held, not 10 s", FILLED(big));
     cases += 2;
+
+    /* (HeyListen) above 60 fps a game frame reads less than a 60th of a second: it is told only whole 60ths (800 frames),
+       all of them read that frame in 256s, each unbroken; at 60 fps, or with HOS_MIC_PACE=0, what was recorded */
+    CALL(imp__ZN2nn5audio16CloseInputStreamEPNS0_15InputStreamTypeE, U(big));
+    OPEN(stream, names[0]);
+    hos_mic_select(1, "", -1);
+    START(stream);
+    game_fps = 120;
+    MS(9), mic_bytes = 500 * 2;
+    if (FILLED(stream) != 0 || READ(stream, buf, 256) != 0) FAIL(43, "above 60: less than a 60th recorded: nothing yet");
+    MS(9), mic_bytes = 500 * 2;
+    const int first_sample = next_sample - 500;   /* (the first frame's 500, pumped; these 500 not yet) */
+    if (FILLED(stream) != 800) FAIL(44, "above 60: a whole 60th, not %d", FILLED(stream));
+    for (int k = 0; k < 3; k++) if (READ(stream, buf + 256 * k, 256) != 256) FAIL(45, "above 60: read %d of the 60th", k);
+    if (READ(stream, buf + 768, 256) != 32 || READ(stream, buf, 256) != 0) FAIL(46, "above 60: the 60th's end, then nothing");
+    if (READ(stream, buf2, 1) != 0) FAIL(47, "above 60: the rest waits for the next frame");
+    MS(9), mic_bytes = 700 * 2;
+    if (FILLED(stream) != 800 || READ(stream, buf2, 800) != 800) FAIL(48, "above 60: the next 60th");
+    for (int k = 0; k < 800; k++)
+        if (buf2[k] != (int16_t)(first_sample + 800 + k)) FAIL(49, "above 60: frame %d out of order, unbroken sound", k);
+    game_fps = 60;
+    MS(17), mic_bytes = 300 * 2;
+    if (FILLED(stream) != 400) FAIL(50, "at 60 fps: all that was recorded (100 left + 300), not %d", FILLED(stream));
+    (void)READ(stream, buf, 4800);
+    pace_mode = 0, game_fps = 120;   /* (HOS_MIC_PACE=0) */
+    MS(9), mic_bytes = 500 * 2;
+    if (FILLED(stream) != 500 || READ(stream, buf, 500) != 500) FAIL(51, "HOS_MIC_PACE=0: what was recorded, as before");
+    pace_mode = -1, game_fps = 60;
+    cases += 9;
     printf("PASS: %d input stream cases (device list, open, start, silence, a shared microphone, capacity, a lost one and its"
-           " retries, a quiet one, named ones, a stand-in, stop, close)\n", cases);
+           " retries, a quiet one, named ones, a stand-in, stop, close, the pace above 60 fps)\n", cases);
     return 0;
 }
 '''
