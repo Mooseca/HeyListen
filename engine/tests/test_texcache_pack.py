@@ -33,6 +33,10 @@ def check_source():
         (disk, "s.write_off_why = \"its folder could not be written\";"),   # (a read-only folder: writes off, reads on)
         (tex, "texcache::on_by_default(integrated, astc_ready() && bc_ready(), vram, &why)"),
         (tex, "env >= 0 ? env == 1 :"),                        # (RX_VK_BC_DISK forces it either way)
+        (tex, 'if (const char* e = getenv("RX_VK_BC_LAYERS")) return'),   # (MESH1: the switch decides over the rule)
+        (tex, "texcache::bc_layers_for(device_vram_bytes(),"),
+        (tex, "texcache::bc_cache_mb_for(dev.props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU, dev.mesh_shader,"),
+        (tex, 'getenv("RX_VK_BC_CACHE_MB")'),
     ]
     for src, needle in need:
         if needle not in src:

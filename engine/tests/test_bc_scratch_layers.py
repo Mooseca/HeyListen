@@ -16,7 +16,8 @@ def main():
     if not m:
         raise SystemExit("vk_texture.cpp: no bc_layers()")
     rule = m.group(0)
-    for need in ('getenv("RX_VK_BC_LAYERS")', "device_vram_bytes()", "8ull << 30", "kBcLayers"):
+    # (MESH1: the rule by video memory and system RAM is texcache_pack.h's bc_layers_for, its numbers tested in test_texcache_pack)
+    for need in ('getenv("RX_VK_BC_LAYERS")', "texcache::bc_layers_for(device_vram_bytes(),", "system_ram_bytes()", "kBcLayers"):
         if need not in rule:
             raise SystemExit("bc_layers() lacks " + need)
     for name in ("bool bc_scratch_make() {", "bool bc_scratch2_make() {", "bool bc_scratch_layout("):

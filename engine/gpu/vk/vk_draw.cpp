@@ -7726,6 +7726,38 @@ bool fallback_buffers_of(const Program& p, FallbackBuffers*& out) {
     return true;
 }
 
+/// (MESH1, RX_VK_FALLBACK_STATS=1, off by default; AMD only: VK_AMD_shader_info) What the driver made of each fallback compute
+/// stage: registers, LDS and scratch, from which a SIMD's waves follow (GCN: 256 VGPRs a lane, 64 KB of LDS a CU). It says whether
+/// the no-mesh path is held by occupancy, by scratch or by the stages' own length. RX_VK_FALLBACK_STATS_DIR=<folder>: each stage's
+/// ISA there too (fallback_isa_<key>_<stage>.txt; made from the game's shaders, it stays on the PC)
+void fallback_stats_log(const Program& p, size_t stage, VkPipeline pl) {
+    if (!dev.amd_shader_info || !pl) return;
+    static const auto get = (PFN_vkGetShaderInfoAMD)vkGetDeviceProcAddr(dev.device, "vkGetShaderInfoAMD");
+    if (!get) return;
+    VkShaderStatisticsInfoAMD s{};
+    size_t n = sizeof s;
+    if (get(dev.device, pl, VK_SHADER_STAGE_COMPUTE_BIT, VK_SHADER_INFO_TYPE_STATISTICS_AMD, &n, &s) != VK_SUCCESS) return;
+    const bool mesh = stage + 1 >= p.stages.size() || p.stages[stage + 1].vk_stage != VK_SHADER_STAGE_COMPUTE_BIT;
+    logf("vk: fallback stats %016llx %s stage %zu: workgroup %ux%ux%u, VGPRs %u of %u (physical %u), SGPRs %u of %u, LDS %u bytes "
+         "(used %llu), scratch %llu bytes",
+         (unsigned long long)p.key, mesh ? "mesh" : "task", stage, s.computeWorkGroupSize[0], s.computeWorkGroupSize[1],
+         s.computeWorkGroupSize[2], s.resourceUsage.numUsedVgprs, s.numAvailableVgprs, s.numPhysicalVgprs, s.resourceUsage.numUsedSgprs,
+         s.numAvailableSgprs, s.resourceUsage.ldsSizePerLocalWorkGroup, (unsigned long long)s.resourceUsage.ldsUsageSizeInBytes,
+         (unsigned long long)s.resourceUsage.scratchMemUsageInBytes);
+    static const char* dir = getenv("RX_VK_FALLBACK_STATS_DIR");
+    if (!dir || !*dir) return;
+    size_t bytes = 0;
+    if (get(dev.device, pl, VK_SHADER_STAGE_COMPUTE_BIT, VK_SHADER_INFO_TYPE_DISASSEMBLY_AMD, &bytes, nullptr) != VK_SUCCESS || !bytes) return;
+    std::vector<char> text(bytes);
+    if (get(dev.device, pl, VK_SHADER_STAGE_COMPUTE_BIT, VK_SHADER_INFO_TYPE_DISASSEMBLY_AMD, &bytes, text.data()) != VK_SUCCESS) return;
+    char path[1024];
+    snprintf(path, sizeof path, "%s/fallback_isa_%016llx_%zu.txt", dir, (unsigned long long)p.key, stage);
+    if (FILE* f = fopen(path, "wb")) {
+        fwrite(text.data(), 1, strnlen(text.data(), bytes), f);
+        fclose(f);
+    }
+}
+
 bool fallback_compute_pipelines(Program& p) {
     static std::mutex mu;
     // (the programs whose compute pipeline the driver refused or faulted on, by key and variant: not tried again. Each try
@@ -7775,6 +7807,7 @@ bool fallback_compute_pipelines(Program& p) {
             return false;
         }
         pcache_built_since_save++;
+        fallback_stats_log(p, i, made[i]);   // (RX_VK_FALLBACK_STATS)
     }
     if (!any) return false;
     std::lock_guard lk(mu);

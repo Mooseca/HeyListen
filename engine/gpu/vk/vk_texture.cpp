@@ -20,6 +20,7 @@
 #include <psapi.h>
 #if defined(__linux__)
 #include <malloc.h>
+#include <unistd.h>   // (sysconf: system_ram_bytes)
 #endif
 #include <atomic>
 #include <chrono>
@@ -734,11 +735,30 @@ constexpr uint32_t kBcDim = 2048, kBcLayers = 8;   // the scratch: the largest l
 /// The scratch's layers (Longshot #384: it held 8 whatever a run used, 140 of its 160 MB never written on one-layer runs): 8
 /// when the batched transcodes (TICK-051) can use them, 1 on a card with under 8 GB of video memory (20 MB, not 160: the batch
 /// is a load-time speed-up, off there), RX_VK_BC_LAYERS=<n> (1 to 8) over both. Called once the device is made
+/// The machine's RAM (0 when not known)
+uint64_t system_ram_bytes() {
+    uint64_t ram = 0;
+#ifdef _WIN32
+    MEMORYSTATUSEX ms{};
+    ms.dwLength = sizeof ms;
+    if (GlobalMemoryStatusEx(&ms)) ram = ms.ullTotalPhys;
+#elif defined(__linux__)
+    const long pages = sysconf(_SC_PHYS_PAGES), page = sysconf(_SC_PAGE_SIZE);
+    if (pages > 0 && page > 0) ram = (uint64_t)pages * (uint64_t)page;
+#endif
+    return ram;
+}
+/// (MESH1) an integrated GPU without mesh shaders: the class texcache_pack.h's bc_layers_for and bc_cache_mb_for decide for
+bool integrated_no_mesh() { return dev.props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU && !dev.mesh_shader; }
 uint32_t bc_layers() {
     static const uint32_t n = [] {
         if (const char* e = getenv("RX_VK_BC_LAYERS")) return std::clamp<uint32_t>((uint32_t)atoi(e), 1u, kBcLayers);
-        const uint64_t vram = device_vram_bytes();
-        return vram && vram < (8ull << 30) ? 1u : kBcLayers;
+        const uint32_t v = texcache::bc_layers_for(device_vram_bytes(), dev.props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU,
+                                                   dev.mesh_shader, system_ram_bytes());
+        if (integrated_no_mesh())
+            logf("vk: the BC3 scratch: %u layer%s (an integrated GPU without mesh shaders, %llu MB of RAM: 8 from 12 GB; RX_VK_BC_LAYERS)", v,
+                 v == 1 ? "" : "s", (unsigned long long)(system_ram_bytes() >> 20));
+        return std::min(v, kBcLayers);
     }();
     return n;
 }
@@ -1339,7 +1359,12 @@ std::vector<BcCacheEntry> bcc_dead;               // (bcc_mu; freed once the GPU
 uint64_t bcc_bytes = 0, bcc_tick = 0;
 std::atomic<int64_t> st_bcc_hits{0}, st_bcc_stores{0}, st_bcc_hit_bytes{0};
 uint64_t bcc_cap() {
-    static const uint64_t v = (uint64_t)(getenv("RX_VK_BC_CACHE_MB") ? std::max(0, atoi(getenv("RX_VK_BC_CACHE_MB"))) : 1024) << 20;
+    // (MESH1: 512 on an integrated GPU without mesh shaders with less than 16 GB of RAM, texcache_pack.h bc_cache_mb_for)
+    static const uint64_t v = [] {
+        const int def = (int)texcache::bc_cache_mb_for(dev.props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU, dev.mesh_shader,
+                                                       system_ram_bytes());
+        return (uint64_t)(getenv("RX_VK_BC_CACHE_MB") ? std::max(0, atoi(getenv("RX_VK_BC_CACHE_MB"))) : def) << 20;
+    }();
     return v;
 }
 // (HeyListen, 2026-11-14) RX_VK_BC_CACHE_LAZY=1 (the default on cards the driver allows more than 9.5 GB of; 0: every

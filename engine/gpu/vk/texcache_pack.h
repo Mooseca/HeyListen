@@ -315,6 +315,21 @@ inline bool on_by_default(bool integrated, bool astc_on_gpu, uint64_t vram_bytes
 inline uint32_t pool_mb_for_ram(uint64_t total_bytes) {
     return total_bytes >= (24ull << 30) ? 1024 : total_bytes >= (14ull << 30) ? 512 : 256;
 }
+/// (MESH1) The BC3 scratch's layers, by the machine (RX_VK_BC_LAYERS decides over it): 8, the batched transcodes, which the RAM BC
+/// cache and the disk cache's writer need; 1 on a card with less than 8 GB of video memory (the scratch is 20 MB, not 160). But an
+/// integrated GPU without mesh shaders with 12 GB of system RAM or more takes 8: its "video memory" is the system's own (a Vega 8
+/// laptop reports 256 MB), and with one layer each texture the read-ahead missed was transcoded again on the GPU, 25-35 ms a frame
+/// while the camera turns there (5700U laptop, 15 GB: turning 12.4 -> 15.7 fps with 8, three runs a side). Integrated GPUs with
+/// mesh shaders (a Steam Deck) are not tried: they keep the rule by video memory
+inline uint32_t bc_layers_for(uint64_t vram_bytes, bool integrated, bool mesh_shaders, uint64_t ram_bytes) {
+    if (integrated && !mesh_shaders && ram_bytes >= (12ull << 30)) return 8;
+    return vram_bytes && vram_bytes < (8ull << 30) ? 1 : 8;
+}
+/// (MESH1) The RAM BC cache's cap in MB (RX_VK_BC_CACHE_MB decides over it): 1024, but 512 on those integrated GPUs with less than
+/// 16 GB of system RAM, where the game already holds 10-11 GB of a 15 GB laptop
+inline uint32_t bc_cache_mb_for(bool integrated, bool mesh_shaders, uint64_t ram_bytes) {
+    return integrated && !mesh_shaders && ram_bytes && ram_bytes < (16ull << 30) ? 512u : 1024u;
+}
 /// A record of `size` bytes may be written while the disk keeps at least `floor` free after it (never the last GB of a disk)
 inline bool room_to_write(uint64_t available, uint64_t size, uint64_t floor = 1ull << 30) {
     return available >= floor && available - floor >= size;
