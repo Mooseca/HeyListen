@@ -199,7 +199,7 @@ def movie_site(s, addr, off):
 #   goes through hos_oot_ocb_pick (host/hl_ocb_hold.c) before the update tests it. A line after the label, once.
 # Each goes in only where its function's text hashes as recorded, both lines of a kind or none. The marker is the address
 # plus one, as a step hook's (one hook a function), so a tree that does not ask for it takes it out as a stale gate.
-WANT_LIFT = re.compile(r'^HL_(SOUND|SOLVER|WHOLE|HEAP|NEW|BGM|TURN|HORSE|FLOOR|DRIVE|LOOP|POSE|SONG|OCB)_HOOK\(\s*([0-9a-f]{8})\s*,\s*"([0-9a-f]*)"((?:\s*,\s*(?:\d+|"[^"\n]*"))*)\s*\)',
+WANT_LIFT = re.compile(r'^HL_(SOUND|SOLVER|WHOLE|HEAP|NEW|BGM|TURN|HORSE|FLOOR|DRIVE|LOOP|POSE|SONG|OCB)_HOOK\(\s*([0-9a-f]{8})\s*,\s*"([0-9a-f,]*)"((?:\s*,\s*(?:\d+|"[^"\n]*"))*)\s*\)',
                        re.M)
 CUT = "    c->x[%d]=recomp_fp_to_int(c->vreg[0][0]&UINT64_C(0xffffffff),32,32,1,3,c->fpcr,&c->fpsr);\n"
 SOUND_SLOT = "g_module_base + 0x80435000ULL + (int64_t)75927552"   # (the page of the step's pointer, whose +2192 holds it)
@@ -265,10 +265,14 @@ NEW_TAIL = ("c->x[0] = x0_; c->x[1] = x1_; c->x[8] = x8_; c->x[19] = x19_; c->x[
             "c->n = fn_; c->z = fz_; c->c = fc_; c->v = fv_; A64_IJUMP(c, c->x[3]); return;\n")
 NEW_NOHEAP = "if (x1_ != 0) { goto L_8005ec10; }\n"
 NEW_ALIGNED_FAIL = "c->x[30] = 0x8005ecd8ULL; f_85717f00(c);\n"
+# (the lift without registers kept in locals, as the laptop's lift writes operator new: c->x[...] throughout; a hook's hashes may be
+# a list "<hash>,<hash>": one per form of the lift's text)
+NEW_TAIL_B = "A64_IJUMP(c, c->x[3]); return;\n"
+NEW_NOHEAP_B = "if (c->x[1] != 0) { goto L_8005ec10; }\n"
 NEW_DECL = "extern void hl_oot_new_null(Ctx *A64_NOESC, uint64_t, uint64_t, uint64_t, uint64_t, int); "
 
 
-def lift_lines(kind, addr, args):
+def lift_lines(kind, addr, args, body=None):
     """the lines a lift hook puts in, in the order of their places"""
     mark = "   /* hl gate %s */\n" % step_id(addr)
     if kind == "sound":
@@ -334,6 +338,11 @@ def lift_lines(kind, addr, args):
     if kind == "new":
         if addr == "8005eca0":
             return ["    { " + NEW_DECL + "hl_oot_new_null(c, 0, 0, 0, recomp_load64(c, c->x[31] + 8), 2); }" + mark]
+        if body is not None and NEW_TAIL not in body:
+            return ["    { " + NEW_DECL + "const uint64_t _hl_h = c->x[0], _hl_s = c->x[1], _hl_a = c->x[2], _hl_lr = c->x[30]; "
+                    "A64_ICALL(c, c->x[3]); if (__builtin_expect(c->x[0] == 0, 0)) "
+                    "hl_oot_new_null(c, _hl_h, _hl_s, _hl_a, _hl_lr, 0); return; }" + mark,
+                    "    { " + NEW_DECL + "hl_oot_new_null(c, 0, c->x[20], c->x[19], recomp_load64(c, c->x[31] + 8), 1); }" + mark]
         return ["    { " + NEW_DECL + "const uint64_t _hl_h = x0_, _hl_s = x1_, _hl_a = c->x[2], _hl_lr = c->x[30]; "
                 "c->x[0] = x0_; c->x[1] = x1_; c->x[8] = x8_; c->x[19] = x19_; c->x[20] = x20_; c->x[21] = x21_; c->x[31] = x31_; "
                 "c->n = fn_; c->z = fz_; c->c = fc_; c->v = fv_; A64_ICALL(c, c->x[3]); "
@@ -442,9 +451,12 @@ def lift_places(body, addr, kind, args):
     if kind == "new":
         if addr == "8005eca0":
             return [body.index(NEW_ALIGNED_FAIL)] if body.count(NEW_ALIGNED_FAIL) == 1 else None
-        if body.count(NEW_TAIL) != 1 or body.count(NEW_NOHEAP) != 1:
+        if body.count(NEW_TAIL) == 1 and body.count(NEW_NOHEAP) == 1:
+            tail, noheap = body.index(NEW_TAIL), body.index(NEW_NOHEAP) + len(NEW_NOHEAP)
+        elif body.count(NEW_TAIL_B) == 1 and body.count(NEW_NOHEAP_B) == 1 and "x0_" not in body:
+            tail, noheap = body.index(NEW_TAIL_B), body.index(NEW_NOHEAP_B) + len(NEW_NOHEAP_B)
+        else:
             return None
-        tail, noheap = body.index(NEW_TAIL), body.index(NEW_NOHEAP) + len(NEW_NOHEAP)
         return [tail, noheap] if tail < noheap else None
     if kind == "heap":
         places = []
@@ -484,7 +496,7 @@ def apply_lift(s, addr, kind, args):
     if places is None:
         return None
     # (the lines in reverse order of place, those of one place the last first, so that they end up in their order)
-    for _, at, line in sorted(((i, at, line) for i, (at, line) in enumerate(zip(places, lift_lines(kind, addr, args)))),
+    for _, at, line in sorted(((i, at, line) for i, (at, line) in enumerate(zip(places, lift_lines(kind, addr, args, body)))),
                               key=lambda t: (t[1], t[0]), reverse=True):
         body = body[:at] + line + body[at:]
     return s[:span[0]] + body + s[span[1]:]
@@ -642,7 +654,7 @@ def apply(gen, host=HOST, quiet=False, skip=None):
             s = f.read()
         # (a movie or lift hook goes in only where its function's text hashes as recorded; elsewhere a stale one is taken out)
         movies = {a: off for a, (h, off) in movies_asked.items() if body_of(s, a) is not None and text_hash(s, a) == h}
-        lifts = {a: (k, v) for a, (h, k, v) in lifts_asked.items() if body_of(s, a) is not None and text_hash(s, a) == h}
+        lifts = {a: (k, v) for a, (h, k, v) in lifts_asked.items() if body_of(s, a) is not None and text_hash(s, a) in h.split(",")}
         if not want and not steps and not movies and not lifts and "/* hl gate " not in s:
             continue
         out, status = apply_text(s, want, steps, movies, lifts)

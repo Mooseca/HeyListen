@@ -23,7 +23,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-HL_NEW_HOOK(8005ebe0, "b26a4038456275d8");   /* operator new (size, heap, alignment) */
+HL_NEW_HOOK(8005ebe0, "b26a4038456275d8,fb3beb00575415da");   /* operator new (size, heap, alignment) */
 HL_NEW_HOOK(8005eca0, "0ce5468d82ee701d");   /* aligned_alloc (alignment, size) */
 
 enum { HEAP_NAME = 0x20, HEAP_START = 0x28, HEAP_SIZE = 0x30, HEAP_PARENT = 0x38, VT_FREE_SIZE = 0x80 };

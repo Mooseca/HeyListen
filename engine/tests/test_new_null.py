@@ -135,6 +135,21 @@ return;
 }
 '''
 
+# (the same function as the lift without registers in locals writes it: c->x[...] throughout)
+LIFTED_B = '''#include "a64.h"
+void f_8005ebe0(Ctx *__restrict A64_NOESC c) {
+if (c->x[21] == 0) { goto L_8005ec38; }
+L_8005ec10:; A64_POLL(c);
+    c->x[8]=recomp_load64(c,c->x[1] + 0);
+A64_IJUMP(c, c->x[3]); return;
+L_8005ec54:;
+    c->x[1]=recomp_load64(c,c->x[8] + 0);
+if (c->x[1] != 0) { goto L_8005ec10; }
+    { uint64_t _b=c->x[31]; int64_t _o=32; { uint64_t _p0,_p1; recomp_ldp64(c,(_b+_o),&_p0,&_p1); c->x[20]=_p0; c->x[19]=_p1; } }
+return;
+}
+'''
+
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
@@ -155,6 +170,13 @@ def main():
     assert hl_gates.apply_text(both, {}, {}, {}, {})[0] == hl_gates.MARK.sub("", LIFTED), "taking the hooks out did not restore the text"
     tail = [l for l in both.splitlines() if "A64_ICALL(c, c->x[3])" in l][0]
     assert tail.index("A64_ICALL") < tail.index("hl_oot_new_null(c") < tail.index("return;"), "the test of x0 is not after the call"
+    hook_b = hl_gates.apply_lift(LIFTED_B, "8005ebe0", "new", ())
+    assert hook_b is not None, "the lift without locals was not hooked"
+    assert hook_b.count("hl_oot_new_null(c") == 2 and hook_b.count("x0_") == 0, hook_b
+    assert hl_gates.text_hash(hook_b, "8005ebe0") == hl_gates.text_hash(LIFTED_B, "8005ebe0")
+    assert hl_gates.apply_lift(hook_b, "8005ebe0", "new", ()) == hook_b
+    assert hl_gates.apply_text(hook_b, {}, {}, {}, {})[0] == LIFTED_B
+    assert "A64_ICALL(c, c->x[3]); if (__builtin_expect(c->x[0] == 0, 0))" in hook_b
     asked = hl_gates.wanted_lifts()
     assert asked.get("8005ebe0", (None, None))[1] == "new" and asked.get("8005eca0", (None, None))[1] == "new", \
         "host/hl_alloc_null.c does not ask for the hooks"

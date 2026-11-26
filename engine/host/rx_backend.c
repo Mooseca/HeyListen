@@ -100,13 +100,13 @@ static int collect_fast_on(void) {
 }
 static inline void collect_take(uint64_t p, uint32_t **out, size_t *n, size_t *cap) {
     if (__atomic_exchange_n(&a64_dirty[p], 0, __ATOMIC_ACQUIRE)) {
-        if (*n == *cap) *out = realloc(*out, (*cap *= 2) * sizeof **out);
+        if (*n == *cap) *out = hos_xrealloc(*out, (*cap *= 2) * sizeof **out, "the written pages' list");
         (*out)[(*n)++] = (uint32_t)p;
     }
 }
 static int64_t collect_in_fast(const uint64_t (*ranges)[2], int nranges, uint32_t **pages) {
     size_t n = 0, cap = 4096;
-    uint32_t *out = malloc(cap * sizeof *out);
+    uint32_t *out = hos_xmalloc(cap * sizeof *out, "the written pages' list");
     for (int r = 0; r < nranges; r++) {
         const uint64_t lo = ranges[r][0], hi = ranges[r][1] < hos_guest_size() ? ranges[r][1] : hos_guest_size();
         uint64_t p1 = (hi + 4095) >> 12;
@@ -152,7 +152,7 @@ static int64_t collect_in_fast(const uint64_t (*ranges)[2], int nranges, uint32_
 static int64_t collect_in(const uint64_t (*ranges)[2], int nranges, uint32_t **pages) {
     if (collect_fast_on()) return collect_in_fast(ranges, nranges, pages);
     size_t n = 0, cap = 4096;
-    uint32_t *out = malloc(cap * sizeof *out);
+    uint32_t *out = hos_xmalloc(cap * sizeof *out, "the written pages' list");
     for (int r = 0; r < nranges; r++) {
         const uint64_t lo = ranges[r][0], hi = ranges[r][1] < hos_guest_size() ? ranges[r][1] : hos_guest_size();
         uint64_t p1 = (hi + 4095) >> 12;
@@ -184,7 +184,7 @@ static int64_t collect_in(const uint64_t (*ranges)[2], int nranges, uint32_t **p
                 }
             }
             if (__atomic_load_n(&a64_dirty[p], __ATOMIC_RELAXED) && __atomic_exchange_n(&a64_dirty[p], 0, __ATOMIC_ACQUIRE)) {
-                if (n == cap) out = realloc(out, (cap *= 2) * sizeof *out);
+                if (n == cap) out = hos_xrealloc(out, (cap *= 2) * sizeof *out, "the written pages' list");
                 out[n++] = (uint32_t)p;
             }
             p++;
@@ -195,7 +195,7 @@ static int64_t collect_in(const uint64_t (*ranges)[2], int nranges, uint32_t **p
 }
 static int64_t host_collect(uint32_t **pages) {
     static uint64_t (*ranges)[2];
-    if (!ranges) ranges = malloc(sizeof *ranges * 4096);
+    if (!ranges) ranges = hos_xmalloc(sizeof *ranges * 4096, "the GPU ranges' list");
     return collect_in(ranges, hos_gpu_guest_ranges(ranges, 4096), pages);
 }
 /* (HeyListen, TICK-054) HOS_NVN_HOLD_CHECK=1 (nvn_native.c): what a held submit's capture would have held, taken at the submit:
@@ -204,7 +204,7 @@ static int64_t host_collect(uint32_t **pages) {
    bytes differ from the copy, then marks them all again so that the flush's capture takes them, as it would have. */
 int64_t hos_hold_snapshot(uint32_t **pages, uint8_t **copy) {
     static uint64_t (*ranges)[2];
-    if (!ranges) ranges = malloc(sizeof *ranges * 4096);
+    if (!ranges) ranges = hos_xmalloc(sizeof *ranges * 4096, "the GPU ranges' list");
     const int64_t n = collect_in(ranges, hos_gpu_guest_ranges(ranges, 4096), pages);
     *copy = NULL;
     if (n > 0 && n <= 16384) {
