@@ -2,7 +2,7 @@
  "schema": 1,
  "generated_by": "engine/scripts/list_switches.py",
  "scope": "C, C++ and headers under engine/ (engine/tests and vendored trees other than a64-kit excluded) and the Python the builder, the lifter and the scripts run: getenv, std::getenv, _wgetenv, the code's own env helpers and table-driven reads, and os.environ.",
- "count": 1537,
+ "count": 1540,
  "switches": [
   {
    "name": "A64_",
@@ -1135,7 +1135,7 @@
    "files": [
     {
      "path": "host/hl_mem.c",
-     "line": 808
+     "line": 850
     }
    ],
    "default": "unset",
@@ -1764,7 +1764,7 @@
    "files": [
     {
      "path": "host/hl_mem.c",
-     "line": 804
+     "line": 846
     }
    ],
    "default": "unset",
@@ -1789,7 +1789,7 @@
     },
     {
      "path": "host/hl_mem.c",
-     "line": 811
+     "line": 853
     }
    ],
    "default": "unset",
@@ -1810,7 +1810,7 @@
    "files": [
     {
      "path": "host/hl_mem.c",
-     "line": 824
+     "line": 866
     }
    ],
    "default": "unset",
@@ -1831,13 +1831,13 @@
    "files": [
     {
      "path": "host/hl_mem.c",
-     "line": 824
+     "line": 866
     }
    ],
    "default": "unset",
-   "values": "text",
-   "explanation": "HL_MEM_ACCOUNT=<seconds> the \"hl mem: account:\" lines (private commit and working set by owner) HL_MEM_COLD_FLAGS=<hex,...> the pool flags (default 24,64) HL_MEM_COLD_AGE=<seconds> the pools' age (default 10) HL_FAULT_WATCH=<ms>: who takes the page faults, and on what memory (its comment, above hl_mem_init). Every 10 s two lines \"hl mem: cold pages (pools): ...\" and \"(heaps): ...\" give the counters (MB out now, taken out, came back and how often, the most that came back in 10 s).",
-   "comment": "HL_MEM_ACCOUNT=<seconds> the \"hl mem: account:\" lines (private commit and working set by owner) HL_MEM_COLD_FLAGS=<hex,...> the pool flags (default 24,64) HL_MEM_COLD_AGE=<seconds> the pools' age (default 10) HL_FAULT_WATCH=<ms>: who takes the page faults, and on what memory (its comment, above hl_mem_init). Every 10 s two lines \"hl mem: cold pages (pools): ...\" and \"(heaps): ...\" give the counters (MB out now, taken out, came back and how often, the most that came back in 10 s).",
+   "values": "text (`0` named)",
+   "explanation": "HL_MEM_ACCOUNT=<seconds> the \"hl mem: account:\" lines (private commit and working set by owner) HL_MEM_COLD_FLAGS=<hex,...> the pool flags (default 24,64) HL_MEM_COLD_AGE=<seconds> the pools' age (default 10) HL_MEM_COLD_LOW_MB=<MB> (default 4096) / HL_MEM_COLD_HIGH_MB=<MB> (default 6144) the whole pass only while the available RAM is short: on under LOW, off again from HIGH (hl_mem_coldgate.h); LOW=0: whatever the free RAM, as before (STUT3) HL_FAULT_WATCH=<ms>: who takes the page faults, and on what memory (its comment, above hl_mem_init). Every 10 s two lines \"hl mem: cold pages (pools): ...\" and \"(heaps): ...\" give the counters (MB out now, taken out, came back and how often, the most that came back in 10 s).",
+   "comment": "HL_MEM_ACCOUNT=<seconds> the \"hl mem: account:\" lines (private commit and working set by owner) HL_MEM_COLD_FLAGS=<hex,...> the pool flags (default 24,64) HL_MEM_COLD_AGE=<seconds> the pools' age (default 10) HL_MEM_COLD_LOW_MB=<MB> (default 4096) / HL_MEM_COLD_HIGH_MB=<MB> (default 6144) the whole pass only while the available RAM is short: on under LOW, off again from HIGH (hl_mem_coldgate.h); LOW=0: whatever the free RAM, as before (STUT3) HL_FAULT_WATCH=<ms>: who takes the page faults, and on what memory (its comment, above hl_mem_init). Every 10 s two lines \"hl mem: cold pages (pools): ...\" and \"(heaps): ...\" give the counters (MB out now, taken out, came back and how often, the most that came back in 10 s).",
    "documented_in": null,
    "source": "comment at host/hl_mem.c",
    "documented": true,
@@ -1852,13 +1852,34 @@
    "files": [
     {
      "path": "host/hl_mem.c",
-     "line": 841
+     "line": 883
     }
    ],
    "default": "unset",
    "values": "text (`1`, `0` named)",
-   "explanation": "HL_MEM_COLD=1 on (the default) HL_MEM_COLD=0 off: nothing here runs, as before HL_MEM_COLD_HEAPS=1 the heaps too (the default) HL_MEM_COLD_HEAPS=0 the pools only HL_MEM_COLD_PRESSURE=0 without the back-off: a pass of 500 ms or more stops all trimming for 60 s, and the pools wait out the quiet rule too (the default: the system is paging then, and what comes back is read from the page file) HL_MEM_COLD_LOWMEM=<MB> no trimming while the system's available RAM is under that (a quarter more to start again; default 0: never held, 3072 proposed). HL_MEM_ACCOUNT=<seconds> the \"hl mem: account:\" lines (private commit and working set by owner) HL_MEM_COLD_FLAGS=<hex,...> the pool flags (default 24,64) HL_MEM_COLD_AGE=<seconds> the pools' age (default 10) HL_FAULT_WATCH=<ms>: who takes the page faults, and on what memory (its comment, above hl_mem_init).",
-   "comment": "HL_MEM_COLD=1 on (the default) HL_MEM_COLD=0 off: nothing here runs, as before HL_MEM_COLD_HEAPS=1 the heaps too (the default) HL_MEM_COLD_HEAPS=0 the pools only HL_MEM_COLD_PRESSURE=0 without the back-off: a pass of 500 ms or more stops all trimming for 60 s, and the pools wait out the quiet rule too (the default: the system is paging then, and what comes back is read from the page file) HL_MEM_COLD_LOWMEM=<MB> no trimming while the system's available RAM is under that (a quarter more to start again; default 0: never held, 3072 proposed). HL_MEM_ACCOUNT=<seconds> the \"hl mem: account:\" lines (private commit and working set by owner) HL_MEM_COLD_FLAGS=<hex,...> the pool flags (default 24,64) HL_MEM_COLD_AGE=<seconds> the pools' age (default 10) HL_FAULT_WATCH=<ms>: who takes the page faults, and on what memory (its comment, above hl_mem_init).",
+   "explanation": "HL_MEM_COLD=1 on (the default) HL_MEM_COLD=0 off: nothing here runs, as before HL_MEM_COLD_HEAPS=1 the heaps too (the default) HL_MEM_COLD_HEAPS=0 the pools only HL_MEM_COLD_PRESSURE=0 without the back-off: a pass of 500 ms or more stops all trimming for 60 s, and the pools wait out the quiet rule too (the default: the system is paging then, and what comes back is read from the page file) HL_MEM_COLD_LOWMEM=<MB> no trimming while the system's available RAM is under that (a quarter more to start again; default 0: never held, 3072 proposed). HL_MEM_ACCOUNT=<seconds> the \"hl mem: account:\" lines (private commit and working set by owner) HL_MEM_COLD_FLAGS=<hex,...> the pool flags (default 24,64) HL_MEM_COLD_AGE=<seconds> the pools' age (default 10) HL_MEM_COLD_LOW_MB=<MB> (default 4096) / HL_MEM_COLD_HIGH_MB=<MB> (default 6144) the whole pass only while the available RAM is short: on under ...",
+   "comment": "HL_MEM_COLD=1 on (the default) HL_MEM_COLD=0 off: nothing here runs, as before HL_MEM_COLD_HEAPS=1 the heaps too (the default) HL_MEM_COLD_HEAPS=0 the pools only HL_MEM_COLD_PRESSURE=0 without the back-off: a pass of 500 ms or more stops all trimming for 60 s, and the pools wait out the quiet rule too (the default: the system is paging then, and what comes back is read from the page file) HL_MEM_COLD_LOWMEM=<MB> no trimming while the system's available RAM is under that (a quarter more to start again; default 0: never held, 3072 proposed). HL_MEM_ACCOUNT=<seconds> the \"hl mem: account:\" lines (private commit and working set by owner) HL_MEM_COLD_FLAGS=<hex,...> the pool flags (default 24,64) HL_MEM_COLD_AGE=<seconds> the pools' age (default 10) HL_MEM_COLD_LOW_MB=<MB> (default 4096) / HL_MEM_COLD_HIGH_MB=<MB> (default 6144) the whole pass only while the available RAM is short: on under ...",
+   "documented_in": null,
+   "source": "comment at host/hl_mem.c",
+   "documented": true,
+   "set_via": "In `hookshot_env.txt`, or in the environment.",
+   "use": null
+  },
+  {
+   "name": "HL_MEM_COLD_HIGH_MB",
+   "area": "native",
+   "group": "Timing and frame rate",
+   "audience": "developer",
+   "files": [
+    {
+     "path": "host/hl_mem.c",
+     "line": 503
+    }
+   ],
+   "default": "unset",
+   "values": "text (`0` named)",
+   "explanation": "(STUT3, HL_MEM_COLD_LOW_MB=<MB>, default 4096; HL_MEM_COLD_HIGH_MB=<MB>, default 6144) the pass, pools and heaps, runs only while the PC is short of RAM: it starts when the available RAM falls under the LOW line and stops once it is back at the HIGH line (never under LOW). HL_MEM_COLD_LOW_MB=0: whatever the free RAM, as before.",
+   "comment": "(STUT3, HL_MEM_COLD_LOW_MB=<MB>, default 4096; HL_MEM_COLD_HIGH_MB=<MB>, default 6144) the pass, pools and heaps, runs only while the PC is short of RAM: it starts when the available RAM falls under the LOW line and stops once it is back at the HIGH line (never under LOW). HL_MEM_COLD_LOW_MB=0: whatever the free RAM, as before.",
    "documented_in": null,
    "source": "comment at host/hl_mem.c",
    "documented": true,
@@ -1873,7 +1894,7 @@
    "files": [
     {
      "path": "host/hl_mem.c",
-     "line": 846
+     "line": 888
     }
    ],
    "default": "unset",
@@ -1898,13 +1919,34 @@
     },
     {
      "path": "host/hl_mem.c",
-     "line": 487
+     "line": 493
     }
    ],
    "default": "0 (unset)",
    "values": "a whole number (`true` in the description)",
    "explanation": "(HL_MEM_COLD_LOWMEM=<MB>: available RAM under which nothing is taken out; 0: never held. Default 3072 since STALL1, 22 Nov: the PC 3050's hog run with it had 56 frames over 50 ms against 77 with the pages taken out as before).",
    "comment": "(HL_MEM_COLD_LOWMEM=<MB>: available RAM under which nothing is taken out; 0: never held. Default 3072 since STALL1, 22 Nov: the PC 3050's hog run with it had 56 frames over 50 ms against 77 with the pages taken out as before).",
+   "documented_in": null,
+   "source": "comment at host/hl_mem.c",
+   "documented": true,
+   "set_via": "In `hookshot_env.txt`, or in the environment.",
+   "use": null
+  },
+  {
+   "name": "HL_MEM_COLD_LOW_MB",
+   "area": "native",
+   "group": "Native engine",
+   "audience": "developer",
+   "files": [
+    {
+     "path": "host/hl_mem.c",
+     "line": 501
+    }
+   ],
+   "default": "unset",
+   "values": "text (`0` named)",
+   "explanation": "(STUT3, HL_MEM_COLD_LOW_MB=<MB>, default 4096; HL_MEM_COLD_HIGH_MB=<MB>, default 6144) the pass, pools and heaps, runs only while the PC is short of RAM: it starts when the available RAM falls under the LOW line and stops once it is back at the HIGH line (never under LOW). HL_MEM_COLD_LOW_MB=0: whatever the free RAM, as before. On the PC 3050 (32 GB, 4.4 GB free at the least in play) the pass took 5-6 GB of pool pages and ~3 GB of heap pages out in a warp tour and 4-5 GB came back; with the pass off the frames over 100 ms fell by 31 percent in one series.",
+   "comment": "(STUT3, HL_MEM_COLD_LOW_MB=<MB>, default 4096; HL_MEM_COLD_HIGH_MB=<MB>, default 6144) the pass, pools and heaps, runs only while the PC is short of RAM: it starts when the available RAM falls under the LOW line and stops once it is back at the HIGH line (never under LOW). HL_MEM_COLD_LOW_MB=0: whatever the free RAM, as before. On the PC 3050 (32 GB, 4.4 GB free at the least in play) the pass took 5-6 GB of pool pages and ~3 GB of heap pages out in a warp tour and 4-5 GB came back; with the pass off the frames over 100 ms fell by 31 percent in one series.",
    "documented_in": null,
    "source": "comment at host/hl_mem.c",
    "documented": true,
@@ -1919,7 +1961,7 @@
    "files": [
     {
      "path": "host/hl_mem.c",
-     "line": 482
+     "line": 488
     }
    ],
    "default": "unset",
@@ -3209,7 +3251,7 @@
     },
     {
      "path": "host/hl_mem.c",
-     "line": 527
+     "line": 543
     }
    ],
    "default": "unset",
@@ -3489,7 +3531,7 @@
     },
     {
      "path": "host/hos_crash_record.c",
-     "line": 809
+     "line": 814
     },
     {
      "path": "host/hos_main.c",
@@ -4903,7 +4945,7 @@
    "files": [
     {
      "path": "host/hos_thread.c",
-     "line": 1473
+     "line": 1500
     }
    ],
    "default": "unset",
@@ -4924,7 +4966,7 @@
    "files": [
     {
      "path": "host/hos_thread.c",
-     "line": 1473
+     "line": 1500
     }
    ],
    "default": "unset",
@@ -4945,7 +4987,7 @@
    "files": [
     {
      "path": "host/hos_thread.c",
-     "line": 2006
+     "line": 2033
     }
    ],
    "default": "unset",
@@ -4966,7 +5008,7 @@
    "files": [
     {
      "path": "host/hos_thread.c",
-     "line": 1473
+     "line": 1500
     }
    ],
    "default": "unset",
@@ -5029,7 +5071,7 @@
    "files": [
     {
      "path": "host/hos_thread.c",
-     "line": 1062
+     "line": 1089
     }
    ],
    "default": "off (unset)",
@@ -5050,12 +5092,12 @@
    "files": [
     {
      "path": "host/hos_crash_record.c",
-     "line": 755
+     "line": 760
     }
    ],
    "default": "off (unset)",
    "values": "on or off (0, false, off, no and empty are off)",
-   "explanation": "undocumented: host/hos_crash_record.c:755 (in `prepare_dump()`) reads it as an on/off switch: `if (!env_on(\"HOS_CRASH_MINIDUMP\")) return;`. No comment in the source says what it changes.",
+   "explanation": "undocumented: host/hos_crash_record.c:760 (in `prepare_dump()`) reads it as an on/off switch: `if (!env_on(\"HOS_CRASH_MINIDUMP\")) return;`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -5352,7 +5394,7 @@
    "files": [
     {
      "path": "host/hos_thread.c",
-     "line": 586
+     "line": 613
     }
    ],
    "default": "unset",
@@ -6133,7 +6175,7 @@
    "files": [
     {
      "path": "host/hl_mem.c",
-     "line": 841
+     "line": 883
     },
     {
      "path": "host/hos_heapsplit.c",
@@ -6158,7 +6200,7 @@
    "files": [
     {
      "path": "host/hl_mem.c",
-     "line": 841
+     "line": 883
     },
     {
      "path": "host/hos_heapsplit.c",
@@ -6736,7 +6778,7 @@
    "files": [
     {
      "path": "host/hos_thread.c",
-     "line": 227
+     "line": 230
     }
    ],
    "default": "unset",
@@ -6757,7 +6799,7 @@
    "files": [
     {
      "path": "host/hos_thread.c",
-     "line": 347
+     "line": 373
     }
    ],
    "default": "unset",
@@ -6778,13 +6820,13 @@
    "files": [
     {
      "path": "host/hos_thread.c",
-     "line": 304
+     "line": 310
     }
    ],
    "default": "unset",
    "values": "text (`1` named)",
-   "explanation": "Lines are written by log_main, not by the thread that logs: a write that blocks (a console; the log file while the disk is busy: the render thread was seen held 140-310 ms in one line's write) holds no game thread. Nothing queued is lost when the game ends or crashes: hos_fatal, report_crash/report_fatal (mkw_glue.c), log_crash_filter, svcExitProcess, the window's close and the process's exit (atexit) write the queue first. HOS_LOG_SYNC=1: each line written by the thread that logs it, as files and pipes were before.",
-   "comment": "Lines are written by log_main, not by the thread that logs: a write that blocks (a console; the log file while the disk is busy: the render thread was seen held 140-310 ms in one line's write) holds no game thread. Nothing queued is lost when the game ends or crashes: hos_fatal, report_crash/report_fatal (mkw_glue.c), log_crash_filter, svcExitProcess, the window's close and the process's exit (atexit) write the queue first. HOS_LOG_SYNC=1: each line written by the thread that logs it, as files and pipes were before.",
+   "explanation": "Lines are written by log_main, not by the thread that logs: a write that blocks (a console; the log file while the disk is busy: the render thread was seen held 140-310 ms in one line's write) holds no game thread. Nothing queued is lost when the game ends or crashes: hos_fatal, report_crash/report_fatal (mkw_glue.c), log_crash_filter, svcExitProcess, the window's close and the process's exit (atexit) write the queue first. HOS_LOG_SYNC=1: each line written by the thread that logs it, as files and pipes were before (STUT3: lines a full queue left out, not yet said) (STUT3: all of them, for the crash record's header: hos_log_dropped_total).",
+   "comment": "Lines are written by log_main, not by the thread that logs: a write that blocks (a console; the log file while the disk is busy: the render thread was seen held 140-310 ms in one line's write) holds no game thread. Nothing queued is lost when the game ends or crashes: hos_fatal, report_crash/report_fatal (mkw_glue.c), log_crash_filter, svcExitProcess, the window's close and the process's exit (atexit) write the queue first. HOS_LOG_SYNC=1: each line written by the thread that logs it, as files and pipes were before (STUT3: lines a full queue left out, not yet said) (STUT3: all of them, for the crash record's header: hos_log_dropped_total).",
    "documented_in": null,
    "source": "comment at host/hos_thread.c",
    "documented": true,
@@ -7965,7 +8007,7 @@
    "files": [
     {
      "path": "host/hos_thread.c",
-     "line": 846
+     "line": 873
     }
    ],
    "default": "unset",
@@ -8095,7 +8137,7 @@
    "files": [
     {
      "path": "host/hos_thread.c",
-     "line": 898
+     "line": 925
     }
    ],
    "default": "unset",
@@ -8212,7 +8254,7 @@
    "files": [
     {
      "path": "host/hos_thread.c",
-     "line": 836
+     "line": 863
     }
    ],
    "default": "off (unset)",
@@ -8254,7 +8296,7 @@
    "files": [
     {
      "path": "host/hos_thread.c",
-     "line": 1105
+     "line": 1132
     }
    ],
    "default": "unset",
@@ -8506,7 +8548,7 @@
    "files": [
     {
      "path": "host/hos_thread.c",
-     "line": 1155
+     "line": 1182
     }
    ],
    "default": "off (unset)",
@@ -8548,7 +8590,7 @@
    "files": [
     {
      "path": "host/hos_thread.c",
-     "line": 837
+     "line": 864
     }
    ],
    "default": "off (unset)",
@@ -8728,17 +8770,17 @@
    "files": [
     {
      "path": "host/rx_backend.c",
-     "line": 613
+     "line": 618
     },
     {
      "path": "host/rx_backend.c",
-     "line": 706
+     "line": 711
     }
    ],
    "default": "off (unset)",
    "values": "on or off (0, false, off, no and empty are off); the description names `1`",
-   "explanation": "(HeyListen, v0.4.4, RX_VK_RELEASE_HINT / HOS_RELEASE_KEEP_CORE) A texture's or a program's release, with the replay not asynchronous, drains the stopped queues under the order lock and takes the replay's lock: behind a whole submission being replayed, 2 s with an RX 580's pipeline compiles (OptimizeChangeBanc held core 4 for 2.0-2.5 s inside hookshot_vk.dll, issue 67), and every game thread allowed on that core waited for it. The thread gives its core up for the call when the back end says the call would wait (nvn_release_may_wait: a lock held now); releases are thousands a load, so a call with the locks free keeps the core and pays nothing. HOS_RELEASE_KEEP_CORE=1: kept always, as before.",
-   "comment": "(HeyListen, v0.4.4, RX_VK_RELEASE_HINT / HOS_RELEASE_KEEP_CORE) A texture's or a program's release, with the replay not asynchronous, drains the stopped queues under the order lock and takes the replay's lock: behind a whole submission being replayed, 2 s with an RX 580's pipeline compiles (OptimizeChangeBanc held core 4 for 2.0-2.5 s inside hookshot_vk.dll, issue 67), and every game thread allowed on that core waited for it. The thread gives its core up for the call when the back end says the call would wait (nvn_release_may_wait: a lock held now); releases are thousands a load, so a call with the locks free keeps the core and pays nothing. HOS_RELEASE_KEEP_CORE=1: kept always, as before.",
+   "explanation": "(HeyListen, v0.4.4) The memory pool calls (a pool made, its flags, its finalize: a few hundred a boot, none in the frames) take the back end's pool locks, which an import or a replay in progress holds: BootupBackgroundWorkThread sat in a futex inside the renderer for 165 s holding core 2 at the start of an Arc B580's boot on Linux (issue 88; every other game thread \"ran without a core after 2000 ms\"). The core is given up for them. HOS_RELEASE_KEEP_CORE=1: kept, as before.",
+   "comment": "(HeyListen, v0.4.4) The memory pool calls (a pool made, its flags, its finalize: a few hundred a boot, none in the frames) take the back end's pool locks, which an import or a replay in progress holds: BootupBackgroundWorkThread sat in a futex inside the renderer for 165 s holding core 2 at the start of an Arc B580's boot on Linux (issue 88; every other game thread \"ran without a core after 2000 ms\"). The core is given up for them. HOS_RELEASE_KEEP_CORE=1: kept, as before.",
    "documented_in": null,
    "source": "comment at host/rx_backend.c",
    "documented": true,
@@ -8753,7 +8795,7 @@
    "files": [
     {
      "path": "host/hos_thread.c",
-     "line": 802
+     "line": 829
     }
    ],
    "default": "off (unset)",
@@ -9113,7 +9155,7 @@
     },
     {
      "path": "host/hos_thread.c",
-     "line": 966
+     "line": 993
     }
    ],
    "default": "unset",
@@ -9134,11 +9176,11 @@
    "files": [
     {
      "path": "host/hos_thread.c",
-     "line": 950
+     "line": 977
     },
     {
      "path": "host/hos_thread.c",
-     "line": 952
+     "line": 979
     }
    ],
    "default": "off (unset)",
@@ -9180,11 +9222,11 @@
    "files": [
     {
      "path": "host/hos_thread.c",
-     "line": 1110
+     "line": 1137
     },
     {
      "path": "host/hos_thread.c",
-     "line": 1182
+     "line": 1209
     }
    ],
    "default": "off (unset)",
@@ -9469,7 +9511,7 @@
     },
     {
      "path": "host/hos_thread.c",
-     "line": 540
+     "line": 567
     }
    ],
    "default": "unset",
@@ -9515,7 +9557,7 @@
    "files": [
     {
      "path": "host/hos_thread.c",
-     "line": 1255
+     "line": 1282
     }
    ],
    "default": "off (unset)",
@@ -9536,7 +9578,7 @@
    "files": [
     {
      "path": "host/hos_thread.c",
-     "line": 1241
+     "line": 1268
     }
    ],
    "default": "off (unset)",
@@ -9557,12 +9599,12 @@
    "files": [
     {
      "path": "host/hos_thread.c",
-     "line": 630
+     "line": 657
     }
    ],
    "default": "unset",
    "values": "text",
-   "explanation": "undocumented: host/hos_thread.c:630 (in `thread_main()`) reads it as a text value: `if (hos_trace || getenv(\"HOS_TLS_TRACE\"))`. No comment in the source says what it changes.",
+   "explanation": "undocumented: host/hos_thread.c:657 (in `thread_main()`) reads it as a text value: `if (hos_trace || getenv(\"HOS_TLS_TRACE\"))`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -9599,7 +9641,7 @@
    "files": [
     {
      "path": "host/hos_thread.c",
-     "line": 1438
+     "line": 1465
     }
    ],
    "default": "unset",
@@ -9620,7 +9662,7 @@
    "files": [
     {
      "path": "host/hos_thread.c",
-     "line": 1773
+     "line": 1800
     }
    ],
    "default": "unset",
@@ -9641,7 +9683,7 @@
    "files": [
     {
      "path": "host/hos_thread.c",
-     "line": 1774
+     "line": 1801
     }
    ],
    "default": "unset",
@@ -9662,7 +9704,7 @@
    "files": [
     {
      "path": "host/hos_thread.c",
-     "line": 1586
+     "line": 1613
     }
    ],
    "default": "off (unset)",
@@ -9683,7 +9725,7 @@
    "files": [
     {
      "path": "host/hos_thread.c",
-     "line": 1775
+     "line": 1802
     }
    ],
    "default": "unset",
@@ -9704,7 +9746,7 @@
    "files": [
     {
      "path": "host/hos_thread.c",
-     "line": 1776
+     "line": 1803
     }
    ],
    "default": "unset",
@@ -9725,7 +9767,7 @@
    "files": [
     {
      "path": "host/hos_thread.c",
-     "line": 1724
+     "line": 1751
     }
    ],
    "default": "off (unset)",
@@ -9746,7 +9788,7 @@
    "files": [
     {
      "path": "host/hos_thread.c",
-     "line": 1940
+     "line": 1967
     }
    ],
    "default": "unset",
@@ -10149,7 +10191,7 @@
    "files": [
     {
      "path": "host/hos_thread.c",
-     "line": 930
+     "line": 957
     }
    ],
    "default": "off (unset)",
@@ -20046,6 +20088,27 @@
    "use": null
   },
   {
+   "name": "RX_VK_EXIT_SAVE",
+   "area": "renderer",
+   "group": "Rendering and GPU",
+   "audience": "developer",
+   "files": [
+    {
+     "path": "gpu/vk/vk_draw.cpp",
+     "line": 12198
+    }
+   ],
+   "default": "off (unset)",
+   "values": "on or off (0, false, off, no and empty are off); the description names `0`",
+   "explanation": "The file is written whole as .tmp and renamed (pcache_save_mapped / the vector path): a save cut by the exit leaves the old file as it was. RX_VK_EXIT_SAVE=0: nothing written at the close, as before.",
+   "comment": "The file is written whole as .tmp and renamed (pcache_save_mapped / the vector path): a save cut by the exit leaves the old file as it was. RX_VK_EXIT_SAVE=0: nothing written at the close, as before.",
+   "documented_in": null,
+   "source": "comment at gpu/vk/vk_draw.cpp",
+   "documented": true,
+   "set_via": "In `hookshot_env.txt`, or in the environment.",
+   "use": null
+  },
+  {
    "name": "RX_VK_EXPOSURE_LOG",
    "area": "logging",
    "group": "Logs and traces",
@@ -25374,7 +25437,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_draw.cpp",
-     "line": 12326
+     "line": 12353
     }
    ],
    "default": "unset",
@@ -26814,7 +26877,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 10237
+     "line": 10239
     }
    ],
    "default": "0 (unset)",
@@ -27070,7 +27133,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_draw.cpp",
-     "line": 12195
+     "line": 12222
     }
    ],
    "default": "off (unset)",
@@ -33641,7 +33704,7 @@
     },
     {
      "path": "host/hos_crash_record.c",
-     "line": 809
+     "line": 814
     }
    ],
    "default": "unset",
@@ -33666,7 +33729,7 @@
     },
     {
      "path": "host/hos_crash_record.c",
-     "line": 803
+     "line": 808
     }
    ],
    "default": "unset",
@@ -33691,7 +33754,7 @@
     },
     {
      "path": "host/hos_crash_record.c",
-     "line": 803
+     "line": 808
     }
    ],
    "default": "unset",

@@ -454,7 +454,10 @@ HLE(_ZN2nn2fs8ReadFileEPmNS0_10FileHandleElPvmRKNS0_10ReadOptionE) {
 /* GetFileSize(long*, FileHandle) */
 HLE(_ZN2nn2fs11GetFileSizeEPlNS0_10FileHandleE) {
     LARGE_INTEGER sz;
-    GetFileSizeEx(get_handle(c, ARG(1))->h, &sz);
+    HANDLE h = get_handle(c, ARG(1))->h;
+    const int away = hos_vcore_away();   /* (STUT3: the metadata calls too, as the others) */
+    GetFileSizeEx(h, &sz);
+    if (away) hos_vcore_back();
     G64(ARG(0)) = (uint64_t)sz.QuadPart;
     RET(0);
 }
@@ -477,8 +480,10 @@ HLE(_ZN2nn2fs11SetFileSizeENS0_10FileHandleEl) {
     Handle *fh = get_handle(c, ARG(0));
     LARGE_INTEGER sz;
     sz.QuadPart = (LONGLONG)ARG(1);
+    const int away = hos_vcore_away();   /* (STUT3: a size change allocates on the disk, as a write) */
     SetFilePointerEx(fh->h, sz, NULL, FILE_BEGIN);
     SetEndOfFile(fh->h);
+    if (away) hos_vcore_back();
     RET(0);
 }
 /* (the save's flush is an fdatasync on Linux, FlushFileBuffers on Windows: tens of ms or more on a busy disk, no core
@@ -492,9 +497,16 @@ HLE(_ZN2nn2fs9FlushFileENS0_10FileHandleE) {
     if (away) hos_vcore_back();
     RET(0);
 }
+/* (STUT3) a close gives the core up too: on the PC 3050, with the system's commit at its limit and the page file growing,
+   the ARes loaders sat 2-6.2 s in CloseHandle (ZwClose) holding cores 4 and 5, and the presenting thread's 7 s frame waited
+   for them (the vcore escape lines: "ARes Loading 0 (19) asked, held 6237 ms at ntdll.dll+0x1665c4") */
 HLE(_ZN2nn2fs9CloseFileENS0_10FileHandleE) {
     Handle *fh = get_handle(c, ARG(0));
+    const int away = hos_vcore_away();
+    const int64_t fs0 = hos_now_ns();
     CloseHandle(fh->h);
+    hos_wn_add(HOS_WN_FILE, hos_now_ns() - fs0);
+    if (away) hos_vcore_back();
     free_handle(ARG(0));
     free(fh);
 }
@@ -504,28 +516,40 @@ HLE(_ZN2nn2fs10CreateFileEPKcl) {
     char path[HOS_FS_PATH];
     int writable = 0;
     if (!host_path(gstr(ARG(0)), path, sizeof path, &writable) || !writable) { RET(R_PATH_NOT_FOUND); return; }
+    const int away = hos_vcore_away();   /* (STUT3: a create, its size and its close: as the other calls that change the disk) */
     make_dirs(path);
     HANDLE h = CreateFileA(path, GENERIC_WRITE, 0, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
-    if (h == INVALID_HANDLE_VALUE) { RET(GetLastError() == ERROR_FILE_EXISTS ? R_PATH_EXISTS : R_PATH_NOT_FOUND); return; }
-    LARGE_INTEGER sz;
-    sz.QuadPart = (LONGLONG)ARG(1);
-    SetFilePointerEx(h, sz, NULL, FILE_BEGIN);
-    SetEndOfFile(h);
-    CloseHandle(h);
+    const DWORD err = h == INVALID_HANDLE_VALUE ? GetLastError() : 0;
+    if (h != INVALID_HANDLE_VALUE) {
+        LARGE_INTEGER sz;
+        sz.QuadPart = (LONGLONG)ARG(1);
+        SetFilePointerEx(h, sz, NULL, FILE_BEGIN);
+        SetEndOfFile(h);
+        CloseHandle(h);
+    }
+    if (away) hos_vcore_back();
+    if (h == INVALID_HANDLE_VALUE) { RET(err == ERROR_FILE_EXISTS ? R_PATH_EXISTS : R_PATH_NOT_FOUND); return; }
     RET(0);
 }
 HLE(_ZN2nn2fs10DeleteFileEPKc) {
     char path[HOS_FS_PATH];
     int writable = 0;
-    if (!host_path(gstr(ARG(0)), path, sizeof path, &writable) || !writable || !DeleteFileA(path)) { RET(R_PATH_NOT_FOUND); return; }
-    RET(0);
+    if (!host_path(gstr(ARG(0)), path, sizeof path, &writable) || !writable) { RET(R_PATH_NOT_FOUND); return; }
+    const int away = hos_vcore_away();   /* (STUT3) */
+    const BOOL ok = DeleteFileA(path);
+    if (away) hos_vcore_back();
+    RET(ok ? 0 : R_PATH_NOT_FOUND);
 }
 HLE(_ZN2nn2fs15CreateDirectoryEPKc) {
     char path[HOS_FS_PATH];
     int writable = 0;
     if (!host_path(gstr(ARG(0)), path, sizeof path, &writable) || !writable) { RET(R_PATH_NOT_FOUND); return; }
+    const int away = hos_vcore_away();   /* (STUT3) */
     make_dirs(path);
-    RET(CreateDirectoryA(path, NULL) ? 0 : GetLastError() == ERROR_ALREADY_EXISTS ? R_PATH_EXISTS : R_PATH_NOT_FOUND);
+    const BOOL ok = CreateDirectoryA(path, NULL);
+    const DWORD err = ok ? 0 : GetLastError();
+    if (away) hos_vcore_back();
+    RET(ok ? 0 : err == ERROR_ALREADY_EXISTS ? R_PATH_EXISTS : R_PATH_NOT_FOUND);
 }
 static void delete_tree(const char *dir) {
     char pat[HOS_FS_PATH];
@@ -557,14 +581,19 @@ HLE(_ZN2nn2fs26DeleteDirectoryRecursivelyEPKc) {
         RET(0);
         return;
     }
+    const int away = hos_vcore_away();   /* (STUT3) */
     delete_tree(path);
+    if (away) hos_vcore_back();
     RET(0);
 }
 HLE(_ZN2nn2fs10RenameFileEPKcS2_) {
     char a[HOS_FS_PATH], b[HOS_FS_PATH];
     int w1 = 0, w2 = 0;
     if (!host_path(gstr(ARG(0)), a, sizeof a, &w1) || !host_path(gstr(ARG(1)), b, sizeof b, &w2) || !w1 || !w2) { RET(R_PATH_NOT_FOUND); return; }
-    RET(MoveFileExA(a, b, MOVEFILE_REPLACE_EXISTING) ? 0 : R_PATH_NOT_FOUND);
+    const int away = hos_vcore_away();   /* (STUT3) */
+    const BOOL ok = MoveFileExA(a, b, MOVEFILE_REPLACE_EXISTING);
+    if (away) hos_vcore_back();
+    RET(ok ? 0 : R_PATH_NOT_FOUND);
 }
 /* a RomFS folder that only mods have: rom:/x -> some mod entry lies under x */
 static void count_extra(void *arg, const char *name, int is_dir, uint64_t size) { (void)name, (void)is_dir, (void)size; ++*(int *)arg; }
@@ -596,7 +625,10 @@ HLE(_ZN2nn2fs12GetEntryTypeEPNS0_18DirectoryEntryTypeEPKc) {
     char path[HOS_FS_PATH];
     if (!host_path(gstr(ARG(1)), path, sizeof path, NULL)) { RET(R_PATH_NOT_FOUND); return; }
     hos_blank_cached_icon(gstr(ARG(1)), path);
+    /* (STUT3) a file's attributes: on the PC 3050 the game's gmd::SaveDataMgr sat 2 s in ZwQueryAttributesFile holding core 2 */
+    const int away = hos_vcore_away();
     DWORD at = GetFileAttributesA(path);
+    if (away) hos_vcore_back();
     if (at == INVALID_FILE_ATTRIBUTES && is_mod_dir(gstr(ARG(1)))) at = FILE_ATTRIBUTE_DIRECTORY;   /* (only in mods) */
     if (fs_trace())
         hos_log("fs: GetEntryType(%s): %s", gstr(ARG(1)), at == INVALID_FILE_ATTRIBUTES ? "not found"
@@ -621,7 +653,9 @@ HLE(_ZN2nn2fs13OpenDirectoryEPNS0_15DirectoryHandleEPKci) {
     Handle *dh = (Handle *)calloc(1, sizeof *dh);
     dh->is_dir = (int)ARG(2);   /* mode: 1 directories, 2 files, 3 both */
     snprintf(dh->path, sizeof dh->path, "%s", pat);   /* (for GetDirectoryEntryCount) */
+    const int away = hos_vcore_away();   /* (STUT3) */
     dh->find = FindFirstFileA(pat, &dh->fd);
+    if (away) hos_vcore_back();
     if (dh->find == INVALID_HANDLE_VALUE) dh->find_done = 1;
     if (rom_rel(gstr(ARG(1)))) hos_mods_dir_extras(rom_rel(gstr(ARG(1))), path, add_extra, dh);
     if (fs_trace())

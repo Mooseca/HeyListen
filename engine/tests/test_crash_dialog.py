@@ -270,6 +270,7 @@ void hos_log_flush(void) {}
 const char *hos_options_file(void) { return ""; }
 /* (host/hos_main.c: the crash record's lifted_code; the host's, not the helper's) */
 const char *hos_lift_key(void) { return "testlift01"; }
+long hos_log_dropped_total(void) { return 0; }
 static void note(const char *kind, const char *text) {
     const char *out = getenv("CRASH_TEST_OUT");
     FILE *f = out ? fopen(out, "ab") : NULL;
