@@ -2,7 +2,7 @@
  "schema": 1,
  "generated_by": "engine/scripts/list_switches.py",
  "scope": "C, C++ and headers under engine/ (engine/tests and vendored trees other than a64-kit excluded) and the Python the builder, the lifter and the scripts run: getenv, std::getenv, _wgetenv, the code's own env helpers and table-driven reads, and os.environ.",
- "count": 1545,
+ "count": 1546,
  "switches": [
   {
    "name": "A64_",
@@ -816,12 +816,12 @@
    "files": [
     {
      "path": "gpu/vk/vk_shader.cpp",
-     "line": 2071
+     "line": 2158
     }
    ],
    "default": "unset",
    "values": "text",
-   "explanation": "undocumented: gpu/vk/vk_shader.cpp:2071 (in `translate_into()`) reads it as a text value: `Shader::Optimization::g_gm_port_this = key_listed(hex, \"EDEN_NX2_GM_PORT_PROGS\");`. No comment in the source says what it changes.",
+   "explanation": "undocumented: gpu/vk/vk_shader.cpp:2158 (in `translate_into()`) reads it as a text value: `Shader::Optimization::g_gm_port_this = key_listed(hex, \"EDEN_NX2_GM_PORT_PROGS\");`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -2381,7 +2381,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_shader.cpp",
-     "line": 2547
+     "line": 2634
     }
    ],
    "default": "unset",
@@ -2402,7 +2402,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_shader.cpp",
-     "line": 2546
+     "line": 2633
     }
    ],
    "default": "unset",
@@ -16006,7 +16006,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_shader.cpp",
-     "line": 2062
+     "line": 2149
     }
    ],
    "default": "unset",
@@ -17168,7 +17168,7 @@
     },
     {
      "path": "gpu/vk/vk_shader.cpp",
-     "line": 920
+     "line": 1007
     }
    ],
    "default": "unset",
@@ -19628,7 +19628,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_shader.cpp",
-     "line": 2423
+     "line": 2510
     }
    ],
    "default": "unset",
@@ -19859,7 +19859,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_shader.cpp",
-     "line": 2111
+     "line": 2198
     }
    ],
    "default": "unset",
@@ -20241,7 +20241,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_shader.cpp",
-     "line": 1357
+     "line": 1444
     }
    ],
    "default": "unset",
@@ -21799,11 +21799,11 @@
     },
     {
      "path": "gpu/vk/vk_shader.cpp",
-     "line": 921
+     "line": 1008
     },
     {
      "path": "gpu/vk/vk_shader.cpp",
-     "line": 2550
+     "line": 2637
     }
    ],
    "default": "unset",
@@ -21878,6 +21878,27 @@
    "documented": true,
    "set_via": "In `hookshot_env.txt`, or in the environment.",
    "use": "Dark or green blocks where shadow maps should be read (issue 52): `=0` is the earlier translation."
+  },
+  {
+   "name": "RX_VK_HANDLE_TABLE_COUNT",
+   "area": "renderer",
+   "group": "Rendering and GPU",
+   "audience": "developer",
+   "files": [
+    {
+     "path": "gpu/vk/vk_shader.cpp",
+     "line": 853
+    }
+   ],
+   "default": "unset",
+   "values": "text (`0` named)",
+   "explanation": "RX_VK_HANDLE_TABLE_COUNT (on by default): the elements of a handle table behind the game's own count of its records name no texture, so no leftover's slot is uploaded again; =0 binds every element, as before (Longshot b9bd74a25).",
+   "comment": "RX_VK_HANDLE_TABLE_COUNT (on by default): the elements of a handle table behind the game's own count of its records name no texture, so no leftover's slot is uploaded again; =0 binds every element, as before (Longshot b9bd74a25).",
+   "documented_in": null,
+   "source": "comment at gpu/vk/vk_shader.cpp",
+   "documented": true,
+   "set_via": "In `hookshot_env.txt`, or in the environment.",
+   "use": null
   },
   {
    "name": "RX_VK_HANG_DUMP",
@@ -22415,15 +22436,15 @@
    "files": [
     {
      "path": "gpu/vk/vk_shader.cpp",
-     "line": 1109
+     "line": 1196
     },
     {
      "path": "gpu/vk/vk_shader.cpp",
-     "line": 2087
+     "line": 2174
     },
     {
      "path": "gpu/vk/vk_shader.cpp",
-     "line": 2116
+     "line": 2203
     }
    ],
    "default": "unset",
@@ -24213,7 +24234,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_shader.cpp",
-     "line": 1158
+     "line": 1245
     }
    ],
    "default": "empty (unset)",
@@ -24259,7 +24280,7 @@
     },
     {
      "path": "gpu/vk/vk_shader.cpp",
-     "line": 2331
+     "line": 2418
     }
    ],
    "default": "off (unset)",
@@ -24599,11 +24620,11 @@
    "files": [
     {
      "path": "gpu/vk/vk_shader.cpp",
-     "line": 2056
+     "line": 2143
     },
     {
      "path": "gpu/vk/vk_shader.cpp",
-     "line": 2268
+     "line": 2355
     }
    ],
    "default": "unset",
@@ -24859,7 +24880,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_shader.cpp",
-     "line": 2184
+     "line": 2271
     }
    ],
    "default": "on (unless set to 0, false, off or no)",
@@ -24972,7 +24993,7 @@
     },
     {
      "path": "gpu/vk/vk_shader.cpp",
-     "line": 2096
+     "line": 2183
     }
    ],
    "default": "off (unset)",
@@ -25759,7 +25780,7 @@
     },
     {
      "path": "gpu/vk/vk_shader.cpp",
-     "line": 1551
+     "line": 1638
     }
    ],
    "default": "off (unset)",
@@ -25780,12 +25801,12 @@
    "files": [
     {
      "path": "gpu/vk/vk_shader.cpp",
-     "line": 1465
+     "line": 1552
     }
    ],
    "default": "unset",
    "values": "text",
-   "explanation": "undocumented: gpu/vk/vk_shader.cpp:1465 (in `disk_compact()`) reads it as a text value: `if (!pack_on() || raw_bytes < kCompactMin || getenv(\"RX_VK_NO_PROGRAM_COMPACT\")) return false;`. No comment in the source says what it changes.",
+   "explanation": "undocumented: gpu/vk/vk_shader.cpp:1552 (in `disk_compact()`) reads it as a text value: `if (!pack_on() || raw_bytes < kCompactMin || getenv(\"RX_VK_NO_PROGRAM_COMPACT\")) return false;`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -26303,7 +26324,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_shader.cpp",
-     "line": 1143
+     "line": 1230
     }
    ],
    "default": "the engine's own value",
@@ -26324,7 +26345,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_shader.cpp",
-     "line": 1140
+     "line": 1227
     }
    ],
    "default": "the engine's own value",
@@ -26345,7 +26366,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_shader.cpp",
-     "line": 1138
+     "line": 1225
     }
    ],
    "default": "off (unset)",
@@ -27321,7 +27342,7 @@
     },
     {
      "path": "gpu/vk/vk_shader.cpp",
-     "line": 2726
+     "line": 2813
     }
    ],
    "default": "off (unset)",
@@ -28298,7 +28319,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_shader.cpp",
-     "line": 1253
+     "line": 1340
     }
    ],
    "default": "unset",
@@ -29006,11 +29027,11 @@
     },
     {
      "path": "gpu/vk/vk_shader.cpp",
-     "line": 921
+     "line": 1008
     },
     {
      "path": "gpu/vk/vk_shader.cpp",
-     "line": 2550
+     "line": 2637
     }
    ],
    "default": "off (unset)",
@@ -29622,7 +29643,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_shader.cpp",
-     "line": 2874
+     "line": 2961
     }
    ],
    "default": "on (unless set to 0, false, off or no)",
@@ -31178,7 +31199,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_shader.cpp",
-     "line": 2837
+     "line": 2924
     }
    ],
    "default": "off (unset)",
