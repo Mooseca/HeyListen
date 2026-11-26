@@ -2208,6 +2208,7 @@ void log_stage_bind(uint32_t op, int stage) {
 }
 
 void maybe_split(VkCommandBuffer& cmd);
+bool part_ends_before_draw();   // (below; ORDER2 asks for a part's end too)
 // (longshot #443) A part's end that waits for the next plain draw (maybe_split, split_part): see part_ends_before_draw
 void split_part(VkCommandBuffer& cmd);
 bool part_end_wanted = false;
@@ -3184,7 +3185,12 @@ void replay(VkCommandBuffer& cmd, NvnState& s, const uint8_t* p, const uint8_t* 
                 }
                 if (dry_work == presync_kick_at) presync_early_start();   // (TICK-056: a command buffer big enough to be cut, likely)
             } else if (!worker) {
-                maybe_split(cmd);
+                if (rbearly_split_take()) {   // (ORDER2, RX_VK_RB_EARLY: the culling results' last copy goes to the GPU now)
+                    if (part_ends_before_draw()) part_end_wanted = true;
+                    else split_part(cmd);
+                } else {
+                    maybe_split(cmd);
+                }
             }
         }
         // (RX_VK_MESH_CONV=2: the op that ended the last scan, with indirect mesh draws after it before the next barrier, is
@@ -6335,15 +6341,28 @@ bool wait_value_bounded(uint64_t v) {
 }
 void ot_join_all(int site);   // (PIPE2)
 void ot_join_readback(uint64_t gpu, uint64_t size);
+bool ot_audit_on();
+uint64_t ot_audit_begin(uint64_t gpu, uint64_t size, uint64_t* v0);
+void ot_audit_end(uint64_t want, uint64_t v0, uint64_t gpu, uint64_t size);
 void invalidate(uint64_t gpu, uint64_t size) {
     static const bool rb_prof = getenv("RX_VK_RB_PROF") != nullptr || getenv("RX_VK_TL") != nullptr || getenv("RX_VK_TL_S") != nullptr;
     RbScope rbs(rb_prof, gpu, size);
     struct RbWhoPost { uint64_t g, n; ~RbWhoPost() { if (n && rbwho_on()) rbwho_content(g, n); } } rbwho_post{gpu, size};
+    struct R4MapPost {   // (ORDER2, RX_VK_ORDER_R4_MAP: the read logged after the waits; declared after rbwho_post, so it runs first)
+        uint64_t g, n;
+        int64_t t;
+        ~R4MapPost() { if (n) r4map_read(g, n, t); }
+    } r4map_post{gpu, size, std::chrono::steady_clock::now().time_since_epoch().count()};
     // (READB2, HL_RB_R2 / HL_RB_R3, readbacks-r2-r3.md) the class of this read, whether it is read late (no wait: what guest memory holds),
     // and for the CHECK switch the value it holds at entry, compared with the value after the waits when the read is done
     // (STEP1, HL_RB_LAG) the range is learned as one to stage; one already staged is answered by the ring below and waits for nothing
     if (size) rbring_note_read(host->gpu_guest(gpu), size);
     const bool ring_serve = size && rbring_serves(host->gpu_guest(gpu), size);
+    // (ORDER2, RX_VK_RB_EARLY=1) a served range (the 0x3980 culling results) answered from the copy behind its last writer in the frame's last
+    // submission, before any of the old path's waits; then it waits for nothing else (as a ring-served read)
+    if (size) rbearly_note_read(host->gpu_guest(gpu), size);
+    const bool early_served = size && !ring_serve && order_thread_on() && rbearly_answer(gpu, size);
+    const bool skip_old = ring_serve || early_served;
     struct RbQuietPost {   // (HL_RB_LAG_CHECK=1: a range no program writes, read before and after the old path's waits)
         uint64_t gpu = 0, size = 0;
         std::vector<uint8_t> early;
@@ -6365,8 +6384,21 @@ void invalidate(uint64_t gpu, uint64_t size) {
     const bool rb_late = rb_cls && !rbclass_check(rb_cls) && (rbclass_mode(rb_cls) & 2);
     // (PIPE2, RX_VK_ORDER_THREAD) a read the ring does not answer: the submissions this thread handed over before it replayed first,
     // as the submitting thread's own replay had them by now (their write-back registrations are made as they replay): ot_join_readback
-    if (size && !ring_serve && !rb_late && order_thread_on() && !(size == 0x1040 && expo_mode() == 1 && expo_serves(host->gpu_guest(gpu))))
+    if (size && !skip_old && !rb_late && order_thread_on() && !(size == 0x1040 && expo_mode() == 1 && expo_serves(host->gpu_guest(gpu))))
         ot_join_readback(gpu, size);
+    // (FLASH2, RX_VK_ORDER_RB_AUDIT=1, logging only) when the read is done, the order thread caught up with every job handed over
+    // before it: did the range's write-back value move? Then this read saw the range before a writer of another thread had replayed
+    struct RbAuditPost {
+        uint64_t gpu = 0, size = 0, want = 0, v0 = 0;
+        bool on = false;
+        RbAuditPost(uint64_t g, uint64_t n, bool go) {
+            if (go) on = true, gpu = g, size = n, want = ot_audit_begin(g, n, &v0);
+        }
+        ~RbAuditPost() {
+            if (on) ot_audit_end(want, v0, gpu, size);
+        }
+    } rb_audit_post{gpu, size, size && !skip_old && !rb_late && order_thread_on() && ot_audit_on() &&
+                    !(size == 0x1040 && expo_mode() == 1 && expo_serves(host->gpu_guest(gpu)))};
     struct RbClassPost {
         int cls;
         uint64_t gpu, size;
@@ -6410,7 +6442,7 @@ void invalidate(uint64_t gpu, uint64_t size) {
     // it, only for what is left of that one section by then, and later readbacks wait for nothing until the next poll's ticket
     // (TICK-058's v3 waited at every readback with write-backs for whichever replay was in progress then: castle-move -6 fps)
     const int ticket = readback_ticket();
-    if (size && ticket == 1 && !rb_late && !ring_serve) order_ticket_wait();
+    if (size && ticket == 1 && !rb_late && !skip_old) order_ticket_wait();
     rbs.mark(0);
     if (size && rbwho_on()) rbwho_read(host->gpu_guest(gpu), size);
     if (size) memory_cpu_reads(host->gpu_guest(gpu), size);   // (TICK-015: its pool's write-backs made from now on)
@@ -6447,7 +6479,7 @@ void invalidate(uint64_t gpu, uint64_t size) {
     // RX_VK_NO_READBACK_WAIT=1: as before
     // (EXPO1, HL_EXPO_GPU=1) a meter block the engine's ring is fed from: no wait for any write-back, the sums come from the ring below
     const bool expo_skip = size == 0x1040 && expo_mode() == 1 && expo_serves(host->gpu_guest(gpu));
-    if (size && !expo_skip && !ring_serve) {
+    if (size && !expo_skip && !skip_old) {
         static const bool off = getenv("RX_VK_NO_READBACK_WAIT") != nullptr;
         bool ever = false;
         if (!off && (memory_writeback_value(host->gpu_guest(gpu), size, &ever), ever)) {
@@ -6486,6 +6518,7 @@ void invalidate(uint64_t gpu, uint64_t size) {
             rbs.mark(1);
             const auto w1 = std::chrono::steady_clock::now();
             const uint64_t v = memory_writeback_value(host->gpu_guest(gpu), size, nullptr);
+            if (rb_audit_post.on) rb_audit_post.v0 = v;   // (FLASH2: the value this read waits for)
             rbs.value = v, rbs.fence_at = f0;
             rbs.skip();
             // (RX_VK_READBACK_LATE: a range a rule names is read as guest memory holds it, with no wait at all)
@@ -6565,6 +6598,7 @@ void invalidate(uint64_t gpu, uint64_t size) {
     }
     if (ring_serve) rbring_apply(gpu, size);   // (STEP1, HL_RB_LAG: after everything else the invalidate does, nothing lands over it)
     else if (size) rbring_check(gpu, size);    // (HL_RB_LAG_CHECK=1: the ring's candidate against what the waits left)
+    if (size && !skip_old) rbearly_check(gpu, size);   // (ORDER2, RX_VK_RB_EARLY=2: the copy the rule picks against what the waits left)
     {   // (ported from hookshot 53eb0441, pixl27, RX_VK_METER_HOLD=0 turns it off) OoT's exposure sums read before a new result
         // has landed are the zeros the game wrote after its last read: it is given the last result again
         if (expo_skip) {
@@ -8621,6 +8655,7 @@ struct Job {
     nvn_prog prog;
     std::chrono::steady_clock::time_point queued;
     uint64_t seq = 0;           // (PIPE2: its place among the order thread's jobs)
+    uint64_t since = 0;         // (FLASH2: its seq minus the newest present's before it: its place in its frame)
 };
 std::mutex q_mu;
 std::condition_variable q_cv, q_space, q_idle;
@@ -8908,6 +8943,14 @@ std::mutex ot_mu;
 std::condition_variable ot_cv, ot_done_cv;
 std::deque<Job> ot_jobs;               // (ot_mu)
 uint64_t ot_seq_pushed = 0;            // (ot_mu)
+uint64_t ot_present_seq = 0;           // (ot_mu: the sequence number of the newest present handed over: the end of the game's last whole frame)
+uint64_t ot_present_seq_prev = 0;      // (ot_mu: the one before it: the end of the frame before the last whole one)
+uint64_t ot_last_submit_seq = 0;       // (ot_mu: the newest submission handed over)
+uint64_t ot_present_sub = 0;           // (ot_mu: the last submission before the newest present: what the frame's work ends with; the present's own job is not waited
+                                       // for, it is held until the game signals its event, and the game may be in the wait)
+std::atomic<uint64_t> ot_cur_since{0}; // (FLASH2: the place in its frame of the job the order thread is on)
+std::atomic<uint64_t> ot_r4_since[16]; // (FLASH2: the places in their frames of the jobs that wrote the 0x3980 culling results, the last 16 frames')
+std::atomic<uint64_t> ot_r4_n{0};
 int ot_presents = 0;                   // (handed over, not yet shown: ot_mu)
 int ot_waiters = 0;                    // (threads in ot_done_cv: ot_mu)
 std::atomic<uint64_t> ot_seq_done{0}, ot_value_done{0};
@@ -9103,15 +9146,18 @@ void ot_main() {
             }
         }
         WaitScope job_scope(WS_OT_JOB);   // (DECOUPLE: the stall watch's site; the waits inside it nest)
-        if (got) ot_cur_kind.store((int)j.kind, std::memory_order_relaxed), ot_cur_value.store(j.value, std::memory_order_relaxed);
+        if (got) ot_cur_kind.store((int)j.kind, std::memory_order_relaxed), ot_cur_value.store(j.value, std::memory_order_relaxed), ot_cur_since.store(j.since, std::memory_order_relaxed);
         else if (holding) ot_cur_kind.store(-2, std::memory_order_relaxed), ot_cur_value.store(held.value, std::memory_order_relaxed);
         if (got && j.kind == JOB_PRESENT) {
             // (DECOUPLE3) its value, until it is recorded: the recordings of the jobs run behind it while it is held signal below it
             // (finish_recording: timeline_order::signal_at), so its own signal rises; before, it went back on the timeline (4.9)
             ot_held_present.store(j.value, std::memory_order_release);
+            const int64_t map_p0 = ot_now();
             if (ot_present_run(j, ms == 0)) {
                 ot_held_present.store(0, std::memory_order_release);
                 finish(j);
+                r4map_job((int)j.kind, j.value, j.queue, j.seq, j.since,
+                          std::chrono::duration_cast<std::chrono::nanoseconds>(j.queued.time_since_epoch()).count(), map_p0, ot_now());   // (ORDER2)
             } else {
                 ot_sig_waits++;
                 held = std::move(j), holding = true, held_until = ot_now() + (int64_t)ms * 1000000;
@@ -9121,8 +9167,13 @@ void ot_main() {
             continue;
         }
         if (got) {
+            const int64_t map_t0 = ot_now();
+            r4map_job_t0.store(map_t0, std::memory_order_relaxed);   // (ORDER2, RX_VK_ORDER_R4_MAP)
+            ot_cur_job.store(j.seq, std::memory_order_relaxed);      // (ORDER2, RX_VK_RB_EARLY)
             ot_run(j);
             finish(j);
+            r4map_job((int)j.kind, j.value, j.queue, j.seq, j.since,
+                      std::chrono::duration_cast<std::chrono::nanoseconds>(j.queued.time_since_epoch()).count(), map_t0, ot_now());
             if (holding && j.kind == JOB_SUBMIT) {
                 held_jobs++, held_last = j.value;
                 if (!held_first) held_first = j.value;
@@ -9144,6 +9195,8 @@ void ot_main() {
                          (unsigned long long)held_first, (unsigned long long)held_last, force ? ", forced" : "");
                 ot_held_present.store(0, std::memory_order_release);
                 finish(held);
+                r4map_job(100 + (int)held.kind, held.value, held.queue, held.seq, held.since,   // (ORDER2: kind + 100 = a held present let go)
+                          std::chrono::duration_cast<std::chrono::nanoseconds>(held.queued.time_since_epoch()).count(), held_since, ot_now());
                 holding = false;
                 ot_holding.store(false, std::memory_order_release);
             }
@@ -9225,8 +9278,9 @@ void ot_push(Job&& j) {
     {
         std::lock_guard lk(ot_mu);
         j.seq = ++ot_seq_pushed;
-        if (j.kind == JOB_SUBMIT) ot_my_seq = j.seq;   // (its submits: what it replayed itself inline; registrations never waited)
-        if (j.kind == JOB_PRESENT) ot_presents++, ot_last_present_push.store(ot_now(), std::memory_order_relaxed);
+        j.since = j.seq - ot_present_seq;
+        if (j.kind == JOB_SUBMIT) ot_my_seq = j.seq, ot_last_submit_seq = j.seq;   // (its submits: what it replayed itself inline; registrations never waited)
+        if (j.kind == JOB_PRESENT) ot_presents++, ot_present_seq_prev = ot_present_seq, ot_present_seq = j.seq, ot_present_sub = ot_last_submit_seq, ot_last_present_push.store(ot_now(), std::memory_order_relaxed);
         ot_jobs.push_back(std::move(j));
     }
     ot_cv.notify_one();
@@ -9270,15 +9324,75 @@ void ot_join_all(int site) {
 }
 /// (PIPE2) a CPU readback the ring does not serve. In the replay inline, the reading thread's own submits had been replayed by now
 /// (on it), while the other threads' were being replayed beside it (OoT's main thread reads while the PT replays the frame before):
-/// so it waits for the submissions this thread handed over (RX_VK_ORDER_RB_JOIN=1, the default); =2: every job handed over (all threads'),
+/// so it waits for the submissions this thread handed over (RX_VK_ORDER_RB_JOIN=1; the default 5 is that, and the last whole frame's jobs for the 0x3980 culling results); =2: every job handed over (all threads'),
 /// =0: none. RX_VK_ORDER_LOG=1: the first 60 reads that waited, by range
 void ot_join_readback(uint64_t gpu, uint64_t size) {
-    // (PIPE2) RX_VK_ORDER_RB_JOIN=<0|1|2> (1): what a CPU readback waits for with the order thread: nothing, this thread's jobs, all jobs
-    static const int mode = getenv("RX_VK_ORDER_RB_JOIN") ? atoi(getenv("RX_VK_ORDER_RB_JOIN")) : 1;
+    // (PIPE2) RX_VK_ORDER_RB_JOIN=<0..5> (5): what a CPU readback waits for with the order thread: nothing, this thread's jobs, all jobs, all jobs for a range with write-backs (3), this thread's jobs and all jobs for the 0x3980 culling results (4), this thread's jobs and the last whole frame's jobs for them (5)
+    static const int mode = getenv("RX_VK_ORDER_RB_JOIN") ? atoi(getenv("RX_VK_ORDER_RB_JOIN")) : 5;
     // (PIPE2) RX_VK_ORDER_LOG=1: the order thread's joins one by one (the first 60 readbacks that waited)
     static const bool log_each = getenv("RX_VK_ORDER_LOG") && atoi(getenv("RX_VK_ORDER_LOG")) != 0;
     if (ot_self || !mode) return;
     if (mode == 2) return ot_join_all(OT_READBACK);
+    // (FLASH2) =3: a range the GPU's write-backs have covered before (any page of it) waits for every job handed over, as =2: its
+    // writer may be a submission of another thread, whose write-back is registered only when the order thread replays it. The ranges
+    // no write-back ever covered wait for this thread's jobs only, as =1
+    // (FLASH2) =4 (the default): only the 0x3980 culling results (R4, the lights and the ground fog), when the ring does not serve them, wait for every
+    // job handed over: the audit named them as the one range read before a writer of another thread's submission was replayed
+    if (mode == 4 && size == 0x3980) return ot_join_all(OT_READBACK);
+    // (FLASH2) =5 (the default): the 0x3980 culling results wait for what the inline replay had at this read and no more: the game alternates
+    // two buffers, so the one read in frame f was written in frame f-1 and all of f-1's jobs end with its present. The read waits until the order
+    // thread has done up to the newest present handed over (and this thread's own jobs), not for the frame in progress's submissions as =4 does
+    // (it cost the 3050 10-14 fps). The ring's R4 class (RX_VK_RB_R4=1) gave these values at a fixed lag of 3 and made the plants pop: off
+    if (mode == 5 && size == 0x3980) {
+        // (FLASH2, RX_VK_ORDER_R4_LEARN=0 off) the writer is not the end of the frame but its place in it: the order thread notes where in its
+        // frame (jobs since the frame's start) the job that binds a 0x3980 range for writing is (ot_note_r4_writer, at the binding), and the
+        // read waits for that place in the last whole frame (the largest of the last 16 frames', and 2 more for a registration between); the end of
+        // the frame (the present's job) as long as none is learned
+        static const bool learn = !getenv("RX_VK_ORDER_R4_LEARN") || atoi(getenv("RX_VK_ORDER_R4_LEARN")) != 0;
+        uint64_t want, prev;
+        {
+            std::lock_guard lk(ot_mu);
+            want = ot_present_sub, prev = ot_present_seq_prev;
+        }
+        const uint64_t n = ot_r4_n.load(std::memory_order_acquire);
+        bool placed = false;
+        if (learn && n && prev) {
+            uint64_t d = 0;
+            for (uint64_t i = 0; i < std::min<uint64_t>(n, 16); i++) d = std::max(d, ot_r4_since[i].load(std::memory_order_relaxed));
+            if (d && prev + d + 2 < want) want = prev + d + 2, placed = true;
+        }
+        static std::atomic<int64_t> st_placed{0};
+        st_placed += placed;
+        // (RX_VK_ORDER_R4_OWN=1: also this thread's own jobs, as flash2c did: the main thread's submissions of the frame in progress, which the
+        // buffer read was not written by: it made a quarter of the reads wait 3.6 ms)
+        static const bool own = getenv("RX_VK_ORDER_R4_OWN") && atoi(getenv("RX_VK_ORDER_R4_OWN")) != 0;
+        if (own) want = std::max(want, ot_my_seq);
+        static std::atomic<int64_t> reads{0}, waits{0}, wait_ns{0}, worst_ns{0};
+        int64_t d = 0;
+        if (ot_seq_done.load(std::memory_order_acquire) < want) {
+            const int64_t t0 = ot_now();
+            ot_wait_until([want] { return ot_seq_done.load(std::memory_order_acquire) >= want; }, UINT64_MAX);
+            d = ot_now() - t0;
+            ot_note(OT_READBACK, d, true);
+            waits++, wait_ns += d;
+            int64_t w = worst_ns.load();
+            while (d > w && !worst_ns.compare_exchange_weak(w, d)) {}
+        } else {
+            ot_note(OT_READBACK, 0, false);
+        }
+        if (++reads % 1200 == 0) {   // (about every 600 frames: two reads a frame)
+            const int64_t n = waits.exchange(0), ns = wait_ns.exchange(0);
+            logf("vk: order thread: the 0x3980 culling results' reads wait for the last whole frame's jobs: %lld of 1200 waited, %.2f ms each, worst %.2f ms; "
+                 "%lld of 1200 only up to the writer's place in the frame",
+                 (long long)n, n ? ns / (double)n / 1e6 : 0.0, worst_ns.exchange(0) / 1e6, (long long)st_placed.exchange(0));
+        }
+        return;
+    }
+    if (mode == 3) {
+        bool ever = false;
+        memory_writeback_value(host->gpu_guest(gpu), size, &ever);
+        if (ever) return ot_join_all(OT_READBACK);
+    }
     const uint64_t want = ot_my_seq;
     if (ot_seq_done.load(std::memory_order_acquire) >= want) return ot_note(OT_READBACK, 0, false);
     const int64_t t0 = ot_now();
@@ -9287,6 +9401,146 @@ void ot_join_readback(uint64_t gpu, uint64_t size) {
     ot_note(OT_READBACK, d, true);
     static std::atomic<int> logged{0};
     if (log_each && logged++ < 60) logf("vk: order thread: readback %#llx +%#llx waited %.2f ms for this thread's jobs", (unsigned long long)gpu, (unsigned long long)size, d / 1e6);
+}
+/// (FLASH2) the order thread, replaying a job, binds a 0x3980 range for writing (vk_memory.cpp gpu_buffer_bind): the job's place in its frame is noted
+}   // namespace
+// (declared in vk_internal.h: vk_memory.cpp calls it, so it lives outside the file-local namespace)
+void ot_note_r4_writer() {
+    if (!ot_self) return;
+    const uint64_t i = ot_r4_n.fetch_add(1, std::memory_order_acq_rel);
+    ot_r4_since[i % 16].store(ot_cur_since.load(std::memory_order_relaxed), std::memory_order_relaxed);
+}
+// ---- (ORDER2) RX_VK_ORDER_R4_MAP=<first game frame>:<frames> (logging only, default off): where the readbacks' writers sit in the
+// order thread's work and when the game reads them, for a window of game frames (rb_clock): each order-thread job (kind, value, queue,
+// place in its frame, when it was handed over and run), each written binding of an R4/R5/R6-sized range (the program, the job it was
+// recorded in, the thread, how far into the job), each CPU read of those ranges (the order thread's progress, the first words). With
+// RX_VK_ORDER_R4_DUMP=<dir>: every R4 read's 0x3980 bytes in the window to <dir>/r4_<frame>_<guest>_<n>.bin
+std::atomic<int64_t> r4map_job_t0{0};
+std::atomic<uint64_t> ot_cur_job{0};   // (ORDER2: the job the order thread is replaying, its sequence number; RX_VK_RB_EARLY's slots are tagged with it)
+uint64_t ot_current_job() { return ot_cur_job.load(std::memory_order_relaxed); }
+uint64_t ot_rb_target() {
+    std::lock_guard lk(ot_mu);
+    return ot_present_sub;
+}
+uint64_t ot_rb_done() { return ot_seq_done.load(std::memory_order_acquire); }
+bool ot_on() { return order_thread_on(); }
+/// (ORDER2) what the order thread is on now, for a read that waits long: the job (kind, value, queue place in its frame, ms in it), the jobs queued
+void ot_describe_now(char* out, size_t cap) {
+    size_t queued;
+    uint64_t pushed;
+    {
+        std::lock_guard lk(ot_mu);
+        queued = ot_jobs.size(), pushed = ot_seq_pushed;
+    }
+    const int64_t t0 = r4map_job_t0.load(std::memory_order_relaxed);
+    snprintf(out, cap, "the order thread on job %llu (kind %d, value %llu, place %llu in its frame) for %.1f ms, done %llu, %zu jobs queued behind (pushed %llu)",
+             (unsigned long long)ot_cur_job.load(), ot_cur_kind.load(), (unsigned long long)ot_cur_value.load(), (unsigned long long)ot_cur_since.load(),
+             t0 ? (ot_now() - t0) / 1e6 : -1.0, (unsigned long long)ot_seq_done.load(), queued, (unsigned long long)pushed);
+}
+static bool r4map_window(int64_t* lo, int64_t* hi) {
+    static int64_t a = -1, b = -1;
+    static const bool on = [] {
+        // (ORDER2) RX_VK_ORDER_R4_MAP=<first game frame>:<frames> (off; frames 30): logging only, the readbacks' writers in the order thread's jobs and the CPU's reads of them, for that window
+        const char* e = getenv("RX_VK_ORDER_R4_MAP");
+        if (!e || !*e) return false;
+        long long x = 0, y = 30;
+        if (sscanf(e, "%lld:%lld", &x, &y) < 1) return false;
+        a = x, b = x + y;
+        logf("vk: RX_VK_ORDER_R4_MAP: the readbacks' writers and reads logged for game frames %lld-%lld", (long long)a, (long long)b);
+        return true;
+    }();
+    if (lo) *lo = a;
+    if (hi) *hi = b;
+    return on;
+}
+static bool r4map_now() {
+    int64_t lo, hi;
+    if (!r4map_window(&lo, &hi)) return false;
+    const int64_t c = rb_clock.load(std::memory_order_relaxed);
+    return c >= lo && c < hi;
+}
+void r4map_note_write(uint64_t guest, uint64_t size) {
+    if (!r4map_now()) return;
+    const int64_t t0 = r4map_job_t0.load(std::memory_order_relaxed);
+    logf("vk: r4map write %#llx +%#llx prog %016llx clk %lld p %lld job v %llu since %llu %s at %.3f ms into the job (t %.3f)",
+         (unsigned long long)guest, (unsigned long long)size, (unsigned long long)rbwho_prog, (long long)rb_clock.load(),
+         (long long)presents_now, (unsigned long long)ot_cur_value.load(), (unsigned long long)ot_cur_since.load(),
+         ot_self ? "order thread" : "other thread", t0 ? (ot_now() - t0) / 1e6 : -1.0, ot_now() / 1e6);
+}
+void r4map_job(int kind, uint64_t value, uint64_t queue, uint64_t seq, uint64_t since, int64_t queued_ns, int64_t t0, int64_t t1) {
+    if (!r4map_now()) return;
+    logf("vk: r4map job kind %d v %llu q %#llx seq %llu since %llu clk %lld p %lld: handed over t %.3f, run %.3f-%.3f (%.3f ms)", kind,
+         (unsigned long long)value, (unsigned long long)queue, (unsigned long long)seq, (unsigned long long)since,
+         (long long)rb_clock.load(), (long long)presents_now, queued_ns / 1e6, t0 / 1e6, t1 / 1e6, (t1 - t0) / 1e6);
+}
+void r4map_read(uint64_t gpu, uint64_t size, int64_t t_enter) {
+    if (!r4map_now()) return;
+    if (size != 0x3980 && size != 0x9b040 && size != 0x8b040 && size != 0x44b040 && size != 0x1b580) return;
+    uint32_t w[8] = {};
+    host->gpu_read(gpu, w, sizeof w);
+    uint64_t pushed, psub;
+    {
+        std::lock_guard lk(ot_mu);
+        pushed = ot_seq_pushed, psub = ot_present_sub;
+    }
+    const int64_t c = rb_clock.load();
+    logf("vk: r4map read %#llx +%#llx clk %lld p %lld: done %llu pushed %llu present_sub %llu, %.3f ms in invalidate (t %.3f): %08x %08x %08x %08x %08x %08x %08x %08x",
+         (unsigned long long)host->gpu_guest(gpu), (unsigned long long)size, (long long)c, (long long)presents_now,
+         (unsigned long long)ot_seq_done.load(), (unsigned long long)pushed, (unsigned long long)psub, (ot_now() - t_enter) / 1e6, ot_now() / 1e6,
+         w[0], w[1], w[2], w[3], w[4], w[5], w[6], w[7]);
+    // (ORDER2) RX_VK_ORDER_R4_DUMP=<dir> (off): with RX_VK_ORDER_R4_MAP, every 0x3980 read's bytes in the window written to <dir>/r4_<frame>_<guest>_<n>.bin
+    static const char* dir = getenv("RX_VK_ORDER_R4_DUMP");
+    if (dir && *dir && size == 0x3980) {
+        static std::atomic<int> n{0};
+        std::vector<uint8_t> b(size);
+        host->gpu_read(gpu, b.data(), size);
+        char path[512];
+        snprintf(path, sizeof path, "%s/r4_%lld_%llx_%d.bin", dir, (long long)c, (unsigned long long)host->gpu_guest(gpu), n++);
+        if (FILE* f = fopen(path, "wb")) fwrite(b.data(), 1, b.size(), f), fclose(f);
+    }
+}
+namespace {
+bool ot_audit_on() {
+    // (FLASH2) RX_VK_ORDER_RB_AUDIT=1 (logging only): after each CPU readback the ring does not serve, the game thread waits for every
+    // job handed over before it and notes whether the range's write-back value moved (a "stale" read: the writer was another thread's
+    // submission, not replayed when the read took its value). A line per stale read (200), a summary by guest range
+    static const bool on = getenv("RX_VK_ORDER_RB_AUDIT") && atoi(getenv("RX_VK_ORDER_RB_AUDIT")) != 0;
+    return on;
+}
+uint64_t ot_audit_begin(uint64_t gpu, uint64_t size, uint64_t* v0) {
+    uint64_t want;
+    {
+        std::lock_guard lk(ot_mu);
+        want = ot_seq_pushed;
+    }
+    *v0 = memory_writeback_value(host->gpu_guest(gpu), size, nullptr);
+    return want;
+}
+void ot_audit_end(uint64_t want, uint64_t v0, uint64_t gpu, uint64_t size) {
+    if (ot_self) return;
+    const bool behind = ot_seq_done.load(std::memory_order_acquire) < want;
+    if (behind) ot_wait_until([want] { return ot_seq_done.load(std::memory_order_acquire) >= want; }, UINT64_MAX);
+    const uint64_t v1 = memory_writeback_value(host->gpu_guest(gpu), size, nullptr);
+    struct Row { int64_t reads = 0, behind = 0, stale = 0; };
+    static std::mutex mu;
+    static std::map<std::pair<uint64_t, uint64_t>, Row> rows;   // (guest address, size)
+    static int lines = 0;
+    static int64_t total = 0;
+    std::lock_guard lk(mu);
+    Row& r = rows[{host->gpu_guest(gpu), size}];
+    r.reads++, r.behind += behind;
+    const bool stale = v1 != v0;
+    r.stale += stale;
+    if (stale && lines++ < 200)
+        logf("vk: rb audit: STALE read present %lld guest %#llx +%#llx: write-back value %llu -> %llu after the order thread caught up (done %llu, fence %llu)",
+             (long long)presents_now, (unsigned long long)host->gpu_guest(gpu), (unsigned long long)size, (unsigned long long)v0,
+             (unsigned long long)v1, (unsigned long long)completed(), (unsigned long long)fence());
+    if (++total % 3000 == 0) {
+        for (const auto& [k, row] : rows)
+            if (row.stale || row.reads >= 100)
+                logf("vk: rb audit: guest %#llx +%#llx: %lld reads, %lld with the order thread behind, %lld stale", (unsigned long long)k.first,
+                     (unsigned long long)k.second, (long long)row.reads, (long long)row.behind, (long long)row.stale);
+    }
 }
 /// a fence wait (nvnSyncWait, nvnQueueFinish's) for value f: false when the game is to be told "not yet" (a poll, or the timeout
 /// ran out while its submission waited for the order thread); *timeout_ns is what is left of the wait

@@ -42,7 +42,13 @@ inline Config parse(const char* lag, const char* check, const char* wait) {
 
 /// The class of a CPU read: 1 the meter's block (size 0x1040: the game has three such rings and the Market's programs write only one of them,
 /// the others are read all the same; and its 0xc0 companion block), 2 a 0x40 slot, 3 a 0x2000 block, 0 none
-inline int class_of(uint64_t size) { return size == 0x1040 || size == 0xc0 ? 1 : size == 0x40 ? 2 : size == 0x2000 ? 3 : 0; }
+inline int class_of(uint64_t size) {
+    return size == 0x1040 || size == 0xc0 ? 1 : size == 0x40 ? 2 : size == 0x2000 ? 3 : size == 0x3980 ? 4 : 0;
+}
+/// (FLASH2) R4, the 0x3980 culling results (two ranges the game alternates between, 0x113b623000 / 0x113b628000): the lights and the ground fog
+/// of a frame depend on them. Read from guest memory as the replay left it, they were 0, 1 or 2 presents old with the order thread, a
+/// jitter that shows as a one-frame change of the lighting; the ring hands them out at the fixed lag like the other classes
+constexpr uint64_t kMaxCopy = 0x4000;   // the largest range a class stages (R4)
 /// The bytes of the range that are staged and handed back (the CPU reads words 0 and 3 of the meter's block only)
 inline uint64_t copy_bytes(int cls, uint64_t size) { return cls == 1 && size == 0x1040 ? 16 : size; }
 

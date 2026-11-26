@@ -210,6 +210,19 @@ int main() {
         expect(pool_mb_for_ram(32 * GB) == 1024 && pool_mb_for_ram(24 * GB) == 1024, "24 GB of RAM and more: 1024 MB");
         expect(pool_mb_for_ram(16 * GB) == 512 && pool_mb_for_ram(15 * GB) == 512, "the 16 GB PCs and the 15 GB laptop: 512 MB");
         expect(pool_mb_for_ram(8 * GB) == 256, "8 GB: 256 MB");
+        // (MESH1) the BC3 scratch's layers and the RAM BC cache's cap, by the machine
+        expect(bc_layers_for(256ull << 20, true, false, 15 * GB) == 8, "a Vega 8 laptop (256 MB 'VRAM', no mesh shaders, 15 GB): 8 layers");
+        expect(bc_layers_for(512ull << 20, true, false, 12 * GB) == 8, "the same class from 12 GB of RAM: 8");
+        expect(bc_layers_for(512ull << 20, true, false, 12 * GB - 1) == 1, "under 12 GB of RAM: 1, as by its video memory");
+        expect(bc_layers_for(1 * GB, true, true, 16 * GB) == 1, "an integrated GPU with mesh shaders (a Steam Deck, untried): by video memory, 1");
+        expect(bc_layers_for(8 * GB - 1, false, false, 32 * GB) == 1, "a discrete card under 8 GB without mesh shaders: 1, as before");
+        expect(bc_layers_for(6 * GB, false, true, 32 * GB) == 1 && bc_layers_for(8 * GB, false, true, 16 * GB) == 8, "discrete cards: by video memory, as before");
+        expect(bc_layers_for(0, false, true, 16 * GB) == 8, "video memory not known: 8, as before");
+        expect(bc_cache_mb_for(true, false, 15 * GB) == 512, "the 15 GB Vega 8 laptop: 512 MB");
+        expect(bc_cache_mb_for(true, false, 16 * GB) == 1024, "16 GB: 1024 MB");
+        expect(bc_cache_mb_for(true, false, 0) == 1024, "RAM not known: 1024 MB");
+        expect(bc_cache_mb_for(true, true, 8 * GB) == 1024 && bc_cache_mb_for(false, false, 8 * GB) == 1024,
+               "other GPUs: 1024 MB, as before");
         expect(room_to_write(5 * GB, 100 << 20), "5 GB free: a record is written");
         expect(!room_to_write(GB + (50 << 20), 100 << 20), "it would eat into the last GB: not written");
         expect(!room_to_write(GB / 2, 1), "under 1 GB free: nothing written");

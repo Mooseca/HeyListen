@@ -89,7 +89,10 @@ class AstcBatchTests(unittest.TestCase):
 
     def test_bc_cache(self):
         cap = block(self.tex, "uint64_t bcc_cap() {")
-        self.assertIn(": 1024) << 20;", cap, "the BC cache's default is not 1024 MB")
+        # (MESH1: the default is texcache_pack.h's bc_cache_mb_for, 1024 MB but 512 on integrated GPUs without mesh shaders under
+        # 16 GB of RAM: its numbers are tested in test_texcache_pack)
+        self.assertIn(": def) << 20;", cap, "the BC cache's default is not the rule's")
+        self.assertIn("texcache::bc_cache_mb_for(", cap, "the BC cache's default is not bc_cache_mb_for")
         self.assertIn("std::max(0, atoi(", cap, "RX_VK_BC_CACHE_MB=0 does not turn it off")
         u = self.upload
         gate = u[u.index("const bool cache_this ="):u.index(";", u.index("const bool cache_this ="))]

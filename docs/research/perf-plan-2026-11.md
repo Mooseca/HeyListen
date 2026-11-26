@@ -149,3 +149,9 @@ Worksites opened the same evening, one machine each:
 | Readbacks decoupled from the replay's progress | main PC | keep the order thread's gain with no stale read: within 2 to 3 percent of the old read |
 | Stutters (issue 139: first visit of an area; zone changes; frames over 100 ms in play) | RTX 3050 | each hitch over 50 ms with its cause, in a player's state (shipped pipeline-state list, empty caches), then the fixes by size |
 | The path without mesh shaders | Ryzen 5700U laptop (Vega 8) | the mesh stages run as compute cost about 11 ms a frame; target 25 to 30 fps in Hyrule Field on the Lowest preset (16 to 19 today) |
+
+26 November: the copy behind the last writer is merged (RX_VK_RB_EARLY, on with the order thread). RTX 3050, Market, camera
+turning, 3 runs each: 57.9 fps against 57.7 for the old read, 55.5 with the order thread off, 49.3 for the whole-submission
+wait; frames over 16.7 ms 47 to 50 percent as with the old read (97 percent with the wait). Left open: a read that arrives
+while the replay is stalled inside the writer's job (20 to 508 ms at zone loads) still waits; it is the first cause of the
+hitches over 50 ms on a zone tour (62 to 126 a tour).
