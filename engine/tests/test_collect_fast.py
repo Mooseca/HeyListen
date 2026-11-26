@@ -49,6 +49,8 @@ static uint8_t a64_dirty[A64_DIRTY_PAGES];
 static uint64_t guest_size;
 static uint64_t hos_guest_size(void) { return guest_size; }
 static int collect_fast_on(void) { return 0; }
+static void *hos_xmalloc(size_t n, const char *what) { (void)what; return malloc(n); }
+static void *hos_xrealloc(void *p, size_t n, const char *what) { (void)what; return realloc(p, n); }
 ''' + take + "\n" + fast + "\n" + old + r'''
 static uint64_t rng = 88172645463325252ull;
 static uint64_t next(void) { rng ^= rng << 13; rng ^= rng >> 7; rng ^= rng << 17; return rng; }
