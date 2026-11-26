@@ -582,6 +582,7 @@ void sampler_counts(uint32_t* made, uint32_t* retired_waiting, uint64_t* retired
 /// (HeyListen, HL_TRACE) one of the back end's writes into guest memory, or a mirror's or an import's life, for the crash
 /// recorder (vk_api.h trace_gpu; nothing when it is off)
 inline void trace_gpu(uint32_t what, uint64_t guest, uint64_t size, uint64_t pool, uint64_t value) {
+    if (host && host->gpu_wrote && (what == MKWVK_TRACE_WRITEBACK || what == MKWVK_TRACE_LAZY)) host->gpu_wrote(guest, size, value);   // (CRASH3: always)
     if (host && host->trace_gpu) host->trace_gpu(what, guest, size, pool, value, vk_timeline_completed());
 }
 void vk_timeline_wait(uint64_t v);

@@ -3935,7 +3935,7 @@ What is slow and rare inside (a program or pipeline made, a texture created or u
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_internal.h:763`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_internal.h:764`.
 
 #### `RX_VK_PROF_CAP` - developer
 
@@ -3945,7 +3945,7 @@ What is slow and rare inside (a program or pipeline made, a texture created or u
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_internal.h:802`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_internal.h:803`.
 
 #### `RX_VK_PROF_FINE` - developer
 
@@ -7875,7 +7875,7 @@ What the renderer (gpu/render, TOTKPort's) asks of TOTKPort's hos_prof.c and tot
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/mkw_glue.c:1288`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/mkw_glue.c:1341`.
 
 #### `HOS_MEM_SPLIT` - developer
 
@@ -10257,7 +10257,7 @@ The first matching entry wins. (2026-10-20: the castle's MainThread and ModuleSy
 
 **When a player would use it:** Freezes while a zone loads: `=1` keeps the thread's virtual core through a texture or program release even when the renderer would make it wait (v0.4.3's behaviour).
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/rx_backend.c:624` and 1 more place.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/rx_backend.c:625` and 1 more place.
 
 #### `HOS_RESERVE_CORE` - developer
 
@@ -10317,7 +10317,7 @@ undocumented: host/hos_svc.c:138 (in `spin_for_release()`) reads it as a text va
 
 **When a player would use it:** Freezes at area changes: `=1` keeps the thread's virtual core while a CPU read or write of texels waits for the GPU (the behaviour before Longshot #1827).
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/rx_backend.c:608`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/rx_backend.c:609`.
 
 #### `HOS_THREAD_OF_CACHE` - developer
 
@@ -11283,7 +11283,7 @@ A yield takes the virtual-core lock every time, and twice when it gives the core
 
 **When a player would use it:** Not for players: an internal experiment or A/B switch, changed only by a developer.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/rx_backend.c:479`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/rx_backend.c:480`.
 
 #### `HOS_VOICE_OPTION_FOLLOW` - developer
 
@@ -11877,7 +11877,7 @@ HOS_WATCH=<file> (diagnostic): when <file> exists (up to 4 guest addresses in he
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/mkw_glue.c:1223` and 1 more place.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/mkw_glue.c:1276` and 1 more place.
 
 #### `HOS_WATCH_ALL_THREADS` - diagnostic
 
@@ -11887,7 +11887,7 @@ HOS_WATCH=<file> (diagnostic): when <file> exists (up to 4 guest addresses in he
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/mkw_glue.c:1015`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/mkw_glue.c:1068`.
 
 #### `HOS_WATCH_PHASES` - diagnostic
 
@@ -11897,7 +11897,7 @@ HOS_WATCH=<file> (diagnostic): when <file> exists (up to 4 guest addresses in he
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/mkw_glue.c:1073`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/mkw_glue.c:1126`.
 
 #### `HOS_WATCH_SECONDS` - diagnostic
 
@@ -11907,7 +11907,7 @@ HOS_WATCH=<file> (diagnostic): when <file> exists (up to 4 guest addresses in he
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/mkw_glue.c:1070`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/mkw_glue.c:1123`.
 
 #### `HOS_WATCH_STACK` - diagnostic
 
@@ -11917,7 +11917,7 @@ HOS_WATCH=<file> (diagnostic): when <file> exists (up to 4 guest addresses in he
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/mkw_glue.c:1225`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/mkw_glue.c:1278`.
 
 #### `HOS_WIDE_UI_LOG` - diagnostic
 
@@ -13017,7 +13017,7 @@ The replay's times for each frame that took longer than this.
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_internal.h:763` and 1 more place.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `gpu/vk/vk_internal.h:764` and 1 more place.
 
 #### `RX_VK_SMALL_LOG` - diagnostic
 
@@ -14071,7 +14071,7 @@ Every interval, the busiest threads in the log; it also starts the samplers belo
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/mkw_glue.c:798` and 3 more places.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/mkw_glue.c:851` and 3 more places.
 
 #### `HOS_PROFILE_GATE` - diagnostic
 
@@ -14091,7 +14091,7 @@ One thread's stacks, sampled every millisecond (needs `HOS_PROFILE`); `python -I
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/mkw_glue.c:1219` and 1 more place.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/mkw_glue.c:1272` and 1 more place.
 
 #### `HOS_SAMPLE_ALL` - diagnostic
 
@@ -14101,7 +14101,7 @@ Every game and renderer thread every 2 ms while `<file>.go` exists (needs `HOS_P
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/mkw_glue.c:1221` and 1 more place.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/mkw_glue.c:1274` and 1 more place.
 
 #### `HOS_SAMPLE_FILE` - diagnostic
 
@@ -14111,7 +14111,7 @@ One thread's stacks, sampled every millisecond (needs `HOS_PROFILE`); `python -I
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In the process environment (or in a file named by `HOS_ENV_FILE`); `hookshot_env.txt` refuses this one. **Read at:** `host/mkw_glue.c:828` and 1 more place.
+**Set it:** In the process environment (or in a file named by `HOS_ENV_FILE`); `hookshot_env.txt` refuses this one. **Read at:** `host/mkw_glue.c:881` and 1 more place.
 
 #### `HOS_SAMPLE_NS` - diagnostic
 
@@ -14121,7 +14121,7 @@ One thread's stacks, sampled every millisecond (needs `HOS_PROFILE`); `python -I
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/mkw_glue.c:1206`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/mkw_glue.c:1259`.
 
 #### `HOS_STATS_AFTER` - diagnostic
 
@@ -14131,7 +14131,7 @@ HOS_STATS_AFTER=<seconds> (with HOS_HOSTCALL_STATS=1): the host call counts and 
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/mkw_glue.c:723`.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/mkw_glue.c:776`.
 
 #### `HOS_THREAD_TIMES` - diagnostic
 
@@ -14141,7 +14141,7 @@ Every interval, the threads that used over 5% of a core.
 
 **When a player would use it:** For a bug report or a measurement: set it only when a maintainer asks, and keep the log, dump or numbers it writes.
 
-**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/mkw_glue.c:1215` and 1 more place.
+**Set it:** In `hookshot_env.txt`, or in the environment. **Read at:** `host/mkw_glue.c:1268` and 1 more place.
 
 #### `RX_GPU_TIMING` - diagnostic
 

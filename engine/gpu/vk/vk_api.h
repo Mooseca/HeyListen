@@ -17,7 +17,7 @@
 extern "C" {
 #endif
 
-#define MKWVK_API_VERSION 23
+#define MKWVK_API_VERSION 24
 enum { HOS_OPT_CHEAT_HEARTS = 32, HOS_OPT_CHEAT_FLIGHT, HOS_OPT_CHEAT_ACTION, HOS_OPT_CHEAT_CAMERA };
 /* (hookshot) the Motion page's rows (host/pad_sdl.c reads them, vk_replay.cpp's option answers them): Motion controls on
    or off, the horizontal's and the vertical's sensitivity in percent, each turned around, and the deadzone (0 to 2) */
@@ -185,6 +185,10 @@ typedef struct MkwVkHost {
        block was allocated there since (host/hl_stale_heads.h, the heaps' entry gates; RX_VK_STALE_HEAD_GUARD=0: always 1): a bare
        storage-table entry the program writes through that points there is stale (gpu/vk/vk_draw.cpp leaves it unbound) */
     int (*bare_head_live)(uint64_t guest);
+    /* (version 24, CRASH3) each range the back end writes back into guest memory (what trace_gpu names MKWVK_TRACE_WRITEBACK
+       and MKWVK_TRACE_LAZY), always, with the submission's timeline value: the crash record's last GPU write-back by page
+       (host/hos_wb_stamp.h). Cheap: no GPU query is made for it */
+    void (*gpu_wrote)(uint64_t guest, uint64_t size, uint64_t value);
 } MkwVkHost;
 enum {
     MKWVK_TRACE_WRITEBACK = 1,     /* a mirror's GPU writes copied into guest memory (in a submission) */

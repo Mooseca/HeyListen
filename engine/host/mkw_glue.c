@@ -557,6 +557,57 @@ static void crash_stack(const CONTEXT *ctx, char *out, size_t cap) {
 }
 #endif
 
+/* (CRASH3) the last GPU write-back by guest page (host/hos_wb_stamp.h), told by the back end (vk_api.h gpu_wrote), always on */
+#include "hos_wb_stamp.h"
+static HosWbStamps wb_stamps;
+static uint64_t wb_ms(void) { return (uint64_t)hos_now_ns() / 1000000u; }
+void hos_gpu_wrote(uint64_t guest, uint64_t size, uint64_t value) { hos_wbs_note(&wb_stamps, guest, size, value, wb_ms()); }
+
+/* (CRASH3) the crash record's registers, as values (the rows of memory stay out of the report: hos_crash_memory_row): the
+   guest's x0-x30 and sp, the host's general registers; then, for the faulting guest address and each guest register that
+   points into the guest window, the GPU's last write-back over its page (hos_wb_stamp.h): the culprit of a crash on an
+   object a stale write-back overwrote */
+static void crash_regs(const CONTEXT *h, const Ctx *c, uint64_t fault_guest) {
+    char line[300];
+    if (c)
+        for (int i = 0; i < 32; i += 8) {
+            int n = snprintf(line, sizeof line, "CRASH: guest regs:");
+            for (int r = i; r < i + 8; r++)
+                n += snprintf(line + n, sizeof line - n, " %s%d=%llx", r == 31 ? "sp" : "x", r == 31 ? 0 : r,
+                              (unsigned long long)c->x[r]);
+            hos_log("%s", line);
+        }
+    hos_log("CRASH: host regs: rax=%llx rbx=%llx rcx=%llx rdx=%llx rsi=%llx rdi=%llx rbp=%llx rsp=%llx",
+            (unsigned long long)h->Rax, (unsigned long long)h->Rbx, (unsigned long long)h->Rcx, (unsigned long long)h->Rdx,
+            (unsigned long long)h->Rsi, (unsigned long long)h->Rdi, (unsigned long long)h->Rbp, (unsigned long long)h->Rsp);
+    hos_log("CRASH: host regs: r8=%llx r9=%llx r10=%llx r11=%llx r12=%llx r13=%llx r14=%llx r15=%llx rip=%llx",
+            (unsigned long long)h->R8, (unsigned long long)h->R9, (unsigned long long)h->R10, (unsigned long long)h->R11,
+            (unsigned long long)h->R12, (unsigned long long)h->R13, (unsigned long long)h->R14, (unsigned long long)h->R15,
+            (unsigned long long)h->Rip);
+    const uint64_t now = wb_ms();
+    int n = snprintf(line, sizeof line, "CRASH: GPU write-back:"), told = 0, lines = 0;
+    for (int r = -1; r < (c ? 31 : 0) && lines < 3; r++) {
+        const uint64_t a = r < 0 ? fault_guest : c->x[r];
+        uint64_t age;
+        uint32_t value;
+        if (a < 0x10000 || a >= (uint64_t)HOS_SPACE_END || !hos_wbs_find(&wb_stamps, a, now, &age, &value)) continue;
+        char who[8], one[96];
+        if (r < 0) snprintf(who, sizeof who, "fault");
+        else snprintf(who, sizeof who, "x%d", r);
+        snprintf(one, sizeof one, " %s %llx page %llu ms ago (submission %u);", who, (unsigned long long)a,
+                 (unsigned long long)age, value);
+        if (n + (int)strlen(one) >= (int)sizeof line) {
+            hos_log("%s", line);
+            lines++;
+            n = snprintf(line, sizeof line, "CRASH: GPU write-back:");
+        }
+        n += snprintf(line + n, sizeof line - n, "%s", one);
+        told++;
+    }
+    if (!told) hos_log("CRASH: GPU write-back: none known on the fault's page or the registers' pages");
+    else if (lines < 3) hos_log("%s", line);
+}
+
 static LONG WINAPI report_crash(EXCEPTION_POINTERS *info) {
     record_exception(info);
     EXCEPTION_RECORD *rec = info->ExceptionRecord;
@@ -643,6 +694,7 @@ static LONG WINAPI report_crash(EXCEPTION_POINTERS *info) {
                 fp = next;
             }
         }
+        crash_regs(info->ContextRecord, c, addr - (uint64_t)A64_MEM);
         /* the memory x0, x1, x19, x20, x21, x22 and x24 point to (the object a crash is usually about, its
            manager and the next array entry: the review of #67's report) */
         static const int dumped[] = {0, 1, 19, 20, 21, 22, 24};
@@ -655,7 +707,8 @@ static LONG WINAPI report_crash(EXCEPTION_POINTERS *info) {
                         (unsigned long long)peek_guest(base + row), (unsigned long long)peek_guest(base + row + 8),
                         (unsigned long long)peek_guest(base + row + 16), (unsigned long long)peek_guest(base + row + 24));
         }
-    }
+    } else
+        crash_regs(info->ContextRecord, NULL, addr - (uint64_t)A64_MEM);   /* (a host thread: its registers) */
     {   /* (HL_TRACE: the blocks the fault and the registers are in, the last events; hl_trace.c) */
         void hl_trace_on_crash(Ctx *, uint64_t);
         hl_trace_on_crash(c, addr - (uint64_t)A64_MEM);

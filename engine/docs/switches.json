@@ -6975,7 +6975,7 @@
    "files": [
     {
      "path": "host/mkw_glue.c",
-     "line": 1288
+     "line": 1341
     }
    ],
    "default": "off (unset)",
@@ -8669,11 +8669,11 @@
    "files": [
     {
      "path": "host/mkw_glue.c",
-     "line": 798
+     "line": 851
     },
     {
      "path": "host/mkw_glue.c",
-     "line": 1217
+     "line": 1270
     },
     {
      "path": "host/posix/prof.c",
@@ -8828,11 +8828,11 @@
    "files": [
     {
      "path": "host/rx_backend.c",
-     "line": 624
+     "line": 625
     },
     {
      "path": "host/rx_backend.c",
-     "line": 717
+     "line": 718
     }
    ],
    "default": "off (unset)",
@@ -8983,7 +8983,7 @@
    "files": [
     {
      "path": "host/mkw_glue.c",
-     "line": 1219
+     "line": 1272
     },
     {
      "path": "host/posix/prof.c",
@@ -9008,7 +9008,7 @@
    "files": [
     {
      "path": "host/mkw_glue.c",
-     "line": 1221
+     "line": 1274
     },
     {
      "path": "host/posix/prof.c",
@@ -9033,7 +9033,7 @@
    "files": [
     {
      "path": "host/mkw_glue.c",
-     "line": 828
+     "line": 881
     },
     {
      "path": "host/posix/prof.c",
@@ -9058,7 +9058,7 @@
    "files": [
     {
      "path": "host/mkw_glue.c",
-     "line": 1206
+     "line": 1259
     }
    ],
    "default": "off (unset)",
@@ -9376,7 +9376,7 @@
    "files": [
     {
      "path": "host/mkw_glue.c",
-     "line": 723
+     "line": 776
     }
    ],
    "default": "unset",
@@ -9502,7 +9502,7 @@
    "files": [
     {
      "path": "host/rx_backend.c",
-     "line": 608
+     "line": 609
     }
    ],
    "default": "off (unset)",
@@ -9590,7 +9590,7 @@
    "files": [
     {
      "path": "host/mkw_glue.c",
-     "line": 1215
+     "line": 1268
     },
     {
      "path": "host/posix/prof.c",
@@ -10014,7 +10014,7 @@
    "files": [
     {
      "path": "host/rx_backend.c",
-     "line": 479
+     "line": 480
     }
    ],
    "default": "unset",
@@ -10140,7 +10140,7 @@
    "files": [
     {
      "path": "host/mkw_glue.c",
-     "line": 1223
+     "line": 1276
     },
     {
      "path": "host/posix/prof.c",
@@ -10165,7 +10165,7 @@
    "files": [
     {
      "path": "host/mkw_glue.c",
-     "line": 1015
+     "line": 1068
     }
    ],
    "default": "off (unset)",
@@ -10186,7 +10186,7 @@
    "files": [
     {
      "path": "host/mkw_glue.c",
-     "line": 1073
+     "line": 1126
     }
    ],
    "default": "unset",
@@ -10207,7 +10207,7 @@
    "files": [
     {
      "path": "host/mkw_glue.c",
-     "line": 1070
+     "line": 1123
     }
    ],
    "default": "unset",
@@ -10228,7 +10228,7 @@
    "files": [
     {
      "path": "host/mkw_glue.c",
-     "line": 1225
+     "line": 1278
     }
    ],
    "default": "off (unset)",
@@ -11027,7 +11027,7 @@
     },
     {
      "path": "host/rx_backend.c",
-     "line": 463
+     "line": 464
     }
    ],
    "default": "unset",
@@ -21514,7 +21514,7 @@
     },
     {
      "path": "host/rx_backend.c",
-     "line": 433
+     "line": 434
     }
    ],
    "default": "off (unset)",
@@ -28210,7 +28210,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_internal.h",
-     "line": 763
+     "line": 764
     }
    ],
    "default": "unset",
@@ -28231,7 +28231,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_internal.h",
-     "line": 802
+     "line": 803
     }
    ],
    "default": "unset",
@@ -30150,7 +30150,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_internal.h",
-     "line": 763
+     "line": 764
     },
     {
      "path": "gpu/vk/vk_replay.cpp",

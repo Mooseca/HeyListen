@@ -314,6 +314,7 @@ static void host_no_usable_gpu(const char *text) {
 
 int hos_oot_player_seen(void);   /* (host/hos_main.c) */
 int hos_bare_head_live(uint64_t guest);   /* (host/hl_trace.c, CRASH3: a bare storage entry's block freed by the game) */
+void hos_gpu_wrote(uint64_t guest, uint64_t size, uint64_t value);   /* (host/mkw_glue.c: the crash record's last GPU write-back by page) */
 static MkwVkHost vk_host = {   /* (not const: trace_gpu set when HL_TRACE is on) */
     MKWVK_API_VERSION, host_log, hos_guest_base, hos_guest_size, hos_gpu_ptr, nvn_gpu_guest, nvn_gpu_read,
     nvn_gpu_write, host_collect, host_free_pages, host_mark_written, hos_ticks, hos_now_ns, nvn_tex_layout,
@@ -322,7 +323,7 @@ static MkwVkHost vk_host = {   /* (not const: trace_gpu set when HL_TRACE is on)
     host_watch_guest_writes, hos_pad_raw, hos_binding, hos_bind, host_aspect_ratio, host_take_key_press,
     hos_mouse_pointer, hos_mic_count, hos_mic_name, hos_mic_select, hos_sdl_gyro_status, hos_log_flush, hos_prompts_face,
     host_romfs_dir, NULL, hos_perf_info, host_out_of_memory, host_no_usable_gpu, hos_profile_pc, hos_profile_build_id, hos_profile_threads, hos_oot_player_seen,
-    hos_out_count, hos_out_name, hos_out_id, hos_out_select, hos_bare_head_live,
+    hos_out_count, hos_out_name, hos_out_id, hos_out_select, hos_bare_head_live, hos_gpu_wrote,
 };
 
 static const MkwVkRenderer *vk;   /* the Vulkan back end, when it was chosen and started */
