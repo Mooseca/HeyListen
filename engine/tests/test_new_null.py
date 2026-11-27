@@ -184,6 +184,22 @@ return;
 }
 '''
 
+# (operator new's other two variants, f_8005e9d0 and f_8005eb20, in the context's form and with their registers in locals: the
+# tail call through the vtable in the loop and the zero before the epilogue are the places, as in f_8005ebe0)
+def variant(addr, locals_):
+    r = (lambda n: "x%d_" % n) if locals_ else (lambda n: "c->x[%d]" % n)
+    saved = "c->x[0] = x0_; c->x[31] = x31_; " if locals_ else ""
+    return ('#include "a64.h"\n'
+            "void f_%s(Ctx *__restrict A64_NOESC c) {\n"
+            "if (%s == 0) { goto L_x; }\n"
+            "L_y:; A64_POLL(c);\n"
+            "    %s=recomp_load64(c,%s + 48);\n"
+            "%sA64_IJUMP(c, c->x[3]); return;\n"
+            "L_x:;\n"
+            "    { uint64_t _b=%s; int64_t _o=32; { uint64_t _p0,_p1; recomp_ldp64(c,_b,&_p0,&_p1); %s=_p0; } }\n"
+            "    { uint64_t _r = ((uint64_t)0 | (((uint64_t)0) << 0)); %s = _r; }\n"
+            "return;\n}\n" % (addr, r(20), r(8), r(8), saved, r(31), r(29), r(0)))
+
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
@@ -211,6 +227,14 @@ def main():
     assert hl_gates.apply_lift(hook_b, "8005ebe0", "new", ()) == hook_b
     assert hl_gates.apply_text(hook_b, {}, {}, {}, {})[0] == LIFTED_B
     assert "A64_ICALL(c, c->x[3]); if (__builtin_expect(c->x[0] == 0, 0))" in hook_b
+    for addr in ("8005e9d0", "8005eb20"):
+        for locals_ in (False, True):
+            text = variant(addr, locals_)
+            hook_v = hl_gates.apply_lift(text, addr, "new", ())
+            assert hook_v is not None, "f_%s was not hooked (registers in locals: %s)" % (addr, locals_)
+            assert hook_v.count("hl_oot_new_null(c") == 2, hook_v
+            assert hl_gates.apply_text(hook_v, {}, {}, {}, {})[0] == text
+            assert hl_gates.text_hash(hook_v, addr) == hl_gates.text_hash(text, addr)
     hook_m = hl_gates.apply_lift(LIFTED_M, "83b7b340", "new", ())
     assert hook_m is not None, "the module heap hook was not put in"
     lines_m = hook_m.splitlines()
@@ -222,6 +246,9 @@ def main():
     asked = hl_gates.wanted_lifts()
     assert asked.get("8005ebe0", (None, None))[1] == "new" and asked.get("8005eca0", (None, None))[1] == "new", \
         "host/hl_alloc_null.c does not ask for the hooks"
+    # (the lift's two forms of each variant, the text of an older lift and of a fresh one: both hashes are asked for)
+    for addr in ("8005e9d0", "8005eb20", "8005ebe0"):
+        assert len(asked[addr][0].split(",")) == 2, "f_%s asks for one form of the lift's text only" % addr
     print("PASS: nx2/hl_gates.py: operator new's two exits and aligned_alloc's failure path hooked once, hash unchanged, "
           "a second run changes nothing, taking them out restores the text, other text is left alone")
 
