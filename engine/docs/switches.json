@@ -5292,7 +5292,7 @@
      "line": 707
     }
    ],
-   "default": "unset",
+   "default": "on (set at the start by host/hos_main.c; =0: off)",
    "values": "text (`0`, `1` named)",
    "explanation": "TICK-062 B1, HOS_CV_SIGNAL_FAST=1: a signal with no waiter changes nothing a later wait can see, so it returns before taking cv->lk. No wake is lost: (1) a waiter registers (cv_waiting++, seq_cst) under cv->lk BEFORE it releases the guest mutex (mutex_release_all) and before it sleeps, and reads cv->gen before registering. (2) A signal the guest orders after a wait's registration (it took the mutex the waiter released, or any release/acquire chain from it) reads cv_waiting with a seq_cst load after that, so it sees >= 1 and takes the slow path below, exactly as before. (3) A signal not ordered with the registration (no mutex, truly concurrent) may read 0: that is the signal ordered before the wait, which the slow path also loses (it bumps gen before the waiter reads gen, so the waiter sleeps on).",
    "comment": "TICK-062 B1, HOS_CV_SIGNAL_FAST=1: a signal with no waiter changes nothing a later wait can see, so it returns before taking cv->lk. No wake is lost: (1) a waiter registers (cv_waiting++, seq_cst) under cv->lk BEFORE it releases the guest mutex (mutex_release_all) and before it sleeps, and reads cv->gen before registering. (2) A signal the guest orders after a wait's registration (it took the mutex the waiter released, or any release/acquire chain from it) reads cv_waiting with a seq_cst load after that, so it sees >= 1 and takes the slow path below, exactly as before. (3) A signal not ordered with the registration (no mutex, truly concurrent) may read 0: that is the signal ordered before the wait, which the slow path also loses (it bumps gen before the waiter reads gen, so the waiter sleeps on).",
@@ -8676,7 +8676,7 @@
      "line": 1058
     }
    ],
-   "default": "off (unset)",
+   "default": "on (set at the start by host/hos_main.c; =0: off)",
    "values": "on or off (0, false, off, no and empty are off); the description names `0`, `1`",
    "explanation": "(HeyListen, TICK-054) HOS_PRECOPY_KICK=1: when the game's main thread leaves its end-of-frame wait (OoT's f_83acfb90, lr 0x83acfcf4: the last BaseProc stage is done, every job thread's writes of the frame are final, and the main thread's draw code and its submits are still 2-4 ms away), the renderer's capture pre-copy thread is kicked (rx_backend.c rx_precopy_kick, with RX_VK_CAPTURE_PRECOPY=1 RX_VK_PRECOPY_KICK=1): the frame's pages are copied while the job threads idle, and the submit copies only what was written since.",
    "comment": "(HeyListen, TICK-054) HOS_PRECOPY_KICK=1: when the game's main thread leaves its end-of-frame wait (OoT's f_83acfb90, lr 0x83acfcf4: the last BaseProc stage is done, every job thread's writes of the frame are final, and the main thread's draw code and its submits are still 2-4 ms away), the renderer's capture pre-copy thread is kicked (rx_backend.c rx_precopy_kick, with RX_VK_CAPTURE_PRECOPY=1 RX_VK_PRECOPY_KICK=1): the frame's pages are copied while the job threads idle, and the submit copies only what was written since.",
@@ -9367,7 +9367,7 @@
      "line": 993
     }
    ],
-   "default": "unset",
+   "default": "on (set at the start by host/hos_main.c; =0: off)",
    "values": "text (`0`, `2` named)",
    "explanation": "(QUICK1, HOS_SHORT_SLEEP_PAUSE=2: the clock read once per eight pauses instead of four, one QPC read less in two; idea: Rekarina's notes, 2026-11; off until measured: 1 stays four).",
    "comment": "(QUICK1, HOS_SHORT_SLEEP_PAUSE=2: the clock read once per eight pauses instead of four, one QPC read less in two; idea: Rekarina's notes, 2026-11; off until measured: 1 stays four).",
@@ -9723,7 +9723,7 @@
      "line": 567
     }
    ],
-   "default": "unset",
+   "default": "on (set at the start by host/hos_main.c; =0: off)",
    "values": "text (`0`, `1` named)",
    "explanation": "TICK-062 B2: hos_thread_of is a linear scan of every thread under a shared lock. HOS_THREAD_OF_CACHE=1: each thread keeps a few (ThreadType, thread) pairs, valid while thread_gen has not changed. thread_gen is bumped by everything that can change what the scan returns: a thread added (track) or removed (hos_thread_destroy), or a guest_tt rewritten (adopt). A reader takes the generation BEFORE the scan and stores the pair under it: a change during the scan leaves the pair stale at once, never served. The answer is then the scan's own (the first matching thread in the table), and a cached pointer to a destroyed thread cannot be served (destroy bumps the generation before the free).",
    "comment": "TICK-062 B2: hos_thread_of is a linear scan of every thread under a shared lock. HOS_THREAD_OF_CACHE=1: each thread keeps a few (ThreadType, thread) pairs, valid while thread_gen has not changed. thread_gen is bumped by everything that can change what the scan returns: a thread added (track) or removed (hos_thread_destroy), or a guest_tt rewritten (adopt). A reader takes the generation BEFORE the scan and stores the pair under it: a change during the scan leaves the pair stale at once, never served. The answer is then the scan's own (the first matching thread in the table), and a cached pointer to a destroyed thread cannot be served (destroy bumps the generation before the free).",
@@ -16651,7 +16651,7 @@
      "line": 3487
     }
    ],
-   "default": "unset",
+   "default": "on (set at the start by host/hos_main.c; =0: off)",
    "values": "text (`1` named)",
    "explanation": "(TICK-057) Inside a parallel replay work_epoch moves with every thread's work, so the dedupe was off there. RX_VK_BARRIER_DEDUPE_PAR=1: there the count of the command buffer's own work (vk_work.h all_work_slot: each draw, pass edge, copy, dispatch, barrier and begin recorded into it) decides instead. One command buffer is recorded by one thread at a time (Vulkan's rule), and any work another thread records into it, or into one sharing its slot, moves the count: the barrier is kept.",
    "comment": "(TICK-057) Inside a parallel replay work_epoch moves with every thread's work, so the dedupe was off there. RX_VK_BARRIER_DEDUPE_PAR=1: there the count of the command buffer's own work (vk_work.h all_work_slot: each draw, pass edge, copy, dispatch, barrier and begin recorded into it) decides instead. One command buffer is recorded by one thread at a time (Vulkan's rule), and any work another thread records into it, or into one sharing its slot, moves the count: the barrier is kept.",
@@ -16714,7 +16714,7 @@
      "line": 3540
     }
    ],
-   "default": "off (unset)",
+   "default": "on (set at the start by host/hos_main.c; =0: off)",
    "values": "on or off (0, false, off, no and empty are off); the description names `1`",
    "explanation": "Namespace (TICK-057) RX_VK_BARRIER_TRUST=1, off by default: the engine's own pass-start and dispatch barriers trust the game's, inside a parallel replay too. Since this thread's last barrier on the command buffer (the trust point), with only draws and pass edges recorded there, a pass start orders the previous passes' attachment writes against its own attachment use (an attachment barrier, not a drain), or nothing when nothing at all was recorded since; with only draws and dispatches (no copy, clear, update or query), a dispatch takes no barrier.",
    "comment": "Namespace (TICK-057) RX_VK_BARRIER_TRUST=1, off by default: the engine's own pass-start and dispatch barriers trust the game's, inside a parallel replay too. Since this thread's last barrier on the command buffer (the trust point), with only draws and pass edges recorded there, a pass start orders the previous passes' attachment writes against its own attachment use (an attachment barrier, not a drain), or nothing when nothing at all was recorded since; with only draws and dispatches (no copy, clear, update or query), a dispatch takes no barrier.",
@@ -17376,7 +17376,7 @@
      "line": 545
     }
    ],
-   "default": "unset",
+   "default": "on (set at the start by host/hos_main.c; =0: off)",
    "values": "text (`8` named)",
    "explanation": "(RX_VK_CAPTURE_CLAIM=<n> >= 8: n pages a chunk; 1: about four chunks a participant, 16 to 256 pages (64 KB to 1 MB)).",
    "comment": "(RX_VK_CAPTURE_CLAIM=<n> >= 8: n pages a chunk; 1: about four chunks a participant, 16 to 256 pages (64 KB to 1 MB)).",
@@ -17527,7 +17527,7 @@
      "line": 3058
     }
    ],
-   "default": "unset",
+   "default": "on (set at the start by host/hos_main.c; =0: off)",
    "values": "text (`1` named)",
    "explanation": "(TICK-043) the capture copied ahead: RX_VK_CAPTURE_PRECOPY=1 ---- The capture copies the pages the game wrote since the last submit, on the submitting thread (the game's main thread, alone then: TICK-042). Most of them are written well before the submit, while the main thread waits for the game's job threads.",
    "comment": "(TICK-043) the capture copied ahead: RX_VK_CAPTURE_PRECOPY=1 ---- The capture copies the pages the game wrote since the last submit, on the submitting thread (the game's main thread, alone then: TICK-042). Most of them are written well before the submit, while the main thread waits for the game's job threads.",
@@ -18244,7 +18244,7 @@
      "line": 96
     }
    ],
-   "default": "unset",
+   "default": "on (set at the start by host/hos_main.c; =0: off)",
    "values": "text (`0`, `1` named)",
    "explanation": "One consumer: with Vulkan the WebGPU renderer never runs. (HeyListen, TICK-061, C2) RX_VK_COLLECT_FAST=1 (off by default): the same scan with unaligned loads at the ranges' edges. collect_in below skips clean marks 256, 32 or 8 at a time only from a page number aligned to that size, so each of the ~1,500 capture ranges (and ~760 the replay collects) began and ended with up to ~17 single-page atomic loads: the scan took 0.05-0.07 ms for ~830 KB of marks, twice a submit, six submits a frame. Here the blocks are read wherever the walk is (the marks are bytes: no alignment is needed, memcpy into words is an unaligned load), and only a non-zero byte of a non-zero block is exchanged.",
    "comment": "One consumer: with Vulkan the WebGPU renderer never runs. (HeyListen, TICK-061, C2) RX_VK_COLLECT_FAST=1 (off by default): the same scan with unaligned loads at the ranges' edges. collect_in below skips clean marks 256, 32 or 8 at a time only from a page number aligned to that size, so each of the ~1,500 capture ranges (and ~760 the replay collects) began and ended with up to ~17 single-page atomic loads: the scan took 0.05-0.07 ms for ~830 KB of marks, twice a submit, six submits a frame. Here the blocks are read wherever the walk is (the marks are bytes: no alignment is needed, memcpy into words is an unaligned load), and only a non-zero byte of a non-zero block is exchanged.",
@@ -19513,7 +19513,7 @@
      "line": 545
     }
    ],
-   "default": "unset",
+   "default": "on (set at the start by host/hos_main.c; =0: off)",
    "values": "text (`1`, `2` named)",
    "explanation": "(Stream SMALL1) (RX_VK_DRY_LEAN=1: the one-segment case only, exact whatever the dry pass finds. =2: the planned boundaries too, which is exact only when the dry pass reaches the counted end; measured (TICK-061 screen 2) the segments came out other than with every point (the first ~280 draws against ~180), the replay thread's own segment +0.8 ms: so =2 is not for play).",
    "comment": "(Stream SMALL1) (RX_VK_DRY_LEAN=1: the one-segment case only, exact whatever the dry pass finds. =2: the planned boundaries too, which is exact only when the dry pass reaches the counted end; measured (TICK-061 screen 2) the segments came out other than with every point (the first ~280 draws against ~180), the replay thread's own segment +0.8 ms: so =2 is not for play).",
@@ -20558,7 +20558,7 @@
      "line": 545
     }
    ],
-   "default": "off (unset)",
+   "default": "on (set at the start by host/hos_main.c; =0: off)",
    "values": "on or off (0, false, off, no and empty are off); the description names `0`, `1`, `2`",
    "explanation": "(HeyListen, TICK-059) RX_VK_READBACK_TICKET=1: the fast poll above, and the readbacks' order it skipped kept by a ticket: the poll notes the sync_order_mu section in progress, and a CPU readback (invalidate) waits until that section has left, the order the poll's lock gave it, instead of the poll waiting (see invalidate). =2 (a diagnostic, not the locked path's order): only the readbacks of ranges with write-backs wait. Off: RX_VK_FENCE_POLL_FAST=1 alone is TICK-058's v3.",
    "comment": "(HeyListen, TICK-059) RX_VK_READBACK_TICKET=1: the fast poll above, and the readbacks' order it skipped kept by a ticket: the poll notes the sync_order_mu section in progress, and a CPU readback (invalidate) waits until that section has left, the order the poll's lock gave it, instead of the poll waiting (see invalidate). =2 (a diagnostic, not the locked path's order): only the readbacks of ranges with write-backs wait. Off: RX_VK_FENCE_POLL_FAST=1 alone is TICK-058's v3.",
@@ -25105,7 +25105,7 @@
      "line": 545
     }
    ],
-   "default": "off (unset)",
+   "default": "on (set at the start by host/hos_main.c; =0: off)",
    "values": "on or off (0, false, off, no and empty are off); the description names `0`",
    "explanation": "(TICK-060) on by default where the chunk diff is on (links of 8 GB/s or less: PC 3050's confirm, with RX_VK_LATE_DEFER and RX_VK_CAPTURE_HASH); elsewhere off as TICK-056 left it. RX_VK_MSYNC_FAST=0 / 1: off / on anywhere.",
    "comment": "(TICK-060) on by default where the chunk diff is on (links of 8 GB/s or less: PC 3050's confirm, with RX_VK_LATE_DEFER and RX_VK_CAPTURE_HASH); elsewhere off as TICK-056 left it. RX_VK_MSYNC_FAST=0 / 1: off / on anywhere.",
@@ -26541,7 +26541,7 @@
      "line": 545
     }
    ],
-   "default": "unset",
+   "default": "on (set at the start by host/hos_main.c; =0: off)",
    "values": "text (`1`, `0` named)",
    "explanation": "(TICK-061, F2) RX_VK_OCC_PROXY_SKIP=1 (off by default): draws that cannot change anything, left out of the command buffer ---- OoT starts each frame with ~900 occlusion proxy tests: a draw between a samples-passed reset and its report. With the default occlusion (RX_VK_OCC_REAL off, RX_VK_OCC_FIXED >= 0) the report's count is the fixed value, written on the CPU in stream order (vk_replay.cpp NOP_REPORT_COUNTER), whatever the draws did, and the render conditions read those words: the draws' own GPU work is not observed.",
    "comment": "(TICK-061, F2) RX_VK_OCC_PROXY_SKIP=1 (off by default): draws that cannot change anything, left out of the command buffer ---- OoT starts each frame with ~900 occlusion proxy tests: a draw between a samples-passed reset and its report. With the default occlusion (RX_VK_OCC_REAL off, RX_VK_OCC_FIXED >= 0) the report's count is the fixed value, written on the CPU in stream order (vk_replay.cpp NOP_REPORT_COUNTER), whatever the draws did, and the render conditions read those words: the draws' own GPU work is not observed.",
@@ -28020,7 +28020,7 @@
      "line": 3155
     }
    ],
-   "default": "off (unset)",
+   "default": "2 (set at the start by host/hos_main.c)",
    "values": "on or off (0, false, off, no and empty are off); the description names `0`, `1`",
    "explanation": "(HeyListen, TICK-054) RX_VK_PRECOPY_KICK=1 (with RX_VK_CAPTURE_PRECOPY=1): the thread copies once per kick from the host (mkwvk_precopy_kick, called when the game's main thread leaves its end-of-frame wait: the job threads' writes of the frame are final then and the main thread's draw code and submits are still 2-4 ms away), not on the 250 us timer whose rounds during the job threads' work cost more than they saved (TICK-043). The copies then run while the job threads idle.",
    "comment": "(HeyListen, TICK-054) RX_VK_PRECOPY_KICK=1 (with RX_VK_CAPTURE_PRECOPY=1): the thread copies once per kick from the host (mkwvk_precopy_kick, called when the game's main thread leaves its end-of-frame wait: the job threads' writes of the frame are final then and the main thread's draw code and submits are still 2-4 ms away), not on the 250 us timer whose rounds during the job threads' work cost more than they saved (TICK-043). The copies then run while the job threads idle.",
@@ -29177,7 +29177,7 @@
      "line": 545
     }
    ],
-   "default": "0",
+   "default": "on (set at the start by host/hos_main.c; =0: off)",
    "values": "a whole number (`1`, `2` in the description)",
    "explanation": "(HeyListen, TICK-059) RX_VK_READBACK_TICKET=1: the fast poll above, and the readbacks' order it skipped kept by a ticket: the poll notes the sync_order_mu section in progress, and a CPU readback (invalidate) waits until that section has left, the order the poll's lock gave it, instead of the poll waiting (see invalidate). =2 (a diagnostic, not the locked path's order): only the readbacks of ranges with write-backs wait. Off: RX_VK_FENCE_POLL_FAST=1 alone is TICK-058's v3.",
    "comment": "(HeyListen, TICK-059) RX_VK_READBACK_TICKET=1: the fast poll above, and the readbacks' order it skipped kept by a ticket: the poll notes the sync_order_mu section in progress, and a CPU readback (invalidate) waits until that section has left, the order the poll's lock gave it, instead of the poll waiting (see invalidate). =2 (a diagnostic, not the locked path's order): only the readbacks of ranges with write-backs wait. Off: RX_VK_FENCE_POLL_FAST=1 alone is TICK-058's v3.",
@@ -29864,7 +29864,7 @@
      "line": 545
     }
    ],
-   "default": "off (unset)",
+   "default": "on (set at the start by host/hos_main.c; =0: off)",
    "values": "on or off (0, false, off, no and empty are off); the description names `0`, `1`",
    "explanation": "(TICK-056) RX_VK_SEG_EARLY=1: a big command buffer's segments handed out as the dry pass passes their boundaries ---- TICK-054's loop: the Presentation Thread's dry pass (~0.25-0.5 ms a big command buffer) ran before any segment started. Here the boundaries are planned from the command buffer of the same order in the last frame (its draw count and time profile, RX_VK_PARALLEL_BALANCE's), and segment k goes to a worker as soon as the dry pass passes the point after its planned end (the first kept point at or past it): what a segment takes from the dry pass (its starting state, the uniform updates and render conditions before its end, the written-image marks of the draws before its end) is there by then.",
    "comment": "(TICK-056) RX_VK_SEG_EARLY=1: a big command buffer's segments handed out as the dry pass passes their boundaries ---- TICK-054's loop: the Presentation Thread's dry pass (~0.25-0.5 ms a big command buffer) ran before any segment started. Here the boundaries are planned from the command buffer of the same order in the last frame (its draw count and time profile, RX_VK_PARALLEL_BALANCE's), and segment k goes to a worker as soon as the dry pass passes the point after its planned end (the first kept point at or past it): what a segment takes from the dry pass (its starting state, the uniform updates and render conditions before its end, the written-image marks of the draws before its end) is there by then.",
@@ -29931,7 +29931,7 @@
      "line": 545
     }
    ],
-   "default": "unset",
+   "default": "on (set at the start by host/hos_main.c; =0: off)",
    "values": "text (`1` named)",
    "explanation": "(TICK-061, D7) RX_VK_SEG_SETUP_PAR=1 (off by default): a segment's command buffers begun by the thread that records it ---- Before releasing any segment, the replay thread took each segment's slot, reset its two command pools, began its command buffer and its upload one and wrote their start timestamps (gpu_time_begin): 5-6 segments, two big command buffers a frame, part of the ~0.2 ms \"setup\" on the frame's loop (TICK-054). Here it only takes the slots, in order (begin_segment_slot: the wait for the slot's last use, its GPU times collected, its value); the resets, the begins and the timestamps move to the start of record_job, on the recording thread, before anything is recorded into them.",
    "comment": "(TICK-061, D7) RX_VK_SEG_SETUP_PAR=1 (off by default): a segment's command buffers begun by the thread that records it ---- Before releasing any segment, the replay thread took each segment's slot, reset its two command pools, began its command buffer and its upload one and wrote their start timestamps (gpu_time_begin): 5-6 segments, two big command buffers a frame, part of the ~0.2 ms \"setup\" on the frame's loop (TICK-054). Here it only takes the slots, in order (begin_segment_slot: the wait for the slot's last use, its GPU times collected, its value); the resets, the begins and the timestamps move to the start of record_job, on the recording thread, before anything is recorded into them.",
@@ -30019,7 +30019,7 @@
      "line": 545
     }
    ],
-   "default": "unset",
+   "default": "on (set at the start by host/hos_main.c; =0: off)",
    "values": "text (`1` named)",
    "explanation": "(TICK-061, C3 = E2) RX_VK_SHADOW_FAST=1 (off by default): take_capture's texture-shadow block with less work a page ---- The block (shadow_mu and pools_mu held, on the replay thread or the held flush) did for every page of a capture two binary searches of tex_merged (one in the erase pass, one in the insert pass), a hash erase, then for every copied texture page a hash insert, a fresh `new uint8_t[4096]` and a 4 KB copy: each page the capture just copied was first erased and then made again. Here (shadow_take_fast): - whether a page is texture storage comes from one merge walk of the sorted page list against the sorted, disjoint tex_merged (the same answer as in_tex_merged); a page list not in ascending order (the TICK-043 pre-copy's merged list) takes the old code; - a copied texture page keeps its entry and its 4 KB block, which the copy overwrites; only texture pages written but ...",
    "comment": "(TICK-061, C3 = E2) RX_VK_SHADOW_FAST=1 (off by default): take_capture's texture-shadow block with less work a page ---- The block (shadow_mu and pools_mu held, on the replay thread or the held flush) did for every page of a capture two binary searches of tex_merged (one in the erase pass, one in the insert pass), a hash erase, then for every copied texture page a hash insert, a fresh `new uint8_t[4096]` and a 4 KB copy: each page the capture just copied was first erased and then made again. Here (shadow_take_fast): - whether a page is texture storage comes from one merge walk of the sorted page list against the sorted, disjoint tex_merged (the same answer as in_tex_merged); a page list not in ascending order (the TICK-043 pre-copy's merged list) takes the old code; - a copied texture page keeps its entry and its 4 KB block, which the copy overwrites; only texture pages written but ...",
@@ -30908,7 +30908,7 @@
      "line": 545
     }
    ],
-   "default": "unset",
+   "default": "on (set at the start by host/hos_main.c; =0: off)",
    "values": "text (`1` named)",
    "explanation": "(TICK-061, E3) RX_VK_STAMP_SPLIT=1 (off by default): a take's page stamps and table entries on the copy helpers ---- take_capture stamps each page of the capture with its generation (stamp_page) and points each copied page's table entry at its slot (cap_entry_set), ~1,000-2,000 pages a take, serially under pools_mu. Here the two loops become one job of chunks claimed by the taking thread and the copy helpers (claim_all, as RX_VK_CAPTURE_CLAIM's copy), for takes of 1,024 pages or more.",
    "comment": "(TICK-061, E3) RX_VK_STAMP_SPLIT=1 (off by default): a take's page stamps and table entries on the copy helpers ---- take_capture stamps each page of the capture with its generation (stamp_page) and points each copied page's table entry at its slot (cap_entry_set), ~1,000-2,000 pages a take, serially under pools_mu. Here the two loops become one job of chunks claimed by the taking thread and the copy helpers (claim_all, as RX_VK_CAPTURE_CLAIM's copy), for takes of 1,024 pages or more.",
@@ -33644,7 +33644,7 @@
      "line": 545
     }
    ],
-   "default": "unset",
+   "default": "on (set at the start by host/hos_main.c; =0: off)",
    "values": "text",
    "explanation": "undocumented: gpu/vk/vk_texture.cpp:3500 (in `work_seg_begin()`) reads it as a text value: `const char* e = getenv(\"RX_VK_WORK_LOCAL\");`. No comment in the source says what it changes.",
    "comment": null,

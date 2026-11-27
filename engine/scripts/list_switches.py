@@ -870,7 +870,33 @@ def extend_back(rel, first, body):
     return body
 
 
+def start_defaults():
+    """The switches host/hos_main.c sets at the start (heylisten_env_defaults, before main) when the environment and
+    hookshot_env.txt leave them unset: {name: value}. Their reads in the source look like an unset default, so without
+    this they would be listed as off."""
+    path = os.path.join(ENGINE, "host", "hos_main.c")
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            src = f.read()
+    except OSError:
+        return {}
+    m = re.search(r"static\s+void\s+heylisten_env_defaults\s*\(\s*void\s*\)\s*\{(.*?)\n\}", src, re.S)
+    if not m:
+        return {}
+    body = re.sub(r"/\*.*?\*/", "", m.group(1), flags=re.S)
+    out = {}
+    for arr in re.finditer(r"static\s+const\s+char\s*\*\s*const\s+(\w+)\s*\[\s*\](\[\s*2\s*\])?\s*=\s*\{(.*?)\};", body, re.S):
+        if arr.group(2):
+            for k, v in re.findall(r"\{\s*\"([A-Z0-9_]+)\"\s*,\s*\"([^\"]*)\"\s*\}", arr.group(3)):
+                out[k] = v
+        else:
+            for k in re.findall(r"\"([A-Z0-9_]+)\"", arr.group(3)):
+                out[k] = "1"
+    return out
+
+
 def build_records():
+    started = start_defaults()
     occ = scan_c() + scan_py()
     by_name = {}
     for name, rel, line in occ:
@@ -902,6 +928,11 @@ def build_records():
         else:
             win = statement(code_lines, line)
             default, kind = read_default(win, name)
+        if name in started:
+            # (set at the start unless the environment or hookshot_env.txt sets it: =0 turns it off)
+            v = started[name]
+            default = ("on (set at the start by host/hos_main.c; =0: off)" if v == "1"
+                       else "%s (set at the start by host/hos_main.c)" % v)
         # (a name that says it holds text, not a flag: `HOS_WINDOW_SIZE=1920x1080` is no on/off switch)
         if kind == "on/off" and (re.search(r"_(?:SIZE|RES|ASPECT|LANGUAGE|PROMPTS|FONT|SCRIPT|LIST|KEYS|NAME|URL|"
                                            r"DIR|FILE|PATH|HOME|LIVE|MODE|TAGS)$", name) or
