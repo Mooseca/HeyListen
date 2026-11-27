@@ -68,3 +68,5 @@ enum { HL_PROMPTS_LIVE_TEXTURES = 1, HL_PROMPTS_LIVE_LAYOUTS = 2, HL_PROMPTS_LIV
 /* The Graphics tab's Handheld profile row (host/nn_applet.c asks at each poll for notifications, gpu/vk/vk_replay.cpp answers 0 docked
    or 1 handheld, -1 while the options are not read yet): a change of the row is told to the game as an undock or a dock. */
 #define HL_OPT_HANDHELD 101
+/* The Gameplay page's First person row (host/hos_main.c and host/nn_hid.c ask, gpu/vk/vk_replay.cpp answers 0 or 1) */
+#define HL_OPT_FIRST_PERSON 102

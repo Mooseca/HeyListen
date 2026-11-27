@@ -185,6 +185,8 @@ def main():
         oot_occlusion.install(L, img)
         import oot_view   # (fork: the gameplay view's hook, which oot_patches.py's patch_view no longer finds; host/hos_main.c)
         oot_view.install(L, img)
+        import oot_near   # (first person's near plane, host/hos_main.c hos_oot_near)
+        oot_near.install(L, img)
     L.discover(max_insns=a.max_func)
     if local_regs.text_passes():   # (nx2/guest_locals.py: which functions keep the context, and keep main's text)
         print("locals: %d functions with spliced code kept in the context" % local_regs.keep_spliced(L))

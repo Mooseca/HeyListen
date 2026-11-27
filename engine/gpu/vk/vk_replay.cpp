@@ -8558,6 +8558,7 @@ void present_image(VkImage src, uint32_t sw, uint32_t sh, const int crop[4], VkI
     // ~15% to submit. With a queue of their own (dev.present_queue, a compute family's: vk_main.cpp create_device) the presents go
     // out with the submits' lock let go: the blit above signals swap_rendered on the replay's queue (submitted already, as a binary
     // semaphore's wait needs). (Waiting for the blit's fence before the present, with the lock let go, was worse.)
+    hdr_metadata_refresh();   // (the HDR peak row changed in the menu: no new swapchain for it)
     {   // (the present call itself, which can hold the presenting thread: the summary's present cause)
         perf_parts::Scope perf_wait(perf_parts::t_present);
         if (dev.present_queue) {
@@ -10234,6 +10235,7 @@ void fill_replay_table(MkwVkRenderer& t) {
         if (id == HL_OPT_SPRINT) return opts.sprint;   // (host/nn_hid.c, host/oot_sprint.c)
         if (id == HL_OPT_HUD_LAYOUT) return opts.hud_layout;
         if (id == HL_OPT_VSYNC_MODE) return opts.vsync_mode;
+        if (id == HL_OPT_FIRST_PERSON) return opts.first_person != 0;   // (host/hos_main.c, host/nn_hid.c)
         return id == 0 ? opts.realtime : id == 1 ? menu_is_open() : id == 2 ? resolution_auto() && !temporal_full_scale() : id == 3 ? (temporal_full_scale() ? 10000 : resolution_scale()) : id == 4 ? opts.pad_background : id == 5 ? opts.text_speed : id == 6 ? opts.mouse_native :
                id == 7 ? opts.mouse_sens : id == 8 ? opts.mouse_invert : id == 9 ? opts.rumble : id == 16 ? opts.invert_cam_x : id == 17 ? opts.invert_cam_y : id == HOS_OPT_GYRO ? opts.gyro : id == HOS_OPT_GYRO_SENS_X ? opts.gyro_sens_x : id == HOS_OPT_GYRO_SENS_Y ? opts.gyro_sens_y : id == HOS_OPT_GYRO_INV_X ? opts.gyro_inv_x : id == HOS_OPT_GYRO_INV_Y ? opts.gyro_inv_y : id == HOS_OPT_GYRO_DEADZONE ? opts.gyro_deadzone :
                id == HOS_OPT_DLSS_JITTER_W || id == HOS_OPT_DLSS_JITTER_H || id == HOS_OPT_DLSS_JITTER_PHASES ? jitter_option(id) :
