@@ -207,6 +207,7 @@ void trace_note(uint16_t what, uint64_t a, uint64_t b) { put(what, 2, 0, a, b); 
 void vk_trace_install() {
     const char* path = getenv("HOS_VK_TRACE");
     if (!path || !*path || ring) return;
+#ifdef _WIN32
     HANDLE f = CreateFileA(path, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, CREATE_ALWAYS,
                            FILE_ATTRIBUTE_NORMAL, nullptr);
     if (f == INVALID_HANDLE_VALUE) { logf("vk trace: %s could not be made", path); return; }
@@ -214,6 +215,13 @@ void vk_trace_install() {
     HANDLE m = CreateFileMappingA(f, nullptr, PAGE_READWRITE, (DWORD)(bytes >> 32), (DWORD)bytes, nullptr);
     void* v = m ? MapViewOfFile(m, FILE_MAP_ALL_ACCESS, 0, 0, 0) : nullptr;
     if (!v) { logf("vk trace: %s could not be mapped", path); return; }
+#else   // (the ring is a Windows file mapping, and the crash it is for is AMD's Windows driver's: the Linux build's Windows layer has no
+        // file mappings, so there the switch only says so)
+    logf("vk trace: HOS_VK_TRACE is for Windows builds; nothing is wrapped here");
+    return;
+    void* v = nullptr;
+    const uint64_t bytes = 0;
+#endif
     ring = (Entry*)v;
     memset(ring, 0, bytes);
     using namespace vkx;
