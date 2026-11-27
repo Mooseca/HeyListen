@@ -613,7 +613,7 @@ bool desc_pool_keep() {
     return v;
 }
 constexpr uint32_t kExtraIdle = 120;   // (recordings of a slot that did not need its idle extra pools before they are destroyed)
-VkDescriptorPool make_pool(uint32_t shift = 0) {
+VkDescriptorPool make_pool(uint32_t shift = 0, bool force = false) {
     // (each recording's pool: 8192 sets of up to 32768 descriptors a type, for the programs with more descriptors than the push limit,
     // 24 or 48 pools at once, and the driver may keep host memory for all of that. A pool that runs out is followed by another of the same
     // size (cur->extra), so a smaller one is safe, and costs a pool made and destroyed per recording in a scene that needs more.
@@ -629,7 +629,10 @@ VkDescriptorPool make_pool(uint32_t shift = 0) {
     ci.poolSizeCount = (uint32_t)std::size(sizes);
     ci.pPoolSizes = sizes;
     VkDescriptorPool p = VK_NULL_HANDLE;
-    vkCreateDescriptorPool(dev.device, &ci, nullptr, &p);
+    // (LAP2: the driver's own host memory for the pool; with RX_VK_MEM_GUARD=1 none is asked while the PC's RAM is short, and a pool the
+    // driver refuses is no pool: the callers leave their draw out)
+    if (!force && !ram_guard_pool_ok()) return VK_NULL_HANDLE;
+    if (vkCreateDescriptorPool(dev.device, &ci, nullptr, &p) != VK_SUCCESS) return VK_NULL_HANDLE;
     return p;
 }
 
@@ -4334,7 +4337,13 @@ bool bind_descriptors(VkCommandBuffer cmd, VkPipelineBindPoint bp, const Program
         if (keep && cur->extra_used < cur->extra.size()) {   // (an idle one kept from an earlier recording: reset already)
             cur->extra_used++;
         } else {
-            cur->extra.push_back(make_pool());
+            const VkDescriptorPool np = make_pool();
+            if (!np) {   // (LAP2: no pool could be made: the draw is left out, as when a second set is refused below)
+                ram_guard_draw_left_out();
+                prof_desc[PD_POOL] += prof_now() - pool_t0;
+                return false;
+            }
+            cur->extra.push_back(np);
             if (keep) cur->extra_used = cur->extra.size();
         }
         ai.descriptorPool = cur->extra.back();
@@ -5758,7 +5767,7 @@ void draw_begin_recording(int slot, VkCommandBuffer cmd, uint64_t value) {
     RecordingRes& r = res[slot];
     if (!r.pool) {
         r.pool_shift = pool_shift_first();
-        r.pool = make_pool(r.pool_shift);
+        r.pool = make_pool(r.pool_shift, true);   // (a slot has a pool of its own always: the guard keeps the extra ones back)
         void* mapped = nullptr;
         RecordingRes::Stream s{};
         s.size = kStream;

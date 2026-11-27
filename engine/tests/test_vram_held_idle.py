@@ -57,16 +57,17 @@ class RecordingMemoryTests(unittest.TestCase):
     def test_a_pool_starts_at_half_and_is_made_whole_after_running_out(self):
         first = block(self.draw, "uint32_t pool_shift_first()")
         self.assertIn('getenv("RX_VK_DESC_POOL_GROW")', first)
-        make = block(self.draw, "VkDescriptorPool make_pool(uint32_t shift = 0)")
+        make = block(self.draw, "VkDescriptorPool make_pool(uint32_t shift = 0, bool force = false)")
         self.assertIn("div0 << std::min(shift, 4u)", make)
         begin = block(self.draw, "void draw_begin_recording(int slot, VkCommandBuffer cmd, uint64_t value)")
-        self.assertIn("r.pool = make_pool(r.pool_shift);", begin)
+        self.assertIn("r.pool = make_pool(r.pool_shift, true);", begin)
         grow = begin[begin.index("vkResetDescriptorPool"):begin.index("if (desc_pool_keep()) {")]
         self.assertIn("desc_pool_keep() ? r.extra_used > 0 : !r.extra.empty()", grow)   # (v0.4.4 keeps extra pools: extra_used says one was needed)
         self.assertIn("ran_out && r.pool_shift > 0", grow)
         self.assertIn("make_pool(0)", grow)
         # (the pools added when one ran out stay whole)
-        self.assertIn("cur->extra.push_back(make_pool());", self.draw)
+        self.assertIn("const VkDescriptorPool np = make_pool();", self.draw)   # (LAP2: a pool the driver or the memory guard refuses is none: the draw is left out)
+        self.assertIn("cur->extra.push_back(np);", self.draw)
 
 
 if __name__ == "__main__":

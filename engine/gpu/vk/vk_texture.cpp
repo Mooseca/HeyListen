@@ -3345,8 +3345,9 @@ Texture* create(const Key& key, const nvn_tex* t, VkFormat vf, bool astc, int bw
                  (ci.usage &= ~VK_IMAGE_USAGE_STORAGE_BIT, x.usage = ci.usage, x.ci_key = image_key(ci), create_image(ci, x.image, x.allocation, big)))) {
         static int logged;
         if (logged++ < 16)
-            logf("vk: image %ux%ux%u x%u levels %u format %d (NVN %#x) not made", x.width, x.height, x.depth, x.layers,
-                 x.levels, (int)x.format, d.format);
+            logf("vk: image %ux%ux%u x%u levels %u format %d (NVN %#x) not made (the driver's last error on this thread: %d)", x.width,
+                 x.height, x.depth, x.layers, x.levels, (int)x.format, d.format, (int)trace_last_error());
+        trace_note(1500, ((uint64_t)x.width << 32) | x.height, ((uint64_t)x.format << 32) | (uint32_t)x.levels);
         return nullptr;
     }
     // what it costs: the level chain's texels
@@ -6346,6 +6347,40 @@ void texture_frame(uint64_t completed) {
             }
         }
     }
+    // (LAP2, RX_VK_MEM_GUARD=1) and the PC's available physical RAM on an integrated GPU, whose memory it is: the commit limit above
+    // does not see it (16 GB of commit were left when the PC had 3 MB of RAM and AMD's driver stopped the process, 0xc0000409). Under
+    // 1536 MB the shortfall comes off the textures' budget (512 MB at least left), as Linux's pressure hold does below
+    if (ram_guard_blocks() && dev.props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU) {
+        {   // (the heaps the GPU reaches, the device heaps' use counted with the system heaps': past their size less the headroom the
+            // textures give up the excess; the driver needs room of its own, vk_ram_guard.cpp)
+            uint64_t du = 0, db = 0, su = 0, sb = 0;
+            static const uint64_t head = getenv("RX_VK_MEM_GUARD_GTT_MB") ? (uint64_t)std::max(0, atoi(getenv("RX_VK_MEM_GUARD_GTT_MB"))) << 20 : 1024ull << 20;
+            if (head && vram_usage_now(&du, &db) && system_heap_usage(&su, &sb) && sb && du + su + head > sb) {
+                const uint64_t over = du + su + head - sb;
+                budget = std::min(budget, std::max<uint64_t>(total_bytes > over ? total_bytes - over : 0, 256ull << 20));
+                static uint64_t said_at;
+                if (!said_at || frame_no - said_at >= 300) {
+                    said_at = frame_no;
+                    logf("vk: memory guard: the heaps the GPU reaches hold %llu MB of %llu MB (headroom %llu MB); the textures' budget down to %llu MB of their %llu MB",
+                         (unsigned long long)((du + su) >> 20), (unsigned long long)(sb >> 20), (unsigned long long)(head >> 20),
+                         (unsigned long long)(budget >> 20), (unsigned long long)(total_bytes >> 20));
+                }
+            }
+        }
+        const uint64_t avail = ram_avail_mb();
+        const uint64_t reserve = ram_guard_reserve_mb() ? 1536 : 0;
+        if (reserve && avail != UINT64_MAX && avail < reserve) {
+            const uint64_t over = (reserve - avail) << 20;
+            budget = std::min(budget, std::max<uint64_t>(total_bytes > over ? total_bytes - over : 0, 512ull << 20));
+            static uint64_t said_at;
+            if (!said_at || frame_no - said_at >= 300) {
+                said_at = frame_no;
+                logf("vk: RAM guard: %llu MB of RAM available (reserve %llu MB); the textures' budget down to %llu MB of their %llu MB",
+                     (unsigned long long)avail, (unsigned long long)reserve, (unsigned long long)(budget >> 20),
+                     (unsigned long long)(total_bytes >> 20));
+            }
+        }
+    }
 #if defined(__linux__)
     // (Longshot f1b17d59) and Linux's memory pressure (MemAvailable and SwapFree in /proc/meminfo, linux_pressure.h): the device
     // heap can report room while the PC has none left, because every VMA block, staging arena, spare capture buffer and imported
@@ -6456,6 +6491,12 @@ void texture_frame(uint64_t completed) {
         uint32_t samplers_made = 0, samplers_waiting = 0, samplers_limit = 0;   // (longshot #442: a count that grows without end shows)
         uint64_t samplers_retired = 0, samplers_destroyed = 0;
         sampler_counts(&samplers_made, &samplers_waiting, &samplers_retired, &samplers_destroyed, &samplers_limit);
+        {   // (LAP2) the memory guard's refusals so far
+            int64_t gp = 0, gd = 0, gb = 0;
+            if (ram_guard_counts(&gp, &gd, &gb))
+                logf("vk: memory guard: %lld descriptor pools refused, %lld draws left out for want of one, %lld memory blocks refused so far",
+                     (long long)gp, (long long)gd, (long long)gb);
+        }
         logf("vk: VRAM: %llu MB used of %llu MB allowed (%llu MB of it free in the blocks); textures %llu MB (budget %llu "
              "MB), %zu textures; samplers %u made (the device allows %u), %u retired waiting for the GPU, %llu retired and %llu destroyed "
              "so far", (unsigned long long)(used >> 20), (unsigned long long)(allowed >> 20),

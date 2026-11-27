@@ -196,11 +196,17 @@ VKAPI_ATTR void VKAPI_CALL free_memory_later(VkDevice device, VkDeviceMemory mem
 }
 }  // namespace
 
+bool vma_up() { return vma != VK_NULL_HANDLE; }   // (vk_ram_guard.cpp: the allocator is made)
 bool vma_init(PFN_vkGetInstanceProcAddr gipa) {
     VmaVulkanFunctions f{};
     f.vkGetInstanceProcAddr = gipa;
     f.vkGetDeviceProcAddr = vkGetDeviceProcAddr;
     f.vkFreeMemory = free_memory_later;   // (the others are fetched: VMA keeps the pointers it is given)
+    if (getenv("HOS_VK_TRACE") || ram_guard_on()) {   // (LAP2: VMA's own allocations, images, buffers and binds go through the wrapped functions too)
+        f.vkAllocateMemory = vkAllocateMemory, f.vkCreateImage = vkCreateImage, f.vkCreateBuffer = vkCreateBuffer;
+        f.vkBindImageMemory = vkBindImageMemory, f.vkBindBufferMemory = vkBindBufferMemory, f.vkMapMemory = vkMapMemory;
+        f.vkDestroyImage = vkDestroyImage, f.vkDestroyBuffer = vkDestroyBuffer;
+    }
     VmaAllocatorCreateInfo ci{};
     ci.flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT |
                (dev.memory_budget ? VMA_ALLOCATOR_CREATE_EXT_MEMORY_BUDGET_BIT : 0);
@@ -210,7 +216,9 @@ bool vma_init(PFN_vkGetInstanceProcAddr gipa) {
     ci.vulkanApiVersion = VK_API_VERSION_1_3;
     ci.pVulkanFunctions = &f;
     ci.preferredLargeHeapBlockSize = 64ull << 20;   // (64 MB blocks: Eglantine found 256 MB ones wasted VRAM)
-    return vmaCreateAllocator(&ci, &vma) == VK_SUCCESS;
+    const bool made = vmaCreateAllocator(&ci, &vma) == VK_SUCCESS;
+    if (made) vk_trace_sampler();
+    return made;
 }
 
 // Images come from a pool of 128 MB blocks: on their own, VMA gave most of them dedicated memory (the driver prefers it

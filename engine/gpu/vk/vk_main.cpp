@@ -80,6 +80,8 @@ void load_device(VkDevice device) {
     VKX_DEVICE2(VKX_LOAD)
     VKX_DEVICE3(VKX_LOAD)
 #undef VKX_LOAD
+    mkwvk::vk_trace_install();   // (HOS_VK_TRACE: the calls wrapped; nothing without it)
+    mkwvk::ram_guard_install();  // (RX_VK_RAM_GUARD=1)
 }
 } // namespace vkx
 

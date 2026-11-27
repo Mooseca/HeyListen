@@ -41,6 +41,7 @@ ARGS = {
     "tests/test_state_report.py": ["--cxx", "{cxx}"],
     "tests/test_zone_report.py": ["--cxx", "{cxx}"],
     "tests/test_linux_pressure.py": ["--cxx", "{cxx}"],
+    "tests/test_mem_guard_rule.py": ["--cxx", "{cxx}"],
     "tests/test_compile_gate.py": ["--cxx", "{cxx}"],
     "tests/test_thread_prio.py": ["--cxx", "{cxx}"],
     "tests/test_profile_report.py": ["--cxx", "{cxx}"],
@@ -92,6 +93,8 @@ ARGS = {
     "tests/test_wb_pool_eager.py": ["--cxx", "{cxx}"],
     "tests/test_wb_guess.py": ["--cxx", "{cxx}"],
     "tests/test_wb_guess_gpu.py": [],   # (FOLIAGE2: the guessed heads checked on the GPU in their own part)
+    "tests/test_meter_pace.py": [],   # (FLICK1: the meter's reads before the frame's present)
+    "tests/test_rb_c0_keep.py": [],   # (FLICK1: the meter's 0xc0 companion kept)
     "tests/test_wb_defer.py": ["--cxx", "{cxx}"],
     "tests/test_grow_lock.py": ["--cxx", "{cxx}"],
     "tests/test_readback_ticket.py": ["--cxx", "{cxx}"],
