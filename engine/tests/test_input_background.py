@@ -64,10 +64,8 @@ def main():
     constants += block(api, "enum { HOS_OPT_CHEAT_HEARTS") + ";\n"
     # (the option ids of rows that are HeyListen's alone, gpu/vk/vk_opt_ids.h: Sprint with L3's and First person's, which the input reads)
     ids = (ROOT / "gpu/vk/vk_opt_ids.h").read_text(encoding="utf-8")
-    constants += block(api, "enum { HOS_BIND_PAD") + ";
-"   # (the live input's !bind)
-    constants += "".join(m + "
-" for m in re.findall(r"^#define HL_OPT_(?:SPRINT|FIRST_PERSON)\s+\d+", ids, re.M))
+    constants += block(api, "enum { HOS_BIND_PAD") + ";\n"   # (the live input's !bind)
+    constants += "".join(m + "\n" for m in re.findall(r"^#define HL_OPT_(?:SPRINT|FIRST_PERSON)\s+\d+", ids, re.M))
     for name in ("STATE_SIZE", "NPAD_NO1", "ATTR_CONNECTED"):
         matches = re.findall(r"^#define " + name + r"\s+[^\n]+", hid, re.M)
         assert len(matches) == 1, name
