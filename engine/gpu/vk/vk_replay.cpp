@@ -3460,13 +3460,14 @@ void par_worker_ideal(int index, int workers) {
         const char* e = getenv("RX_VK_PARALLEL_IDEAL");
         const int mode = e ? (atoi(e) != 0 ? 1 : 0) : -1;
         if (mode == 0) return;
+        std::vector<par_ideal_rule::Core> cores;   // (the calling thread's processor group's cores: the ideal processor is one of its group's)
+#ifdef _WIN32
         GROUP_AFFINITY ga;
         const WORD group = GetThreadGroupAffinity(GetCurrentThread(), &ga) ? ga.Group : 0;
         DWORD len = 0;
         if (GetLogicalProcessorInformationEx(RelationProcessorCore, nullptr, &len) || GetLastError() != ERROR_INSUFFICIENT_BUFFER) return;
         std::vector<char> buf(len);
         if (!GetLogicalProcessorInformationEx(RelationProcessorCore, (SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX*)buf.data(), &len)) return;
-        std::vector<par_ideal_rule::Core> cores;   // (the calling thread's processor group's cores: the ideal processor is one of its group's)
         for (DWORD at = 0; at < len;) {
             const auto* p = (const SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX*)(buf.data() + at);
             if (!p->Size) break;
@@ -3475,6 +3476,15 @@ void par_worker_ideal(int index, int workers) {
                 cores.push_back({__builtin_ctzll((unsigned long long)p->Processor.GroupMask[0].Mask), (int)p->Processor.EfficiencyClass});
             at += p->Size;
         }
+#else   // (the Linux build's Windows layer has the older call only: every core counts as one kind)
+        DWORD len = 0;
+        GetLogicalProcessorInformation(nullptr, &len);
+        std::vector<SYSTEM_LOGICAL_PROCESSOR_INFORMATION> info(len / sizeof(SYSTEM_LOGICAL_PROCESSOR_INFORMATION) + 1);
+        if (!GetLogicalProcessorInformation(info.data(), &len)) return;
+        for (size_t i = 0; i < len / sizeof(SYSTEM_LOGICAL_PROCESSOR_INFORMATION); i++)
+            if (info[i].Relationship == RelationProcessorCore && info[i].ProcessorMask)
+                cores.push_back({__builtin_ctzll((unsigned long long)info[i].ProcessorMask), 0});
+#endif
         ncores = (int)cores.size();
         cpus = par_ideal_rule::ideal_cpus(cores, host && host->reserved_cpus ? host->reserved_cpus() : 0, workers, mode);
         if (cpus.empty())
