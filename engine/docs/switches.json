@@ -2,7 +2,7 @@
  "schema": 1,
  "generated_by": "engine/scripts/list_switches.py",
  "scope": "C, C++ and headers under engine/ (engine/tests and vendored trees other than a64-kit excluded) and the Python the builder, the lifter and the scripts run: getenv, std::getenv, _wgetenv, the code's own env helpers and table-driven reads, and os.environ.",
- "count": 1561,
+ "count": 1563,
  "switches": [
   {
    "name": "A64_",
@@ -1149,6 +1149,48 @@
    "use": null
   },
   {
+   "name": "HL_FP_EYE_OUT",
+   "area": "native",
+   "group": "Native engine",
+   "audience": "developer",
+   "files": [
+    {
+     "path": "host/hos_main.c",
+     "line": 1870
+    }
+   ],
+   "default": "unset",
+   "values": "text",
+   "explanation": "(With the head bone at scale 0 nothing of his head is left in front of the eye: HL_FP_EYE_OUT metres, 0.10 if unset).",
+   "comment": "(With the head bone at scale 0 nothing of his head is left in front of the eye: HL_FP_EYE_OUT metres, 0.10 if unset).",
+   "documented_in": null,
+   "source": "comment at host/hos_main.c",
+   "documented": true,
+   "set_via": "In `hookshot_env.txt`, or in the environment.",
+   "use": null
+  },
+  {
+   "name": "HL_FP_HEAD_BONE",
+   "area": "native",
+   "group": "Native engine",
+   "audience": "developer",
+   "files": [
+    {
+     "path": "host/hos_main.c",
+     "line": 1506
+    }
+   ],
+   "default": "unset",
+   "values": "text (`0` named)",
+   "explanation": "Link's head through its bone: its local scale 0 while first person is on, so the head, hair and hat (the hat is the tunic's mesh, skinned to the head's bones) go with it, and the eye can sit at his eyes. The model's skeleton is nn::g3d's (model +0xf8): its local matrices at [skel+0x18], 0x60 bytes a bone (flags, scale at +0x10, the 3x4 matrix at +0x20), the resource's bone dictionary at [[skel]+8] (a count at +4, a bone's name at [dict + 0x20 + 16 * index] + 2). The model's vtable +0x48 gives a bone's name by index and +0x60 (model, &scale, index) sets its local scale (main+0x3596360: it clears the bone's identity flags and marks the skeleton dirty), as the game's own animation does. The animation writes the bones every frame, so this runs every player update. HL_FP_HEAD_BONE=0 leaves the bone alone (the materials are hidden as before).",
+   "comment": "Link's head through its bone: its local scale 0 while first person is on, so the head, hair and hat (the hat is the tunic's mesh, skinned to the head's bones) go with it, and the eye can sit at his eyes. The model's skeleton is nn::g3d's (model +0xf8): its local matrices at [skel+0x18], 0x60 bytes a bone (flags, scale at +0x10, the 3x4 matrix at +0x20), the resource's bone dictionary at [[skel]+8] (a count at +4, a bone's name at [dict + 0x20 + 16 * index] + 2). The model's vtable +0x48 gives a bone's name by index and +0x60 (model, &scale, index) sets its local scale (main+0x3596360: it clears the bone's identity flags and marks the skeleton dirty), as the game's own animation does. The animation writes the bones every frame, so this runs every player update. HL_FP_HEAD_BONE=0 leaves the bone alone (the materials are hidden as before).",
+   "documented_in": null,
+   "source": "comment at host/hos_main.c",
+   "documented": true,
+   "set_via": "In `hookshot_env.txt`, or in the environment.",
+   "use": null
+  },
+  {
    "name": "HL_GFX",
    "area": "native",
    "group": "Hooks and tracing",
@@ -1550,11 +1592,11 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2704
+     "line": 2707
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2708
+     "line": 2711
     }
    ],
    "default": "off (unset)",
@@ -1575,7 +1617,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2700
+     "line": 2703
     }
    ],
    "default": "0 (unset)",
@@ -1596,7 +1638,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2689
+     "line": 2692
     }
    ],
    "default": "unset",
@@ -2255,7 +2297,7 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 605
+     "line": 606
     }
    ],
    "default": "unset",
@@ -2276,7 +2318,7 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 701
+     "line": 702
     }
    ],
    "default": "on (unless set to 0, false, off or no)",
@@ -3661,7 +3703,7 @@
     },
     {
      "path": "host/hos_main.c",
-     "line": 388
+     "line": 389
     },
     {
      "path": "host/hos_update.c",
@@ -4264,7 +4306,7 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 1622
+     "line": 1961
     }
    ],
    "default": "unset",
@@ -4735,7 +4777,7 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 1946
+     "line": 2285
     }
    ],
    "default": "unset",
@@ -5285,7 +5327,7 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 545
+     "line": 546
     },
     {
      "path": "host/nn_os_sync.c",
@@ -5398,7 +5440,7 @@
     },
     {
      "path": "host/hos_main.c",
-     "line": 1775
+     "line": 2114
     }
    ],
    "default": "off (unset)",
@@ -5419,7 +5461,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2868
+     "line": 2871
     }
    ],
    "default": "0 (unset)",
@@ -5440,7 +5482,7 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 650
+     "line": 651
     }
    ],
    "default": "unset",
@@ -5503,7 +5545,7 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 1970
+     "line": 2309
     }
    ],
    "default": "unset",
@@ -5566,11 +5608,11 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2877
+     "line": 2880
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2885
+     "line": 2888
     },
     {
      "path": "host/nn_vi.c",
@@ -5645,11 +5687,11 @@
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2877
+     "line": 2880
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2885
+     "line": 2888
     },
     {
      "path": "host/nn_vi.c",
@@ -5972,7 +6014,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2973
+     "line": 2976
     },
     {
      "path": "host/display.c",
@@ -6106,7 +6148,7 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 201
+     "line": 202
     }
    ],
    "default": "unset",
@@ -6252,15 +6294,15 @@
     },
     {
      "path": "host/hos_main.c",
-     "line": 1660
+     "line": 1999
     },
     {
      "path": "host/hos_main.c",
-     "line": 1698
+     "line": 2037
     },
     {
      "path": "host/hos_main.c",
-     "line": 1731
+     "line": 2070
     },
     {
      "path": "host/mkw_glue.c",
@@ -6480,7 +6522,7 @@
     },
     {
      "path": "host/nn_hid.c",
-     "line": 1073
+     "line": 1079
     }
    ],
    "default": "unset",
@@ -6866,7 +6908,7 @@
     },
     {
      "path": "host/hos_main.c",
-     "line": 172
+     "line": 173
     }
    ],
    "default": "unset",
@@ -7122,12 +7164,12 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 722
+     "line": 723
     }
    ],
    "default": "unset",
    "values": "text",
-   "explanation": "undocumented: host/hos_main.c:722 (in `submit_thread_at_start()`) reads it as a text value: `const char *user = hos_submit_thread_user_value(mesa, getenv(HOS_SUBMIT_THREAD_MARK));`. No comment in the source says what it changes.",
+   "explanation": "undocumented: host/hos_main.c:723 (in `submit_thread_at_start()`) reads it as a text value: `const char *user = hos_submit_thread_user_value(mesa, getenv(HOS_SUBMIT_THREAD_MARK));`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -7285,7 +7327,7 @@
    "files": [
     {
      "path": "host/mouse_native.c",
-     "line": 58
+     "line": 64
     },
     {
      "path": "host/nn_hid.c",
@@ -7331,7 +7373,7 @@
    "files": [
     {
      "path": "host/mouse_native.c",
-     "line": 52
+     "line": 56
     },
     {
      "path": "host/nn_hid.c",
@@ -7687,7 +7729,7 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 255
+     "line": 256
     }
    ],
    "default": "off (unset)",
@@ -8216,7 +8258,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2765
+     "line": 2768
     }
    ],
    "default": "unset",
@@ -8237,11 +8279,11 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2768
+     "line": 2771
     },
     {
      "path": "host/hos_main.c",
-     "line": 1767
+     "line": 2106
     }
    ],
    "default": "unset",
@@ -8262,12 +8304,12 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 1179
+     "line": 1180
     }
    ],
    "default": "unset",
    "values": "text",
-   "explanation": "undocumented: host/hos_main.c:1179 (in `oot_teleport()`) reads it as a text value: `const char *event_env = getenv(\"HOS_OOT_TELEPORT_EVENT\");`. No comment in the source says what it changes.",
+   "explanation": "undocumented: host/hos_main.c:1180 (in `oot_teleport()`) reads it as a text value: `const char *event_env = getenv(\"HOS_OOT_TELEPORT_EVENT\");`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -8283,12 +8325,12 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 1181
+     "line": 1182
     }
    ],
    "default": "unset",
    "values": "text",
-   "explanation": "undocumented: host/hos_main.c:1181 (in `oot_teleport()`) reads it as a text value: `const char *starter_env = getenv(\"HOS_OOT_TELEPORT_STARTER\");`. No comment in the source says what it changes.",
+   "explanation": "undocumented: host/hos_main.c:1182 (in `oot_teleport()`) reads it as a text value: `const char *starter_env = getenv(\"HOS_OOT_TELEPORT_STARTER\");`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -8346,7 +8388,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2869
+     "line": 2872
     },
     {
      "path": "host/nn_applet.c",
@@ -8652,12 +8694,12 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 84
+     "line": 85
     }
    ],
    "default": "unset",
    "values": "text",
-   "explanation": "undocumented: host/hos_main.c:84 (in `no_power_throttling()`) reads it as a text value: `const char *e = getenv(\"HOS_POWER_THROTTLING\");`. No comment in the source says what it changes.",
+   "explanation": "undocumented: host/hos_main.c:85 (in `no_power_throttling()`) reads it as a text value: `const char *e = getenv(\"HOS_POWER_THROTTLING\");`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -8895,7 +8937,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2867
+     "line": 2870
     }
    ],
    "default": "0 (unset)",
@@ -9004,7 +9046,7 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 1783
+     "line": 2122
     }
    ],
    "default": "unset",
@@ -9071,7 +9113,7 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 1694
+     "line": 2033
     }
    ],
    "default": "unset",
@@ -9251,7 +9293,7 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 1969
+     "line": 2308
     }
    ],
    "default": "off (unset)",
@@ -9360,7 +9402,7 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 545
+     "line": 546
     },
     {
      "path": "host/hos_thread.c",
@@ -9695,7 +9737,7 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 251
+     "line": 252
     }
    ],
    "default": "unset",
@@ -9716,7 +9758,7 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 545
+     "line": 546
     },
     {
      "path": "host/hos_thread.c",
@@ -9829,7 +9871,7 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 1900
+     "line": 2239
     }
    ],
    "default": "off (unset)",
@@ -10571,7 +10613,7 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 103
+     "line": 104
     },
     {
      "path": "host/ws_floor.h",
@@ -10767,12 +10809,12 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 721
+     "line": 722
     }
    ],
    "default": "unset",
    "values": "text",
-   "explanation": "undocumented: host/hos_main.c:721 (in `submit_thread_at_start()`) reads it as a text value: `const char *mesa = getenv(\"MESA_VK_ENABLE_SUBMIT_THREAD\");`. No comment in the source says what it changes.",
+   "explanation": "undocumented: host/hos_main.c:722 (in `submit_thread_at_start()`) reads it as a text value: `const char *mesa = getenv(\"MESA_VK_ENABLE_SUBMIT_THREAD\");`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -10939,7 +10981,7 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 759
+     "line": 760
     }
    ],
    "default": "unset",
@@ -17373,7 +17415,7 @@
     },
     {
      "path": "host/hos_main.c",
-     "line": 545
+     "line": 546
     }
    ],
    "default": "on (set at the start by host/hos_main.c; =0: off)",
@@ -18237,7 +18279,7 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 545
+     "line": 546
     },
     {
      "path": "host/rx_backend.c",
@@ -19217,7 +19259,7 @@
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2863
+     "line": 2866
     }
    ],
    "default": "unset",
@@ -19510,7 +19552,7 @@
     },
     {
      "path": "host/hos_main.c",
-     "line": 545
+     "line": 546
     }
    ],
    "default": "on (set at the start by host/hos_main.c; =0: off)",
@@ -20555,7 +20597,7 @@
     },
     {
      "path": "host/hos_main.c",
-     "line": 545
+     "line": 546
     }
    ],
    "default": "on (set at the start by host/hos_main.c; =0: off)",
@@ -20844,7 +20886,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2646
+     "line": 2649
     }
    ],
    "default": "unset",
@@ -21221,7 +21263,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2857
+     "line": 2860
     }
    ],
    "default": "0 (unset)",
@@ -21946,7 +21988,7 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 762
+     "line": 763
     }
    ],
    "default": "unset",
@@ -22126,7 +22168,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2859
+     "line": 2862
     }
    ],
    "default": "unset",
@@ -24129,7 +24171,7 @@
     },
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2851
+     "line": 2854
     }
    ],
    "default": "2",
@@ -24322,7 +24364,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 3179
+     "line": 3182
     }
    ],
    "default": "unset",
@@ -25102,7 +25144,7 @@
     },
     {
      "path": "host/hos_main.c",
-     "line": 545
+     "line": 546
     }
    ],
    "default": "on (set at the start by host/hos_main.c; =0: off)",
@@ -25491,7 +25533,7 @@
     },
     {
      "path": "host/hos_main.c",
-     "line": 225
+     "line": 226
     }
    ],
    "default": "unset",
@@ -26538,7 +26580,7 @@
     },
     {
      "path": "host/hos_main.c",
-     "line": 545
+     "line": 546
     }
    ],
    "default": "on (set at the start by host/hos_main.c; =0: off)",
@@ -26961,7 +27003,7 @@
     },
     {
      "path": "host/hos_main.c",
-     "line": 702
+     "line": 703
     },
     {
      "path": "host/nvn_native.c",
@@ -27011,7 +27053,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2858
+     "line": 2861
     }
    ],
    "default": "0 (unset)",
@@ -27283,7 +27325,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_replay.cpp",
-     "line": 10285
+     "line": 10286
     }
    ],
    "default": "0 (unset)",
@@ -28826,7 +28868,7 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 728
+     "line": 729
     },
     {
      "path": "host/hos_submit_thread.h",
@@ -29174,7 +29216,7 @@
     },
     {
      "path": "host/hos_main.c",
-     "line": 545
+     "line": 546
     }
    ],
    "default": "on (set at the start by host/hos_main.c; =0: off)",
@@ -29861,7 +29903,7 @@
     },
     {
      "path": "host/hos_main.c",
-     "line": 545
+     "line": 546
     }
    ],
    "default": "on (set at the start by host/hos_main.c; =0: off)",
@@ -29928,7 +29970,7 @@
     },
     {
      "path": "host/hos_main.c",
-     "line": 545
+     "line": 546
     }
    ],
    "default": "on (set at the start by host/hos_main.c; =0: off)",
@@ -30016,7 +30058,7 @@
     },
     {
      "path": "host/hos_main.c",
-     "line": 545
+     "line": 546
     }
    ],
    "default": "on (set at the start by host/hos_main.c; =0: off)",
@@ -30905,7 +30947,7 @@
     },
     {
      "path": "host/hos_main.c",
-     "line": 545
+     "line": 546
     }
    ],
    "default": "on (set at the start by host/hos_main.c; =0: off)",
@@ -32414,7 +32456,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 3151
+     "line": 3154
     }
    ],
    "default": "unset",
@@ -32582,7 +32624,7 @@
    "files": [
     {
      "path": "gpu/vk/vk_menu.cpp",
-     "line": 2864
+     "line": 2867
     }
    ],
    "default": "0 (unset)",
@@ -33641,7 +33683,7 @@
     },
     {
      "path": "host/hos_main.c",
-     "line": 545
+     "line": 546
     }
    ],
    "default": "on (set at the start by host/hos_main.c; =0: off)",
@@ -34398,7 +34440,7 @@
     },
     {
      "path": "host/hos_main.c",
-     "line": 388
+     "line": 389
     },
     {
      "path": "host/hos_update.c",
@@ -34473,16 +34515,16 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 611
+     "line": 612
     },
     {
      "path": "host/hos_main.c",
-     "line": 612
+     "line": 613
     }
    ],
    "default": "unset",
    "values": "a path (text)",
-   "explanation": "undocumented: host/hos_main.c:611 (in `nv_cache_env()`) reads it as a path: `if (getenv(\"__GL_SHADER_DISK_CACHE_PATH\")) {`. No comment in the source says what it changes.",
+   "explanation": "undocumented: host/hos_main.c:612 (in `nv_cache_env()`) reads it as a path: `if (getenv(\"__GL_SHADER_DISK_CACHE_PATH\")) {`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
@@ -34498,7 +34540,7 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 631
+     "line": 632
     }
    ],
    "default": "unset",
@@ -34519,12 +34561,12 @@
    "files": [
     {
      "path": "host/hos_main.c",
-     "line": 635
+     "line": 636
     }
    ],
    "default": "unset",
    "values": "text",
-   "explanation": "undocumented: host/hos_main.c:635 (in `nv_cache_env()`) reads it as a text value: `if (!getenv(\"__GL_SHADER_DISK_CACHE_SKIP_CLEANUP\")) {`. No comment in the source says what it changes.",
+   "explanation": "undocumented: host/hos_main.c:636 (in `nv_cache_env()`) reads it as a text value: `if (!getenv(\"__GL_SHADER_DISK_CACHE_SKIP_CLEANUP\")) {`. No comment in the source says what it changes.",
    "comment": null,
    "documented_in": null,
    "source": "undocumented",
