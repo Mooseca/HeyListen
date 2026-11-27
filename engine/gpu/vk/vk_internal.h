@@ -645,6 +645,7 @@ void res_note_pipeline_use(VkPipeline pl);   // (vk_draw.cpp, RX_VK_RES_LOG: a p
 void res_pipeline_counts(size_t* graphics, size_t* used, int64_t* modules_dropped);
 // device memory (vk_vma.cpp, Vulkan Memory Allocator)
 bool vma_init(PFN_vkGetInstanceProcAddr gipa);
+bool vma_up();
 bool create_image(const VkImageCreateInfo& ci, VkImage& image, VmaAllocation& allocation, bool dedicated = false, bool target = false);
 void destroy_image(VkImage image, VmaAllocation allocation);
 /// (RX_VK_REAP, vk_vma.cpp) fn on the reaper's thread, in the order given, or here with RX_VK_REAP=0: a texture's views, a buffer, memory
@@ -671,7 +672,22 @@ bool vram_usage(uint64_t* used, uint64_t* budget, uint64_t* block_free = nullptr
 /// vram_usage asked of the driver now (VMA asks again for a new frame index), for the status line; false when the driver
 /// gives no budget (VK_EXT_memory_budget): used is then the game's own allocations
 bool vram_usage_now(uint64_t* used, uint64_t* budget);
+/// the system-memory heaps the GPU reaches: used, and what the driver allows (vk_vma.cpp)
+bool system_heap_usage(uint64_t* used, uint64_t* budget);
 void vma_log_heaps();
+/// (LAP2, vk_trace.cpp: HOS_VK_TRACE=<file>) every Vulkan call that returns an error told, the memory and device calls in a ring file;
+/// the last error this thread's wrapped calls saw (0: none), a note into the ring
+/// (LAP2, vk_ram_guard.cpp: RX_VK_MEM_GUARD=1) memory blocks and descriptor pools not asked of the driver while the PC's available RAM is short
+bool ram_guard_on();
+uint64_t ram_guard_reserve_mb();
+uint64_t ram_avail_mb();
+bool ram_guard_low(uint64_t need_mb, uint64_t reserve_mb);
+bool ram_guard_pool_ok();
+void ram_guard_install();
+void vk_trace_install();
+void vk_trace_sampler();
+int32_t trace_last_error();
+void trace_note(uint16_t what, uint64_t a, uint64_t b);
 /// (TICK-019) one log line: which memory type and heap an allocation landed in (device-local / host-visible / cached)
 void log_alloc_where(const char* what, VmaAllocation allocation);
 bool log_alloc_uncached(const char* what, VmaAllocation allocation);   // (issue 135: logs a host-visible buffer without HOST_CACHED)
