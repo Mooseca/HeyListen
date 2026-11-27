@@ -52,6 +52,7 @@
 #include "vk_opt_ids.h"
 #include "vk_perf.h"
 #include "segment_plan.h"   // (TICK-050: the parallel replay's segment count)
+#include "par_ideal_rule.h"   // (the recording workers' ideal processors, RX_VK_PARALLEL_IDEAL)
 #include "completion_tracker.h"   // (stream ORDER2: the recordings' completion tracked off the order thread)
 #include "feed_stats.h"           // (stream ORDER3: why the GPU sat idle between recordings)
 #include "submit_seq.h"           // (stream DECOUPLE: the lanes' submit sequencer, RX_VK_LANES / RX_VK_LANES_CHECK)
@@ -3445,30 +3446,50 @@ inline void spin_before_sleep(F&& ready) {
         if ((i & 15) == 0 && tl_now() - t0 >= ns) return;
     }
 }
-/// (TICK-052) RX_VK_PARALLEL_IDEAL=1: each worker's ideal processor is a physical core of its own (its first logical processor),
-/// from the second core on: two recorders on one core's two hardware threads share its caches and units
-void par_worker_ideal(int index) {
-    static const bool on = getenv("RX_VK_PARALLEL_IDEAL") && atoi(getenv("RX_VK_PARALLEL_IDEAL")) != 0;
-    if (!on) return;
-    DWORD len = 0;
-    GetLogicalProcessorInformation(nullptr, &len);
-    std::vector<SYSTEM_LOGICAL_PROCESSOR_INFORMATION> info(len / sizeof(SYSTEM_LOGICAL_PROCESSOR_INFORMATION) + 1);
-    if (!GetLogicalProcessorInformation(info.data(), &len)) return;
-    std::vector<int> firsts;   // (each physical core's first logical processor)
-    for (size_t i = 0; i < len / sizeof(SYSTEM_LOGICAL_PROCESSOR_INFORMATION); i++)
-        if (info[i].Relationship == RelationProcessorCore && info[i].ProcessorMask)
-            firsts.push_back(__builtin_ctzll((unsigned long long)info[i].ProcessorMask));
-    std::sort(firsts.begin(), firsts.end());
-    if (firsts.size() < 2) return;
-    const int cpu = firsts[1 + index % (int)(firsts.size() - 1)];
-    const DWORD prev = SetThreadIdealProcessor(GetCurrentThread(), (DWORD)cpu);
-    logf("vk: parallel replay worker %d: ideal processor %d (was %d; %d cores) (RX_VK_PARALLEL_IDEAL)", index, cpu, (int)prev,
-         (int)firsts.size());
+/// (TICK-052; on by default since 27 Nov 2026) RX_VK_PARALLEL_IDEAL (default 1; 0: off): each recording worker's ideal processor
+/// is a physical core of its own (its first logical processor): two recorders on one core's two hardware threads share its
+/// caches and units. A hint to the scheduler, not an affinity. The cores of the fastest kind, without the first (the game's main
+/// thread's) and the one the host keeps for the replay thread; by default only where every worker gets its own (par_ideal_rule.h;
+/// an i5-10400F at the 60 limit in Hyrule Field: 0.1 % low 8.5 -> 18.0 fps, 1 % low 25.2 -> 29.7, the Market unchanged). 1: the
+/// cores are shared out in turn even when there are fewer than workers
+void par_worker_ideal(int index, int workers) {
+    static std::once_flag once;
+    static std::vector<int> cpus;
+    static int ncores = 0;
+    std::call_once(once, [workers] {
+        const char* e = getenv("RX_VK_PARALLEL_IDEAL");
+        const int mode = e ? (atoi(e) != 0 ? 1 : 0) : -1;
+        if (mode == 0) return;
+        GROUP_AFFINITY ga;
+        const WORD group = GetThreadGroupAffinity(GetCurrentThread(), &ga) ? ga.Group : 0;
+        DWORD len = 0;
+        if (GetLogicalProcessorInformationEx(RelationProcessorCore, nullptr, &len) || GetLastError() != ERROR_INSUFFICIENT_BUFFER) return;
+        std::vector<char> buf(len);
+        if (!GetLogicalProcessorInformationEx(RelationProcessorCore, (SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX*)buf.data(), &len)) return;
+        std::vector<par_ideal_rule::Core> cores;   // (the calling thread's processor group's cores: the ideal processor is one of its group's)
+        for (DWORD at = 0; at < len;) {
+            const auto* p = (const SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX*)(buf.data() + at);
+            if (!p->Size) break;
+            if (p->Relationship == RelationProcessorCore && p->Processor.GroupCount && p->Processor.GroupMask[0].Group == group &&
+                p->Processor.GroupMask[0].Mask)
+                cores.push_back({__builtin_ctzll((unsigned long long)p->Processor.GroupMask[0].Mask), (int)p->Processor.EfficiencyClass});
+            at += p->Size;
+        }
+        ncores = (int)cores.size();
+        cpus = par_ideal_rule::ideal_cpus(cores, host && host->reserved_cpus ? host->reserved_cpus() : 0, workers, mode);
+        if (cpus.empty())
+            logf("vk: parallel replay: the %d workers keep the scheduler's choice of cores (%d cores; RX_VK_PARALLEL_IDEAL%s)", workers,
+                 ncores, mode < 0 ? ": not a core of its own for each" : "");
+    });
+    if (index < 0 || index >= (int)cpus.size()) return;
+    const DWORD prev = SetThreadIdealProcessor(GetCurrentThread(), (DWORD)cpus[index]);
+    logf("vk: parallel replay worker %d: ideal processor %d (was %d; %d cores) (RX_VK_PARALLEL_IDEAL)", index, cpus[index], (int)prev,
+         ncores);
 }
-void par_worker_main(int index) {
+void par_worker_main(int index, int workers) {
     SetThreadDescription(GetCurrentThread(), L"mkw_vk replay worker");
     SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL);
-    par_worker_ideal(index);
+    par_worker_ideal(index, workers);
     std::deque<std::function<void()>>& own = par_pool.own[index & 7];
     for (;;) {
         std::function<void()> fn;
@@ -4864,7 +4885,7 @@ const uint8_t* replay_handle(VkCommandBuffer& cmd, const uint8_t* h, bool may_st
                  texture_gone_ring_on() ? "on" : "off", getenv("RX_VK_TL_POOLS_WIDE") && atoi(getenv("RX_VK_TL_POOLS_WIDE")) == 0 ? "off" : "on",
                  getenv("RX_VK_PARALLEL_POINT") ? (atoi(getenv("RX_VK_PARALLEL_POINT")) <= 0 ? 64 : std::clamp(atoi(getenv("RX_VK_PARALLEL_POINT")), 8, 256)) : 32);
         }
-        for (int i = 0; i < threads; i++) std::thread(par_worker_main, i).detach();
+        for (int i = 0; i < threads; i++) std::thread(par_worker_main, i, threads).detach();
         logf("vk: parallel replay: big command buffers recorded on %d threads in segments of ~%lld draws and dispatches%s%s",
              threads, (long long)per, one_round ? ", in one round (RX_VK_PARALLEL_ROUNDS)" : "",
              self_rec ? (self_help ? ", the replay thread recording the first and helping (RX_VK_PARALLEL_SELF=2)"

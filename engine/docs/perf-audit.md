@@ -2779,7 +2779,7 @@ the same moment. And a segment's later draws are cheaper when fewer threads are 
 | `RX_VK_PARLOCK_SPIN` | 0 (4000 tried) | `SetCriticalSectionSpinCount` on the ParLock mutex: a taker spins before it sleeps |
 | (always) | | the counters every draw bumped (`st_draws`, `st_mesh`, `st_passes`, `st_dispatches`, `st_skipped`, `st_desc_reused`, `prof_ns`, ParLock's own counts) are split one cache line a thread (`split_count.h`); `texture_touch_quick` stores `last_frame` / `last_value` only when they differ |
 | `RX_VK_PARALLEL_AFFINITY` | 0 | a segment's place goes to the same worker every command buffer. Tried: fewer misses, no time saved (below). Off |
-| `RX_VK_PARALLEL_IDEAL` | 0 | each worker's ideal processor on a physical core of its own. Tried: no change. Off |
+| `RX_VK_PARALLEL_IDEAL` | 1 since 27 Nov 2026 (0 before) | each worker's ideal processor on a fast physical core of its own, where there is one for every worker (`par_ideal_rule.h`). On the 7800X3D in the castle: no change. On an i5-10400F at the 60 limit in Hyrule Field: 0.1 % low 8.5 -> 18.0 fps, 1 % low 25.2 -> 29.7, +1.7 fps; the Market unchanged |
 
 What they did (castle-move, `RX_VK_PARLOCK_STATS=1`, one run): bind page range 347 -> 6-18, view destroyed 206 -> 4-30, slot
 destroyed 502 -> 20-74 a command buffer; takings ~1,050 -> ~690; waiting 0.45 -> ~0.27 ms a command buffer with the spin. The
