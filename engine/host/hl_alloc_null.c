@@ -23,8 +23,13 @@
 #include <stdlib.h>
 #include <string.h>
 
-HL_NEW_HOOK(8005e9d0, "cc5c961686c8cd09");   /* operator new variants (size, heap, alignment): the same function written three ways */
-HL_NEW_HOOK(8005eb20, "a523c51881267cd9");
+/* (the lift writes a function in one of two forms: its registers kept in C locals (x0_, x31_), or in the context (c->x[0]). The
+   functions named here are kept in the context (nx2/guest_locals.py keep_mentioned), but a lift made before a line was added
+   here still has the locals: the lift key covers nx2/, not host/hl_*.c. So each of the three has two hashes: the older lift's
+   text, and a lift made with these lines in place (any fresh lift: a Linux builder's, the laptop's). Both are hooked; the
+   anchors (hl_gates.py new_places) fit both forms. A form of neither list is warned as before) */
+HL_NEW_HOOK(8005e9d0, "cc5c961686c8cd09,1f2826d67e2d3e25");   /* operator new variants (size, heap, alignment): the same function written three ways */
+HL_NEW_HOOK(8005eb20, "a523c51881267cd9,0c50092f6cb3904f");
 HL_NEW_HOOK(8005ebe0, "b26a4038456275d8,fb3beb00575415da");
 HL_NEW_HOOK(8005eca0, "0ce5468d82ee701d");   /* aligned_alloc (alignment, size) */
 HL_NEW_HOOK(83b7b340, "39c8d417e1c2204e");   /* the module system: each module heap is made here */
