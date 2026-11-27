@@ -6350,8 +6350,7 @@ void texture_frame(uint64_t completed) {
     // (LAP2, RX_VK_MEM_GUARD=1) and the PC's available physical RAM on an integrated GPU, whose memory it is: the commit limit above
     // does not see it (16 GB of commit were left when the PC had 3 MB of RAM and AMD's driver stopped the process, 0xc0000409). Under
     // 1536 MB the shortfall comes off the textures' budget (512 MB at least left), as Linux's pressure hold does below
-    static const bool guard_blocks = !getenv("RX_VK_MEM_GUARD_BLOCKS") || atoi(getenv("RX_VK_MEM_GUARD_BLOCKS")) != 0;
-    if (ram_guard_on() && guard_blocks && dev.props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU) {
+    if (ram_guard_blocks() && dev.props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU) {
         {   // (the heaps the GPU reaches, the device heaps' use counted with the system heaps': past their size less the headroom the
             // textures give up the excess; the driver needs room of its own, vk_ram_guard.cpp)
             uint64_t du = 0, db = 0, su = 0, sb = 0;
@@ -6492,6 +6491,12 @@ void texture_frame(uint64_t completed) {
         uint32_t samplers_made = 0, samplers_waiting = 0, samplers_limit = 0;   // (longshot #442: a count that grows without end shows)
         uint64_t samplers_retired = 0, samplers_destroyed = 0;
         sampler_counts(&samplers_made, &samplers_waiting, &samplers_retired, &samplers_destroyed, &samplers_limit);
+        {   // (LAP2) the memory guard's refusals so far
+            int64_t gp = 0, gd = 0, gb = 0;
+            if (ram_guard_counts(&gp, &gd, &gb))
+                logf("vk: memory guard: %lld descriptor pools refused, %lld draws left out for want of one, %lld memory blocks refused so far",
+                     (long long)gp, (long long)gd, (long long)gb);
+        }
         logf("vk: VRAM: %llu MB used of %llu MB allowed (%llu MB of it free in the blocks); textures %llu MB (budget %llu "
              "MB), %zu textures; samplers %u made (the device allows %u), %u retired waiting for the GPU, %llu retired and %llu destroyed "
              "so far", (unsigned long long)(used >> 20), (unsigned long long)(allowed >> 20),

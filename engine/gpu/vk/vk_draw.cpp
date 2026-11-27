@@ -4339,6 +4339,7 @@ bool bind_descriptors(VkCommandBuffer cmd, VkPipelineBindPoint bp, const Program
         } else {
             const VkDescriptorPool np = make_pool();
             if (!np) {   // (LAP2: no pool could be made: the draw is left out, as when a second set is refused below)
+                ram_guard_draw_left_out();
                 prof_desc[PD_POOL] += prof_now() - pool_t0;
                 return false;
             }

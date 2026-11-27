@@ -679,6 +679,9 @@ void vma_log_heaps();
 /// the last error this thread's wrapped calls saw (0: none), a note into the ring
 /// (LAP2, vk_ram_guard.cpp: RX_VK_MEM_GUARD=1) memory blocks and descriptor pools not asked of the driver while the PC's available RAM is short
 bool ram_guard_on();
+bool ram_guard_blocks();
+void ram_guard_draw_left_out();
+bool ram_guard_counts(int64_t* pools, int64_t* draws, int64_t* blocks);
 uint64_t ram_guard_reserve_mb();
 uint64_t ram_avail_mb();
 bool ram_guard_low(uint64_t need_mb, uint64_t reserve_mb);
